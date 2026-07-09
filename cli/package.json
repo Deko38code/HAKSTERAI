@@ -1,0 +1,17 @@
+{
+  "name": "hakster-cli",
+  "version": "0.1.0",
+  "description": "haksterAi CLI — manage files, sessions, and agent interactions from the terminal",
+  "main": "index.js",
+  "bin": {
+    "hakster": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  },
+  "keywords": ["hakster", "cli", "ai", "agent"],
+  "license": "MIT"
+}

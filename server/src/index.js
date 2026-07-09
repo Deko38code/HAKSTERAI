@@ -1708,6 +1708,28 @@ function safePath(reqPath) {
   return resolved;
 }
 
+// GET /api/fs/list?path=/some/dir — List files/dirs in a path
+app.get('/api/fs/list', (req, res) => {
+  try {
+    const dirPath = safePath(req.query.path || '/');
+    if (!fs.existsSync(dirPath)) return res.status(404).json({ error: 'Not found' });
+    const stat = fs.statSync(dirPath);
+    if (!stat.isDirectory()) return res.json([{ type: 'file', name: path.basename(dirPath), size: stat.size }]);
+    const items = fs.readdirSync(dirPath, { withFileTypes: true }).map(dirent => {
+      const fullPath = path.join(dirPath, dirent.name);
+      try {
+        const s = fs.statSync(fullPath);
+        return { type: dirent.isDirectory() ? 'dir' : 'file', name: dirent.name, size: s.isFile() ? s.size : 0 };
+      } catch {
+        return { type: 'unknown', name: dirent.name, size: 0 };
+      }
+    });
+    res.json(items);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Read file
 app.get('/api/fs/read', (req, res) => {
   try {
