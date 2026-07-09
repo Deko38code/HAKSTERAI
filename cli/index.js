@@ -9,6 +9,10 @@ const http = require('http');
 const https = require('https');
 
 const pkg = require('./package.json');
+const { showIntro, C } = require('./logo');
+
+// Show intro on every launch
+showIntro(pkg.version);
 
 // ── Config ────────────────────────────────────────────────────────
 const CONFIG_DIR = path.join(os.homedir(), '.hakster');
