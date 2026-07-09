@@ -1,0 +1,256 @@
+---
+// Hero section with hakster bubble + scramble-decode terminal
+---
+
+<section class="relative min-h-screen flex flex-col items-center justify-center px-6 pt-24 pb-16 overflow-hidden">
+
+  <!-- Background grid -->
+  <div
+    class="pointer-events-none absolute inset-0"
+    style="background-image: linear-gradient(rgba(124,58,237,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(124,58,237,0.04) 1px, transparent 1px); background-size: 40px 40px;"
+  ></div>
+
+  <!-- Glow blob -->
+  <div
+    class="pointer-events-none absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full opacity-20"
+    style="background: radial-gradient(circle, #7c3aed 0%, transparent 70%);"
+  ></div>
+
+  <!-- Content -->
+  <div class="relative z-10 flex flex-col items-center text-center max-w-4xl mx-auto gap-8">
+
+    <!-- hakster bubble badge -->
+    <div class="inline-flex items-center gap-2 rounded-full border border-[#7c3aed]/50 bg-[#7c3aed]/10 px-5 py-2.5 backdrop-blur-sm shadow-lg shadow-[#7c3aed]/10">
+      <span class="relative flex h-2 w-2">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#a855f7] opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-2 w-2 bg-[#7c3aed]"></span>
+      </span>
+      <span class="text-sm font-semibold tracking-widest text-[#a855f7] uppercase">hakster</span>
+      <span class="text-xs text-[#64748b] border-l border-[#7c3aed]/30 pl-2">v1.0 · always running</span>
+    </div>
+
+    <!-- Heading -->
+    <h1 class="text-5xl md:text-7xl font-bold leading-tight tracking-tight">
+      <span class="text-[#e2e8f0]">The agent that</span><br />
+      <span class="bg-gradient-to-r from-[#7c3aed] via-[#a855f7] to-[#c084fc] bg-clip-text text-transparent">
+        gets it done.
+      </span>
+    </h1>
+
+    <!-- Subheading -->
+    <p class="max-w-2xl text-lg md:text-xl text-[#64748b] leading-relaxed">
+      haksterAi is always running — reasoning through problems, executing tasks end-to-end, and telling you when the job's done. The top-tier autonomous agent for your terminal.
+    </p>
+
+    <!-- CTA buttons -->
+    <div class="flex flex-col sm:flex-row items-center gap-4">
+      <a
+        href="#install"
+        class="inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-6 py-3 text-base font-semibold text-white hover:bg-[#6d28d9] transition-all hover:shadow-lg hover:shadow-[#7c3aed]/30 active:scale-95"
+      >
+        <span>↓</span> Get haksterAi
+      </a>
+      <a
+        href="#docs"
+        class="inline-flex items-center gap-2 rounded-lg border border-[#1e1e2e] bg-[#111118] px-6 py-3 text-base font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/50 hover:bg-[#1e1e2e] transition-all"
+      >
+        Read the docs →
+      </a>
+    </div>
+
+    <!-- Terminal preview with scramble-decode effect -->
+    <div class="w-full max-w-2xl rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden shadow-2xl shadow-black/50 mt-4">
+
+      <!-- Terminal title bar -->
+      <div class="flex items-center gap-2 px-4 py-3 border-b border-[#1e1e2e] bg-[#0d0d14]">
+        <span class="h-3 w-3 rounded-full bg-[#ff5f57]"></span>
+        <span class="h-3 w-3 rounded-full bg-[#febc2e]"></span>
+        <span class="h-3 w-3 rounded-full bg-[#28c840]"></span>
+        <span class="ml-2 text-xs text-[#64748b] font-mono">terminal — haksterAi</span>
+      </div>
+
+      <!-- Terminal body -->
+      <div class="p-6 font-mono text-sm text-left min-h-[200px]" id="hero-terminal">
+
+        <!-- Command line -->
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-[#7c3aed] font-bold">❯</span>
+          <span id="hero-cmd" class="text-[#e2e8f0]"></span>
+          <span id="hero-cursor" class="inline-block w-2 h-4 bg-[#a855f7] animate-pulse ml-0.5"></span>
+        </div>
+
+        <!-- Scramble output area -->
+        <div id="hero-output" class="pl-4 space-y-0.5"></div>
+
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+<script>
+  // ── HAKSTER HERO — Big-Chunk Scramble & Decode Engine ────────────
+  const SC = '\u2591\u2592\u2593\u2588\u2584\u2580\u25A0\u25A1\u25AA\u25AB\u29EB\u2BC3\u2BC2\u27D0\u27D1\uFF3A\uFF3B\uFF3C\uFF3D\uFF3E\uFF3F';
+  const SC_CODE = '{}[]<>()=;:!@#$%^&*+-_|~`?/';
+
+  function scramble(text, chaos) {
+    chaos = chaos || 0.55;
+    var pool = SC + SC_CODE;
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (c === ' ' || c === '\n' || c === '\r' || c === '\t') { out += c; continue; }
+      if (Math.random() < chaos) {
+        out += pool[Math.floor(Math.random() * pool.length)];
+      } else {
+        out += c;
+      }
+    }
+    return out;
+  }
+
+  function decodePass(original, pass, total) {
+    var progress = pass / total;
+    var chaos = 0.55 * Math.pow(1 - progress, 2);
+    var waveFront = Math.floor(original.length * progress * 1.1);
+    var pool = SC + SC_CODE;
+    var out = '';
+    for (var i = 0; i < original.length; i++) {
+      var c = original[i];
+      if (c === ' ' || c === '\n' || c === '\r' || c === '\t') { out += c; continue; }
+      if (i < waveFront * 0.75) {
+        out += c;
+      } else if (Math.random() < chaos) {
+        out += pool[Math.floor(Math.random() * pool.length)];
+      } else {
+        out += c;
+      }
+    }
+    return out;
+  }
+
+  var SEQUENCES = [
+    {
+      cmd: 'hakster spec "add user auth with JWT"',
+      reasoning: 'Analyzing codebase... found 3 entry points needing auth middleware',
+      lines: [
+        { text: '\u2713 Created src/auth/jwt.ts', color: '#28c840' },
+        { text: '\u2713 Created src/auth/middleware.ts', color: '#28c840' },
+        { text: '\u2713 Created src/routes/auth.ts', color: '#28c840' },
+        { text: '\u2713 All tests passing (12/12)', color: '#a855f7' },
+      ],
+    },
+    {
+      cmd: 'hakster fix ./src/api/users.ts',
+      reasoning: 'Scanning for errors... null dereference on line 47 \u2192 patching',
+      lines: [
+        { text: '\u2713 Fixed null dereference in getUser()', color: '#28c840' },
+        { text: '\u2713 Added defensive checks (3 locations)', color: '#28c840' },
+        { text: '\u2713 Tests: 8/8 passing', color: '#a855f7' },
+      ],
+    },
+    {
+      cmd: 'hakster test --coverage',
+      reasoning: 'Running suite with coverage... analyzing gaps...',
+      lines: [
+        { text: '\u2713 47 tests passed, 0 failed', color: '#28c840' },
+        { text: '\u2713 Coverage: 94.2% statements', color: '#00bfff' },
+        { text: '\u2713 Coverage: 88.1% branches', color: '#00bfff' },
+      ],
+    },
+    {
+      cmd: 'hakster chat "optimize the database queries"',
+      reasoning: 'Profiling slow queries... found N+1 in getUsers() \u2192 batching',
+      lines: [
+        { text: '\u2713 Replaced N+1 with batch query', color: '#28c840' },
+        { text: '\u2713 Added composite index on (user_id, created_at)', color: '#28c840' },
+        { text: '\u2713 Query time: 340ms \u2192 12ms', color: '#ffd700' },
+      ],
+    },
+  ];
+
+  var cmdEl = document.getElementById('hero-cmd');
+  var cursorEl = document.getElementById('hero-cursor');
+  var outputEl = document.getElementById('hero-output');
+  var seqIdx = 0;
+  var cancelled = false;
+
+  function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+  async function typeCmd(cmd) {
+    cmdEl.textContent = '';
+    for (var i = 0; i < cmd.length; i++) {
+      if (cancelled) return;
+      cmdEl.textContent = cmd.slice(0, i + 1);
+      await delay(30);
+    }
+    await delay(250);
+  }
+
+  async function showReasoning(text) {
+    if (!text) return;
+    var div = document.createElement('div');
+    div.className = 'mb-2';
+    div.style.cssText = 'border-left:2px solid #7c3aed;padding-left:8px;margin-left:-8px;';
+    var label = document.createElement('span');
+    label.style.cssText = 'color:#a855f7;font-size:0.7rem;display:block;margin-bottom:2px;';
+    label.textContent = '\uD83E\uDDB0 Reasoning';
+    div.appendChild(label);
+    var content = document.createElement('span');
+    content.style.cssText = 'color:#c084fc;font-size:0.8rem;';
+    content.textContent = scramble(text, 0.6);
+    div.appendChild(content);
+    outputEl.appendChild(div);
+    await delay(50);
+    content.textContent = decodePass(text, 1, 3);
+    await delay(40);
+    content.textContent = decodePass(text, 2, 3);
+    await delay(35);
+    content.textContent = text;
+  }
+
+  async function showOutputLine(line, color) {
+    var div = document.createElement('div');
+    div.style.cssText = 'color:' + color + ';min-height:1.4em;';
+    div.textContent = scramble(line.text, 0.55);
+    outputEl.appendChild(div);
+    await delay(35);
+    div.textContent = decodePass(line.text, 1, 2);
+    await delay(30);
+    div.textContent = line.text;
+  }
+
+  async function runSequence() {
+    var seq = SEQUENCES[seqIdx];
+    seqIdx = (seqIdx + 1) % SEQUENCES.length;
+    await typeCmd(seq.cmd);
+    await delay(150);
+    cursorEl.style.display = 'none';
+    await showReasoning(seq.reasoning);
+    await delay(100);
+    for (var i = 0; i < seq.lines.length; i++) {
+      await showOutputLine(seq.lines[i], seq.lines[i].color);
+      await delay(60);
+    }
+    await delay(2200);
+    outputEl.style.transition = 'opacity 0.3s';
+    outputEl.style.opacity = '0';
+    cmdEl.style.transition = 'opacity 0.3s';
+    cmdEl.style.opacity = '0';
+    await delay(350);
+    outputEl.innerHTML = '';
+    outputEl.style.opacity = '1';
+    cmdEl.textContent = '';
+    cmdEl.style.opacity = '1';
+    cursorEl.style.display = '';
+    await delay(300);
+  }
+
+  async function loop() {
+    while (!cancelled) { await runSequence(); }
+  }
+
+  setTimeout(loop, 800);
+  document.addEventListener('astro:before-swap', function() { cancelled = true; });
+</script>

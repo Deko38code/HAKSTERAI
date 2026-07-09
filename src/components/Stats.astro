@@ -1,0 +1,86 @@
+---
+// Animated stats section
+---
+
+<section id="stats" class="relative py-20 px-6">
+  <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#7c3aed]/20 to-transparent"></div>
+
+  <div class="mx-auto max-w-6xl">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+
+      <div class="stat-card flex flex-col items-center text-center p-6 rounded-xl border border-[#1e1e2e] bg-[#111118]">
+        <span class="text-3xl md:text-4xl font-bold text-[#e2e8f0] mb-1">
+          <span class="stat-counter" data-target="12000" data-suffix="K+">0</span>
+        </span>
+        <span class="text-sm text-[#64748b]">Developers</span>
+      </div>
+
+      <div class="stat-card flex flex-col items-center text-center p-6 rounded-xl border border-[#1e1e2e] bg-[#111118]">
+        <span class="text-3xl md:text-4xl font-bold text-[#7c3aed] mb-1">
+          <span class="stat-counter" data-target="98" data-suffix="%">0</span>
+        </span>
+        <span class="text-sm text-[#64748b]">Satisfaction</span>
+      </div>
+
+      <div class="stat-card flex flex-col items-center text-center p-6 rounded-xl border border-[#1e1e2e] bg-[#111118]">
+        <span class="text-3xl md:text-4xl font-bold text-[#e2e8f0] mb-1">
+          <span class="stat-counter" data-target="4200" data-suffix="K+">0</span>
+        </span>
+        <span class="text-sm text-[#64748b]">GitHub stars</span>
+      </div>
+
+      <div class="stat-card flex flex-col items-center text-center p-6 rounded-xl border border-[#1e1e2e] bg-[#111118]">
+        <span class="text-3xl md:text-4xl font-bold text-[#a855f7] mb-1">
+          <span class="stat-counter" data-target="40" data-suffix="ms">0</span>
+        </span>
+        <span class="text-sm text-[#64748b]">Avg response</span>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<script>
+  // ── Animated counters (IntersectionObserver) ─────────────────────
+  function animateCounter(el) {
+    const target = parseInt(el.dataset.target ?? '0', 10);
+    const suffix = el.dataset.suffix ?? '';
+    const duration = 1800;
+    const start = performance.now();
+
+    function update(now) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      // Ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const current = Math.round(eased * target);
+
+      // Format: if target >= 1000, show as K
+      if (target >= 1000 && suffix.includes('K')) {
+        el.textContent = (current / 1000).toFixed(1).replace('.0', '') + suffix;
+      } else {
+        el.textContent = current + suffix;
+      }
+
+      if (progress < 1) requestAnimationFrame(update);
+    }
+
+    requestAnimationFrame(update);
+  }
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const counters = entry.target.querySelectorAll<HTMLElement>('.stat-counter');
+          counters.forEach(animateCounter);
+          observer.unobserve(entry.target);
+        }
+      });
+    },
+    { threshold: 0.3 }
+  );
+
+  const statsSection = document.getElementById('stats');
+  if (statsSection) observer.observe(statsSection);
+</script>

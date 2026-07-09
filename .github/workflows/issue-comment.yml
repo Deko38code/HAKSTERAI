@@ -1,0 +1,81 @@
+name: Issue Comment Handler
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  handle-comment:
+    # Only run for issue comments (not PR comments)
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for triage commands
+        id: parse-command
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.comment.body.trim().toLowerCase();
+            const commands = [];
+
+            // Parse triage commands from comments
+            if (body.startsWith('/triage')) {
+              commands.push('triage');
+            }
+            if (body.startsWith('/duplicate')) {
+              commands.push('duplicate_check');
+            }
+            if (body.startsWith('/label')) {
+              commands.push('label');
+            }
+            if (body.startsWith('/stale-check')) {
+              commands.push('stale_check');
+            }
+
+            console.log(`Parsed commands: ${commands.join(', ') || 'none'}`);
+            return commands;
+
+      - name: Respond to unrecognized commands
+        if: steps.parse-command.outputs.result != '[]'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issueNumber = context.payload.issue.number;
+            const commentBody = context.payload.comment.body.trim().toLowerCase();
+
+            if (commentBody.startsWith('/help')) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body: [
+                  '**Available Commands:**',
+                  '- `/triage` — Re-run AI triage on this issue',
+                  '- `/duplicate` — Check for duplicate issues',
+                  '- `/label` — Re-classify and assign labels',
+                  '- `/stale-check` — Check if this issue is stale',
+                  '',
+                  'Only org members can run these commands.'
+                ].join('\n')
+              });
+            } else if (!context.payload.comment.user_association || 
+                       context.payload.comment.author_association === 'NONE') {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body: '❌ Only org members can run triage commands.'
+              });
+            }
+
+      - name: Create workflow summary
+        if: always()
+        run: |
+          echo "## Issue Comment Handler Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Issue #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

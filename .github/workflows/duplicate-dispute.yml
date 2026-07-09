@@ -1,0 +1,106 @@
+name: Duplicate Dispute Handler
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  handle-comment-dispute:
+    # Only run for issue comments (not PR comments) on issues with duplicate label
+    if: |
+      github.event_name == 'issue_comment' && 
+      !github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if issue has duplicate label
+        id: check-label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.issue.labels.map(l => l.name);
+            const hasDuplicate = labels.includes('duplicate');
+            console.log(`Issue #${context.payload.issue.number} labels: ${labels.join(', ')}`);
+            console.log(`Has duplicate label: ${hasDuplicate}`);
+            return hasDuplicate;
+          result-encoding: string
+
+      - name: Check if comment is after duplicate detection
+        if: steps.check-label.outputs.result == 'true'
+        id: check-timing
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issueNumber = context.payload.issue.number;
+            const newCommentId = context.payload.comment.id;
+            const newCommentDate = new Date(context.payload.comment.created_at);
+            
+            // Fetch all comments
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              per_page: 100
+            });
+            
+            // Find duplicate detection comment
+            const duplicateComment = comments.find(c => 
+              c.body && c.body.includes('Potential Duplicate Detected')
+            );
+            
+            if (!duplicateComment) {
+              console.log('No duplicate detection comment found');
+              return false;
+            }
+            
+            const duplicateCommentDate = new Date(duplicateComment.created_at);
+            const isAfter = newCommentDate > duplicateCommentDate && newCommentId !== duplicateComment.id;
+            
+            console.log(`Duplicate detection comment: ${duplicateComment.id} at ${duplicateCommentDate}`);
+            console.log(`New comment: ${newCommentId} at ${newCommentDate}`);
+            console.log(`Is after duplicate detection: ${isAfter}`);
+            
+            return isAfter;
+          result-encoding: string
+
+      - name: Relabel issue (remove duplicate, add pending-triage)
+        if: |
+          steps.check-label.outputs.result == 'true' && 
+          steps.check-timing.outputs.result == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issueNumber = context.payload.issue.number;
+            
+            await github.rest.issues.removeLabel({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              name: 'duplicate'
+            });
+            
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              labels: ['pending-triage']
+            });
+            
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              body: '🔄 Duplicate label removed — issue re-queued for triage based on user dispute.'
+            });
+
+      - name: Create workflow summary
+        if: always()
+        run: |
+          echo "## Duplicate Dispute Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Issue #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,196 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="haksterAi Labs — Hacking & Security Tools">
+  <section class="relative min-h-screen flex flex-col items-center px-6 pt-28 pb-16 overflow-hidden">
+
+    <!-- Background grid -->
+    <div
+      class="pointer-events-none absolute inset-0"
+      style="background-image: linear-gradient(rgba(124,58,237,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(124,58,237,0.04) 1px, transparent 1px); background-size: 40px 40px;"
+    ></div>
+
+    <!-- Glow blob -->
+    <div
+      class="pointer-events-none absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full opacity-20"
+      style="background: radial-gradient(circle, #7c3aed 0%, transparent 70%);"
+    ></div>
+
+    <!-- Content -->
+    <div class="relative z-10 flex flex-col items-center text-center max-w-5xl mx-auto w-full gap-8">
+
+      <!-- Badge -->
+      <div class="inline-flex items-center gap-2 rounded-full border border-[#7c3aed]/50 bg-[#7c3aed]/10 px-5 py-2.5 backdrop-blur-sm shadow-lg shadow-[#7c3aed]/10">
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#a855f7] opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-[#7c3aed]"></span>
+        </span>
+        <span class="text-sm font-semibold tracking-widest text-[#a855f7] uppercase">hakster</span>
+        <span class="text-xs text-[#64748b] border-l border-[#7c3aed]/30 pl-2">labs · offensive security</span>
+      </div>
+
+      <!-- Heading -->
+      <h1 class="text-5xl md:text-7xl font-bold leading-tight tracking-tight">
+        <span class="text-[#e2e8f0]">The hacking</span><br />
+        <span class="bg-gradient-to-r from-[#7c3aed] via-[#a855f7] to-[#c084fc] bg-clip-text text-transparent">
+          lab.
+        </span>
+      </h1>
+
+      <p class="max-w-2xl text-lg md:text-xl text-[#64748b] leading-relaxed">
+        Autonomous pentest agents, live exploit terminals, and security research tools — all running in your browser, powered by local AI.
+      </p>
+
+      <!-- Lab cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 w-full mt-6">
+
+        <!-- Hack Terminal -->
+        <a href="/hack" class="group relative rounded-2xl border border-[#1e1e2e] bg-[#0d0d14] p-6 hover:border-[#7c3aed]/50 transition-all hover:shadow-lg hover:shadow-[#7c3aed]/10 hover:-translate-y-0.5">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-[#7c3aed]/10 border border-[#7c3aed]/20 text-2xl">💀</div>
+            <div>
+              <h3 class="text-[#e2e8f0] font-bold text-lg">Hack Terminal</h3>
+              <span class="text-xs text-[#64748b]">Agentic Pentest Engine</span>
+            </div>
+          </div>
+          <p class="text-sm text-[#64748b] leading-relaxed mb-4">
+            5-phase penetration testing pipeline: recon, scan, exploit, post-exploit, report. AI-driven with shell access and checkpoint saving.
+          </p>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#7c3aed]/10 text-[#a855f7] border border-[#7c3aed]/20">RECON</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#7c3aed]/10 text-[#a855f7] border border-[#7c3aed]/20">EXPLOIT</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#7c3aed]/10 text-[#a855f7] border border-[#7c3aed]/20">REPORT</span>
+          </div>
+          <div class="mt-4 text-[#a855f7] text-sm font-semibold group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+            Launch <span>→</span>
+          </div>
+        </a>
+
+        <!-- Build / Chat -->
+        <a href="/build" class="group relative rounded-2xl border border-[#1e1e2e] bg-[#0d0d14] p-6 hover:border-[#00ff88]/50 transition-all hover:shadow-lg hover:shadow-[#00ff88]/10 hover:-translate-y-0.5">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-[#00ff88]/10 border border-[#00ff88]/20 text-2xl">💬</div>
+            <div>
+              <h3 class="text-[#e2e8f0] font-bold text-lg">AI Chat</h3>
+              <span class="text-xs text-[#64748b]">Coding & Research Agent</span>
+            </div>
+          </div>
+          <p class="text-sm text-[#64748b] leading-relaxed mb-4">
+            Full agentic chat with file, shell, and sub-agent tools. Build apps, debug code, research vulnerabilities, and automate tasks.
+          </p>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/20">CODE</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/20">SHELL</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/20">SEARCH</span>
+          </div>
+          <div class="mt-4 text-[#00ff88] text-sm font-semibold group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+            Open <span>→</span>
+          </div>
+        </a>
+
+        <!-- Terminal -->
+        <a href="/terminal" class="group relative rounded-2xl border border-[#1e1e2e] bg-[#0d0d14] p-6 hover:border-[#ffd700]/50 transition-all hover:shadow-lg hover:shadow-[#ffd700]/10 hover:-translate-y-0.5">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-[#ffd700]/10 border border-[#ffd700]/20 text-2xl">⌨️</div>
+            <div>
+              <h3 class="text-[#e2e8f0] font-bold text-lg">Terminal</h3>
+              <span class="text-xs text-[#64748b]">Live Shell Access</span>
+            </div>
+          </div>
+          <p class="text-sm text-[#64748b] leading-relaxed mb-4">
+            Real xterm.js terminal with full shell access. Run nmap, sqlmap, gobuster, and any tool directly from the browser.
+          </p>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#ffd700]/10 text-[#ffd700] border border-[#ffd700]/20">SHELL</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#ffd700]/10 text-[#ffd700] border border-[#ffd700]/20">XTerm</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#ffd700]/10 text-[#ffd700] border border-[#ffd700]/20">LIVE</span>
+          </div>
+          <div class="mt-4 text-[#ffd700] text-sm font-semibold group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+            Connect <span>→</span>
+          </div>
+        </a>
+
+        <!-- Dashboard -->
+        <a href="/dashboard" class="group relative rounded-2xl border border-[#1e1e2e] bg-[#0d0d14] p-6 hover:border-[#00bfff]/50 transition-all hover:shadow-lg hover:shadow-[#00bfff]/10 hover:-translate-y-0.5">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-[#00bfff]/10 border border-[#00bfff]/20 text-2xl">📊</div>
+            <div>
+              <h3 class="text-[#e2e8f0] font-bold text-lg">Dashboard</h3>
+              <span class="text-xs text-[#64748b]">System Monitor</span>
+            </div>
+          </div>
+          <p class="text-sm text-[#64748b] leading-relaxed mb-4">
+            Monitor sessions, models, providers, memory, and system health. Track agent runs and tool usage in real time.
+          </p>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00bfff]/10 text-[#00bfff] border border-[#00bfff]/20">MONITOR</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00bfff]/10 text-[#00bfff] border border-[#00bfff]/20">SESSIONS</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00bfff]/10 text-[#00bfff] border border-[#00bfff]/20">HEALTH</span>
+          </div>
+          <div class="mt-4 text-[#00bfff] text-sm font-semibold group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+            View <span>→</span>
+          </div>
+        </a>
+
+        <!-- TUI -->
+        <a href="/tui" class="group relative rounded-2xl border border-[#1e1e2e] bg-[#0d0d14] p-6 hover:border-[#ff6bff]/50 transition-all hover:shadow-lg hover:shadow-[#ff6bff]/10 hover:-translate-y-0.5">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-[#ff6bff]/10 border border-[#ff6bff]/20 text-2xl">🖥️</div>
+            <div>
+              <h3 class="text-[#e2e8f0] font-bold text-lg">TUI</h3>
+              <span class="text-xs text-[#64748b]">Terminal UI Mode</span>
+            </div>
+          </div>
+          <p class="text-sm text-[#64748b] leading-relaxed mb-4">
+            Full-screen terminal user interface. Navigate agents, sessions, and tools in a retro hacker aesthetic.
+          </p>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#ff6bff]/10 text-[#ff6bff] border border-[#ff6bff]/20">TUI</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#ff6bff]/10 text-[#ff6bff] border border-[#ff6bff]/20">FULLSCREEN</span>
+          </div>
+          <div class="mt-4 text-[#ff6bff] text-sm font-semibold group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+            Enter <span>→</span>
+          </div>
+        </a>
+
+        <!-- Messages -->
+        <a href="/messages" class="group relative rounded-2xl border border-[#1e1e2e] bg-[#0d0d14] p-6 hover:border-[#22d3ee]/50 transition-all hover:shadow-lg hover:shadow-[#22d3ee]/10 hover:-translate-y-0.5">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-[#22d3ee]/10 border border-[#22d3ee]/20 text-2xl">📨</div>
+            <div>
+              <h3 class="text-[#e2e8f0] font-bold text-lg">Messages</h3>
+              <span class="text-xs text-[#64748b]">Session History</span>
+            </div>
+          </div>
+          <p class="text-sm text-[#64748b] leading-relaxed mb-4">
+            Browse saved conversation sessions, replay agent interactions, and export findings from past engagements.
+          </p>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#22d3ee]/10 text-[#22d3ee] border border-[#22d3ee]/20">HISTORY</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#22d3ee]/10 text-[#22d3ee] border border-[#22d3ee]/20">EXPORT</span>
+          </div>
+          <div class="mt-4 text-[#22d3ee] text-sm font-semibold group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+            Browse <span>→</span>
+          </div>
+        </a>
+
+      </div>
+
+      <!-- Bottom CTA -->
+      <div class="mt-10 flex flex-col sm:flex-row items-center gap-4">
+        <a href="/hack" class="inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-6 py-3 text-base font-semibold text-white hover:bg-[#6d28d9] transition-all hover:shadow-lg hover:shadow-[#7c3aed]/30 active:scale-95">
+          <span>💀</span> Start Hacking
+        </a>
+        <a href="/" class="inline-flex items-center gap-2 rounded-lg border border-[#1e1e2e] bg-[#111118] px-6 py-3 text-base font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/50 hover:bg-[#1e1e2e] transition-all">
+          ← Back Home
+        </a>
+      </div>
+
+    </div>
+  </section>
+
+  <style>
+    body { background: #0a0a0f; }
+  </style>
+</Layout>

@@ -1,0 +1,475 @@
+---
+/**
+ * Reusable Crush Terminal component — v2
+ * Full-screen, fast, polished.
+ * Props:
+ *   id - unique DOM id (default: 'crush-terminal')
+ *   autoStart - legacy prop (server spawns crush directly)
+ *   compact - smaller toolbar (default: false)
+ */
+const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props;
+---
+
+<div id={id + '-panel'} class="crush-term-panel" style="position:absolute;inset:0;display:flex;flex-direction:column;background:#000;">
+  <!-- Status bar -->
+  <div class="crush-toolbar" style="display:flex;align-items:center;justify-content:space-between;padding:0 12px;height:28px;min-height:28px;background:#0d0d14;border-bottom:1px solid #1e1e2e;user-select:none;flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="color:#7c3aed;font-size:11px;font-weight:700;letter-spacing:1px;">⚡</span>
+      <span style="color:#00ff88;font-size:11px;font-weight:700;letter-spacing:0.5px;">HAKSTERAI</span>
+      <span id={id + '-status'} style="color:#ffd700;font-size:10px;">●</span>
+      <span id={id + '-model-badge'} style="color:#64748b;font-size:10px;font-family:'JetBrains Mono',monospace;"></span>
+      <span id={id + '-prefix'} style="color:#7c3aed;font-size:10px;font-weight:900;background:rgba(124,58,237,0.15);padding:1px 5px;border-radius:3px;opacity:0;transition:opacity 0.2s;">Ctrl+B</span>
+      <span id={id + '-panes'} style="color:#7c3aed;font-size:10px;"></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id={id + '-fps'} style="color:#4b5563;font-size:9px;font-family:monospace;"></span>
+      <span id={id + '-latency'} style="color:#4b5563;font-size:9px;font-family:monospace;"></span>
+      <button id={id + '-clear'} title="Clear terminal" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;font-size:12px;line-height:1;">🗑️</button>
+      <button id={id + '-fullscreen'} title="Fullscreen (F11)" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l4 4m8-4h4m0 0v4m0-4l-4 4M4 16v4m0 0h4m-4 0l4-4m8 4h4m0 0v-4m0 4l-4-4"/></svg>
+      </button>
+    </div>
+  </div>
+  <!-- Terminal root: split panes live here -->
+  <div id={id + '-root'} class="crush-term-root" style="position:relative;flex:1;min-height:0;overflow:hidden;background:#000;display:flex;flex-direction:row;"></div>
+</div>
+
+<style>
+  .crush-term-panel .xterm { background: #000 !important; padding: 0 !important; }
+  .crush-term-panel .xterm-viewport { background: #000 !important; }
+  .crush-term-panel .xterm-screen { background: #000 !important; }
+  .crush-term-panel .xterm-rows { background: #000 !important; }
+  .crush-term-panel .xterm-scrollable-element { background: #000 !important; }
+  .crush-term-panel .xterm-helpers { background: #000 !important; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar { width: 6px; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar-track { background: #0a0a0f; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar-thumb { background: #1e1e2e; border-radius: 3px; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+  .crush-scroll-btn:hover { background: rgba(124,58,237,1) !important; transform: scale(1.1); }
+  /* Split pane styles */
+  .crush-term-root .pane-wrapper { position: relative; display: flex; flex-direction: column; overflow: hidden; flex: 1 1 0%; min-width: 0; min-height: 0; }
+  .crush-term-root .pane-term { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; background: #000; padding: 0; }
+  .crush-term-root .pane-border { position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: #1e1e2e; transition: background 0.2s; z-index: 5; }
+  .crush-term-root .pane-wrapper.active-pane > .pane-border { background: #7c3aed; }
+  .crush-term-root .split-container { display: flex; flex: 1 1 0%; min-height: 0; min-width: 0; overflow: hidden; }
+  .crush-term-root .split-container.split-horizontal { flex-direction: column; }
+  .crush-term-root .split-container.split-vertical { flex-direction: row; }
+  .crush-term-root .split-handle { background: #1e1e2e; flex-shrink: 0; transition: background 0.15s; z-index: 10; }
+  .crush-term-root .split-handle:hover { background: rgba(124,58,237,0.5); }
+  .crush-term-root .split-handle:active { background: #7c3aed; }
+  .crush-term-root .split-handle.handle-vertical { width: 4px; cursor: col-resize; }
+  .crush-term-root .split-handle.handle-horizontal { height: 4px; cursor: row-resize; }
+</style>
+
+<link rel="stylesheet" href="/css/xterm.css" />
+<script is:inline src="/js/xterm.js"></script>
+<script is:inline src="/js/addon-fit.js"></script>
+
+<script define:vars={{ termId: id, autoStart }}>
+(function() {
+  const TID = termId;
+  let xtermTerm = null;
+  let xtermFit = null;
+  let ptyWs = null;
+  let terminalPingTimer = null;
+  let terminalResizeObserver = null;
+  let autoScrollEnabled = true;
+  let scrollRafId = null;
+
+  // ── Reasoning & Thinking Scrambler ──
+  // Detects <think>, <reasoning>, <thought>, <reason> blocks in terminal output
+  // and renders them with a scrambler decode animation: garbled chars → readable.
+  const _SC_REASON_OPEN = /<(?:think|reasoning|thought|reason)>/i;
+  const _SC_REASON_CLOSE = /<\/(?:think|reasoning|thought|reason)>/i;
+  let _scInReason = false;
+  let _scReasonBuf = '';
+  const _SC_CHARS = '▓░▒█▄▀■□▪▫◦‡※⟐⟑⟒⟓⧫⧪⧩⧨⬡⬢⬣⯃⯂';
+  const _SC_COLORS = ['\x1b[38;5;99m','\x1b[38;5;141m','\x1b[38;5;183m','\x1b[38;5;213m','\x1b[38;5;177m','\x1b[38;5;147m'];
+  let _scColorIdx = 0;
+
+  function scScramble(text) {
+    let out = '';
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === ' ' || ch === '\n' || ch === '\r') { out += ch; continue; }
+      out += Math.random() < 0.4 ? _SC_CHARS[Math.floor(Math.random() * _SC_CHARS.length)] : ch;
+    }
+    return out;
+  }
+
+  function scReasonBox(text, scrambled) {
+    const color = _SC_COLORS[_scColorIdx++ % _SC_COLORS.length];
+    const lines = text.split('\n');
+    const cols = xtermTerm?.cols || 80;
+    const bar = '═'.repeat(Math.min(72, cols - 4));
+    let out = '\r\n' + color + '╔' + bar + '╗\x1b[0m\r\n';
+    out += color + '║\x1b[0m \x1b[1;38;5;213m🧠 Reasoning\x1b[0m ' + color + '║\x1b[0m\r\n';
+    out += color + '╠' + bar + '╣\x1b[0m\r\n';
+    for (const line of lines) {
+      const trimmed = line.replace(/\s+$/, '');
+      const display = scrambled ? scScramble(trimmed) : trimmed;
+      out += color + '║\x1b[0m ' + color + display + '\x1b[0m\r\n';
+    }
+    out += color + '╚' + bar + '╝\x1b[0m\r\n';
+    return out;
+  }
+
+  function scrambleReasoning(data) {
+    let result = '';
+    let pos = 0;
+    const len = data.length;
+
+    while (pos < len) {
+      if (!_scInReason) {
+        const openMatch = data.substring(pos).match(_SC_REASON_OPEN);
+        if (openMatch) {
+          const tagStart = data.indexOf(openMatch[0], pos);
+          result += data.substring(pos, tagStart);
+          pos = tagStart + openMatch[0].length;
+          _scInReason = true;
+          _scReasonBuf = '';
+        } else {
+          result += data.substring(pos);
+          break;
+        }
+      } else {
+        const closeMatch = data.substring(pos).match(_SC_REASON_CLOSE);
+        if (closeMatch) {
+          const tagStart = data.indexOf(closeMatch[0], pos);
+          _scReasonBuf += data.substring(pos, tagStart);
+          pos = tagStart + closeMatch[0].length;
+          _scInReason = false;
+          const scrambled = scReasonBox(_scReasonBuf, true);
+          const decoded = scReasonBox(_scReasonBuf, false);
+          result += scrambled;
+          const totalLines = scrambled.split('\r\n').length - 1;
+          if (xtermTerm && totalLines > 0) {
+            const delay = Math.min(totalLines * 8, 400);
+            setTimeout(() => {
+              try {
+                xtermTerm.write('\x1b[' + totalLines + 'A\r');
+                const decodedLines = decoded.split('\r\n');
+                for (const dl of decodedLines) {
+                  xtermTerm.write('\x1b[2K' + dl + '\r\n');
+                }
+              } catch {}
+            }, delay);
+          }
+          _scReasonBuf = '';
+        } else {
+          _scReasonBuf += data.substring(pos);
+          if (_scReasonBuf.length > 0) {
+            const color = _SC_COLORS[_scColorIdx % _SC_COLORS.length];
+            for (const pl of _scReasonBuf.split('\n')) {
+              if (pl.trim()) result += color + scScramble(pl) + '\x1b[0m\r\n';
+              else result += '\r\n';
+            }
+            _scReasonBuf = '';
+          }
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
+  // ── Write buffer for batching PTY output (reduces reflows) ──
+  let writeBuffer = '';
+  let writeRafId = null;
+  function flushWriteBuffer() {
+    if (writeBuffer && xtermTerm) {
+      xtermTerm.write(writeBuffer);
+      writeBuffer = '';
+    }
+    writeRafId = null;
+  }
+  function bufferedWrite(data) {
+    writeBuffer += data;
+    if (!writeRafId) {
+      writeRafId = requestAnimationFrame(flushWriteBuffer);
+    }
+  }
+
+  // ── FPS counter ──
+  let frameCount = 0;
+  let lastFpsTime = performance.now();
+  let displayFps = '';
+  setInterval(() => {
+    const now = performance.now();
+    const elapsed = now - lastFpsTime;
+    if (elapsed > 0) {
+      displayFps = Math.round(frameCount / (elapsed / 1000));
+    }
+    frameCount = 0;
+    lastFpsTime = now;
+    const fpsEl = document.getElementById(TID + '-fps');
+    if (fpsEl && displayFps) fpsEl.textContent = displayFps + ' fps';
+  }, 2000);
+
+  // ── Latency tracking ──
+  let pingSendTime = 0;
+
+  const terminalContainer = document.getElementById(TID + '-container');
+  const terminalPanel = document.getElementById(TID + '-panel');
+  const scrollBottomBtn = document.getElementById(TID + '-scroll-btn');
+  const fullscreenBtn = document.getElementById(TID + '-fullscreen');
+  const clearBtn = document.getElementById(TID + '-clear');
+  const statusDot = document.getElementById(TID + '-status');
+  const modelBadge = document.getElementById(TID + '-model-badge');
+  const latencyEl = document.getElementById(TID + '-latency');
+
+  if (!terminalContainer) return;
+
+  function updateStatus(state) {
+    if (!statusDot) return;
+    const states = {
+      connected: { color: '#00ff88', text: '●' },
+      connecting: { color: '#ffd700', text: '●' },
+      disconnected: { color: '#ff4444', text: '●' },
+      error: { color: '#ff4444', text: '●' },
+    };
+    const s = states[state] || states.connecting;
+    statusDot.style.color = s.color;
+    statusDot.textContent = s.text;
+  }
+
+  function fitAndResizeTerminal() {
+    if (xtermTerm && xtermFit) {
+      try { xtermFit.fit(); } catch {}
+      requestAnimationFrame(() => {
+        try { xtermFit.fit(); } catch {}
+        if (ptyWs?.readyState === WebSocket.OPEN && xtermTerm) {
+          ptyWs.send(JSON.stringify({ type: 'resize', cols: xtermTerm.cols, rows: xtermTerm.rows }));
+        }
+      });
+    }
+  }
+
+  let fitTimeout;
+  function scheduleTerminalFit() {
+    clearTimeout(fitTimeout);
+    fitTimeout = setTimeout(fitAndResizeTerminal, 60);
+  }
+
+  function isAtBottom() {
+    if (!xtermTerm) return true;
+    return xtermTerm.buffer.active.viewportY >= xtermTerm.buffer.active.baseY + xtermTerm.rows - 2;
+  }
+
+  function showScrollArrow() { if (scrollBottomBtn) scrollBottomBtn.style.display = 'flex'; }
+  function hideScrollArrow() { if (scrollBottomBtn) scrollBottomBtn.style.display = 'none'; }
+
+  function sendPtyInput(data) {
+    if (ptyWs?.readyState === WebSocket.OPEN) {
+      ptyWs.send(JSON.stringify({ type: 'input', data }));
+    }
+  }
+
+  function pasteIntoTerminal(text) {
+    if (!text) return;
+    sendPtyInput(text.replace(/\n/g, '\r'));
+  }
+
+  function initTerminal() {
+    if (xtermTerm) return;
+
+    xtermTerm = new Terminal({
+      theme: {
+        background: '#000000', foreground: '#00ff88', cursor: '#7c3aed', cursorAccent: '#000000',
+        selectionBackground: '#7c3aed55', selectionForeground: '#ffffff',
+        black: '#000000', red: '#ff4444', green: '#00ff88', yellow: '#ffd700',
+        blue: '#00bfff', magenta: '#ff6bff', cyan: '#00ffff', white: '#d4d4d4',
+        brightBlack: '#64748b', brightRed: '#ff6b6b', brightGreen: '#00ff88',
+        brightYellow: '#ffd700', brightBlue: '#4dc4ff', brightMagenta: '#ff88ff',
+        brightCyan: '#00ffff', brightWhite: '#e2e8f0',
+      },
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: 15,
+      lineHeight: 1.15,
+      letterSpacing: 0,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      scrollback: 50000,
+      fastScrollModifier: 'alt',
+      fastScrollSensitivity: 10,
+      scrollSensitivity: 1,
+      smoothScrollDuration: 0,
+      convertEol: false,
+      rightClickSelectsWord: true,
+      macOptionIsMeta: true,
+      windowsMode: false,
+      allowProposedApi: true,
+      overviewRulerWidth: 0,
+      scrollbarWidth: 6,
+    });
+
+    xtermFit = new FitAddon.FitAddon();
+    xtermTerm.loadAddon(xtermFit);
+    xtermTerm.open(terminalContainer);
+
+    // Initial fit — microtask + delayed for font loading
+    requestAnimationFrame(() => {
+      fitAndResizeTerminal();
+      setTimeout(fitAndResizeTerminal, 200);
+    });
+
+    xtermTerm.onScroll(() => {
+      frameCount++;
+      if (isAtBottom()) { autoScrollEnabled = true; hideScrollArrow(); }
+      else { autoScrollEnabled = false; showScrollArrow(); }
+    });
+
+    scrollBottomBtn?.addEventListener('click', () => {
+      if (xtermTerm) { xtermTerm.scrollToBottom(); autoScrollEnabled = true; hideScrollArrow(); }
+    });
+
+    clearBtn?.addEventListener('click', () => {
+      if (xtermTerm) xtermTerm.clear();
+    });
+
+    fullscreenBtn?.addEventListener('click', () => {
+      if (!terminalPanel) return;
+      if (document.fullscreenElement) { document.exitFullscreen(); }
+      else { terminalPanel.requestFullscreen().catch(() => {}); }
+    });
+
+    // F11 fullscreen override when terminal is focused
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'F11' && document.activeElement && terminalPanel?.contains(document.activeElement)) {
+        e.preventDefault();
+        if (document.fullscreenElement) document.exitFullscreen();
+        else terminalPanel.requestFullscreen().catch(() => {});
+      }
+    });
+
+    // Re-fit on fullscreen change
+    document.addEventListener('fullscreenchange', () => {
+      setTimeout(fitAndResizeTerminal, 100);
+      setTimeout(fitAndResizeTerminal, 300);
+    });
+
+    function connectPty() {
+      updateStatus('connecting');
+      const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ptyWs = new WebSocket(`${wsProtocol}//${location.host}/pty`);
+
+      ptyWs.onopen = () => {
+        updateStatus('connected');
+        scheduleTerminalFit();
+        terminalPingTimer = window.setInterval(() => {
+          if (ptyWs?.readyState === WebSocket.OPEN) {
+            pingSendTime = performance.now();
+            ptyWs.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 15000);
+      };
+
+      ptyWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'pty' && xtermTerm) {
+            bufferedWrite(scrambleReasoning(msg.data));
+            if (autoScrollEnabled) {
+              if (!scrollRafId) {
+                scrollRafId = requestAnimationFrame(function scrollLoop() {
+                  xtermTerm.scrollToBottom();
+                  if (isAtBottom()) { hideScrollArrow(); scrollRafId = null; }
+                  else { scrollRafId = requestAnimationFrame(scrollLoop); }
+                });
+              }
+            }
+          } else if (msg.type === 'pong') {
+            const lat = Math.round(performance.now() - pingSendTime);
+            if (latencyEl) latencyEl.textContent = lat + 'ms';
+          } else if (msg.type === 'exit' && xtermTerm) {
+            updateStatus('disconnected');
+            xtermTerm.write('\r\n\x1b[90m[Connection closed — reconnecting...]\x1b[0m\r\n');
+          }
+        } catch {}
+      };
+
+      ptyWs.onclose = () => {
+        updateStatus('disconnected');
+        if (terminalPingTimer) { clearInterval(terminalPingTimer); terminalPingTimer = null; }
+        if (xtermTerm) xtermTerm.write('\r\n\x1b[33m[Disconnected — reconnecting...]\x1b[0m\r\n');
+        ptyWs = null;
+        setTimeout(() => { if (!ptyWs) connectPty(); }, 2000);
+      };
+
+      ptyWs.onerror = () => {
+        updateStatus('error');
+        if (xtermTerm) xtermTerm.write('\r\n\x1b[31m[Connection error]\x1b[0m\r\n');
+      };
+    }
+
+    connectPty();
+
+    xtermTerm.onData((data) => {
+      sendPtyInput(data);
+      if (data.length > 0 && data !== '\x1b[A' && data !== '\x1b[B' && data !== '\x1b[C' && data !== '\x1b[D') {
+        autoScrollEnabled = true;
+        hideScrollArrow();
+      }
+    });
+
+    xtermTerm.attachCustomKeyEventHandler((arg) => {
+      if (arg.type === 'keydown') {
+        if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyC') {
+          const sel = xtermTerm.getSelection();
+          if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+          return false;
+        }
+        if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyV') {
+          navigator.clipboard.readText().then(pasteIntoTerminal).catch(() => {});
+          return false;
+        }
+        if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyA') {
+          xtermTerm.selectAll();
+          return false;
+        }
+        if (arg.ctrlKey && arg.code === 'KeyL' && !arg.shiftKey) {
+          xtermTerm.clear();
+          return true;
+        }
+      }
+      return true;
+    });
+
+    terminalContainer.addEventListener('paste', (e) => {
+      const text = e.clipboardData?.getData('text/plain') || '';
+      if (text) { e.preventDefault(); pasteIntoTerminal(text); }
+    });
+    terminalContainer.addEventListener('copy', (e) => {
+      const sel = xtermTerm?.getSelection();
+      if (sel) { e.preventDefault(); e.clipboardData?.setData('text/plain', sel); }
+    });
+    terminalContainer.addEventListener('contextmenu', (e) => {
+      const sel = xtermTerm?.getSelection();
+      if (sel) { e.preventDefault(); navigator.clipboard.writeText(sel).catch(() => {}); }
+    });
+
+    terminalResizeObserver = new ResizeObserver(() => { scheduleTerminalFit(); });
+    terminalResizeObserver.observe(terminalContainer);
+    if (terminalPanel) {
+      new ResizeObserver(() => { scheduleTerminalFit(); }).observe(terminalPanel);
+    }
+
+    // Fetch model info for badge
+    fetch('/api/dashboard').then(r => r.json()).then(d => {
+      if (d.crush && modelBadge) {
+        const model = d.crush.model || '';
+        modelBadge.textContent = model.length > 20 ? model.substring(0, 18) + '…' : model;
+      }
+    }).catch(() => {});
+
+    window.__crushTerminals = window.__crushTerminals || {};
+    window.__crushTerminals[TID] = { term: xtermTerm, ws: ptyWs };
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initTerminal);
+  } else {
+    initTerminal();
+  }
+})();
+</script>

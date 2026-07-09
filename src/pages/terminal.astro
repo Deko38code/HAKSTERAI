@@ -1,0 +1,568 @@
+---
+import CrushTerminal from '../components/CrushTerminal.astro';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hakster Terminal</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/logo-32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'JetBrains Mono', monospace; }
+
+      /* ── Layout ── */
+      #terminal-root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
+
+      /* ── Top nav bar ── */
+      #term-nav { height: 32px; min-height: 32px; background: #0a0a0f; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; z-index: 100; user-select: none; flex-shrink: 0; }
+      #term-nav a { color: #64748b; text-decoration: none; font-size: 11px; font-weight: 500; letter-spacing: 0.5px; transition: color 0.2s; }
+      #term-nav a:hover { color: #e2e8f0; }
+      #term-nav .brand { display: flex; align-items: center; gap: 8px; }
+      #term-nav .brand img { width: 18px; height: 18px; border-radius: 3px; }
+      #term-nav .brand span { color: #e2e8f0; font-size: 12px; font-weight: 700; }
+      #term-nav .brand .ai { color: #7c3aed; }
+      #term-nav .links { display: flex; gap: 14px; align-items: center; }
+      #term-nav .links .active { color: #7c3aed; font-weight: 700; }
+
+      /* ── Main area: sidebar + terminal ── */
+      #term-main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+
+      /* ── Sidebar ── */
+      #term-sidebar {
+        width: 220px; min-width: 220px; background: #0d0d14; border-right: 1px solid #1e1e2e;
+        display: flex; flex-direction: column; overflow-y: auto; transition: width 0.2s, min-width 0.2s;
+        font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e2e8f0; z-index: 50;
+      }
+      #term-sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; border-right: none; }
+      #term-sidebar .sb-section { padding: 10px 12px; border-bottom: 1px solid #1e1e2e; }
+      #term-sidebar .sb-title { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 8px; }
+      #term-sidebar select { width: 100%; background: #111118; border: 1px solid #1e1e2e; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; font-size: 11px; font-family: inherit; outline: none; cursor: pointer; }
+      #term-sidebar select:focus { border-color: #7c3aed; }
+      #term-sidebar .sb-btn { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid #1e1e2e; background: #111118; color: #e2e8f0; font-size: 11px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
+      #term-sidebar .sb-btn:hover { background: #1a1a2e; border-color: #7c3aed; }
+      #term-sidebar .sb-btn.primary { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+      #term-sidebar .sb-btn.primary:hover { background: #6d28d9; }
+      #term-sidebar .sb-btn.blue { background: #2563eb; border-color: #2563eb; color: #fff; }
+      #term-sidebar .sb-btn.blue:hover { background: #1d4ed8; }
+      #term-sidebar .sb-info { color: #64748b; font-size: 10px; }
+      #term-sidebar .sb-info span { color: #7c3aed; font-weight: 700; }
+      #term-sidebar a { color: #64748b; text-decoration: none; transition: color 0.15s; }
+      #term-sidebar a:hover { color: #7c3aed; }
+
+      /* ── Sidebar toggle ── */
+      #sidebar-toggle-btn {
+        display: flex; align-items: center; justify-content: center; width: 20px; min-width: 20px;
+        background: #0d0d14; border-right: 1px solid #1e1e2e; cursor: pointer; transition: background 0.15s;
+        flex-shrink: 0;
+      }
+      #sidebar-toggle-btn:hover { background: #1a1a2e; }
+      #sidebar-toggle-btn svg { width: 12px; height: 12px; color: #64748b; transition: transform 0.2s, color 0.15s; }
+      #sidebar-toggle-btn:hover svg { color: #7c3aed; }
+      #sidebar-toggle-btn.open svg { transform: rotate(180deg); }
+
+      /* ── Terminal body ── */
+      #term-body { flex: 1; min-width: 0; min-height: 0; position: relative; }
+
+      /* ── Right sidebar (crush tools/info) ── */
+      #crush-sidebar {
+        width: 240px; min-width: 240px; background: #0d0d14; border-left: 1px solid #1e1e2e;
+        display: flex; flex-direction: column; overflow-y: auto; transition: width 0.2s, min-width 0.2s;
+        font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e2e8f0; z-index: 50;
+      }
+      #crush-sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; border-left: none; }
+      #crush-sidebar .cs-section { padding: 10px 12px; border-bottom: 1px solid #1e1e2e; }
+      #crush-sidebar .cs-title { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 8px; }
+      #crush-sidebar .cs-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
+      #crush-sidebar .cs-label { color: #64748b; }
+      #crush-sidebar .cs-value { color: #e2e8f0; font-weight: 600; }
+      #crush-sidebar .cs-value.purple { color: #7c3aed; }
+      #crush-sidebar .cs-value.green { color: #00ff88; }
+      #crush-sidebar .cs-value.gold { color: #fbbf24; }
+      #crush-sidebar .cs-value.red { color: #e50914; }
+      #crush-sidebar .cs-bar { height: 4px; background: #1e1e2e; border-radius: 2px; margin-top: 4px; overflow: hidden; }
+      #crush-sidebar .cs-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+      #crush-sidebar .cs-tool-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+      #crush-sidebar .cs-tool-icon { width: 14px; text-align: center; font-size: 12px; }
+      #crush-sidebar .cs-tool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
+      #crush-sidebar .cs-tool-count { color: #7c3aed; font-weight: 600; min-width: 24px; text-align: right; }
+      #crush-sidebar .cs-list { max-height: 190px; overflow-y: auto; padding-right: 2px; }
+      #crush-sidebar .cs-list.tall { max-height: 260px; }
+      #crush-sidebar .cs-chip-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; min-width: 0; }
+      #crush-sidebar .cs-chip-main { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
+      #crush-sidebar .cs-chip-meta { color: #4b5563; font-size: 9px; white-space: nowrap; }
+      #crush-sidebar .cs-empty { color: #4b5563; font-size: 10px; padding: 3px 0; }
+      #crush-sidebar .cs-file-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; font-size: 10px; }
+      #crush-sidebar .cs-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
+      #crush-sidebar .cs-file-add { color: #00ff88; font-weight: 600; }
+      #crush-sidebar .cs-file-del { color: #e50914; font-weight: 600; }
+      #crush-sidebar .cs-toggle { display: flex; align-items: center; justify-content: center; width: 20px; min-width: 20px; background: #0d0d14; border-left: 1px solid #1e1e2e; cursor: pointer; transition: background 0.15s; flex-shrink: 0; }
+      #crush-sidebar .cs-toggle:hover { background: #1a1a2e; }
+      #crush-sidebar .cs-toggle svg { width: 12px; height: 12px; color: #64748b; transition: transform 0.2s, color 0.15s; }
+      #crush-sidebar .cs-toggle:hover svg { color: #7c3aed; }
+      #crush-sidebar .cs-toggle.open svg { transform: rotate(180deg); }
+
+      /* ── Right sidebar toggle ── */
+      .cs-toggle-btn {
+        display: flex; align-items: center; justify-content: center; width: 20px; min-width: 20px;
+        background: #0d0d14; border-left: 1px solid #1e1e2e; cursor: pointer; transition: background 0.15s;
+        flex-shrink: 0;
+      }
+      .cs-toggle-btn:hover { background: #1a1a2e; }
+      .cs-toggle-btn svg { width: 12px; height: 12px; color: #64748b; transition: transform 0.2s, color 0.15s; }
+      .cs-toggle-btn:hover svg { color: #7c3aed; }
+      .cs-toggle-btn.open svg { transform: rotate(180deg); }
+
+      /* ── Responsive: hide sidebars on small screens ── */
+      @media (max-width: 768px) {
+        #term-sidebar { position: fixed; top: 32px; left: 0; bottom: 0; z-index: 60; transform: translateX(-100%); transition: transform 0.2s; }
+        #term-sidebar.mobile-open { transform: translateX(0); width: 240px; min-width: 240px; }
+        #sidebar-toggle-btn { width: 28px; min-width: 28px; }
+        #sidebar-overlay { display: none; position: fixed; inset: 0; top: 32px; background: rgba(0,0,0,0.5); z-index: 55; }
+        #sidebar-overlay.active { display: block; }
+        #crush-sidebar { position: fixed; top: 32px; right: 0; bottom: 0; z-index: 60; transform: translateX(100%); transition: transform 0.2s; }
+        #crush-sidebar.mobile-open { transform: translateX(0); width: 260px; min-width: 260px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="terminal-root">
+      <div id="term-nav">
+        <div class="brand">
+          <a href="/"><img src="/logo-192.png" alt="haksterAi" /></a>
+          <a href="/"><span>hakster<span class="ai">Ai</span></span></a>
+        </div>
+        <div class="links">
+          <a href="/hack">💀 Hack</a>
+          <a href="/terminal" class="active">⌨️ Terminal</a>
+          <a href="/dashboard">📊 Dashboard</a>
+        </div>
+      </div>
+      <div id="term-main">
+        <!-- Sidebar -->
+        <aside id="term-sidebar">
+          <div class="sb-section">
+            <button class="sb-btn primary" onclick="fetch('/api/session/new',{method:'POST'}).then(()=>location.reload())">⚡ New Session</button>
+          </div>
+          <div class="sb-section">
+            <button class="sb-btn blue" onclick="location.href='/terminal'">⌨️ New Terminal</button>
+          </div>
+          <div class="sb-section">
+            <div class="sb-title">📡 Provider</div>
+            <select id="sb-provider">
+              <option value="ollama">Ollama (Local)</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+              <option value="hermes">Hermes</option>
+              <option value="claude-proxy">Claude Proxy</option>
+            </select>
+          </div>
+          <div class="sb-section">
+            <div class="sb-title">🤖 Model</div>
+            <select id="sb-model">
+              <option value="">Loading...</option>
+            </select>
+          </div>
+          <div class="sb-section">
+            <div class="sb-title">ℹ️ Status</div>
+            <div class="sb-info" id="sb-status">● <span>Connecting...</span></div>
+            <div class="sb-info" id="sb-model-info" style="margin-top:4px;">Model: <span>—</span></div>
+            <div class="sb-info" id="sb-uptime" style="margin-top:4px;">Uptime: <span>—</span></div>
+          </div>
+          <div class="sb-section">
+            <div class="sb-title">⌨️ Shortcuts</div>
+            <div class="sb-info">Ctrl+B " → Split horiz</div>
+            <div class="sb-info">Ctrl+B % → Split vert</div>
+            <div class="sb-info">Ctrl+B ←↑→↓ → Navigate</div>
+            <div class="sb-info">Ctrl+B x → Close pane</div>
+            <div class="sb-info">Ctrl+B z → Zoom pane</div>
+            <div class="sb-info">Ctrl+Shift+C/V → Copy/Paste</div>
+          </div>
+          <div class="sb-section">
+            <div class="sb-title">🔗 Links</div>
+            <a href="/" style="display:block;margin-bottom:4px;">🏠 Home</a>
+            <a href="/dashboard" style="display:block;margin-bottom:4px;">📊 Dashboard</a>
+          </div>
+        </aside>
+
+        <!-- Sidebar toggle -->
+        <button id="sidebar-toggle-btn" class="open" title="Toggle sidebar">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+
+        <!-- Overlay for mobile sidebar -->
+        <div id="sidebar-overlay"></div>
+
+        <!-- Terminal -->
+        <div id="term-body">
+          <CrushTerminal id="crush-main" autoStart={true} />
+        </div>
+
+        <!-- Right sidebar: Crush tools & info -->
+        <button id="crush-sidebar-toggle" class="cs-toggle-btn" title="Toggle tools panel">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
+        </button>
+        <aside id="crush-sidebar">
+          <div class="cs-section">
+            <div class="cs-title">🤖 Model</div>
+            <div class="cs-row"><span class="cs-label">Provider</span><span class="cs-value purple" id="cs-provider">—</span></div>
+            <div class="cs-row"><span class="cs-label">Model</span><span class="cs-value" id="cs-model">—</span></div>
+            <div class="cs-row"><span class="cs-label">Version</span><span class="cs-value" id="cs-version">—</span></div>
+          </div>
+          <div class="cs-section">
+            <div class="cs-title">📊 Session Stats</div>
+            <div class="cs-row"><span class="cs-label">Sessions</span><span class="cs-value green" id="cs-sessions">0</span></div>
+            <div class="cs-row"><span class="cs-label">Messages</span><span class="cs-value" id="cs-messages">0</span></div>
+            <div class="cs-row"><span class="cs-label">Tokens</span><span class="cs-value gold" id="cs-tokens">0</span></div>
+            <div class="cs-row"><span class="cs-label">Cost</span><span class="cs-value red" id="cs-cost">$0.00</span></div>
+          </div>
+          <div class="cs-section">
+            <div class="cs-title">🔧 Tools Used</div>
+            <div class="cs-row"><span class="cs-label">Total Calls</span><span class="cs-value purple" id="cs-tool-calls">0</span></div>
+            <div class="cs-row"><span class="cs-label">Unique Tools</span><span class="cs-value" id="cs-unique-tools">0</span></div>
+            <div id="cs-tools-list" class="cs-list"></div>
+          </div>
+          <div class="cs-section">
+            <div class="cs-title">🧰 Available Tools</div>
+            <div class="cs-row"><span class="cs-label">Loaded</span><span class="cs-value green" id="cs-tools-total">0</span></div>
+            <div id="cs-tools-inventory" class="cs-list"></div>
+          </div>
+          <div class="cs-section">
+            <div class="cs-title">📚 Skills</div>
+            <div class="cs-row"><span class="cs-label">Loaded</span><span class="cs-value gold" id="cs-skills-total">0</span></div>
+            <div id="cs-skills-list" class="cs-list tall"></div>
+          </div>
+          <div class="cs-section">
+            <div class="cs-title">📁 Files</div>
+            <div class="cs-row"><span class="cs-label">Modified</span><span class="cs-value green" id="cs-files-count">0</span></div>
+            <div id="cs-files-list"></div>
+          </div>
+          <div class="cs-section">
+            <div class="cs-title">💻 System</div>
+            <div class="cs-row"><span class="cs-label">CPU</span><span class="cs-value" id="cs-cpu">—</span></div>
+            <div class="cs-row"><span class="cs-label">Memory</span><span class="cs-value" id="cs-memory">—</span></div>
+            <div class="cs-row"><span class="cs-label">Uptime</span><span class="cs-value" id="cs-uptime2">—</span></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script>
+      // ── Sidebar toggle ──────────────────────────────────────────
+      const sidebar = document.getElementById('term-sidebar');
+      const toggleBtn = document.getElementById('sidebar-toggle-btn');
+      const overlay = document.getElementById('sidebar-overlay');
+      let sidebarOpen = true;
+
+      toggleBtn.addEventListener('click', () => {
+        sidebarOpen = !sidebarOpen;
+        if (window.innerWidth <= 768) {
+          sidebar.classList.toggle('mobile-open', sidebarOpen);
+          overlay.classList.toggle('active', sidebarOpen);
+        } else {
+          sidebar.classList.toggle('collapsed', !sidebarOpen);
+        }
+        toggleBtn.classList.toggle('open', sidebarOpen);
+        // Refit terminal after layout change
+        setTimeout(() => {
+          window.dispatchEvent(new Event('resize'));
+          if (window.__crushTerminals && window.__crushTerminals['crush-main']) {
+            window.__crushTerminals['crush-main'].panes.forEach(p => {
+              try { p.fit.fit(); } catch {}
+              if (p.ws?.readyState === WebSocket.OPEN) {
+                p.ws.send(JSON.stringify({ type: 'resize', cols: p.term.cols, rows: p.term.rows }));
+              }
+            });
+          }
+        }, 250);
+      });
+
+      overlay?.addEventListener('click', () => {
+        sidebarOpen = false;
+        sidebar.classList.remove('mobile-open');
+        overlay.classList.remove('active');
+        toggleBtn.classList.remove('open');
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 250);
+      });
+
+            // ── Load provider/model info ─────────────────────────────────
+      const modelSelect = document.getElementById('sb-model');
+      const statusEl = document.getElementById('sb-status');
+      const modelInfo = document.getElementById('sb-model-info');
+
+      // Set initial status
+      if (statusEl) statusEl.innerHTML = '<span style="color:#ffd700">●</span> <span>Connecting...</span>';
+
+      fetch('/api/dashboard').then(r => r.json()).then(d => {
+        // Update status
+        if (d.crush) {
+          if (modelInfo) {
+            const m = d.crush.model || '—';
+            const p = d.crush.provider || '—';
+            const provName = (d.providers || []).find(x => x.id === p)?.name || p;
+            modelInfo.innerHTML = 'Model: <span>' + (m.length > 25 ? m.substring(0,23) + '…' : m) + '</span><br>Provider: <span>' + provName + '</span>';
+          }
+          if (statusEl) statusEl.innerHTML = '<span style="color:#00ff88">●</span> <span>Online</span>';
+        }
+
+        // Populate providers
+        const provSelect = document.getElementById('sb-provider');
+        if (d.providers && provSelect) {
+          provSelect.innerHTML = '';
+          d.providers.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name;
+            if (d.crush && p.id === d.crush.provider) opt.selected = true;
+            provSelect.appendChild(opt);
+          });
+          // If crush provider not in list, select ollama as default
+          if (!provSelect.querySelector('[selected]') && provSelect.options.length > 0) {
+            provSelect.selectedIndex = 0;
+          }
+        }
+
+        // Load models — use haksterAi provider
+        const hakProv = (d.crush && d.crush.provider) || 'ollama';
+        const knownProviders = (d.providers || []).map(p => p.id);
+        const modelProvider = knownProviders.includes(hakProv) ? hakProv : 'ollama';
+        if (provSelect) provSelect.value = modelProvider;
+
+        if (modelSelect) {
+          const currentModel = d.crush?.model || '';
+          modelSelect.innerHTML = '';
+          if (currentModel) {
+            const curOpt = document.createElement('option');
+            curOpt.value = currentModel;
+            curOpt.textContent = currentModel;
+            curOpt.selected = true;
+            modelSelect.appendChild(curOpt);
+          }
+          fetch('/api/providers/' + encodeURIComponent(modelProvider) + '/models').then(r => r.json()).then(md => {
+            if (md.models && md.models.length > 0) {
+              const existing = new Set();
+              for (const o of modelSelect.options) existing.add(o.value);
+              md.models.forEach(m => {
+                const val = m.id || m.name || m;
+                if (existing.has(val)) return;
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = m.name || m.id || m;
+                if (val === currentModel) opt.selected = true;
+                modelSelect.appendChild(opt);
+              });
+            }
+          }).catch(() => {});
+        }
+
+        // Show system info
+        if (d.system) {
+          const uptimeEl = document.getElementById('sb-uptime');
+          if (uptimeEl && d.system.uptime) {
+            const hrs = Math.floor(d.system.uptime / 3600);
+            const mins = Math.floor((d.system.uptime % 3600) / 60);
+            uptimeEl.innerHTML = 'Uptime: <span>' + hrs + 'h ' + mins + 'm</span>';
+          }
+        }
+      }).catch(() => {});
+
+      // ── Provider select → update model list ──────────────────────
+      document.getElementById('sb-provider')?.addEventListener('change', (e) => {
+        const modelSelect = document.getElementById('sb-model');
+        const statusEl = document.getElementById('sb-status');
+        if (statusEl) statusEl.innerHTML = '<span style="color:#ffd700">●</span> <span>Loading models...</span>';
+        if (!modelSelect) return;
+        modelSelect.innerHTML = '<option value="">Loading...</option>';
+        fetch('/api/providers/' + encodeURIComponent(e.target.value) + '/models').then(r => r.json()).then(d => {
+          modelSelect.innerHTML = '';
+          (d.models || []).forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.id || m.name || m;
+            opt.textContent = m.name || m.id || m;
+            modelSelect.appendChild(opt);
+          });
+          if (statusEl) statusEl.innerHTML = '<span style="color:#00ff88">●</span> <span>Online</span>';
+        }).catch(() => { modelSelect.innerHTML = '<option value="">Error</option>'; if (statusEl) statusEl.innerHTML = '<span style="color:#ff4444">●</span> <span>Error</span>'; });
+      });
+
+      // ── Model select → switch model in crush config + reconnect PTY ──
+      document.getElementById('sb-model')?.addEventListener('change', (e) => {
+        const provider = document.getElementById('sb-provider')?.value;
+        const model = e.target.value;
+        if (!model) return;
+        // Update the model info display immediately
+        const modelInfo = document.getElementById('sb-model-info');
+        if (modelInfo) modelInfo.innerHTML = 'Model: <span style="color:#7c3aed">' + (model.length > 25 ? model.substring(0,23) + '…' : model) + '</span>';
+        const statusEl = document.getElementById('sb-status');
+        if (statusEl) statusEl.innerHTML = '<span style="color:#ffd700">●</span> <span>Switching...</span>';
+        // Update model badge in terminal
+        const modelBadge = document.getElementById('crush-main-model-badge');
+        if (modelBadge) modelBadge.textContent = model.length > 20 ? model.substring(0, 18) + '\u2026' : model;
+        // Persist model change to crush.json so it takes effect on next session
+        fetch('/api/crush/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider, model })
+        }).then(r => r.json()).then(d => {
+          if (d.ok) {
+            // Config saved — reconnect PTY so crush picks up new model
+            const terminals = window.__crushTerminals;
+            if (terminals && terminals['crush-main']) {
+              const t = terminals['crush-main'];
+              const pane = t.active || (t.panes && t.panes[0]);
+              if (pane && typeof t.reconnect === 'function') {
+                t.reconnect(pane);
+              } else {
+                setTimeout(() => location.reload(), 1000);
+              }
+            } else {
+              setTimeout(() => location.reload(), 1000);
+            }
+            // Refresh dashboard data after switch
+            setTimeout(() => {
+              fetch('/api/dashboard').then(r => r.json()).then(dash => {
+                if (dash.crush) {
+                  if (modelInfo) modelInfo.innerHTML = 'Model: <span style="color:#00ff88">' + (dash.crush.model || model).substring(0, 25) + '</span>';
+                  if (statusEl) statusEl.innerHTML = '<span style="color:#00ff88">●</span> <span>Online</span>';
+                  if (modelBadge) modelBadge.textContent = (dash.crush.model || model).length > 20 ? (dash.crush.model || model).substring(0, 18) + '\u2026' : (dash.crush.model || model);
+                }
+              }).catch(() => {});
+            }, 2000);
+          }
+        }).catch(() => {
+          setTimeout(() => location.reload(), 1000);
+        });
+        // Update right sidebar stats display
+        const csModel = document.getElementById('cs-model');
+        const csProv = document.getElementById('cs-provider');
+        if (csModel) csModel.textContent = model;
+        if (csProv) csProv.textContent = provider;
+      });
+
+      // ── Right sidebar toggle ──────────────────────────────────────
+      const crushSidebar = document.getElementById('crush-sidebar');
+      const crushToggle = document.getElementById('crush-sidebar-toggle');
+      let crushOpen = true;
+
+      crushToggle.addEventListener('click', () => {
+        crushOpen = !crushOpen;
+        if (window.innerWidth <= 768) {
+          crushSidebar.classList.toggle('mobile-open', crushOpen);
+        } else {
+          crushSidebar.classList.toggle('collapsed', !crushOpen);
+        }
+        crushToggle.classList.toggle('open', crushOpen);
+        setTimeout(() => {
+          window.dispatchEvent(new Event('resize'));
+          if (window.__crushTerminals && window.__crushTerminals['crush-main']) {
+            window.__crushTerminals['crush-main'].panes.forEach(p => {
+              try { p.fit.fit(); } catch {}
+              if (p.ws?.readyState === WebSocket.OPEN) {
+                p.ws.send(JSON.stringify({ type: 'resize', cols: p.term.cols, rows: p.term.rows }));
+              }
+            });
+          }
+        }, 250);
+      });
+
+      // ── Populate right sidebar with crush data ────────────────────
+      function formatTokens(n) {
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+        return String(n);
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
+      }
+
+      function refreshCrushSidebar() {
+        fetch('/api/dashboard').then(r => r.json()).then(d => {
+          if (d.crush) {
+            const c = d.crush;
+            const s = c.stats || {};
+            document.getElementById('cs-provider').textContent = c.provider || '—';
+            document.getElementById('cs-model').textContent = c.model || '—';
+            document.getElementById('cs-version').textContent = c.version || '—';
+            document.getElementById('cs-sessions').textContent = s.sessions || 0;
+            document.getElementById('cs-messages').textContent = s.messages || 0;
+            const totalTokens = (s.promptTokens || 0) + (s.completionTokens || 0);
+            document.getElementById('cs-tokens').textContent = formatTokens(totalTokens);
+            document.getElementById('cs-tool-calls').textContent = s.toolCalls || 0;
+            document.getElementById('cs-unique-tools').textContent = s.uniqueTools || 0;
+            document.getElementById('cs-files-count').textContent = s.files || 0;
+
+            // Cost
+            const cost = d.requests?.totalCost || 0;
+            document.getElementById('cs-cost').textContent = '$' + cost.toFixed(2);
+
+            // Tools breakdown
+            const toolsList = document.getElementById('cs-tools-list');
+            if (toolsList && s.toolBreakdown) {
+              const tools = Object.entries(s.toolBreakdown).sort((a, b) => b[1] - a[1]);
+              toolsList.innerHTML = tools.length ? tools.slice(0, 20).map(([name, count]) => {
+                const icon = name.includes('file') || name.includes('write') || name.includes('read') ? '📄'
+                  : name.includes('bash') || name.includes('shell') || name.includes('exec') ? '⌨️'
+                  : name.includes('browser') || name.includes('web') ? '🌐'
+                  : name.includes('search') ? '🔍'
+                  : name.includes('think') || name.includes('reason') ? '🧠'
+                  : name.includes('edit') ? '✏️' : '🔧';
+                return '<div class="cs-tool-row"><span class="cs-tool-icon">' + icon + '</span><span class="cs-tool-name">' + escapeHtml(name) + '</span><span class="cs-tool-count">' + count + '</span></div>';
+              }).join('') : '<div class="cs-empty">No tool calls recorded yet.</div>';
+            }
+          }
+
+          if (d.agent) {
+            const availableTools = d.agent.tools || [];
+            const skills = d.agent.skills?.skills || [];
+            const toolsTotal = document.getElementById('cs-tools-total');
+            const skillsTotal = document.getElementById('cs-skills-total');
+            const toolsInventory = document.getElementById('cs-tools-inventory');
+            const skillsList = document.getElementById('cs-skills-list');
+            if (toolsTotal) toolsTotal.textContent = availableTools.length;
+            if (skillsTotal) skillsTotal.textContent = d.agent.skills?.total || skills.length;
+            if (toolsInventory) {
+              toolsInventory.innerHTML = availableTools.length ? availableTools.map(t => {
+                const name = escapeHtml(t.name || 'unknown');
+                const desc = escapeHtml(t.description || '');
+                const source = escapeHtml(t.source || 'tool');
+                return '<div class="cs-chip-row" title="' + desc + '"><span class="cs-tool-icon">🔧</span><span class="cs-chip-main">' + name + '</span><span class="cs-chip-meta">' + source + '</span></div>';
+              }).join('') : '<div class="cs-empty">No tools loaded.</div>';
+            }
+            if (skillsList) {
+              skillsList.innerHTML = skills.length ? skills.map(skill => {
+                const name = escapeHtml(skill.name || 'unknown');
+                const category = escapeHtml(skill.category || 'general');
+                const title = escapeHtml(skill.path || '');
+                return '<div class="cs-chip-row" title="' + title + '"><span class="cs-tool-icon">📚</span><span class="cs-chip-main">' + name + '</span><span class="cs-chip-meta">' + category + '</span></div>';
+              }).join('') : '<div class="cs-empty">No skills found.</div>';
+            }
+          }
+
+          if (d.system) {
+            const sys = d.system;
+            document.getElementById('cs-cpu').textContent = sys.cpus + ' cores';
+            const usedMem = ((sys.totalMem - sys.freeMem) / 1073741824).toFixed(1);
+            const totalMem = (sys.totalMem / 1073741824).toFixed(1);
+            document.getElementById('cs-memory').textContent = usedMem + '/' + totalMem + ' GB';
+            const hrs = Math.floor(sys.uptime / 3600);
+            const mins = Math.floor((sys.uptime % 3600) / 60);
+            document.getElementById('cs-uptime2').textContent = hrs + 'h ' + mins + 'm';
+          }
+        }).catch(() => {});
+      }
+
+      // Initial load + auto-refresh every 15s
+      refreshCrushSidebar();
+      setInterval(refreshCrushSidebar, 15000);
+    </script>
+  </body>
+</html>

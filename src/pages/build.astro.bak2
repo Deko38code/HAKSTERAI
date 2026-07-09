@@ -1,0 +1,511 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="haksterAi — Chat with Cloud Models">
+  <section id="hacker-chat" class="h-dvh min-h-0 flex flex-col bg-[#050506] text-white overflow-hidden">
+
+    <!-- Subtle grid background like hackerai.co -->
+    <div class="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+      <div class="absolute inset-0" style="background-image: linear-gradient(rgba(124,58,237,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(124,58,237,0.03) 1px, transparent 1px); background-size: 40px 40px;"></div>
+      <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] rounded-full opacity-[0.07]" style="background: radial-gradient(circle, #7c3aed 0%, transparent 70%);"></div>
+    </div>
+
+    <!-- Center: hero + chat composer (hackerai.co style) -->
+    <div class="relative flex-1 flex flex-col items-center justify-center px-4 sm:px-6 max-w-3xl mx-auto w-full">
+      <!-- Logo -->
+      <div class="mb-4 flex items-center gap-2">
+        <a href="/" class="flex items-center gap-2">
+          <img src="/logo-32.png" alt="haksterAi" class="h-7 w-7 rounded" />
+          <span class="text-[#e2e8f0] font-bold text-lg tracking-tight">hakster<span class="text-[#7c3aed]">Ai</span></span>
+        </a>
+      </div>
+
+      <!-- Hero heading -->
+      <h1 id="hero-heading" class="text-balance text-center text-4xl font-bold leading-[1.03] tracking-normal text-white sm:text-5xl lg:text-6xl mb-2">
+        What will you hack today?
+      </h1>
+      <p id="hero-sub" class="text-center text-base leading-7 text-white/58 sm:text-lg mb-6 max-w-xl">
+        Find and fix vulnerabilities by chatting with your cloud models on Ollama. Search live docs &amp; scrape references with Firecrawl.
+      </p>
+
+      <!-- Firecrawl + Model status pill -->
+      <div class="mb-4 flex items-center gap-3">
+        <div class="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-1.5 text-xs text-emerald-200">
+          <span id="fc-dot" class="h-2 w-2 rounded-full bg-yellow-300"></span>
+          <span id="fc-status">Checking agents...</span>
+        </div>
+        <select id="model-select" class="rounded-full border border-white/10 bg-[#141416]/80 px-3 py-1.5 text-xs text-white/80 outline-none focus:border-[#7c3aed]/50 backdrop-blur">
+          <option value="">Loading models...</option>
+        </select>
+      </div>
+
+      <!-- Chat composer -->
+      <form id="chat-form" class="w-full text-left">
+        <div id="composer" class="rounded-[24px] border border-white/10 bg-[#141416]/95 p-3 shadow-[0_24px_80px_rgba(0,0,0,0.38)] backdrop-blur">
+          <textarea
+            id="chat-input"
+            rows="4"
+            placeholder="Ask haksterAi to hack, search, scrape, build, or analyze..."
+            class="min-h-[112px] w-full resize-none border-0 bg-transparent px-2 pt-1 text-base leading-6 text-white outline-none placeholder:text-white/35"
+          ></textarea>
+          <div class="flex flex-wrap items-center gap-2 pt-2">
+            <button type="button" id="firecrawl-btn" class="firecrawl-pill" title="Search & scrape with Firecrawl">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-4.3-4.3"/></svg>
+              <span>Search</span>
+            </button>
+            <button type="button" id="mode-btn" class="mode-pill">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <span id="mode-label">Agent</span>
+            </button>
+            <button type="button" id="scrape-btn" class="scrape-pill" title="Scrape a URL with Firecrawl">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a3 3 0 0 0-3 3v1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-5V5a3 3 0 0 0-3-3zm0 2a1 1 0 0 0-1 1v1h2V5a1 1 0 0 0-1-1zM9 9h6v2H9V9z"/></svg>
+              <span>Scrape</span>
+            </button>
+            <button type="button" id="image-btn" class="image-pill" title="Generate an image with DALL-E">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.5" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 15-5-5L5 21"/></svg>
+              <span>Image</span>
+            </button>
+            <button type="button" id="ask-btn" class="ask-pill">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg>
+              <span class="hidden sm:inline">Ask</span>
+              <svg class="h-3 w-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="ask-dropdown" class="hidden absolute left-3 bottom-full mb-2 w-72 rounded-xl border border-white/10 bg-[#141416]/95 shadow-2xl backdrop-blur p-2 z-50">
+              <div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">Quick prompts</div>
+              <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Scan this target for vulnerabilities and report findings">🎯 Pentest scan</button>
+              <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use Firecrawl to search for the latest exploits and CVEs for this target">🔍 Search exploits</button>
+              <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Scrape this reference URL and recreate the functionality">🌐 Scrape & build</button>
+              <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Analyze this codebase and suggest security improvements">🛡️ Security audit</button>
+              <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Write a script to automate this task">⚡ Script it</button>
+            </div>
+            <div class="flex-1"></div>
+            <span id="send-state" class="text-xs text-white/30 mr-1">Ready</span>
+            <div class="inline-block">
+              <button id="send-btn" type="submit" disabled aria-label="Send message" class="send-btn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <!-- Quick action pills below composer -->
+      <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+        <button class="quick-prompt rounded-full border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-xs text-white/50 hover:text-white hover:border-white/20 transition" data-prompt="Scan this target for open ports and services">🔍 Scan target</button>
+        <button class="quick-prompt rounded-full border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-xs text-white/50 hover:text-white hover:border-white/20 transition" data-prompt="Use Firecrawl to find and document all API endpoints">🌐 Crawl APIs</button>
+        <button class="quick-prompt rounded-full border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-xs text-white/50 hover:text-white hover:border-white/20 transition" data-prompt="Generate a pentest report for the current findings">📋 Write report</button>
+        <button class="quick-prompt rounded-full border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-xs text-white/50 hover:text-white hover:border-white/20 transition" data-prompt="Search for the latest CVEs and exploits related to this target">🛡️ Find CVEs</button>
+      </div>
+    </div>
+
+    <!-- Output panel -->
+    <div id="output-panel" class="hidden relative mx-auto w-full max-w-3xl px-4 pb-8">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-semibold text-white/70">Response</h2>
+        <button id="clear-output" class="text-xs text-white/40 hover:text-white transition">Clear</button>
+      </div>
+      <div id="output-area" class="rounded-2xl border border-white/[0.06] bg-[#0a0a10]/80 p-4 text-sm text-white/80 leading-relaxed max-h-[60vh] overflow-y-auto whitespace-pre-wrap font-mono backdrop-blur"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="flex-shrink-0 text-center p-4 text-xs text-white/30">
+      By messaging haksterAi, you agree to our Terms and Privacy Policy. · <span class="text-white/50">Powered by Ollama + Firecrawl</span>
+    </div>
+  </section>
+
+  <!-- Image Generator Modal -->
+  <div id="image-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+    <div class="w-full max-w-lg mx-4 rounded-2xl border border-white/10 bg-[#111118] shadow-2xl">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+        <h2 class="text-base font-semibold text-white flex items-center gap-2">
+          <svg class="w-5 h-5 text-[#7c3aed]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.5" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 15-5-5L5 21"/></svg>
+          Generate Image
+        </h2>
+        <button id="close-image-modal" class="text-white/40 hover:text-white transition text-xl leading-none">&times;</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Prompt</label>
+          <textarea id="image-prompt" rows="3" placeholder="Describe the image you want to generate..." class="w-full rounded-xl border border-white/10 bg-[#0a0a10] px-3 py-2.5 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#7c3aed]/50 resize-none"></textarea>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Model</label>
+            <select id="image-model" class="w-full rounded-xl border border-white/10 bg-[#0a0a10] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50">
+              <option value="dall-e-3">DALL-E 3</option>
+              <option value="gpt-image-1">GPT Image 1</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Size</label>
+            <select id="image-size" class="w-full rounded-xl border border-white/10 bg-[#0a0a10] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50">
+              <option value="1024x1024">1024×1024</option>
+              <option value="1792x1024">1792×1024</option>
+              <option value="1024x1792">1024×1792</option>
+              <option value="512x512">512×512</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Quality</label>
+          <div class="flex gap-3">
+            <label class="flex items-center gap-1.5 text-sm text-white/70 cursor-pointer">
+              <input type="radio" name="image-quality" value="standard" checked class="accent-[#7c3aed]" /> Standard
+            </label>
+            <label class="flex items-center gap-1.5 text-sm text-white/70 cursor-pointer">
+              <input type="radio" name="image-quality" value="hd" class="accent-[#7c3aed]" /> HD
+            </label>
+          </div>
+        </div>
+        <button id="generate-image-btn" class="w-full rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white font-semibold py-2.5 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          Generate Image
+        </button>
+        <div id="image-status" class="hidden text-center text-xs text-white/50 py-2"></div>
+      </div>
+      <!-- Image result area -->
+      <div id="image-result" class="hidden p-5 pt-0">
+        <div class="rounded-xl border border-white/[0.06] bg-[#0a0a10] overflow-hidden">
+          <img id="image-result-img" class="w-full" alt="Generated image" />
+          <div class="flex items-center justify-between px-3 py-2">
+            <span id="image-result-info" class="text-xs text-white/40"></span>
+            <a id="image-result-download" download="haksterai-image.png" class="text-xs text-[#7c3aed] hover:text-[#a855f7] transition">Download</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .send-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+      border-radius: 9999px; padding: 0; width: 2rem; height: 2rem; min-width: 0;
+      background: #7c3aed; color: white; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      font-size: 0; border: none; cursor: pointer; transition: background 0.15s;
+    }
+    .send-btn:hover { background: #6d28d9; }
+    .send-btn:disabled { pointer-events: none; opacity: 0.5; }
+    .mode-pill {
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      border-radius: 9999px; border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04); padding: 0.25rem 0.625rem;
+      font-size: 0.75rem; color: rgba(255,255,255,0.6); cursor: pointer; transition: all 0.15s;
+    }
+    .mode-pill:hover { color: #fff; border-color: rgba(255,255,255,0.2); }
+    .mode-pill.active { border-color: rgba(124,58,237,0.4); color: #a855f7; background: rgba(124,58,237,0.1); }
+    .firecrawl-pill {
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      border-radius: 9999px; border: 1px solid rgba(251,191,36,0.2);
+      background: rgba(251,191,36,0.06); padding: 0.25rem 0.625rem;
+      font-size: 0.75rem; color: #fde68a; cursor: pointer; transition: all 0.15s;
+    }
+    .firecrawl-pill:hover { color: #fef3c7; }
+    .scrape-pill {
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      border-radius: 9999px; border: 1px solid rgba(34,211,238,0.2);
+      background: rgba(34,211,238,0.06); padding: 0.25rem 0.625rem;
+      font-size: 0.75rem; color: #a5f3fc; cursor: pointer; transition: all 0.15s;
+    }
+    .scrape-pill:hover { color: #cffafe; }
+    .ask-pill {
+      display: inline-flex; align-items: center; gap: 0.25rem;
+      border-radius: 9999px; border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04); padding: 0.375rem 0.75rem;
+      font-size: 0.875rem; color: rgba(255,255,255,0.6); cursor: pointer; transition: all 0.15s;
+      position: relative;
+    }
+    .ask-pill:hover { color: #fff; }
+    .image-pill {
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      border-radius: 9999px; border: 1px solid rgba(168,85,247,0.3);
+      background: rgba(124,58,237,0.1); padding: 0.25rem 0.625rem;
+      font-size: 0.75rem; color: #c084fc; cursor: pointer; transition: all 0.15s;
+    }
+    .image-pill:hover { color: #e9d5ff; border-color: rgba(168,85,247,0.5); background: rgba(124,58,237,0.2); }
+    .output-user { color: #a855f7; }
+    .output-error { color: #ef4444; }
+    .output-result { color: #e2e8f0; }
+    .output-thinking { color: #7c3aed; opacity: 0.7; }
+    #hacker-chat.showing-output #hero-heading,
+    #hacker-chat.showing-output #hero-sub { display: none; }
+    #hacker-chat.showing-output { justify-content: flex-start; padding-top: 80px; }
+  </style>
+
+  <script>
+    const API = location.port === '4321' ? 'http://localhost:3579' : '';
+    const chatForm = document.getElementById('chat-form')!;
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
+    const sendState = document.getElementById('send-state')!;
+    const outputPanel = document.getElementById('output-panel')!;
+    const outputArea = document.getElementById('output-area')!;
+    const clearBtn = document.getElementById('clear-output')!;
+    const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
+    const fcDot = document.getElementById('fc-dot')!;
+    const fcStatus = document.getElementById('fc-status')!;
+    const modeBtn = document.getElementById('mode-btn')!;
+    const modeLabel = document.getElementById('mode-label')!;
+    const askBtn = document.getElementById('ask-btn')!;
+    const askDropdown = document.getElementById('ask-dropdown')!;
+    const section = document.getElementById('hacker-chat')!;
+
+    let busy = false;
+    let agentMode = true;
+    let currentModel = '';
+
+    const OLLAMA_MODELS = [
+      'gpt-oss:120b-cloud', 'glm-5.2:cloud', 'kimi-k2.7-code:cloud',
+      'glm-5.1:cloud-ctx', 'glm-5.1:cloud', 'qwen3.5:latest',
+      'hermes3:latest', 'hermes3-65k:latest', 'mistral:latest',
+      'mistral-ctx:latest', 'mistral-hermes:latest', 'llama3.2:3b',
+      'llama3.2:1b', 'qwen2.5:3b', 'qwen2.5:0.5b', 'tinyllama:latest',
+      'tinyllama-opt:latest', 'qwen-opt:latest', 'claude-pentest:latest'
+    ];
+
+    async function loadModels() {
+      let models = [...OLLAMA_MODELS];
+      try {
+        const res = await fetch(`${API}/api/providers`);
+        if (res.ok) {
+          const data = await res.json();
+          const ollama = (data.providers || []).find((p: any) => p.id === 'ollama');
+          if (ollama && Array.isArray(ollama.models)) {
+            models = ollama.models.filter((m: string) => !/cerebr/i.test(m));
+          }
+        }
+      } catch {}
+      modelSelect.innerHTML = '';
+      models.forEach((m: string) => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        modelSelect.appendChild(opt);
+      });
+      if (models.includes('gpt-oss:120b-cloud')) modelSelect.value = 'gpt-oss:120b-cloud';
+      currentModel = modelSelect.value;
+      modelSelect.addEventListener('change', () => { currentModel = modelSelect.value; });
+    }
+
+    async function loadCapabilities() {
+      try {
+        const res = await fetch(`${API}/api/dashboard`);
+        const data = await res.json();
+        if (data.firecrawl && data.firecrawl.keyCount > 0) {
+          fcDot.className = 'h-2 w-2 rounded-full bg-emerald-400';
+          fcStatus.textContent = `${data.defaultAgent?.model || currentModel} · Firecrawl ✓`;
+        } else {
+          fcDot.className = 'h-2 w-2 rounded-full bg-yellow-300';
+          fcStatus.textContent = `${data.defaultAgent?.model || currentModel} · Firecrawl missing`;
+        }
+      } catch {
+        fcDot.className = 'h-2 w-2 rounded-full bg-red-400';
+        fcStatus.textContent = 'Agent offline';
+      }
+    }
+
+    function setReadyState() {
+      sendBtn.disabled = !chatInput.value.trim() || busy;
+    }
+
+    function appendOutput(text: string, cls = 'result') {
+      outputPanel.classList.remove('hidden');
+      section.classList.add('showing-output');
+      const line = document.createElement('div');
+      line.className = `output-${cls}`;
+      line.textContent = text;
+      outputArea.appendChild(line);
+      outputArea.scrollTop = outputArea.scrollHeight;
+    }
+
+    modeBtn.classList.add('active');
+    modeBtn.addEventListener('click', () => {
+      agentMode = !agentMode;
+      if (agentMode) { modeBtn.classList.add('active'); modeLabel.textContent = 'Agent'; }
+      else { modeBtn.classList.remove('active'); modeLabel.textContent = 'Chat'; }
+    });
+
+    askBtn.addEventListener('click', (e) => { e.stopPropagation(); askDropdown.classList.toggle('hidden'); });
+    document.addEventListener('click', () => askDropdown.classList.add('hidden'));
+
+    clearBtn.addEventListener('click', () => {
+      outputArea.innerHTML = '';
+      outputPanel.classList.add('hidden');
+      section.classList.remove('showing-output');
+    });
+
+    document.getElementById('firecrawl-btn')!.addEventListener('click', () => {
+      chatInput.value = 'Use Firecrawl to search for current information about this topic, then provide detailed findings.';
+      setReadyState(); chatInput.focus();
+    });
+
+    document.getElementById('scrape-btn')!.addEventListener('click', () => {
+      const url = prompt('Enter URL to scrape with Firecrawl:');
+      if (url) {
+        chatInput.value = `Use Firecrawl to scrape and analyze this URL: ${url}\n\nExtract the main content, structure, and key information. Then implement or explain based on what you find.`;
+        setReadyState(); chatInput.focus();
+      }
+    });
+
+    async function sendMessage(prompt: string) {
+      busy = true;
+      sendState.textContent = 'Running';
+      sendBtn.disabled = true;
+      chatInput.disabled = true;
+      appendOutput(`> ${prompt}`, 'user');
+      const model = currentModel || modelSelect.value || 'gpt-oss:120b-cloud';
+      const endpoint = agentMode ? `${API}/api/agent/run` : `${API}/api/chat`;
+      try {
+        if (agentMode) {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider: 'ollama',
+              model,
+              sessionId: `build-${Date.now()}`,
+              stream: true,
+              messages: [{ role: 'user', content: prompt + '\n\nUse the sub-agent roster when helpful: Search Agent for discovery, Firecrawl Agent for web/docs/reference scraping, Build Agent for implementation, Script Agent for scripts/setup/automation, QA Agent for tests and verification, and Ops Agent for services/logs/PM2. Default to gpt-oss:120b-cloud unless the runtime config says otherwise.' }],
+            }),
+          });
+          if (!res.ok || !res.body) throw new Error(`Agent request failed (${res.status})`);
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const raw = line.slice(6).trim();
+              if (!raw) continue;
+              try {
+                const event = JSON.parse(raw);
+                if (event.type === 'content') appendOutput(event.content || '', 'result');
+                else if (event.type === 'thinking' || event.type === 'thought') appendOutput(event.content || event.message || '', 'thinking');
+                else if (event.type === 'tool_call') appendOutput(`⚡ ${event.toolCall?.function?.name || event.name || 'tool'}`, 'thinking');
+                else if (event.type === 'tool_result') appendOutput(`  → ${(event.result || '').slice(0, 500)}`, 'result');
+                else if (event.type === 'error') appendOutput(`Error: ${event.error}`, 'error');
+                else if (event.content) appendOutput(event.content, 'result');
+              } catch {}
+            }
+          }
+        } else {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: 'ollama', model, messages: [{ role: 'user', content: prompt }] }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Chat request failed');
+          const content = data.content || data.message || data.result || JSON.stringify(data, null, 2);
+          appendOutput(content, 'result');
+        }
+      } catch (err: any) { appendOutput(err.message || String(err), 'error'); }
+      finally { busy = false; sendState.textContent = 'Ready'; chatInput.disabled = false; setReadyState(); }
+    }
+
+    chatInput.addEventListener('input', setReadyState);
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const prompt = chatInput.value.trim();
+        if (prompt && !busy) sendMessage(prompt);
+      }
+    });
+    chatForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const prompt = chatInput.value.trim();
+      if (prompt && !busy) sendMessage(prompt);
+    });
+    document.querySelectorAll('.quick-prompt').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        chatInput.value = (btn as HTMLElement).dataset.prompt || '';
+        setReadyState(); chatInput.focus();
+      });
+    });
+
+    setReadyState();
+    loadModels();
+    loadCapabilities();
+
+    // ── Image Generator Modal Logic ──────────────────────────────────
+    const imageBtn = document.getElementById('image-btn')!;
+    const imageModal = document.getElementById('image-modal')!;
+    const closeImageModal = document.getElementById('close-image-modal')!;
+    const imagePromptInput = document.getElementById('image-prompt') as HTMLTextAreaElement;
+    const imageModelSelect = document.getElementById('image-model') as HTMLSelectElement;
+    const imageSizeSelect = document.getElementById('image-size') as HTMLSelectElement;
+    const generateImageBtn = document.getElementById('generate-image-btn') as HTMLButtonElement;
+    const imageStatus = document.getElementById('image-status')!;
+    const imageResult = document.getElementById('image-result')!;
+    const imageResultImg = document.getElementById('image-result-img') as HTMLImageElement;
+    const imageResultInfo = document.getElementById('image-result-info')!;
+    const imageResultDownload = document.getElementById('image-result-download') as HTMLAnchorElement;
+
+    imageBtn.addEventListener('click', () => {
+      imageModal.classList.remove('hidden');
+      imagePromptInput.focus();
+    });
+
+    closeImageModal.addEventListener('click', () => {
+      imageModal.classList.add('hidden');
+    });
+
+    imageModal.addEventListener('click', (e) => {
+      if (e.target === imageModal) imageModal.classList.add('hidden');
+    });
+
+    generateImageBtn.addEventListener('click', async () => {
+      const prompt = imagePromptInput.value.trim();
+      if (!prompt) return;
+
+      generateImageBtn.disabled = true;
+      generateImageBtn.textContent = 'Generating...';
+      imageStatus.classList.remove('hidden');
+      imageStatus.textContent = 'Creating your image with DALL-E...';
+      imageResult.classList.add('hidden');
+
+      const model = imageModelSelect.value;
+      const size = imageSizeSelect.value;
+      const quality = (document.querySelector('input[name="image-quality"]:checked') as HTMLInputElement)?.value || 'standard';
+
+      try {
+        const res = await fetch(`${API}/api/images/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'openai', model, prompt, size, quality }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Image generation failed');
+
+        if (data.images && data.images[0]) {
+          const img = data.images[0];
+          // DALL-E returns base64 — create a data URL
+          if (img.b64_json) {
+            const dataUrl = `data:image/png;base64,${img.b64_json}`;
+            imageResultImg.src = dataUrl;
+            imageResultDownload.href = dataUrl;
+            imageResultInfo.textContent = `${model} · ${size} · ${quality} · ${img.revised_prompt ? 'Revised prompt applied' : 'Original prompt'}`;
+          } else if (img.url) {
+            imageResultImg.src = img.url;
+            imageResultDownload.href = img.url;
+            imageResultInfo.textContent = `${model} · ${size} · ${quality}`;
+          }
+          imageResult.classList.remove('hidden');
+          imageStatus.textContent = `Done in ${data.latency || '?'}ms`;
+        } else {
+          throw new Error('No image returned');
+        }
+      } catch (err: any) {
+        imageStatus.textContent = `Error: ${err.message || String(err)}`;
+        imageStatus.style.color = '#ef4444';
+      } finally {
+        generateImageBtn.disabled = false;
+        generateImageBtn.textContent = 'Generate Image';
+      }
+    });
+  </script>
+</Layout>

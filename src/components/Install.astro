@@ -1,0 +1,149 @@
+---
+// Install / CTA section
+---
+
+<section id="install" class="relative py-24 px-6">
+  <!-- Section divider -->
+  <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#7c3aed]/30 to-transparent"></div>
+
+  <div class="mx-auto max-w-4xl">
+    <!-- Header -->
+    <div class="text-center mb-12">
+      <div class="inline-flex items-center gap-2 rounded-full border border-[#1e1e2e] bg-[#111118] px-4 py-1.5 text-xs font-semibold text-[#7c3aed] tracking-widest uppercase mb-4">
+        Install
+      </div>
+      <h2 class="text-4xl md:text-5xl font-bold text-[#e2e8f0] mb-4">
+        Up in <span class="text-[#7c3aed]">30 seconds.</span>
+      </h2>
+      <p class="text-[#64748b] text-lg">
+        One command to install. Zero config to get started.
+      </p>
+    </div>
+
+    <!-- Install cards -->
+    <div class="space-y-4 mb-12">
+
+      <!-- curl install -->
+      <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
+          <span class="text-xs text-[#64748b] font-mono">macOS / Linux</span>
+          <button
+            class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none"
+            data-copy="curl -fsSL https://cli.hakster.ai/install | bash"
+          >
+            copy
+          </button>
+        </div>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">curl -fsSL https://cli.hakster.ai/install | bash</span>
+        </div>
+      </div>
+
+      <!-- npm install -->
+      <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
+          <span class="text-xs text-[#64748b] font-mono">npm (global)</span>
+          <button
+            class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none"
+            data-copy="npm install -g hakster-ai"
+          >
+            copy
+          </button>
+        </div>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
+          <span class="text-[#e2e8f0]">npm install -g hakster-ai</span>
+        </div>
+      </div>
+
+      <!-- winget -->
+      <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
+          <span class="text-xs text-[#64748b] font-mono">Windows (winget)</span>
+          <button
+            class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none"
+            data-copy="winget install haksterAi"
+          >
+            copy
+          </button>
+        </div>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">❯</span>
+          <span class="text-[#e2e8f0]">winget install haksterAi</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- CTA banner -->
+    <div class="relative rounded-2xl border border-[#7c3aed]/30 bg-gradient-to-br from-[#111118] to-[#0d0d14] p-8 md:p-12 text-center overflow-hidden">
+      <div
+        class="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full opacity-10"
+        style="background: radial-gradient(circle, #7c3aed 0%, transparent 70%);"
+      ></div>
+      <div class="relative z-10">
+        <p class="text-xs font-semibold tracking-widest text-[#7c3aed] uppercase mb-3">Start now</p>
+        <h3 class="text-3xl md:text-4xl font-bold text-[#e2e8f0] mb-4">
+          Ready to hack smarter?
+        </h3>
+        <p class="text-[#64748b] mb-8 max-w-md mx-auto">
+          Join developers using haksterAi to build faster, ship cleaner, and stay in the zone.
+        </p>
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+          <a
+            href="#install"
+            class="inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-6 py-3 text-base font-semibold text-white hover:bg-[#6d28d9] transition-all hover:shadow-lg hover:shadow-[#7c3aed]/30"
+          >
+            ↓ Download haksterAi
+          </a>
+          <a
+            href="#docs"
+            class="inline-flex items-center gap-2 rounded-lg border border-[#1e1e2e] bg-[#111118] px-6 py-3 text-base font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/50 transition-all"
+          >
+            Browse docs →
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // ── Copy to clipboard ───────────────────────────────────────────
+  document.querySelectorAll<HTMLButtonElement>('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const text = btn.dataset.copy;
+      if (!text) return;
+
+      try {
+        await navigator.clipboard.writeText(text);
+        const original = btn.textContent;
+        btn.textContent = '✓ copied!';
+        btn.style.color = '#28c840';
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.style.color = '';
+        }, 2000);
+      } catch {
+        // Fallback for browsers without clipboard API
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const original = btn.textContent;
+        btn.textContent = '✓ copied!';
+        btn.style.color = '#28c840';
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.style.color = '';
+        }, 2000);
+      }
+    });
+  });
+</script>

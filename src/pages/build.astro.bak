@@ -1,0 +1,341 @@
+---
+import Layout from '../layouts/Layout.astro';
+import CrushTerminal from '../components/CrushTerminal.astro';
+---
+
+<Layout title="haksterAi - Build">
+  <section id="build-shell" class="min-h-screen bg-[#050506] pt-[72px] text-white">
+    <div class="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+      <div class="build-grid"></div>
+      <div class="build-glow build-glow-a"></div>
+      <div class="build-glow build-glow-b"></div>
+    </div>
+
+    <div class="relative mx-auto flex min-h-[calc(100vh-72px)] max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <a href="/chat" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/70 hover:text-white">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          Chat
+        </a>
+        <div class="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-2 text-xs text-emerald-200">
+          <span id="firecrawl-dot" class="h-2 w-2 rounded-full bg-yellow-300"></span>
+              <span id="firecrawl-status">Checking agents</span>
+        </div>
+      </div>
+
+      <div class="grid flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)]">
+        <div class="flex min-h-[620px] flex-col justify-center py-8 lg:py-12">
+          <div class="mx-auto w-full max-w-4xl text-center">
+            <div class="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-white/55">
+              <img src="/logo-32.png" alt="" class="h-4 w-4 rounded" />
+              agentic builder
+            </div>
+            <h1 class="mx-auto max-w-3xl text-balance text-4xl font-bold leading-[1.03] tracking-normal text-white sm:text-5xl lg:text-6xl">
+              What will you build today?
+            </h1>
+            <p class="mx-auto mt-4 max-w-2xl text-base leading-7 text-white/58 sm:text-lg">
+              Ship apps by chatting with haksterAi. The agent can code, run commands, search live docs, scrape references with Firecrawl, and keep the terminal visible while it works.
+            </p>
+
+            <form id="build-chat-form" class="mx-auto mt-8 w-full max-w-3xl text-left">
+              <div id="composer" class="rounded-[24px] border border-white/10 bg-[#141416]/95 p-3 shadow-[0_24px_80px_rgba(0,0,0,0.38)] backdrop-blur">
+                <textarea
+                  id="build-prompt"
+                  rows="4"
+                  placeholder="Ask haksterAi to build an app, improve this project, or recreate a reference site..."
+                  class="min-h-[112px] w-full resize-none border-0 bg-transparent px-2 pt-1 text-base leading-6 text-white outline-none placeholder:text-white/35"
+                ></textarea>
+                <div class="flex flex-wrap items-center gap-2 pt-2">
+                  <button type="button" id="attach-btn" class="icon-btn" title="Attach files">
+                    <svg class="h-[17px] w-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16 6-8.4 8.6a2 2 0 0 0 2.8 2.8l8.4-8.6a4 4 0 0 0-5.6-5.6l-8.4 8.5a6 6 0 1 0 8.5 8.5l8.4-8.5"/></svg>
+                  </button>
+                  <button type="button" id="mode-btn" class="mode-pill">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9h8m-8 4h5m9 1a8 8 0 0 1-8 8H6l-4 4V6a4 4 0 0 1 4-4h8a8 8 0 0 1 8 8z"/></svg>
+                    Build
+                  </button>
+                  <button type="button" id="firecrawl-btn" class="mode-pill">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a10 10 0 1 0 10 10M2 12h20M12 2c3 3 4.5 6.3 4.5 10S15 19 12 22c-3-3-4.5-6.3-4.5-10S9 5 12 2z"/></svg>
+                    Firecrawl
+                  </button>
+                  <div class="ml-auto flex items-center gap-2">
+                    <span id="send-state" class="hidden text-xs text-white/45 sm:inline">Ready</span>
+                    <button id="send-build" type="submit" class="send-btn" disabled title="Send">
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 19V5m0 0-7 7m7-7 7 7"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+
+            <div class="mx-auto mt-5 grid max-w-3xl gap-2 sm:grid-cols-2">
+              <button class="quick-prompt" data-prompt="Build a polished cybersecurity dashboard with live cards, findings table, severity filters, and responsive dark UI.">
+                Cyber dashboard
+              </button>
+              <button class="quick-prompt" data-prompt="Recreate this page as a premium chat-first app builder, then improve the layout, mobile behavior, and visual hierarchy.">
+                Recreate reference
+              </button>
+              <button class="quick-prompt" data-prompt="Inspect this HaksterAI project, improve the build/chat experience, run checks, and explain what changed.">
+                Improve HaksterAI
+              </button>
+              <button class="quick-prompt" data-prompt="Use Firecrawl to search current docs, then build a production-ready integration with tests and graceful errors.">
+                Research then build
+              </button>
+            </div>
+
+            <div id="subagent-strip" class="mx-auto mt-4 grid max-w-3xl grid-cols-2 gap-2 text-left sm:grid-cols-3">
+              <div class="subagent-card"><span>Search</span><small>files + docs</small></div>
+              <div class="subagent-card"><span>Build</span><small>features + UI</small></div>
+              <div class="subagent-card"><span>Script</span><small>shell + setup</small></div>
+              <div class="subagent-card"><span>QA</span><small>tests + checks</small></div>
+              <div class="subagent-card"><span>Firecrawl</span><small>web scrape</small></div>
+              <div class="subagent-card"><span>Ops</span><small>pm2 + logs</small></div>
+            </div>
+
+            <p class="mx-auto mt-6 max-w-2xl text-center text-xs leading-5 text-white/36">
+              Firecrawl keys stay in server environment variables. The browser only sees whether the agent has web search and scrape capability available.
+            </p>
+          </div>
+        </div>
+
+        <aside class="flex min-h-[620px] flex-col rounded-[22px] border border-white/10 bg-[#0d0d10]/88 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur">
+          <div class="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 rounded-full bg-[#ff5f57]"></span>
+              <span class="h-2.5 w-2.5 rounded-full bg-[#ffbd2e]"></span>
+              <span class="h-2.5 w-2.5 rounded-full bg-[#28c840]"></span>
+            </div>
+            <span class="text-xs text-white/42">live agent terminal</span>
+          </div>
+          <div id="agent-output" class="max-h-56 overflow-auto border-b border-white/10 p-4 text-sm leading-6 text-white/70">
+            <div class="text-white/42">Send a build request to start an agent run. Tool output and terminal activity stay visible here.</div>
+          </div>
+          <div class="min-h-0 flex-1">
+            <CrushTerminal id="build-term" autoStart={true} />
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    #build-shell {
+      position: relative;
+      overflow: hidden;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .build-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(circle at center, black 0, transparent 72%);
+    }
+    .build-glow {
+      position: absolute;
+      width: 520px;
+      height: 520px;
+      border-radius: 999px;
+      filter: blur(100px);
+      opacity: 0.16;
+    }
+    .build-glow-a { top: 12%; left: 8%; background: #18c6a3; }
+    .build-glow-b { right: 5%; bottom: 8%; background: #7c3aed; }
+    .icon-btn {
+      display: inline-flex;
+      height: 34px;
+      width: 34px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      color: rgba(255,255,255,0.56);
+      transition: color .15s, background .15s;
+    }
+    .icon-btn:hover { background: rgba(255,255,255,0.07); color: white; }
+    .mode-pill {
+      display: inline-flex;
+      height: 30px;
+      align-items: center;
+      gap: 6px;
+      border-radius: 9px;
+      background: rgba(255,255,255,0.07);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 650;
+      color: rgba(255,255,255,0.72);
+      transition: background .15s, color .15s;
+    }
+    .mode-pill:hover { background: rgba(255,255,255,0.11); color: white; }
+    .send-btn {
+      display: inline-flex;
+      height: 34px;
+      width: 34px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: white;
+      color: black;
+      transition: opacity .15s, transform .15s;
+    }
+    .send-btn:disabled { opacity: .35; cursor: not-allowed; }
+    .send-btn:not(:disabled):active { transform: scale(.96); }
+    .quick-prompt {
+      min-height: 44px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.045);
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 13px;
+      color: rgba(255,255,255,0.7);
+      transition: border-color .15s, background .15s, color .15s;
+    }
+    .quick-prompt:hover {
+      border-color: rgba(24,198,163,0.35);
+      background: rgba(24,198,163,0.08);
+      color: white;
+    }
+    .subagent-card {
+      min-height: 48px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.09);
+      background: rgba(0,0,0,0.22);
+      padding: 9px 11px;
+    }
+    .subagent-card span {
+      display: block;
+      font-size: 12px;
+      font-weight: 750;
+      color: rgba(255,255,255,0.82);
+    }
+    .subagent-card small {
+      display: block;
+      margin-top: 2px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.38);
+    }
+    @media (max-width: 1023px) {
+      #build-shell { min-height: auto; }
+      aside { min-height: 520px; }
+    }
+  </style>
+
+  <script>
+    const promptEl = document.getElementById('build-prompt');
+    const formEl = document.getElementById('build-chat-form');
+    const sendBtn = document.getElementById('send-build');
+    const sendState = document.getElementById('send-state');
+    const outputEl = document.getElementById('agent-output');
+    const fcStatus = document.getElementById('firecrawl-status');
+    const fcDot = document.getElementById('firecrawl-dot');
+
+    const API = window.location.origin.replace(/:4321$/, ':3579');
+    let provider = 'ollama';
+    let model = 'gpt-oss:120b-cloud';
+    let busy = false;
+
+    function setReadyState() {
+      sendBtn.disabled = busy || !promptEl.value.trim();
+      promptEl.style.height = 'auto';
+      promptEl.style.height = Math.min(promptEl.scrollHeight, 220) + 'px';
+    }
+
+    function appendOutput(text, tone = 'normal') {
+      const div = document.createElement('div');
+      div.className = tone === 'error' ? 'text-red-300' : tone === 'user' ? 'text-emerald-200' : 'text-white/70';
+      div.textContent = text;
+      outputEl.appendChild(div);
+      outputEl.scrollTop = outputEl.scrollHeight;
+    }
+
+    async function loadCapabilities() {
+      try {
+        const res = await fetch(`${API}/api/agent/capabilities`);
+        const data = await res.json();
+        if (data.firecrawl?.configured) {
+          fcDot.className = 'h-2 w-2 rounded-full bg-emerald-300';
+          fcStatus.textContent = `${data.defaultAgent?.model || model} + Firecrawl (${data.firecrawl.keyCount} key${data.firecrawl.keyCount === 1 ? '' : 's'})`;
+        } else {
+          fcDot.className = 'h-2 w-2 rounded-full bg-yellow-300';
+          fcStatus.textContent = `${data.defaultAgent?.model || model} + Firecrawl missing`;
+        }
+      } catch {
+        fcDot.className = 'h-2 w-2 rounded-full bg-red-400';
+        fcStatus.textContent = 'Agent API offline';
+      }
+    }
+
+    async function loadModel() {
+      try {
+        const res = await fetch(`${API}/api/dashboard`);
+        const data = await res.json();
+        if (data.crush?.provider) provider = data.crush.provider;
+        if (data.crush?.model) model = data.crush.model;
+      } catch {}
+    }
+
+    async function runAgent(prompt) {
+      busy = true;
+      sendState.textContent = 'Running';
+      setReadyState();
+      outputEl.innerHTML = '';
+      appendOutput(`> ${prompt}`, 'user');
+      const terminal = window.__crushTerminals?.['build-term'];
+      terminal?.writeln?.(`\r\n\x1b[38;5;118m[haksterAi build]\x1b[0m ${prompt}\r\n`);
+      try {
+        const res = await fetch(`${API}/api/agent/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider,
+            model,
+            sessionId: 'build-default',
+            messages: [{
+              role: 'user',
+              content: `${prompt}\n\nUse the sub-agent roster when helpful: Search Agent for discovery, Build Agent for implementation, Script Agent for scripts/setup/automation, QA Agent for tests and verification, Firecrawl Agent for current web/docs/reference scraping, and Ops Agent for services/logs/PM2. Default to gpt-oss:120b-cloud unless the runtime config says otherwise.`,
+            }],
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Agent request failed');
+        const content = data.content || data.message || data.result || JSON.stringify(data, null, 2);
+        appendOutput(content);
+        terminal?.writeln?.('\x1b[38;5;118m[done]\x1b[0m Agent response added to build panel.');
+      } catch (err) {
+        appendOutput(err.message || String(err), 'error');
+      } finally {
+        busy = false;
+        sendState.textContent = 'Ready';
+        setReadyState();
+      }
+    }
+
+    promptEl.addEventListener('input', setReadyState);
+    formEl.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const prompt = promptEl.value.trim();
+      if (!prompt || busy) return;
+      runAgent(prompt);
+    });
+    document.querySelectorAll('.quick-prompt').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        promptEl.value = btn.dataset.prompt || '';
+        setReadyState();
+        promptEl.focus();
+      });
+    });
+    document.getElementById('firecrawl-btn').addEventListener('click', () => {
+      promptEl.value = 'Use Firecrawl to inspect the latest docs and reference pages for this build, then implement the feature with current APIs.';
+      setReadyState();
+      promptEl.focus();
+    });
+    document.getElementById('attach-btn').addEventListener('click', () => {
+      appendOutput('File attachments are handled in the full /chat flow. Paste the file path or reference URL here for this builder.', 'normal');
+    });
+
+    setReadyState();
+    loadModel();
+    loadCapabilities();
+  </script>
+</Layout>

@@ -1,0 +1,793 @@
+---
+/**
+ * Reusable Crush Terminal component — v2
+ * Full-screen, fast, polished.
+ * Props:
+ *   id - unique DOM id (default: 'crush-terminal')
+ *   autoStart - legacy prop (server spawns crush directly)
+ *   compact - smaller toolbar (default: false)
+ */
+const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props;
+---
+
+<div id={id + '-panel'} class="crush-term-panel" style="position:absolute;inset:0;display:flex;flex-direction:column;background-color:#030308;background-image:linear-gradient(135deg, rgba(3,3,8,0.28) 0%, rgba(8,4,18,0.24) 48%, rgba(0,0,0,0.46) 100%), url('/hakster-terminal-bg.png?v=20260707c');background-size:cover;background-position:center;background-blend-mode:normal;">
+  <!-- Hidden file input for background upload -->
+  <input type="file" id={id + '-bg-input'} accept="image/*" style="display:none;" />
+  <!-- Settings panel (slide-down) -->
+  <div id={id + '-settings'} style="display:none;flex-direction:column;gap:8px;padding:8px 12px;background:#0d0d14;border-bottom:1px solid #1e1e2e;font-family:'JetBrains Mono',monospace;font-size:11px;color:#e2e8f0;max-height:200px;overflow-y:auto;">
+    <!-- Color presets row -->
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <span style="color:#64748b;font-size:10px;min-width:52px;">Theme:</span>
+      <button data-theme="hacker" class="crush-theme-btn" style="background:#0a0f0a;border:1px solid #00ff88;color:#00ff88;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;">Hacker</button>
+      <button data-theme="dracula" class="crush-theme-btn" style="background:#1a0a2e;border:1px solid #bd93f9;color:#bd93f9;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;">Dracula</button>
+      <button data-theme="cyber" class="crush-theme-btn" style="background:#0a0a1a;border:1px solid #00ffff;color:#00ffff;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;">Cyber</button>
+      <button data-theme="sunset" class="crush-theme-btn" style="background:#1a0a0a;border:1px solid #ff6b6b;color:#ff6b6b;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;">Sunset</button>
+      <button data-theme="gold" class="crush-theme-btn" style="background:#1a1500;border:1px solid #ffd700;color:#ffd700;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;">Gold</button>
+      <button data-theme="default" class="crush-theme-btn" style="background:#0d0d14;border:1px solid #7c3aed;color:#7c3aed;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;">Default</button>
+    </div>
+    <!-- Font size -->
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="color:#64748b;font-size:10px;min-width:52px;">Font:</span>
+      <input id={id + '-font-size'} type="range" min="10" max="24" value="15" style="flex:1;accent-color:#7c3aed;height:4px;" />
+      <span id={id + '-font-size-val'} style="color:#7c3aed;font-size:10px;min-width:24px;text-align:right;">15</span>
+    </div>
+    <!-- Line height -->
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="color:#64748b;font-size:10px;min-width:52px;">Height:</span>
+      <input id={id + '-line-height'} type="range" min="10" max="25" value="12" style="flex:1;accent-color:#7c3aed;height:4px;" />
+      <span id={id + '-line-height-val'} style="color:#7c3aed;font-size:10px;min-width:32px;text-align:right;">1.2</span>
+    </div>
+    <!-- Bold toggle -->
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="color:#64748b;font-size:10px;min-width:52px;">Weight:</span>
+      <button id={id + '-bold-off'} class="crush-weight-btn" style="background:#111118;border:1px solid #1e1e2e;color:#e2e8f0;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:10px;">Normal</button>
+      <button id={id + '-bold-on'} class="crush-weight-btn" style="background:#111118;border:1px solid #7c3aed;color:#7c3aed;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:bold;">Bold</button>
+      <!-- Custom text color picker -->
+      <span style="color:#64748b;font-size:10px;margin-left:8px;">FG:</span>
+      <input id={id + '-fg-color'} type="color" value="#00ff88" style="width:24px;height:20px;border:1px solid #1e1e2e;border-radius:3px;background:none;cursor:pointer;padding:0;" />
+      <span style="color:#64748b;font-size:10px;margin-left:4px;">BG:</span>
+      <input id={id + '-bg-color'} type="color" value="#000000" style="width:24px;height:20px;border:1px solid #1e1e2e;border-radius:3px;background:none;cursor:pointer;padding:0;" />
+      <span style="color:#64748b;font-size:10px;margin-left:4px;">Cursor:</span>
+      <input id={id + '-cursor-color'} type="color" value="#7c3aed" style="width:24px;height:20px;border:1px solid #1e1e2e;border-radius:3px;background:none;cursor:pointer;padding:0;" />
+    </div>
+  </div>
+  <!-- Status bar -->
+  <div class="crush-toolbar" style="display:flex;align-items:center;justify-content:space-between;padding:0 12px;height:28px;min-height:28px;background:#0d0d14;border-bottom:1px solid #1e1e2e;user-select:none;flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="color:#7c3aed;font-size:11px;font-weight:700;letter-spacing:1px;">⚡</span>
+      <span style="color:#00ff88;font-size:11px;font-weight:700;letter-spacing:0.5px;">HAKSTERAI</span>
+      <span id={id + '-status'} style="color:#ffd700;font-size:10px;">●</span>
+      <span id={id + '-model-badge'} style="color:#64748b;font-size:10px;font-family:'JetBrains Mono',monospace;"></span>
+      <span id={id + '-prefix'} style="color:#7c3aed;font-size:10px;font-weight:900;background:rgba(124,58,237,0.15);padding:1px 5px;border-radius:3px;opacity:0;transition:opacity 0.2s;">Ctrl+B</span>
+      <span id={id + '-panes'} style="color:#7c3aed;font-size:10px;"></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id={id + '-fps'} style="color:#4b5563;font-size:9px;font-family:monospace;"></span>
+      <span id={id + '-latency'} style="color:#4b5563;font-size:9px;font-family:monospace;"></span>
+      <button id={id + '-settings-btn'} title="Settings (colors, font, bold)" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;font-size:12px;line-height:1;transition:color 0.15s;">⚙️</button>
+      <button id={id + '-bg-btn'} title="Upload background image" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;font-size:12px;line-height:1;transition:color 0.15s;">🖼️</button>
+      <button id={id + '-bg-reset'} title="Reset background" style="background:none;border:none;color:#4b5563;cursor:pointer;padding:2px 4px;font-size:11px;line-height:1;transition:color 0.15s;display:none;">✕</button>
+      <button id={id + '-clear'} title="Clear terminal" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;font-size:12px;line-height:1;">🗑️</button>
+      <button id={id + '-fullscreen'} title="Fullscreen (F11)" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l4 4m8-4h4m0 0v4m0-4l-4 4M4 16v4m0 0h4m-4 0l4-4m8 4h4m0 0v-4m0 4l-4-4"/></svg>
+      </button>
+    </div>
+  </div>
+  <!-- Terminal root: split panes live here -->
+  <div id={id + '-root'} class="crush-term-root" style="position:relative;flex:1;min-height:0;overflow:hidden;background:linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.24) 50%, rgba(0,0,0,0.38) 100%);display:flex;flex-direction:row;"></div>
+</div>
+
+<style is:global>
+  /* These styles target dynamically-created DOM elements (xterm, pane-wrapper, etc.)
+     so they MUST be global — Astro's scoped CSS won't match runtime-created elements. */
+  .crush-term-panel .xterm { background: transparent !important; padding: 0 !important; }
+  .crush-term-panel .xterm-viewport { background: transparent !important; }
+  .crush-term-panel .xterm-screen { background: transparent !important; }
+  .crush-term-panel .xterm-rows { background: transparent !important; }
+  .crush-term-panel .xterm-rows > div { background: transparent !important; }
+  .crush-term-panel .xterm-rows span { background-color: transparent !important; }
+  .crush-term-panel .xterm-screen canvas { background: transparent !important; }
+  .crush-term-panel .xterm-scrollable-element { background: transparent !important; }
+  .crush-term-panel .xterm-helpers { background: transparent !important; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar { width: 6px; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar-track { background: #0a0a0f; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar-thumb { background: #1e1e2e; border-radius: 3px; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+  .crush-scroll-btn:hover { background: rgba(124,58,237,1) !important; transform: scale(1.1); }
+  .crush-theme-btn:hover { opacity: 0.85; transform: scale(1.05); }
+  .crush-theme-btn:active { transform: scale(0.95); }
+  .crush-weight-btn:hover { opacity: 0.85; }
+  .crush-weight-btn:active { transform: scale(0.95); }
+  /* Split pane styles — dynamic elements need global scope */
+  .crush-term-root .pane-wrapper { position: relative; display: flex; flex-direction: column; overflow: hidden; flex: 1 1 0%; min-width: 0; min-height: 0; }
+  .crush-term-root .pane-term { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; background: transparent; padding: 0; }
+  .crush-term-root .pane-border { position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: #1e1e2e; transition: background 0.2s; z-index: 5; }
+  .crush-term-root .pane-wrapper.active-pane > .pane-border { background: #7c3aed; }
+  .crush-term-root .split-container { display: flex; flex: 1 1 0%; min-height: 0; min-width: 0; overflow: hidden; }
+  .crush-term-root .split-container.split-horizontal { flex-direction: column; }
+  .crush-term-root .split-container.split-vertical { flex-direction: row; }
+  .crush-term-root .split-handle { background: #1e1e2e; flex-shrink: 0; transition: background 0.15s; z-index: 10; }
+  .crush-term-root .split-handle:hover { background: rgba(124,58,237,0.5); }
+  .crush-term-root .split-handle:active { background: #7c3aed; }
+  .crush-term-root .split-handle.handle-vertical { width: 4px; cursor: col-resize; }
+  .crush-term-root .split-handle.handle-horizontal { height: 4px; cursor: row-resize; }
+</style>
+
+<link rel="stylesheet" href="/css/xterm.css" />
+<script is:inline src="/js/xterm.js"></script>
+<script is:inline src="/js/addon-fit.js"></script>
+
+<script define:vars={{ termId: id, autoStart }}>
+(function() {
+  const TID = termId;
+  const MAX_PANES = 6;
+  const BORDER_ACTIVE = '#7c3aed';
+  const BORDER_INACTIVE = '#1e1e2e';
+  const PREFIX_MS = 1500;
+
+  // ══════════════════════════════════════════════════════════════════
+  // ── HAKSTER AI — Visual Decode Effect v2 ─────────────────────────
+  // Big-chunk scramble→decode overlay. Does NOT touch PTY data.
+  // Shows a dramatic visual scramble that decodes progressively
+  // through multiple passes when AI connects or data starts flowing.
+  // ══════════════════════════════════════════════════════════════════
+
+  let _decodeTimers = [];
+  let _activeOverlay = null;
+  const _SC_CHARS = '▓░▒█⧫⬡アイウ∀∃∂∇◆◈⬢▄▀■▫⯃※✦✧⟐⟑⟒ждлофцшщыъ';
+  const _SC_COLORS = ['#7c3aed','#a855f7','#c084fc','#e879f9','#22d3ee','#34d399','#f472b6','#fbbf24'];
+  function _randomLine(len) {
+    let s = '';
+    for (let i = 0; i < len; i++) s += _SC_CHARS[Math.floor(Math.random() * _SC_CHARS.length)];
+    return s;
+  }
+
+  // Multi-pass big-chunk decode flash
+  function showDecodeFlash(rows) {
+    if (!terminalPanel) return;
+    // Remove previous overlay if still present
+    const old = document.getElementById(TID + '-decode-overlay');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = TID + '-decode-overlay';
+    overlay.style.cssText = 'position:absolute;inset:0;z-index:50;pointer-events:none;overflow:hidden;font-family:JetBrains Mono,monospace;font-size:14px;line-height:1.5;padding:8px 12px;opacity:1;transition:opacity 0.15s;';
+    const numLines = Math.min(rows || 12, 30);
+    const lines = [];
+    for (let i = 0; i < numLines; i++) {
+      const lineEl = document.createElement('div');
+      const charCount = 40 + Math.floor(Math.random() * 50);
+      lineEl.textContent = _randomLine(charCount);
+      lineEl.style.color = _SC_COLORS[Math.floor(Math.random() * _SC_COLORS.length)];
+      lineEl.style.opacity = (0.4 + Math.random() * 0.6).toFixed(2);
+      lineEl.style.letterSpacing = (Math.random() * 2).toFixed(1) + 'px';
+      lineEl.style.textShadow = '0 0 8px currentColor';
+      overlay.appendChild(lineEl);
+      lines.push({ el: lineEl, finalText: _randomLine(Math.max(15, charCount - 10)), charCount });
+    }
+    terminalPanel.appendChild(overlay);
+    _activeOverlay = overlay;
+
+    // Decode passes: progressively reveal and fade
+    _decodeTimers.forEach(t => clearTimeout(t));
+    _decodeTimers = [];
+
+    // Pass 1: faster scramble (60ms) — reduce randomness
+    _decodeTimers.push(setTimeout(() => {
+      lines.forEach((line, i) => {
+        const partial = _randomLine(Math.floor(line.charCount * 0.4)) + line.finalText.slice(Math.floor(line.charCount * 0.4));
+        line.el.textContent = partial;
+        line.el.style.opacity = '0.6';
+        line.el.style.textShadow = '0 0 4px currentColor';
+      });
+    }, 60));
+
+    // Pass 2: mostly decoded (150ms) — mostly real text with few noise chars
+    _decodeTimers.push(setTimeout(() => {
+      lines.forEach((line, i) => {
+        const mostly = line.finalText.slice(0, Math.floor(line.charCount * 0.7)) + _randomLine(Math.floor(line.charCount * 0.3));
+        line.el.textContent = mostly;
+        line.el.style.opacity = '0.35';
+        line.el.style.letterSpacing = '0px';
+        line.el.style.textShadow = 'none';
+      });
+    }, 150));
+
+    // Pass 3: fade out (250ms)
+    _decodeTimers.push(setTimeout(() => {
+      overlay.style.opacity = '0';
+      overlay.style.transition = 'opacity 0.2s';
+    }, 250));
+
+    // Pass 4: remove (500ms)
+    _decodeTimers.push(setTimeout(() => {
+      overlay.remove();
+      _activeOverlay = null;
+    }, 500));
+  }
+
+  // ── Globals ──
+  const root = document.getElementById(TID + '-root');
+  const terminalPanel = document.getElementById(TID + '-panel');
+  const statusDot = document.getElementById(TID + '-status');
+  const modelBadge = document.getElementById(TID + '-model-badge');
+  const prefixEl = document.getElementById(TID + '-prefix');
+  const panesEl = document.getElementById(TID + '-panes');
+  const fpsEl = document.getElementById(TID + '-fps');
+  const latencyEl = document.getElementById(TID + '-latency');
+  const clearBtn = document.getElementById(TID + '-clear');
+  const fullscreenBtn = document.getElementById(TID + '-fullscreen');
+  const settingsBtn = document.getElementById(TID + '-settings-btn');
+  const settingsPanel = document.getElementById(TID + '-settings');
+  const fontSizeSlider = document.getElementById(TID + '-font-size');
+  const fontSizeVal = document.getElementById(TID + '-font-size-val');
+  const lineHeightSlider = document.getElementById(TID + '-line-height');
+  const lineHeightVal = document.getElementById(TID + '-line-height-val');
+  const boldOffBtn = document.getElementById(TID + '-bold-off');
+  const boldOnBtn = document.getElementById(TID + '-bold-on');
+  const fgColorInput = document.getElementById(TID + '-fg-color');
+  const bgColorInput = document.getElementById(TID + '-bg-color');
+  const cursorColorInput = document.getElementById(TID + '-cursor-color');
+
+  if (!root || !window.Terminal || !window.FitAddon?.FitAddon) { if (root) root.innerHTML = '<div style="color:#e50914;padding:1rem">Terminal failed to load</div>'; return; }
+
+  try {
+    localStorage.removeItem(TID + '-bg');
+    localStorage.removeItem(TID + '-bg-v2');
+    localStorage.removeItem(TID + '-bg-v3');
+    localStorage.removeItem(TID + '-theme');
+  } catch {}
+
+  const panes = [];
+  let active = null;
+  let prefixMode = false;
+  let prefixTimer = null;
+  let frameCount = 0;
+  let lastFpsTime = performance.now();
+  let pingSendTime = 0;
+
+  // ── Theme presets ─────────────────────────────────────────────────
+  const THEMES = {
+    default: {
+      background: 'rgba(0,0,0,0)', foreground: '#00ff88', cursor: '#7c3aed', cursorAccent: '#000000',
+      selectionBackground: '#7c3aed55', selectionForeground: '#ffffff',
+      black: '#000000', red: '#ff4444', green: '#00ff88', yellow: '#ffd700',
+      blue: '#00bfff', magenta: '#ff6bff', cyan: '#00ffff', white: '#d4d4d4',
+      brightBlack: '#64748b', brightRed: '#ff6b6b', brightGreen: '#00ff88',
+      brightYellow: '#ffd700', brightBlue: '#4dc4ff', brightMagenta: '#ff88ff',
+      brightCyan: '#00ffff', brightWhite: '#e2e8f0',
+    },
+    hacker: {
+      background: 'rgba(2,10,2,0)', foreground: '#00ff41', cursor: '#00ff41', cursorAccent: '#000000',
+      selectionBackground: '#00ff4155', selectionForeground: '#ffffff',
+      black: '#000000', red: '#ff4444', green: '#00ff41', yellow: '#aaff00',
+      blue: '#00cc41', magenta: '#44ff44', cyan: '#00ff88', white: '#ccffcc',
+      brightBlack: '#2a4a2a', brightRed: '#ff6b6b', brightGreen: '#00ff41',
+      brightYellow: '#aaff00', brightBlue: '#00cc41', brightMagenta: '#88ff88',
+      brightCyan: '#00ff88', brightWhite: '#e2ffe2',
+    },
+    dracula: {
+      background: 'rgba(26,10,46,0)', foreground: '#f8f8f2', cursor: '#bd93f9', cursorAccent: '#282a36',
+      selectionBackground: '#bd93f955', selectionForeground: '#ffffff',
+      black: '#000000', red: '#ff5555', green: '#50fa7b', yellow: '#f1fa8c',
+      blue: '#6272a4', magenta: '#ff79c6', cyan: '#8be9fd', white: '#f8f8f2',
+      brightBlack: '#6272a4', brightRed: '#ff6e6e', brightGreen: '#69ff94',
+      brightYellow: '#ffffa5', brightBlue: '#d6acff', brightMagenta: '#ff92df',
+      brightCyan: '#a4ffff', brightWhite: '#ffffff',
+    },
+    cyber: {
+      background: 'rgba(0,0,20,0)', foreground: '#00ffff', cursor: '#ff00ff', cursorAccent: '#000014',
+      selectionBackground: '#ff00ff55', selectionForeground: '#ffffff',
+      black: '#000000', red: '#ff0080', green: '#00ff80', yellow: '#ffff00',
+      blue: '#0080ff', magenta: '#ff00ff', cyan: '#00ffff', white: '#e0e0ff',
+      brightBlack: '#404060', brightRed: '#ff40a0', brightGreen: '#40ff80',
+      brightYellow: '#ffff40', brightBlue: '#40a0ff', brightMagenta: '#ff40ff',
+      brightCyan: '#40ffff', brightWhite: '#ffffff',
+    },
+    sunset: {
+      background: 'rgba(26,10,10,0)', foreground: '#ff9f7f', cursor: '#ff4444', cursorAccent: '#1a0a0a',
+      selectionBackground: '#ff444455', selectionForeground: '#ffffff',
+      black: '#1a0a0a', red: '#ff4444', green: '#ff9f7f', yellow: '#ffd700',
+      blue: '#ff6b6b', magenta: '#ff9f7f', cyan: '#ffb088', white: '#f5e6e0',
+      brightBlack: '#4a2a2a', brightRed: '#ff6b6b', brightGreen: '#ffbf9f',
+      brightYellow: '#ffd700', brightBlue: '#ff8888', brightMagenta: '#ffbf9f',
+      brightCyan: '#ffccaa', brightWhite: '#fff5ee',
+    },
+    gold: {
+      background: 'rgba(26,21,0,0)', foreground: '#ffd700', cursor: '#ffa500', cursorAccent: '#1a1500',
+      selectionBackground: '#ffd70055', selectionForeground: '#ffffff',
+      black: '#1a1500', red: '#ff6347', green: '#ffd700', yellow: '#ffec8b',
+      blue: '#daa520', magenta: '#f0c040', cyan: '#e6be8a', white: '#fffacd',
+      brightBlack: '#4a4020', brightRed: '#ff8c69', brightGreen: '#ffe44d',
+      brightYellow: '#fff68f', brightBlue: '#eec900', brightMagenta: '#ffd700',
+      brightCyan: '#f0d080', brightWhite: '#fffaf0',
+    },
+  };
+
+  let currentTheme = { ...THEMES.default };
+
+  function updateStatus(state) {
+    if (!statusDot) return;
+    const states = { connected: { color: '#00ff88', text: '\u25cf' }, connecting: { color: '#ffd700', text: '\u25cf' }, disconnected: { color: '#ff4444', text: '\u25cf' }, error: { color: '#ff4444', text: '\u25cf' } };
+    const s = states[state] || states.connecting;
+    statusDot.style.color = s.color; statusDot.textContent = s.text;
+  }
+
+  function updatePanesEl() { if (panesEl) panesEl.textContent = panes.length > 1 ? panes.length + ' panes' : ''; }
+
+  function focusPane(pane) {
+    if (active) { active.active = false; active._border.style.background = BORDER_INACTIVE; }
+    active = pane; pane.active = true; pane._border.style.background = BORDER_ACTIVE; pane.term.focus();
+    updateStatus(pane.ws ? 'connected' : 'connecting');
+    updatePanesEl();
+  }
+
+  function fitPane(pane) {
+    clearTimeout(pane._ft);
+    pane._ft = setTimeout(() => {
+      try { pane.fit.fit(); } catch {}
+      if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'resize', cols: pane.term.cols, rows: pane.term.rows }));
+    }, 80);
+  }
+
+  function refitAll() {
+    setTimeout(() => { panes.forEach(p => { try { p.fit.fit(); } catch {} if (p.ws?.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify({ type: 'resize', cols: p.term.cols, rows: p.term.rows })); }); }, 100);
+  }
+
+  function connectPane(pane) {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    pane.ws = new WebSocket(proto + '//' + location.host + '/pty');
+    pane.reconnAttempts = 0;
+
+    pane.ws.onopen = () => {
+      pane.intentionalClose = false;
+      updateStatus('connected');
+      const d = pane.fit.proposeDimensions();
+      if (d) pane.ws.send(JSON.stringify({ type: 'resize', cols: d.cols, rows: d.rows }));
+      pane.term.focus();
+    };
+
+    pane.ws.onmessage = (ev) => {
+      try {
+        const m = JSON.parse(ev.data);
+        if (m.type === 'pong') { if (latencyEl) latencyEl.textContent = Math.round(performance.now() - pingSendTime) + 'ms'; return; }
+        if (m.type === 'exit') { updateStatus('disconnected'); pane.term.write('\r\n\x1b[90m[Connection closed]\x1b[0m\r\n'); return; }
+        if (m.type === 'pty' && pane.term) {
+          // Pass PTY data through directly — no PTY-level scrambling
+          // (crush is a TUI app using alternate screen, scrambling breaks it)
+          pane._writeBuf += m.data;
+          if (!pane._writeRaf) {
+            pane._writeRaf = requestAnimationFrame(() => {
+              pane.term.write(pane._writeBuf);
+              pane._writeBuf = '';
+              pane._writeRaf = null;
+            });
+          }
+        }
+      } catch {}
+    };
+
+    pane.ws.onclose = () => {
+      pane.ws = null;
+      if (pane.intentionalClose) return;
+      if (pane.reconnAttempts >= 10) { pane.term.writeln('\r\n\x1b[31mReconnect failed.\x1b[0m'); return; }
+      const delay = Math.min(1000 * (2 ** pane.reconnAttempts), 15000);
+      pane.reconnAttempts++;
+      if (active === pane) updateStatus('connecting');
+      clearTimeout(pane._rt);
+      pane._rt = setTimeout(() => connectPane(pane), delay);
+    };
+
+    pane.ws.onerror = () => { updateStatus('error'); pane.term.writeln('\r\n\x1b[31m[Connection error]\x1b[0m\r\n'); };
+
+    clearInterval(pane._ping);
+    pane._ping = setInterval(() => { if (pane.ws?.readyState === WebSocket.OPEN) { pingSendTime = performance.now(); pane.ws.send(JSON.stringify({ type: 'ping' })); } }, 15000);
+  }
+
+  function createPane(container) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'pane-wrapper';
+    const termDiv = document.createElement('div');
+    termDiv.className = 'pane-term';
+    const border = document.createElement('div');
+    border.className = 'pane-border';
+    border.style.cssText = 'position:absolute;bottom:0;left:0;right:0;height:2px;background:' + BORDER_INACTIVE + ';transition:background 0.2s;z-index:5;';
+    wrapper.appendChild(termDiv);
+    wrapper.appendChild(border);
+    container.appendChild(wrapper);
+
+    const term = new Terminal({
+      theme: currentTheme, fontFamily: 'JetBrains Mono, monospace', fontSize: parseInt(localStorage.getItem(TID + '-fontSize') || '15'), lineHeight: (parseInt(localStorage.getItem(TID + '-lineHeight') || '12')) / 10,
+      fontWeight: localStorage.getItem(TID + '-fontWeight') === 'bold' ? 'bold' : 'normal',
+      letterSpacing: 0, cursorBlink: true, cursorStyle: 'bar', scrollback: 50000,
+      fastScrollModifier: 'alt', fastScrollSensitivity: 10, scrollSensitivity: 1,
+      smoothScrollDuration: 0, convertEol: false, rightClickSelectsWord: true,
+      macOptionIsMeta: true, allowProposedApi: true, allowTransparency: true, scrollbarWidth: 6,
+    });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(termDiv);
+
+    const pane = {
+      term, fit, ws: null, el: wrapper, _termDiv: termDiv, _border: border,
+      _ft: null, _rt: null, _ping: null, _ro: null,
+      _writeBuf: '', _writeRaf: null, _scrollRaf: null,
+      active: false, autoScroll: true, reconnAttempts: 0, intentionalClose: false,
+    };
+    wrapper._paneRef = pane;
+
+    wrapper.addEventListener('mousedown', () => focusPane(pane));
+
+    const ro = new ResizeObserver(() => fitPane(pane));
+    ro.observe(termDiv);
+    pane._ro = ro;
+
+    term.onData((data) => { if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'input', data })); });
+    term.onResize(({ cols, rows }) => { if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
+    term.onScroll(() => { frameCount++; pane.autoScroll = pane.term.buffer.active.viewportY >= pane.term.buffer.active.baseY + pane.term.rows - 2; });
+
+    // Copy/paste
+    term.attachCustomKeyEventHandler((arg) => {
+      if (arg.type === 'keydown') {
+        if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyC') { const sel = term.getSelection(); if (sel) navigator.clipboard.writeText(sel).catch(() => {}); return false; }
+        if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyV') { navigator.clipboard.readText().then(t => { if (t) pane.ws?.readyState === WebSocket.OPEN && pane.ws.send(JSON.stringify({ type: 'input', data: t.replace(/\n/g, '\r') })); }).catch(() => {}); return false; }
+        if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyA') { term.selectAll(); return false; }
+        if (arg.ctrlKey && arg.code === 'KeyL' && !arg.shiftKey) { term.clear(); return true; }
+      }
+      return true;
+    });
+
+    termDiv.addEventListener('paste', (e) => { const text = e.clipboardData?.getData('text/plain') || ''; if (text) { e.preventDefault(); if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'input', data: text.replace(/\n/g, '\r') })); } });
+    termDiv.addEventListener('copy', (e) => { const sel = term.getSelection(); if (sel) { e.preventDefault(); e.clipboardData?.setData('text/plain', sel); } });
+    termDiv.addEventListener('contextmenu', (e) => { const sel = term.getSelection(); if (sel) { e.preventDefault(); navigator.clipboard.writeText(sel).catch(() => {}); } });
+
+    requestAnimationFrame(() => { try { fit.fit(); } catch {} setTimeout(() => { try { fit.fit(); } catch {} }, 200); });
+
+    term.writeln('\x1b[1;38;5;118m\u26a1 haksterai Terminal\x1b[0m');
+    term.writeln('\x1b[2;37mCtrl+B \" \u2192 split horiz \u00b7 Ctrl+B % \u2192 split vert \u00b7 Ctrl+B \u2190\u2191\u2192\u2193 navigate\x1b[0m');
+
+    connectPane(pane);
+    panes.push(pane);
+    if (!active) focusPane(pane);
+    return pane;
+  }
+
+  function addHandle(container, dir) {
+    const handle = document.createElement('div');
+    handle.className = 'split-handle ' + (dir === 'vertical' ? 'handle-vertical' : 'handle-horizontal');
+    const children = [...container.querySelectorAll(':scope > .pane-wrapper')];
+    if (children.length >= 2) container.insertBefore(handle, children[children.length - 1]);
+    else container.appendChild(handle);
+
+    let dragging = false, startPos = 0, startSizes = [];
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      dragging = true;
+      handle.style.background = BORDER_ACTIVE;
+      startPos = dir === 'vertical' ? e.clientX : e.clientY;
+      startSizes = children.map(w => dir === 'vertical' ? w.offsetWidth : w.offsetHeight);
+      const onMove = (ev) => {
+        if (!dragging) return;
+        const diff = (dir === 'vertical' ? ev.clientX : ev.clientY) - startPos;
+        const total = startSizes.reduce((a, b) => a + b, 0);
+        let a = startSizes[0] + diff, b = startSizes[1] - diff;
+        if (a < 80) { a = 80; b = total - 80; }
+        if (b < 80) { b = 80; a = total - 80; }
+        children[0].style.flex = '0 0 ' + a + 'px';
+        children[1].style.flex = '0 0 ' + b + 'px';
+        refitAll();
+      };
+      const onUp = () => {
+        dragging = false;
+        handle.style.background = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        children.forEach(w => { w.style.flex = '1 1 0%'; });
+        refitAll();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  function splitPane(dir) {
+    if (!active || panes.length >= MAX_PANES) { if (active) active.term.writeln('\x1b[33mMax ' + MAX_PANES + ' panes.\x1b[0m'); return; }
+    const parentEl = active.el.parentElement;
+    const isSplit = parentEl?.classList?.contains('split-container');
+
+    if (!isSplit || panes.length === 1) {
+      const container = document.createElement('div');
+      container.className = 'split-container ' + (dir === 'horizontal' ? 'split-horizontal' : 'split-vertical');
+      container.style.cssText = dir === 'horizontal'
+        ? 'display:flex;flex-direction:column;flex:1 1 0%;min-height:0;min-width:0;overflow:hidden;'
+        : 'display:flex;flex-direction:row;flex:1 1 0%;min-height:0;min-width:0;overflow:hidden;';
+      const oldParent = active.el.parentElement;
+      oldParent.removeChild(active.el);
+      container.appendChild(active.el);
+      addHandle(container, dir);
+      oldParent.appendChild(container);
+      const newPane = createPane(container);
+      focusPane(newPane);
+    } else {
+      addHandle(parentEl, dir);
+      const newPane = createPane(parentEl);
+      focusPane(newPane);
+    }
+    refitAll();
+  }
+
+  function closePane(pane) {
+    if (panes.length <= 1) return;
+    const idx = panes.indexOf(pane);
+    if (idx === -1) return;
+    pane.intentionalClose = true;
+    if (pane.ws) pane.ws.close();
+    clearInterval(pane._ping);
+    clearTimeout(pane._rt);
+    if (pane._ro) pane._ro.disconnect();
+    pane.term.dispose();
+    const prev = pane.el.previousElementSibling;
+    const next = pane.el.nextElementSibling;
+    if (prev?.classList.contains('split-handle')) prev.remove();
+    else if (next?.classList.contains('split-handle')) next.remove();
+    pane.el.remove();
+    panes.splice(idx, 1);
+    focusPane(panes[Math.min(idx, panes.length - 1)]);
+    refitAll();
+  }
+
+  function toggleZoom(pane) {
+    if (!pane) return;
+    if (pane._zoomed) {
+      pane._zoomedParent.insertBefore(pane.el, pane._zoomedNext);
+      pane.el.style.cssText = 'position:relative;display:flex;flex-direction:column;overflow:hidden;flex:1 1 0%;min-height:0;';
+      pane._zoomed = false;
+    } else {
+      pane._zoomedParent = pane.el.parentElement;
+      pane._zoomedNext = pane.el.nextElementSibling;
+      pane.el.remove();
+      root.appendChild(pane.el);
+      pane.el.style.cssText = 'position:relative;display:flex;flex-direction:column;overflow:hidden;flex:1 1 0%;min-height:0;width:100%;height:100%;';
+      pane._zoomed = true;
+    }
+    refitAll();
+  }
+
+  function navigatePane(dir) {
+    if (panes.length <= 1) return;
+    const idx = panes.indexOf(active);
+    let next;
+    if (dir === 'next') next = (idx + 1) % panes.length;
+    else if (dir === 'up' || dir === 'left') next = idx > 0 ? idx - 1 : panes.length - 1;
+    else next = idx < panes.length - 1 ? idx + 1 : 0;
+    focusPane(panes[next]);
+  }
+
+  // ── Ctrl+B prefix handler ──
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key.toLowerCase() === 'b' && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      prefixMode = true;
+      clearTimeout(prefixTimer);
+      prefixTimer = setTimeout(() => { prefixMode = false; }, PREFIX_MS);
+      if (prefixEl) { prefixEl.style.opacity = '1'; setTimeout(() => { prefixEl.style.opacity = '0'; }, PREFIX_MS); }
+      return;
+    }
+
+    if (prefixMode) {
+      prefixMode = false;
+      clearTimeout(prefixTimer);
+      switch (e.key) {
+        case '"': case "'": e.preventDefault(); splitPane('horizontal'); break;
+        case '%': e.preventDefault(); splitPane('vertical'); break;
+        case 'ArrowLeft': case 'Left': e.preventDefault(); navigatePane('left'); break;
+        case 'ArrowRight': case 'Right': e.preventDefault(); navigatePane('right'); break;
+        case 'ArrowUp': case 'Up': e.preventDefault(); navigatePane('up'); break;
+        case 'ArrowDown': case 'Down': e.preventDefault(); navigatePane('down'); break;
+        case 'x': case 'X': e.preventDefault(); if (panes.length > 1) closePane(active); break;
+        case 'z': case 'Z': e.preventDefault(); toggleZoom(active); break;
+        case 'o': case 'O': e.preventDefault(); navigatePane('next'); break;
+      }
+    }
+  });
+
+  // ── FPS counter ──
+  setInterval(() => {
+    const now = performance.now();
+    const elapsed = now - lastFpsTime;
+    if (elapsed > 0 && fpsEl) fpsEl.textContent = Math.round(frameCount / (elapsed / 1000)) + ' fps';
+    frameCount = 0; lastFpsTime = now;
+  }, 2000);
+
+  // ── Buttons ──
+  clearBtn?.addEventListener('click', () => { if (active) active.term.clear(); });
+  fullscreenBtn?.addEventListener('click', () => {
+    if (!terminalPanel) return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else terminalPanel.requestFullscreen().catch(() => {});
+  });
+
+  // ── Settings panel toggle ────────────────────────────────────────
+  settingsBtn?.addEventListener('click', () => {
+    if (!settingsPanel) return;
+    const open = settingsPanel.style.display === 'flex';
+    settingsPanel.style.display = open ? 'none' : 'flex';
+    settingsBtn.style.color = open ? '#64748b' : '#7c3aed';
+    refitAll();
+  });
+  settingsBtn?.addEventListener('mouseenter', () => { if (settingsPanel?.style.display !== 'flex') settingsBtn.style.color = '#7c3aed'; });
+  settingsBtn?.addEventListener('mouseleave', () => { if (settingsPanel?.style.display !== 'flex') settingsBtn.style.color = '#64748b'; });
+
+  // ── Apply theme to all panes ─────────────────────────────────────
+  function applyTheme(theme) {
+    currentTheme = { ...theme };
+    panes.forEach(p => {
+      try {
+        p.term.options.theme = theme;
+        p.term.options.fontSize = parseInt(fontSizeSlider?.value || '15');
+        p.term.options.lineHeight = (parseInt(lineHeightSlider?.value || '12')) / 10;
+      } catch {}
+    });
+    try { localStorage.setItem(TID + '-theme', JSON.stringify(theme)); } catch {}
+    refitAll();
+  }
+
+  // ── Theme preset buttons ─────────────────────────────────────────
+  document.querySelectorAll('.crush-theme-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const themeName = btn.dataset.theme || 'default';
+      const theme = THEMES[themeName] || THEMES.default;
+      applyTheme(theme);
+      // Update color pickers to match theme
+      if (fgColorInput) fgColorInput.value = theme.foreground || '#00ff88';
+      if (bgColorInput) bgColorInput.value = theme.background?.replace(/rgba?\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/, (_, a) => { const v = Math.round(parseFloat(a) * 255); return '#' + v.toString(16).padStart(2,'0').repeat(3); }) || '#000000';
+      if (cursorColorInput) cursorColorInput.value = theme.cursor || '#7c3aed';
+    });
+  });
+
+  // ── Font size ────────────────────────────────────────────────────
+  fontSizeSlider?.addEventListener('input', () => {
+    const sz = parseInt(fontSizeSlider.value);
+    if (fontSizeVal) fontSizeVal.textContent = String(sz);
+    panes.forEach(p => { try { p.term.options.fontSize = sz; } catch {} });
+    try { localStorage.setItem(TID + '-fontSize', String(sz)); } catch {}
+    refitAll();
+  });
+
+  // ── Line height ──────────────────────────────────────────────────
+  lineHeightSlider?.addEventListener('input', () => {
+    const raw = parseInt(lineHeightSlider.value);
+    const lh = raw / 10;
+    if (lineHeightVal) lineHeightVal.textContent = String(lh);
+    panes.forEach(p => { try { p.term.options.lineHeight = lh; } catch {} });
+    try { localStorage.setItem(TID + '-lineHeight', String(raw)); } catch {}
+    refitAll();
+  });
+
+  // ── Bold toggle ──────────────────────────────────────────────────
+  boldOffBtn?.addEventListener('click', () => {
+    panes.forEach(p => { try { p.term.options.fontWeight = 'normal'; p.term.options.fontWeightBold = 'bold'; } catch {} });
+    boldOffBtn.style.borderColor = '#7c3aed'; boldOnBtn.style.borderColor = '#1e1e2e';
+    try { localStorage.setItem(TID + '-fontWeight', 'normal'); } catch {}
+  });
+  boldOnBtn?.addEventListener('click', () => {
+    panes.forEach(p => { try { p.term.options.fontWeight = 'bold'; p.term.options.fontWeightBold = 'bold'; } catch {} });
+    boldOnBtn.style.borderColor = '#7c3aed'; boldOffBtn.style.borderColor = '#1e1e2e';
+    try { localStorage.setItem(TID + '-fontWeight', 'bold'); } catch {}
+  });
+
+  // ── Custom color pickers ─────────────────────────────────────────
+  fgColorInput?.addEventListener('input', () => {
+    currentTheme.foreground = fgColorInput.value;
+    applyTheme(currentTheme);
+  });
+  bgColorInput?.addEventListener('input', () => {
+    // Convert hex to rgba for xterm compatibility
+    const hex = bgColorInput.value;
+    const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+    currentTheme.background = `rgba(${r},${g},${b},0.08)`;
+    applyTheme(currentTheme);
+  });
+  cursorColorInput?.addEventListener('input', () => {
+    currentTheme.cursor = cursorColorInput.value;
+    applyTheme(currentTheme);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F11' && terminalPanel?.contains(document.activeElement)) { e.preventDefault(); if (document.fullscreenElement) document.exitFullscreen(); else terminalPanel.requestFullscreen().catch(() => {}); }
+  });
+  document.addEventListener('fullscreenchange', () => { setTimeout(refitAll, 100); setTimeout(refitAll, 300); });
+
+  window.addEventListener('resize', refitAll);
+  window.addEventListener('beforeunload', () => { panes.forEach(p => { p.intentionalClose = true; if (p.ws) p.ws.close(); clearInterval(p._ping); clearTimeout(p._rt); }); });
+
+  // ── Background image upload ───────────────────────────────────────
+  const bgInput = document.getElementById(TID + '-bg-input');
+  const bgBtn = document.getElementById(TID + '-bg-btn');
+  const bgReset = document.getElementById(TID + '-bg-reset');
+  const defaultBg = '/hakster-terminal-bg.png?v=20260707c';
+  const bgStorageKey = TID + '-bg-v4';
+  let currentBg = defaultBg;
+
+  function applyBg(url) {
+    if (terminalPanel) {
+      terminalPanel.style.backgroundImage = `linear-gradient(135deg, rgba(3,3,8,0.28) 0%, rgba(8,4,18,0.24) 48%, rgba(0,0,0,0.46) 100%), url('${url}')`;
+      terminalPanel.style.backgroundSize = 'cover';
+      terminalPanel.style.backgroundPosition = 'center';
+      terminalPanel.style.backgroundBlendMode = 'normal';
+    }
+  }
+
+  bgBtn?.addEventListener('click', () => { bgInput?.click(); });
+  bgBtn?.addEventListener('mouseenter', () => { bgBtn.style.color = '#7c3aed'; });
+  bgBtn?.addEventListener('mouseleave', () => { bgBtn.style.color = '#64748b'; });
+
+  bgInput?.addEventListener('change', () => {
+    const file = bgInput.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const url = e.target?.result;
+      if (!url) return;
+      currentBg = url;
+      applyBg(url);
+      if (bgReset) bgReset.style.display = 'inline';
+      try { localStorage.setItem(bgStorageKey, url); } catch {}
+    };
+    reader.readAsDataURL(file);
+  });
+
+  bgReset?.addEventListener('click', () => {
+    currentBg = defaultBg;
+    applyBg(defaultBg);
+    bgReset.style.display = 'none';
+    try { localStorage.removeItem(bgStorageKey); } catch {}
+  });
+  bgReset?.addEventListener('mouseenter', () => { bgReset.style.color = '#ff4444'; });
+  bgReset?.addEventListener('mouseleave', () => { bgReset.style.color = '#4b5563'; });
+
+  // Restore saved background
+  try {
+    const saved = localStorage.getItem(bgStorageKey);
+    if (saved) { currentBg = saved; applyBg(saved); if (bgReset) bgReset.style.display = 'inline'; }
+  } catch {}
+
+  // ── Init first pane ──
+  createPane(root);
+
+  // ── Restore saved settings ────────────────────────────────────────
+  try {
+    const savedTheme = localStorage.getItem(TID + '-theme');
+    if (savedTheme) { const t = JSON.parse(savedTheme); currentTheme = { ...currentTheme, ...t }; applyTheme(currentTheme); }
+    const savedFontSize = localStorage.getItem(TID + '-fontSize');
+    if (savedFontSize && fontSizeSlider) { fontSizeSlider.value = savedFontSize; if (fontSizeVal) fontSizeVal.textContent = savedFontSize; panes.forEach(p => { try { p.term.options.fontSize = parseInt(savedFontSize); } catch {} }); }
+    const savedLineHeight = localStorage.getItem(TID + '-lineHeight');
+    if (savedLineHeight && lineHeightSlider) { lineHeightSlider.value = savedLineHeight; const lh = parseInt(savedLineHeight) / 10; if (lineHeightVal) lineHeightVal.textContent = String(lh); panes.forEach(p => { try { p.term.options.lineHeight = lh; } catch {} }); }
+    const savedFontWeight = localStorage.getItem(TID + '-fontWeight');
+    if (savedFontWeight === 'bold') { panes.forEach(p => { try { p.term.options.fontWeight = 'bold'; } catch {} }); if (boldOnBtn) boldOnBtn.style.borderColor = '#7c3aed'; if (boldOffBtn) boldOffBtn.style.borderColor = '#1e1e2e'; }
+    else if (savedFontWeight === 'normal') { if (boldOffBtn) boldOffBtn.style.borderColor = '#7c3aed'; if (boldOnBtn) boldOnBtn.style.borderColor = '#1e1e2e'; }
+  } catch {}
+
+  // Fetch model info
+  fetch('/api/dashboard').then(r => r.json()).then(d => { if (d.crush && modelBadge) { const model = d.crush.model || ''; modelBadge.textContent = model.length > 20 ? model.substring(0, 18) + '\u2026' : model; } }).catch(() => {});
+
+  // Expose connectPane for external model switching
+  function reconnectPane(pane) {
+    if (!pane) return;
+    pane.reconnAttempts = 0;
+    pane.intentionalClose = true;
+    // Clear any pending reconnect timer
+    if (pane._rt) { clearTimeout(pane._rt); pane._rt = null; }
+    if (pane.ws) {
+      pane.ws.close();
+    }
+    // Reconnect after short delay to allow close to complete
+    setTimeout(() => {
+      pane.intentionalClose = false;
+      connectPane(pane);
+    }, 500);
+  }
+
+  window.__crushTerminals = window.__crushTerminals || {};
+  window.__crushTerminals[TID] = { panes, get active() { return active; }, split: splitPane, close: closePane, zoom: toggleZoom, reconnect: reconnectPane };
+})();
+</script>

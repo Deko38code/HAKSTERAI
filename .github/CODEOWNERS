@@ -1,0 +1,5 @@
+# CODEOWNERS file for haksterAi repository
+
+# Default owners for all files
+# These teams will be automatically requested for review on all PRs
+* @ghoststack/core

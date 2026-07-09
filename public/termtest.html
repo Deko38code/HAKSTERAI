@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html><head>
+<title>Terminal Test</title>
+<link rel="stylesheet" href="/css/xterm.css">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; color:#fff; font-family:monospace; }
+#term { width:100vw; height:100vh; }
+#status { position:fixed; top:10px; right:10px; color:#0f0; font-size:14px; z-index:999; }
+</style>
+</head><body>
+<div id="status">Loading...</div>
+<div id="term"></div>
+<script src="/js/xterm.js"></script>
+<script src="/js/addon-fit.js"></script>
+<script>
+const status = document.getElementById('status');
+try {
+  status.textContent = 'Terminal: ' + typeof Terminal + ', FitAddon: ' + typeof FitAddon;
+  if (!window.Terminal || !window.FitAddon) {
+    status.textContent = 'MISSING: Terminal=' + typeof Terminal + ' FitAddon=' + typeof FitAddon;
+    throw new Error('Missing deps');
+  }
+  const term = new Terminal({
+    theme: { background:'#000', foreground:'#0f0', cursor:'#f0f' },
+    cursorBlink: true, cursorStyle: 'bar'
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('term'));
+  fit.fit();
+  status.textContent = 'Terminal created! Connecting...';
+  
+  const ws = new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/pty');
+  ws.onopen = () => { status.textContent = 'WS connected!'; ws.send(JSON.stringify({type:'resize',cols:term.cols,rows:term.rows})); };
+  ws.onmessage = (ev) => {
+    try {
+      const m = JSON.parse(ev.data);
+      if (m.type==='pty') { term.write(m.data); }
+      else if (m.type==='pong') { status.textContent = 'Live ('+Math.round(performance.now())+'ms)'; }
+      else if (m.type==='exit') { status.textContent = 'Process exited'; }
+    } catch(e) { status.textContent = 'Parse err: '+e.message; }
+  };
+  ws.onerror = (e) => { status.textContent = 'WS error'; };
+  ws.onclose = () => { status.textContent = 'WS closed'; term.write('\r\n\x1b[31m[Disconnected]\x1b[0m'); };
+  term.onData((data) => { if (ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify({type:'input',data})); });
+  window.addEventListener('resize', () => { fit.fit(); ws.send(JSON.stringify({type:'resize',cols:term.cols,rows:term.rows})); });
+} catch(e) {
+  status.textContent = 'ERROR: ' + e.message;
+  document.getElementById('term').innerHTML = '<pre style="color:red;padding:20px">Error: ' + e.message + '\n\nTerminal=' + typeof Terminal + '\nFitAddon=' + typeof FitAddon + '</pre>';
+}
+</script>
+</body></html>

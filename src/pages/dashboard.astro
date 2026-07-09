@@ -1,0 +1,372 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="haksterAi Dashboard">
+  <div class="min-h-screen pt-[60px] bg-[#0a0a0f] text-[#e2e8f0] px-4 py-6 max-w-7xl mx-auto">
+    <!-- Breadcrumb nav -->
+    <nav class="flex items-center gap-2 text-xs text-[#64748b] mb-4">
+      <a href="/" class="hover:text-[#7c3aed] transition-colors">🏠 Home</a>
+      <span>›</span>
+      <span class="text-[#7c3aed] font-medium">📊 Dashboard</span>
+    </nav>
+
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-2 h-8 bg-[#7c3aed] rounded-full"></div>
+      <h1 class="text-2xl font-bold tracking-tight">📊 Dashboard</h1>
+      <span class="text-xs text-[#64748b] bg-[#111118] px-2 py-1 rounded-full border border-[#1e1e2e]" id="status-badge">connecting...</span>
+      <a href="/terminal" class="ml-auto text-xs bg-[#7c3aed]/20 text-[#7c3aed] hover:bg-[#7c3aed]/30 px-3 py-1.5 rounded-lg border border-[#7c3aed]/30 transition-colors flex items-center gap-1.5">
+        ⌨️ Open Terminal
+      </a>
+    </div>
+
+    <!-- Quick nav tabs -->
+    <div class="flex gap-2 mb-6 overflow-x-auto pb-2">
+      <button onclick="document.getElementById('hakster-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#7c3aed]/10 text-[#7c3aed] border border-[#7c3aed]/30 px-3 py-1.5 rounded-lg hover:bg-[#7c3aed]/20 transition-colors whitespace-nowrap">🧠 haksterAi Stats</button>
+      <button onclick="document.getElementById('tools-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🔧 Tool Breakdown</button>
+      <button onclick="document.getElementById('system-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">💻 System Info</button>
+      <button onclick="document.getElementById('terminal-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">⌨️ Terminal</button>
+      <button onclick="document.getElementById('services-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">📡 Services</button>
+      <button onclick="document.getElementById('providers-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🧪 Providers</button>
+    </div>
+
+    <!-- Top Stats Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6" id="top-stats">
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 hover:border-[#7c3aed]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">📨 Requests</div>
+        <div class="text-2xl font-bold text-[#7c3aed]" id="stat-requests">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 hover:border-[#7c3aed]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">💬 Output Tokens</div>
+        <div class="text-2xl font-bold text-[#00ff88]" id="stat-toolcalls">—</div>
+      </div>
+      <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1 hidden">Tokens</div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 hover:border-[#7c3aed]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">🔢 Tokens</div>
+        <div class="text-2xl font-bold text-[#ffd700]" id="stat-tokens">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 hover:border-[#7c3aed]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">💬 Sessions</div>
+        <div class="text-2xl font-bold text-[#00bfff]" id="stat-sessions">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 hover:border-[#7c3aed]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">✉️ Messages</div>
+        <div class="text-2xl font-bold text-[#ff6bff]" id="stat-messages">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 hover:border-[#7c3aed]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">🎨 Artifacts</div>
+        <div class="text-2xl font-bold text-[#ff6b6b]" id="stat-artifacts">—</div>
+      </div>
+    </div>
+
+    <!-- haksterAi Stats Row -->
+    <div id="hakster-section" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6" id="crush-stats-row">
+      <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors col-span-2 sm:col-span-1">
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">🧠 haksterAi Sessions</div>
+        <div class="text-2xl font-bold text-[#a855f7]" id="crush-sessions">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">🔧 Tools Used</div>
+        <div class="text-2xl font-bold text-[#00ff88]" id="crush-tools-used">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">⚡ Unique Tools</div>
+        <div class="text-2xl font-bold text-[#ffd700]" id="crush-unique-tools">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">💭 Reasoning</div>
+        <div class="text-2xl font-bold text-[#00bfff]" id="crush-reasoning">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">📝 Files</div>
+        <div class="text-2xl font-bold text-[#ff6bff]" id="crush-files">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">🪙 Prompt Tokens</div>
+        <div class="text-2xl font-bold text-[#ff6b6b]" id="crush-prompt-tokens">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">🧾 Completion Tokens</div>
+        <div class="text-2xl font-bold text-[#7c3aed]" id="crush-completion-tokens">—</div>
+      </div>
+    </div>
+
+    <!-- haksterAi Tool Breakdown -->
+    <div id="tools-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6" id="crush-tools-section" style="display:none">
+      <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.056 2.154-1.056 2.58 0a1.724 1.724 0 002.573 1.066c1.005-.482 2.17.378 1.93 1.448a1.724 1.724 0 001.056 2.573c1.056.426 1.056 2.154 0 2.58a1.724 1.724 0 00-1.066 2.573c.482 1.005-.378 2.17-1.448 1.93a1.724 1.724 0 00-2.573 1.056c-.426 1.056-2.154 1.056-2.58 0a1.724 1.724 0 00-2.573-1.066c-1.005.482-2.17-.378-1.93-1.448a1.724 1.724 0 00-1.056-2.573c-1.056-.426-1.056-2.154 0-2.58a1.724 1.724 0 001.066-2.573c-.482-1.005.378-2.17 1.448-1.93a1.724 1.724 0 002.573-1.056z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        haksterAi Tool Breakdown
+      </h2>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" id="crush-tools-grid"></div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      <!-- System Info -->
+      <div id="system-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          💻 System
+        </h2>
+        <div class="space-y-2" id="system-info">
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">🖥️ Host</span><span id="sys-host">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">💾 Platform</span><span id="sys-platform">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">⚡ CPUs</span><span id="sys-cpus">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">🧠 RAM</span><span id="sys-ram">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">⏱️ Uptime</span><span id="sys-uptime">—</span></div>
+          <!-- Memory bar -->
+          <div class="mt-3">
+            <div class="flex justify-between text-xs text-[#64748b] mb-1"><span>📊 Memory Usage</span><span id="mem-pct">—</span></div>
+            <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+              <div id="mem-bar" class="h-full bg-gradient-to-r from-[#7c3aed] to-[#a855f7] rounded-full transition-all duration-500" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- haksterAi Terminal -->
+      <div id="terminal-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          haksterAi Terminal
+        </h2>
+        <div class="space-y-2" id="crush-info">
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">🤖 Model</span><span id="crush-model" class="text-[#00ff88] font-mono">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">📡 Provider</span><span id="crush-provider">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">🏷️ Version</span><span id="crush-version" class="font-mono">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">🟢 Status</span><span id="crush-status" class="text-[#ffd700]">—</span></div>
+        </div>
+        <div id="crush-update-banner" class="hidden mt-3 p-3 rounded-lg bg-[#7c3aed]/10 border border-[#7c3aed]/30 text-sm">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-[#7c3aed] font-semibold">haksterAi Update!</span>
+              <span id="crush-update-versions" class="text-[#64748b] ml-2"></span>
+            </div>
+            <a id="crush-update-link" href="#" target="_blank" class="text-xs bg-[#7c3aed] hover:bg-[#6d28d9] text-white px-3 py-1 rounded-full transition-colors">View Release</a>
+          </div>
+        </div>
+        <a href="/terminal" class="mt-4 w-full flex items-center justify-center gap-2 rounded-lg bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-sm font-semibold py-2.5 px-4 transition-all active:scale-95">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          Open Terminal
+        </a>
+      </div>
+    </div>
+
+    <!-- Services & Ports -->
+    <div id="services-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
+      <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/></svg>
+        Services &amp; Ports 📡
+      </h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" id="services-grid">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- Providers -->
+    <div id="providers-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
+      <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+        🧪 AI Providers
+      </h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" id="providers-grid">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- Provider Breakdown -->
+    <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+      <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        📊 Requests by Provider
+      </h2>
+      <div id="provider-breakdown" class="space-y-3">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script define:vars={{}}">
+    function fmtNum(n) {
+      if (n > 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n > 1000) return (n / 1000).toFixed(1) + 'K';
+      return n.toLocaleString();
+    }
+    async function loadDashboard() {
+      try {
+        const res = await fetch('/api/dashboard');
+        const data = await res.json();
+
+        // Top stats
+        document.getElementById('stat-requests').textContent = data.requests.total.toLocaleString();
+        document.getElementById('stat-toolcalls').textContent = fmtNum(data.requests.outputTokens || 0);
+        document.getElementById('stat-tokens').textContent = fmtNum(data.requests.totalTokens);
+        document.getElementById('stat-sessions').textContent = data.sessions.total;
+        document.getElementById('stat-messages').textContent = data.sessions.messages.toLocaleString();
+        document.getElementById('stat-artifacts').textContent = data.sessions.artifacts;
+
+        // haksterAi stats row
+        const cs = data.crush?.stats || {};
+        document.getElementById('crush-sessions').textContent = cs.sessions || 0;
+        document.getElementById('crush-tools-used').textContent = cs.toolCalls || 0;
+        document.getElementById('crush-unique-tools').textContent = cs.uniqueTools || 0;
+        document.getElementById('crush-reasoning').textContent = cs.reasoningSteps || 0;
+        document.getElementById('crush-files').textContent = cs.files || 0;
+        document.getElementById('crush-prompt-tokens').textContent = fmtNum(cs.promptTokens || 0);
+        document.getElementById('crush-completion-tokens').textContent = fmtNum(cs.completionTokens || 0);
+
+        // haksterAi tool breakdown
+        const toolsGrid = document.getElementById('crush-tools-grid');
+        const toolsSection = document.getElementById('crush-tools-section');
+        const tb = cs.toolBreakdown || {};
+        if (Object.keys(tb).length > 0) {
+          toolsSection.style.display = '';
+          const toolIcons = {
+            ls: '📁', write: '✏️', search: '🔍', grep: '🔎', view: '👁️', bash: '💻',
+            read: '📖', edit: '✂️', glob: '🌐', web: '🔗', fetch: '⬇️', list: '📋',
+            mkdir: '📂', rm: '🗑️', cp: '📋', mv: '➡️', cat: '🐱', head: '🔝',
+            tail: '🔚', diff: '🔀', patch: '🩹', sed: '📝', awk: '📊',
+            find: '🔎', tree: '🌳', cd: '🚪', pwd: '📍', echo: '📢',
+            curl: '🌀', wget: '⬇️', git: '🔀', docker: '🐳', npm: '📦',
+            pip: '🐍', make: '🔨', test: '✅', lint: '🧹', format: '✨',
+            deploy: '🚀', build: '🏗️', run: '▶️', exec: '⚡', eval: '🧮',
+            sql: '🗃️', api: '🌐', http: '📡', ssh: '🔐', scp: '📤',
+            chmod: '🔑', chown: '👤', env: '🌿', export: '📦', source: '📥',
+            kill: '💀', ps: '📊', top: '📈', df: '💾', du: '📏',
+            ping: '🏓', netstat: '🕸️', ss: '🔌', iptables: '🧱',
+          };
+          const maxCount = Math.max(...Object.values(tb));
+          toolsGrid.innerHTML = Object.entries(tb).sort((a,b) => b[1] - a[1]).map(([name, count]) => {
+            const icon = toolIcons[name] || '🔧';
+            const pct = maxCount > 0 ? (count / maxCount * 100) : 0;
+            return `<div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium flex items-center gap-1.5">${icon} <span class="font-mono text-xs">${name}</span></span>
+                <span class="text-xs text-[#7c3aed] font-bold">${count}×</span>
+              </div>
+              <div class="w-full h-1.5 bg-[#1e1e2e] rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-[#7c3aed] to-[#a855f7] rounded-full" style="width:${pct}%"></div>
+              </div>
+            </div>`;
+          }).join('');
+        }
+
+        // System
+        document.getElementById('sys-host').textContent = data.system.hostname;
+        document.getElementById('sys-platform').textContent = data.system.platform + ' / ' + data.system.arch;
+        document.getElementById('sys-cpus').textContent = data.system.cpus + ' cores';
+        const totalGB = (data.system.totalMem / 1024 / 1024 / 1024).toFixed(1);
+        const freeGB = (data.system.freeMem / 1024 / 1024 / 1024).toFixed(1);
+        const usedGB = (totalGB - freeGB).toFixed(1);
+        document.getElementById('sys-ram').textContent = usedGB + ' / ' + totalGB + ' GB';
+        const uptimeH = Math.floor(data.system.uptime / 3600);
+        const uptimeM = Math.floor((data.system.uptime % 3600) / 60);
+        document.getElementById('sys-uptime').textContent = uptimeH + 'h ' + uptimeM + 'm';
+        const memPct = ((1 - data.system.freeMem / data.system.totalMem) * 100).toFixed(0);
+        document.getElementById('mem-pct').textContent = memPct + '%';
+        document.getElementById('mem-bar').style.width = memPct + '%';
+
+        // haksterAi
+        document.getElementById('crush-model').textContent = data.crush.model;
+        document.getElementById('crush-provider').textContent = data.crush.provider;
+        document.getElementById('crush-version').textContent = data.crush.version || '—';
+        document.getElementById('crush-status').textContent = '✓ connected';
+        document.getElementById('crush-status').className = 'text-[#00ff88]';
+        document.getElementById('status-badge').textContent = 'live';
+        document.getElementById('status-badge').className = 'text-xs text-[#00ff88] bg-[#111118] px-2 py-1 rounded-full border border-[#00ff88]/30';
+
+        // Check for haksterAi updates
+        fetch('/api/crush-update').then(r => r.json()).then(u => {
+          document.getElementById('crush-version').textContent = u.currentVersion || '—';
+          if (u.needsUpdate) {
+            const banner = document.getElementById('crush-update-banner');
+            banner.classList.remove('hidden');
+            document.getElementById('crush-update-versions').textContent = `${u.currentVersion} → ${u.latestVersion}`;
+            document.getElementById('crush-update-link').href = u.releaseUrl || '#';
+          }
+        }).catch(() => {});
+
+        // Services
+        const servicesGrid = document.getElementById('services-grid');
+        const knownDescs = {
+          3579: 'Main server',
+          11434: 'Local LLM',
+          80: 'Web server',
+          8081: 'Movie server',
+          8888: 'IPTV portal',
+          9999: 'IPTV SSL',
+          4040: 'Tunnel UI',
+          20241: 'CF tunnel',
+        };
+        const services = (data.services || []).map(s => ({
+          ...s,
+          desc: s.desc || knownDescs[s.port] || (s.process || ''),
+        }));
+        const seen = new Set();
+        const unique = services.filter(s => { if (seen.has(s.port)) return false; seen.add(s.port); return true; });
+        servicesGrid.innerHTML = unique.sort((a,b) => a.port - b.port).map(s => {
+          const statusColor = s.status === 'running' ? 'text-[#00ff88]' : 'text-[#ff4444]';
+          const statusBg = s.status === 'running' ? 'bg-[#00ff88]/10 border-[#00ff88]/20' : 'bg-[#ff4444]/10 border-[#ff4444]/20';
+          return `<div class="flex items-center justify-between bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-4 py-3">
+            <div>
+              <div class="text-sm font-medium">${s.name}</div>
+              <div class="text-xs text-[#64748b]">${s.desc || s.process || ''}</div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="font-mono text-xs text-[#ffd700]">:${s.port}</span>
+              <span class="text-xs px-2 py-0.5 rounded-full border ${statusBg} ${statusColor}">${s.status}</span>
+            </div>
+          </div>`;
+        }).join('');
+
+        // Providers
+        const providersGrid = document.getElementById('providers-grid');
+        const provIcons = { ollama: '🦙', anthropic: '🤖', openai: '⚡', openrouter: '🌐', hermes: '🔥', 'claude-proxy': '🔮' };
+        providersGrid.innerHTML = data.providers.map(p => {
+          const icon = provIcons[p.id] || '🧠';
+          const isActive = p.id === data.crush.provider;
+          const border = isActive ? 'border-[#7c3aed]' : 'border-[#1e1e2e]';
+          const badge = isActive ? '<span class="text-[8px] bg-[#7c3aed] text-white px-1.5 py-0.5 rounded-full ml-2">ACTIVE</span>' : '';
+          return `<div class="bg-[#0a0a0f] border ${border} rounded-lg px-4 py-3">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">${icon}</span>
+              <span class="text-sm font-medium">${p.name}${badge}</span>
+            </div>
+            <div class="text-xs text-[#64748b] mt-1 font-mono">${p.defaultModel}</div>
+            <div class="text-xs text-[#4b5563] mt-0.5">${p.type}</div>
+          </div>`;
+        }).join('');
+
+        // Provider breakdown bars
+        const breakdown = document.getElementById('provider-breakdown');
+        if (data.requests.byProvider && data.requests.byProvider.length > 0) {
+          const maxReqs = Math.max(...data.requests.byProvider.map(p => p.requests));
+          breakdown.innerHTML = data.requests.byProvider.map(p => {
+            const pct = maxReqs > 0 ? (p.requests / maxReqs * 100) : 0;
+            const tokens = ((p.inputTokens || 0) + (p.outputTokens || 0));
+            const tokenStr = tokens > 1000000 ? (tokens / 1000000).toFixed(1) + 'M' : tokens > 1000 ? (tokens / 1000).toFixed(1) + 'K' : tokens;
+            return `<div>
+              <div class="flex justify-between text-sm mb-1">
+                <span class="font-medium">${p.provider}</span>
+                <span class="text-[#64748b]">${p.requests} requests · ${tokenStr} tokens</span>
+              </div>
+              <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-[#7c3aed] to-[#a855f7] rounded-full transition-all duration-500" style="width:${pct}%"></div>
+              </div>
+            </div>`;
+          }).join('');
+        } else {
+          breakdown.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No requests yet — start a chat or run an agent</div>';
+        }
+
+      } catch (err) {
+        console.error('Dashboard load failed:', err);
+        document.getElementById('status-badge').textContent = 'error';
+        document.getElementById('status-badge').className = 'text-xs text-[#ff4444] bg-[#111118] px-2 py-1 rounded-full border border-[#ff4444]/30';
+      }
+    }
+
+    loadDashboard();
+    // Refresh every 15s
+    setInterval(loadDashboard, 15000);
+  </script>
+</Layout>
