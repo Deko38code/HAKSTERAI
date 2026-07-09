@@ -42,3 +42,5 @@ gpt-oss-120b/
 # Kiro
 .kiro/pentest-agents/
 *.bak*
+.kiro/
+pentest-agents/

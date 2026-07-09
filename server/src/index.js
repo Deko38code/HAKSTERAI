@@ -1614,6 +1614,11 @@ ${dirListing}
         // Notify frontend: tool call result
         res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
 
+        // If a file was written/edited, emit a file event so frontend can show a download button
+        if (['write_file', 'edit_file', 'patch_file', 'multi_patch'].includes(toolName) && toolArgs.path) {
+          res.write(`data: ${JSON.stringify({ type: 'file_created', path: toolArgs.path, tool: toolName })}\n\n`);
+        }
+
         // Notify workspace watchers if a file was written/edited
         if (['write_file', 'edit_file'].includes(toolName) && toolArgs.path) {
           notifyWorkspaceChange(sessionId, toolArgs.path);
@@ -1783,6 +1788,24 @@ app.delete('/api/fs/delete', (req, res) => {
       fs.unlinkSync(filePath);
     }
     res.json({ ok: true, path: req.query.path });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// GET /api/fs/download?path=/some/file — Download any file from server filesystem
+app.get('/api/fs/download', (req, res) => {
+  try {
+    const filePath = safePath(req.query.path || '/');
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
+    const stat = fs.statSync(filePath);
+    if (stat.isDirectory()) return res.status(400).json({ error: 'Cannot download a directory' });
+    const filename = path.basename(filePath);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', stat.size);
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

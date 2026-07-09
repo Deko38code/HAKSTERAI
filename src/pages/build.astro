@@ -519,7 +519,10 @@ import Layout from '../layouts/Layout.astro';
         const allowIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
         const denyIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
         let bodyHtml = '';
-        if (isAssistant) {
+        if (isAssistant && msg.url) {
+          // File created by agent — show download button
+          bodyHtml = `<div class="text-sm text-white/80">${escapeHtml(msg.content)}</div><a href="${msg.url}" download class="inline-flex items-center gap-1 text-xs text-[#7c3aed] hover:text-[#a855f7] mt-2 transition">⬇ Download file</a>`;
+        } else if (isAssistant) {
           bodyHtml = renderCodeBlocks(msg.content);
         } else if (isScript) {
           const scriptCodeId = `script-loaded-${Math.random().toString(36).slice(2, 9)}`;
@@ -1041,6 +1044,14 @@ import Layout from '../layouts/Layout.astro';
                   } else if (!scriptOutputs.has(event.tool_call_id || '')) {
                     addMessageBubble({ role: 'assistant', content: `→ ${toolResult.slice(0, 500)}` });
                   }
+                } else if (event.type === 'file_created') {
+                  // Agent wrote/edited a file — show a download button in chat
+                  const filePath = event.path || '';
+                  const fileName = filePath.split('/').pop() || 'file';
+                  const downloadUrl = `${API}/api/fs/download?path=${encodeURIComponent(filePath)}`;
+                  const fileMsg: Message = { role: 'assistant', content: `📄 Created: ${fileName}`, url: downloadUrl };
+                  conv.messages.push(fileMsg); saveConversation(conv);
+                  addMessageBubble(fileMsg);
                 } else if (event.type === 'image') {
                   const imgMsg: Message = { role: 'image', content: '', url: event.url, prompt: event.prompt || '' };
                   conv.messages.push(imgMsg); saveConversation(conv); addMessageBubble(imgMsg);
