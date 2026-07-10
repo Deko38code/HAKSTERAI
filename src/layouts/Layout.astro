@@ -218,6 +218,7 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
         try { googleUser = JSON.parse(googleUserData || '{}'); } catch {}
         user = { ...googleUser, ...user };
         const userId = user.id || user.userId || user.sub || '';
+        const maskedUserId = userId && userId.length > 14 ? `${userId.slice(0, 8)}…${userId.slice(-4)}` : userId;
         const userName = user.name || user.username || user.email || 'User';
 
         // Desktop navbar badge
@@ -230,7 +231,7 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
           const idEl = document.getElementById('nav-user-id');
           const avatarEl = document.getElementById('nav-user-avatar');
           if (nameEl) nameEl.textContent = userName;
-          if (idEl && userId) { idEl.textContent = `#${userId}`; idEl.classList.remove('hidden'); }
+          if (idEl && userId) { idEl.textContent = `#${maskedUserId}`; idEl.title = `User ID #${userId}`; idEl.classList.remove('hidden'); }
           if (avatarEl) avatarEl.textContent = userName.charAt(0).toUpperCase();
         }
         if (navSignin) navSignin.classList.add('hidden');
@@ -249,7 +250,7 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
           const avatarEl = document.getElementById('mobile-user-avatar');
           if (nameEl) nameEl.textContent = userName;
           if (emailEl) emailEl.textContent = user.email || '';
-          if (idEl) idEl.textContent = userId ? `ID #${userId}` : '';
+          if (idEl) { idEl.textContent = userId ? `ID #${maskedUserId}` : ''; idEl.title = userId ? `User ID #${userId}` : ''; }
           if (avatarEl) avatarEl.textContent = userName.charAt(0).toUpperCase();
         }
 
