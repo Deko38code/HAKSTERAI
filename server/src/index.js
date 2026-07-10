@@ -1316,6 +1316,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
 // ── Agent Run (agentic loop with tool calls) ──────────────────────
 const { OpenAI: OpenAIClient } = require('openai');
+const AnthropicClient = require('@anthropic-ai/sdk').default;
 
 // ── Per-session allowlist for dangerous commands ──────────────────
 const sessionAllowedCommands = new Map(); // sessionId -> Set of allowed command strings
@@ -1438,13 +1439,11 @@ app.post('/api/agent/run', async (req, res) => {
 
   // Build the OpenAI-compatible client for the chosen provider
   let client;
-  if (cfg.type === 'anthropic') {
-    // Anthropic doesn't support OpenAI-style tool_calls in our current setup —
-    // route through Ollama for agent mode
-    const ollamaCfg = PROVIDERS.ollama;
-    client = new OpenAIClient({
-      apiKey: ollamaCfg.apiKey || 'ollama',
-      baseURL: `${ollamaCfg.baseURL.replace(/\/$/, '')}/v1`,
+  const isAnthropicAgentProvider = cfg.type === 'anthropic' || cfg.type === 'claude-proxy';
+  if (isAnthropicAgentProvider) {
+    client = new AnthropicClient({
+      apiKey: cfg.type === 'claude-proxy' ? (process.env.ANTHROPIC_API_KEY || 'proxy') : process.env.ANTHROPIC_API_KEY,
+      ...(cfg.type === 'claude-proxy' ? { baseURL: cfg.baseURL } : {}),
     });
   } else if (cfg.type === 'openai-compat') {
     client = new OpenAIClient({
@@ -1456,6 +1455,150 @@ app.post('/api/agent/run', async (req, res) => {
       apiKey: cfg.apiKey,
       baseURL: cfg.baseURL,
     });
+  }
+
+  function anthropicToolsFromAgentTools(tools) {
+    return tools.map(tool => ({
+      name: tool.function.name,
+      description: tool.function.description || '',
+      input_schema: tool.function.parameters || { type: 'object', properties: {} },
+    }));
+  }
+
+  function anthropicContentFromMessageContent(content) {
+    if (!Array.isArray(content)) return String(content || '');
+    return content.map(part => {
+      if (part?.type === 'text') {
+        return { type: 'text', text: String(part.text || '') };
+      }
+      if (part?.type === 'image_url') {
+        const imageUrl = part.image_url?.url || part.url || '';
+        const dataMatch = String(imageUrl).match(/^data:([^;,]+);base64,(.+)$/);
+        if (dataMatch) {
+          return {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: dataMatch[1] || 'image/png',
+              data: dataMatch[2],
+            },
+          };
+        }
+        return {
+          type: 'image',
+          source: { type: 'url', url: imageUrl },
+        };
+      }
+      return { type: 'text', text: JSON.stringify(part) };
+    });
+  }
+
+  function anthropicMessagesFromAgentMessages(msgs) {
+    return msgs
+      .filter(m => m.role !== 'system')
+      .map(m => {
+        if (m.role === 'tool') {
+          return {
+            role: 'user',
+            content: [{
+              type: 'tool_result',
+              tool_use_id: m.tool_call_id || m.name || 'tool_result',
+              content: String(m.content || ''),
+            }],
+          };
+        }
+
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+          const content = [];
+          if (m.content) content.push({ type: 'text', text: String(m.content) });
+          for (const tc of m.tool_calls) {
+            let input = {};
+            try { input = JSON.parse(tc.function?.arguments || '{}'); } catch { input = {}; }
+            content.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.function?.name,
+              input,
+            });
+          }
+          return { role: 'assistant', content };
+        }
+
+        return {
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          content: anthropicContentFromMessageContent(m.content),
+        };
+      });
+  }
+
+  async function anthropicAgentStream(payload, signal) {
+    const stream = await client.messages.stream({
+      model: payload.model,
+      max_tokens: payload.max_tokens,
+      system: payload.messages.find(m => m.role === 'system')?.content || systemContent,
+      messages: anthropicMessagesFromAgentMessages(payload.messages),
+      tools: anthropicToolsFromAgentTools(AGENT_TOOLS),
+    }, { signal });
+
+    async function* iterator() {
+      const toolIndexes = new Map();
+      let nextToolIndex = 0;
+      for await (const event of stream) {
+        if (event.type === 'content_block_start') {
+          const block = event.content_block || {};
+          if (block.type === 'tool_use') {
+            const index = nextToolIndex++;
+            toolIndexes.set(event.index, index);
+            yield {
+              choices: [{
+                delta: {
+                  tool_calls: [{
+                    index,
+                    id: block.id,
+                    type: 'function',
+                    function: {
+                      name: block.name,
+                      arguments: block.input && Object.keys(block.input).length ? JSON.stringify(block.input) : '',
+                    },
+                  }],
+                },
+              }],
+            };
+          }
+        } else if (event.type === 'content_block_delta') {
+          const delta = event.delta || {};
+          if (delta.type === 'text_delta' && delta.text) {
+            yield { choices: [{ delta: { content: delta.text } }] };
+          } else if (delta.type === 'thinking_delta' && delta.thinking) {
+            yield { choices: [{ delta: { thinking: delta.thinking } }] };
+          } else if (delta.type === 'input_json_delta' && delta.partial_json) {
+            const index = toolIndexes.get(event.index);
+            if (index !== undefined) {
+              yield {
+                choices: [{
+                  delta: {
+                    tool_calls: [{
+                      index,
+                      function: { arguments: delta.partial_json },
+                    }],
+                  },
+                }],
+              };
+            }
+          }
+        } else if (event.type === 'message_delta' && event.usage) {
+          yield {
+            choices: [{ delta: {} }],
+            usage: {
+              prompt_tokens: event.usage.input_tokens || 0,
+              completion_tokens: event.usage.output_tokens || 0,
+            },
+          };
+        }
+      }
+    }
+
+    return iterator();
   }
 
   // Build machine context so the model knows the environment
@@ -1735,7 +1878,9 @@ ${dirListing}
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
         };
-        stream = cfg.type === 'openai-compat'
+        stream = isAnthropicAgentProvider
+          ? await anthropicAgentStream(streamPayload, streamAbort.signal)
+          : cfg.type === 'openai-compat'
           ? await openAICompatStreamFetch(cfg.baseURL, streamPayload, streamAbort.signal)
           : await client.chat.completions.create(streamPayload, { signal: streamAbort.signal });
       } catch (streamErr) {
