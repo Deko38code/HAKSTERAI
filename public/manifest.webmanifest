@@ -1,0 +1,57 @@
+{
+  "name": "haksterAI",
+  "short_name": "haksterAI",
+  "description": "Universal AI agent shell for coding, terminal, and project workflows.",
+  "id": "/?source=pwa",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "orientation": "any",
+  "categories": ["developer", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Chat",
+      "short_name": "Chat",
+      "description": "Open the HaksterAI chat agent.",
+      "url": "/build",
+      "icons": [{ "src": "/logo-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Terminal",
+      "short_name": "Terminal",
+      "description": "Open the terminal workspace.",
+      "url": "/terminal",
+      "icons": [{ "src": "/logo-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Open the agent dashboard.",
+      "url": "/dashboard",
+      "icons": [{ "src": "/logo-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
