@@ -3446,6 +3446,25 @@ app.get('/api/auth/google/client-id', (_req, res) => {
   res.json({ clientId: GOOGLE_CLIENT_ID, configured: !!GOOGLE_CLIENT_ID });
 });
 
+app.get('/api/auth/me', (req, res) => {
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Invalid or missing API key' });
+  const db = getDb();
+  const referralCode = ensureReferralCode(db, user);
+  res.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      plan: user.plan,
+      status: user.status,
+      referralCode,
+      tokenBalance: user.token_balance || 0,
+    },
+  });
+});
+
 // Redirect to Google OAuth consent screen
 app.get('/api/auth/google/redirect', (req, res) => {
   if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Google OAuth not configured' });

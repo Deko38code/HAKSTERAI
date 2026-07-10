@@ -217,42 +217,68 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
         let googleUser = {};
         try { googleUser = JSON.parse(googleUserData || '{}'); } catch {}
         user = { ...googleUser, ...user };
-        const userId = user.id || user.userId || user.sub || '';
-        const maskedUserId = userId && userId.length > 14 ? `${userId.slice(0, 8)}…${userId.slice(-4)}` : userId;
-        const userName = user.name || user.username || user.email || 'User';
+
+        function renderUserBadge(currentUser) {
+          const userId = currentUser.id || currentUser.userId || currentUser.sub || '';
+          const maskedUserId = userId && userId.length > 14 ? `${userId.slice(0, 8)}…${userId.slice(-4)}` : userId;
+          const userName = currentUser.name || currentUser.username || currentUser.email || 'User';
+
+          if (navBadge) {
+            navBadge.classList.remove('hidden');
+            navBadge.classList.add('flex');
+            const nameEl = document.getElementById('nav-user-name');
+            const idEl = document.getElementById('nav-user-id');
+            const avatarEl = document.getElementById('nav-user-avatar');
+            if (nameEl) nameEl.textContent = userName;
+            if (idEl && userId) { idEl.textContent = `#${maskedUserId}`; idEl.title = `User ID #${userId}`; idEl.classList.remove('hidden'); }
+            if (avatarEl) avatarEl.textContent = userName.charAt(0).toUpperCase();
+          }
+
+          if (mobileSection) {
+            mobileSection.classList.remove('hidden');
+            const nameEl = document.getElementById('mobile-user-name');
+            const emailEl = document.getElementById('mobile-user-email');
+            const idEl = document.getElementById('mobile-user-id');
+            const avatarEl = document.getElementById('mobile-user-avatar');
+            if (nameEl) nameEl.textContent = userName;
+            if (emailEl) emailEl.textContent = currentUser.email || '';
+            if (idEl) { idEl.textContent = userId ? `ID #${maskedUserId}` : ''; idEl.title = userId ? `User ID #${userId}` : ''; }
+            if (avatarEl) avatarEl.textContent = userName.charAt(0).toUpperCase();
+          }
+        }
 
         // Desktop navbar badge
         const navBadge = document.getElementById('nav-user-badge');
         const navSignin = document.getElementById('nav-signin-btn');
-        if (navBadge) {
-          navBadge.classList.remove('hidden');
-          navBadge.classList.add('flex');
-          const nameEl = document.getElementById('nav-user-name');
-          const idEl = document.getElementById('nav-user-id');
-          const avatarEl = document.getElementById('nav-user-avatar');
-          if (nameEl) nameEl.textContent = userName;
-          if (idEl && userId) { idEl.textContent = `#${maskedUserId}`; idEl.title = `User ID #${userId}`; idEl.classList.remove('hidden'); }
-          if (avatarEl) avatarEl.textContent = userName.charAt(0).toUpperCase();
-        }
-        if (navSignin) navSignin.classList.add('hidden');
 
         // Mobile quick logout button
         const mobileLogout = document.getElementById('mobile-logout-btn');
-        if (mobileLogout) mobileLogout.classList.remove('hidden');
 
         // Mobile menu user section
         const mobileSection = document.getElementById('mobile-user-section');
-        if (mobileSection) {
-          mobileSection.classList.remove('hidden');
-          const nameEl = document.getElementById('mobile-user-name');
-          const emailEl = document.getElementById('mobile-user-email');
-          const idEl = document.getElementById('mobile-user-id');
-          const avatarEl = document.getElementById('mobile-user-avatar');
-          if (nameEl) nameEl.textContent = userName;
-          if (emailEl) emailEl.textContent = user.email || '';
-          if (idEl) { idEl.textContent = userId ? `ID #${maskedUserId}` : ''; idEl.title = userId ? `User ID #${userId}` : ''; }
-          if (avatarEl) avatarEl.textContent = userName.charAt(0).toUpperCase();
-        }
+        renderUserBadge(user);
+        if (navSignin) navSignin.classList.add('hidden');
+        if (mobileLogout) mobileLogout.classList.remove('hidden');
+
+        fetch('/api/auth/me', { headers: { 'x-api-key': token } })
+          .then((res) => res.ok ? res.json() : null)
+          .then((data) => {
+            if (!data?.user) return;
+            const dbUser = {
+              ...user,
+              ...data.user,
+              name: data.user.username || data.user.email || user.name || 'User',
+            };
+            localStorage.setItem('hakster_google_user', JSON.stringify({ ...googleUser, ...data.user }));
+            localStorage.setItem('hakster_user_data', JSON.stringify({
+              id: dbUser.id || '',
+              name: dbUser.name,
+              email: dbUser.email || '',
+              picture: dbUser.picture || '',
+            }));
+            renderUserBadge(dbUser);
+          })
+          .catch(() => {});
 
         // Wire up logout buttons
         document.getElementById('nav-logout-btn')?.addEventListener('click', globalLogout);
