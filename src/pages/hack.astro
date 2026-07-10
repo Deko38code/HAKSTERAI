@@ -679,7 +679,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               }
             });
           }
-        }, 250);
+        }, 16);
       });
 
       overlay?.addEventListener('click', () => {
@@ -687,7 +687,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         sidebar.classList.remove('mobile-open');
         overlay.classList.remove('active');
         toggleBtn.classList.remove('open');
-        setTimeout(() => window.dispatchEvent(new Event('resize')), 250);
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 16);
       });
 
       // ── Right sidebar toggle ──────────────────────────────────────
@@ -714,7 +714,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               }
             });
           }
-        }, 250);
+        }, 16);
       });
 
       // ── Load provider/model info ─────────────────────────────────
@@ -830,10 +830,10 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               if (pane && typeof term.reconnect === 'function') {
                 term.reconnect(pane);
               } else {
-                setTimeout(() => location.reload(), 1000);
+                location.reload();
               }
             } else {
-              setTimeout(() => location.reload(), 1000);
+              location.reload();
             }
             setTimeout(() => {
               fetch('/api/dashboard').then(r => r.json()).then(dash => {
@@ -843,9 +843,9 @@ import CrushTerminal from '../components/CrushTerminal.astro';
                   if (modelBadge) modelBadge.textContent = (dash.crush.model || model).length > 20 ? (dash.crush.model || model).substring(0, 18) + '…' : (dash.crush.model || model);
                 }
               }).catch(() => {});
-            }, 2000);
+            }, 500);
           }
-        }).catch(() => { setTimeout(() => location.reload(), 1000); });
+        }).catch(() => { location.reload(); });
         const csModel = document.getElementById('cs-model');
         const csProv = document.getElementById('cs-provider');
         if (csModel) csModel.textContent = model;
@@ -935,7 +935,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       }
 
       refreshCrushSidebar();
-      setInterval(refreshCrushSidebar, 15000);
+      setInterval(refreshCrushSidebar, 5000);
 
       // ══════════════════════════════════════════════════════════════════
       // HAKSTER AI HACK LAB
@@ -1213,27 +1213,27 @@ import CrushTerminal from '../components/CrushTerminal.astro';
           _hackDecodeTimers.push(setTimeout(() => {
             for (let i = 0; i < lines.length; i++) lines[i].el.textContent = _decodePass(lines[i].finalText, 1, 5);
             overlay.style.opacity = '0.8';
-          }, 20));
+          }, 10));
           _hackDecodeTimers.push(setTimeout(() => {
             for (let i = 0; i < lines.length; i++) lines[i].el.textContent = _decodePass(lines[i].finalText, 2, 5);
             overlay.style.opacity = '0.6';
-          }, 45));
+          }, 25));
           _hackDecodeTimers.push(setTimeout(() => {
             for (let i = 0; i < lines.length; i++) lines[i].el.textContent = _decodePass(lines[i].finalText, 3, 5);
             overlay.style.opacity = '0.4';
-          }, 75));
+          }, 45));
           _hackDecodeTimers.push(setTimeout(() => {
             for (let i = 0; i < lines.length; i++) lines[i].el.textContent = _decodePass(lines[i].finalText, 4, 5);
             overlay.style.opacity = '0.2';
-          }, 105));
+          }, 65));
           _hackDecodeTimers.push(setTimeout(() => {
             for (let i = 0; i < lines.length; i++) lines[i].el.textContent = lines[i].finalText;
             overlay.style.opacity = '0.08';
-          }, 140));
+          }, 90));
           _hackDecodeTimers.push(setTimeout(() => {
             overlay.remove();
             _hackActiveOverlay = null;
-          }, 300));
+          }, 150));
         }
 
         // ── Client Device Detection ──────────────────────────────────
@@ -1487,7 +1487,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
           if (window.__crushTerminals && window.__crushTerminals['crush-main']) {
             cb();
           } else if (attempts < 60) {
-            setTimeout(() => waitForTerminal(cb, attempts + 1), 250);
+            setTimeout(() => waitForTerminal(cb, attempts + 1), 50);
           }
         }
 
@@ -1502,6 +1502,11 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         // ── Google Sign-In for hack lab ──
         let hackGoogleToken = null;
         let hackGoogleUser = null;
+        function getHackReferralCode() {
+          return (localStorage.getItem('hakster_referral_code') || '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 24);
+        }
+        const hackInitialReferralCode = new URLSearchParams(window.location.search).get('ref') || new URLSearchParams(window.location.search).get('referral');
+        if (hackInitialReferralCode) localStorage.setItem('hakster_referral_code', hackInitialReferralCode.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 24));
 
         function loadHackGoogleIdentity() {
           // GSI library not needed for Desktop app OAuth — using redirect flow
@@ -1544,7 +1549,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
             const res = await fetch(`${API}/api/auth/google`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ credential, device }),
+              body: JSON.stringify({ credential, device, referralCode: getHackReferralCode() }),
             });
             const data = await res.json();
             if (data.ok) {
@@ -1552,6 +1557,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               hackGoogleUser = data.user;
               localStorage.setItem('hakster_google_token', hackGoogleToken);
               localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
+              localStorage.removeItem('hakster_referral_code');
               window.haksterSessionTouch?.();
               showHackAccount(data.user);
             }
@@ -1575,7 +1581,8 @@ import CrushTerminal from '../components/CrushTerminal.astro';
 
         // Fallback button uses redirect-based OAuth flow
         document.getElementById('hack-google-fallback')?.addEventListener('click', () => {
-          window.location.href = `${API}/api/auth/google/redirect`;
+          const ref = getHackReferralCode();
+          window.location.href = `${API}/api/auth/google/redirect${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`;
         });
 
         // Check for OAuth callback result in URL
@@ -1591,6 +1598,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
                 hackGoogleUser = data.user;
                 localStorage.setItem('hakster_google_token', hackGoogleToken);
                 localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
+                localStorage.removeItem('hakster_referral_code');
                 window.haksterSessionTouch?.();
                 showHackAccount(data.user);
               }

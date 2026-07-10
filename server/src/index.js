@@ -31,6 +31,8 @@ const FS_ROOT = process.env.FS_ROOT || process.cwd();
 const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED === 'true'; // default: off
 const FREE_USAGE_LIMIT = parseInt(process.env.FREE_USAGE_LIMIT || '5', 10);
 const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
+const REFERRAL_REWARD_TOKENS = parseInt(process.env.REFERRAL_REWARD_TOKENS || '10000', 10);
+const REFERRAL_SIGNUP_TOKENS = parseInt(process.env.REFERRAL_SIGNUP_TOKENS || '2500', 10);
 
 const PRICING_CATALOG = [
   {
@@ -115,6 +117,71 @@ const PRICING_CATALOG = [
     ],
   },
 ];
+
+function normalizeReferralCode(code) {
+  return String(code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+}
+
+function generateReferralCode(username = '') {
+  const base = normalizeReferralCode(username).slice(0, 10) || 'HAKSTER';
+  return `${base}${crypto.randomBytes(3).toString('hex').toUpperCase()}`.slice(0, 18);
+}
+
+function ensureReferralCode(db, user) {
+  if (!user?.id) return null;
+  if (user.referral_code) return user.referral_code;
+  for (let i = 0; i < 8; i++) {
+    const code = generateReferralCode(user.username || user.email || user.id);
+    try {
+      db.prepare("UPDATE users SET referral_code = ?, updated_at = unixepoch() WHERE id = ? AND (referral_code IS NULL OR referral_code = '')")
+        .run(code, user.id);
+      return db.prepare('SELECT referral_code FROM users WHERE id = ?').get(user.id)?.referral_code || code;
+    } catch {}
+  }
+  return null;
+}
+
+function parseOAuthState(state) {
+  if (!state) return {};
+  try {
+    const json = Buffer.from(String(state), 'base64url').toString('utf8');
+    return JSON.parse(json);
+  } catch {
+    return {};
+  }
+}
+
+function makeOAuthState(referralCode) {
+  return Buffer.from(JSON.stringify({
+    nonce: crypto.randomBytes(16).toString('hex'),
+    ref: normalizeReferralCode(referralCode),
+  })).toString('base64url');
+}
+
+function applyReferralCredit(db, newUser, rawReferralCode) {
+  const referralCode = normalizeReferralCode(rawReferralCode);
+  if (!newUser?.id || !referralCode) return null;
+  const referrer = db.prepare('SELECT * FROM users WHERE referral_code = ?').get(referralCode);
+  if (!referrer || referrer.id === newUser.id) return null;
+  const already = db.prepare('SELECT id FROM referrals WHERE referred_user_id = ?').get(newUser.id);
+  if (already) return null;
+
+  const referralId = 'ref_' + crypto.randomBytes(16).toString('hex');
+  const rewardTokens = Math.max(0, REFERRAL_REWARD_TOKENS);
+  const referredTokens = Math.max(0, REFERRAL_SIGNUP_TOKENS);
+  const tx = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO referrals (id, referrer_user_id, referred_user_id, referral_code, reward_tokens, referred_tokens, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'credited')`
+    ).run(referralId, referrer.id, newUser.id, referralCode, rewardTokens, referredTokens);
+    db.prepare('UPDATE users SET token_balance = COALESCE(token_balance, 0) + ?, updated_at = unixepoch() WHERE id = ?')
+      .run(rewardTokens, referrer.id);
+    db.prepare('UPDATE users SET token_balance = COALESCE(token_balance, 0) + ?, referred_by = ?, updated_at = unixepoch() WHERE id = ?')
+      .run(referredTokens, referrer.id, newUser.id);
+  });
+  tx();
+  return { referralId, referrerId: referrer.id, rewardTokens, referredTokens, referralCode };
+}
 
 // ── In-memory caches ──────────────────────────────────────────────
 let _skillsCache = null;
@@ -1181,10 +1248,10 @@ app.post('/api/chat/stream', async (req, res) => {
     return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   }
 
-  // SSE heartbeat — prevent idle disconnect
+  // SSE heartbeat — prevent idle disconnect (fast)
   const chatHeartbeat = setInterval(() => {
     try { res.write(':heartbeat\n\n'); } catch {}
-  }, 15000);
+  }, 5000);
   res.on('close', () => { clearInterval(chatHeartbeat); });
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -1356,12 +1423,12 @@ app.post('/api/agent/run', async (req, res) => {
     clearInterval(heartbeat);
   });
 
-  // SSE heartbeat — prevent idle disconnect (send every 15s)
+  // SSE heartbeat — prevent idle disconnect (send every 5s)
   const heartbeat = setInterval(() => {
     if (!aborted) {
       try { res.write(`:heartbeat\n\n`); } catch {}
     }
-  }, 15000);
+  }, 5000);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -1656,8 +1723,8 @@ ${dirListing}
       const streamAbort = new AbortController();
       const streamTimeout = setTimeout(() => {
         streamAbort.abort();
-        console.warn('[agent] Stream timed out after 120s, aborting');
-      }, 120000);
+        console.warn('[agent] Stream timed out after 60s, aborting');
+      }, 60000);
 
       let stream;
       try {
@@ -1674,7 +1741,7 @@ ${dirListing}
       } catch (streamErr) {
         clearTimeout(streamTimeout);
         if (streamErr.name === 'AbortError') {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (120s). Try again.' })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (60s). Try again.' })}\n\n`);
           break;
         }
         throw streamErr;
@@ -2338,7 +2405,7 @@ app.post('/api/generate', async (req, res) => {
   res.on('close', () => { aborted = true; clearInterval(heartbeat); });
   const heartbeat = setInterval(() => {
     if (!aborted) { try { res.write(`:heartbeat\n\n`); } catch {} }
-  }, 15000);
+  }, 5000);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -2372,7 +2439,7 @@ app.post('/api/generate', async (req, res) => {
 
       // Stream model response with tool support
       const streamAbort = new AbortController();
-      const streamTimeout = setTimeout(() => { streamAbort.abort(); }, 120000);
+      const streamTimeout = setTimeout(() => { streamAbort.abort(); }, 60000);
 
       let stream;
       try {
@@ -2386,7 +2453,7 @@ app.post('/api/generate', async (req, res) => {
       } catch (streamErr) {
         clearTimeout(streamTimeout);
         if (streamErr.name === 'AbortError') {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (120s).' })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (60s).' })}\n\n`);
           break;
         }
         throw streamErr;
@@ -3244,7 +3311,7 @@ app.get('/api/auth/google/redirect', (req, res) => {
   if (host.startsWith('www.')) host = host.slice(4);
   const port = (host === 'localhost' || host === '127.0.0.1') ? `:${req.socket.localPort}` : '';
   const redirectUri = `${proto}://${host}${port}/api/auth/google/callback`;
-  const state = require('crypto').randomBytes(16).toString('hex');
+  const state = makeOAuthState(req.query.ref || req.query.referral || '');
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: redirectUri,
@@ -3265,6 +3332,8 @@ app.get('/api/auth/google/callback', async (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.redirect('/build?google_error=not_configured');
 
   try {
+    const oauthState = parseOAuthState(req.query.state);
+    const referralCode = normalizeReferralCode(oauthState.ref);
     const proto = req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http');
     let host = req.hostname || 'localhost';
     if (host.startsWith('www.')) host = host.slice(4);
@@ -3320,19 +3389,33 @@ app.get('/api/auth/google/callback', async (req, res) => {
       }
     }
 
+    // Owner accounts always get admin role + enterprise plan on login
+    const OWNER_EMAILS = ['dekekenneth840@gmail.com', 'dekoneed@gmail.com', 'dekeneed@yahoo.com', 'savannahscott899@gmail.com'];
+    const OWNER_IDS = {
+      'dekekenneth840@gmail.com': '1234',
+      'dekoneed@gmail.com': '1235',
+      'dekeneed@yahoo.com': '1236',
+      'savannahscott899@gmail.com': '1237'
+    };
+    const isOwner = email && OWNER_EMAILS.includes(email.toLowerCase().trim());
+
     if (!user) {
       wasSignup = true;
-      const id = uuidv4();
+      const id = isOwner ? OWNER_IDS[email.toLowerCase().trim()] : uuidv4();
       const apiKey = 'hkai_' + require('crypto').randomBytes(24).toString('hex');
       const username = name.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30) || ('g_' + googleId.slice(0, 8));
       db.prepare(
         'INSERT INTO users (id, username, email, api_key, google_id, role, plan, status, last_login_at, last_login_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)'
-      ).run(id, username, email, apiKey, googleId, 'user', 'free', 'active', ip);
+      ).run(id, username, email, apiKey, googleId, isOwner ? 'admin' : 'user', isOwner ? 'enterprise' : 'free', 'active', ip);
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+      ensureReferralCode(db, user);
+      if (!isOwner) applyReferralCredit(db, user, referralCode);
     } else {
-      db.prepare('UPDATE users SET last_login_at = unixepoch(), last_login_ip = ?, updated_at = unixepoch() WHERE id = ?')
-        .run(ip, user.id);
+      db.prepare('UPDATE users SET last_login_at = unixepoch(), last_login_ip = ?, updated_at = unixepoch(), role = COALESCE(?, role), plan = COALESCE(?, plan) WHERE id = ?')
+        .run(ip, isOwner ? 'admin' : null, isOwner ? 'enterprise' : null, user.id);
+      ensureReferralCode(db, user);
     }
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
 
     // Log to access_logs
     db.prepare('INSERT INTO access_logs (user_id, ip_address, user_agent, endpoint, method, status_code) VALUES (?, ?, ?, ?, ?, ?)')
@@ -3356,7 +3439,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
     const userData = encodeURIComponent(JSON.stringify({
       ok: true,
       isNewUser: wasSignup,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key },
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
       apiKey: user.api_key,
     }));
     res.redirect(`/build?google_auth=${userData}`);
@@ -3408,18 +3491,55 @@ function incrementUsage(user) {
 app.get('/api/usage', (req, res) => {
   const user = getUserByApiKey(req);
   if (!user) return res.status(401).json({ error: 'Invalid or missing API key' });
+  const db = getDb();
+  const referralCode = ensureReferralCode(db, user);
   res.json({
     plan: user.plan,
     used: user.usage_count || 0,
     limit: user.plan === 'free' ? FREE_USAGE_LIMIT : -1, // -1 = unlimited
     remaining: user.plan === 'free' ? Math.max(0, FREE_USAGE_LIMIT - (user.usage_count || 0)) : -1,
+    tokenBalance: user.token_balance || 0,
+    referralCode,
     limitEnabled: USAGE_LIMIT_ENABLED,
     resetAt: user.usage_reset_at || null,
   });
 });
 
+app.get('/api/referrals', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Invalid or missing API key' });
+  const referralCode = ensureReferralCode(db, user);
+  const origin = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+  const referrals = db.prepare(
+    `SELECT r.id, r.referral_code, r.reward_tokens, r.referred_tokens, r.status, r.created_at,
+            u.username, u.email
+       FROM referrals r
+       LEFT JOIN users u ON u.id = r.referred_user_id
+      WHERE r.referrer_user_id = ?
+      ORDER BY r.created_at DESC
+      LIMIT 100`
+  ).all(user.id);
+  const totals = db.prepare(
+    `SELECT COUNT(*) as count, COALESCE(SUM(reward_tokens), 0) as earned
+       FROM referrals
+      WHERE referrer_user_id = ? AND status = 'credited'`
+  ).get(user.id);
+  res.json({
+    referralCode,
+    referralLink: `${origin}/?ref=${encodeURIComponent(referralCode || '')}`,
+    tokenBalance: user.token_balance || 0,
+    rewardTokens: REFERRAL_REWARD_TOKENS,
+    signupTokens: REFERRAL_SIGNUP_TOKENS,
+    totalReferrals: totals?.count || 0,
+    totalEarned: totals?.earned || 0,
+    referrals,
+  });
+});
+
 app.post('/api/auth/google', async (req, res) => {
   const { credential, device } = req.body;
+  const referralCode = normalizeReferralCode(req.body?.referralCode || req.body?.ref || '');
   if (!credential) return res.status(400).json({ error: 'credential (JWT) is required' });
   if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Google OAuth not configured — set GOOGLE_CLIENT_ID in .env' });
 
@@ -3450,9 +3570,18 @@ app.post('/api/auth/google', async (req, res) => {
     const picture = payload.picture || '';
     const ip = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || '';
     const userAgent = req.get('User-Agent') || '';
-    const isNewUser = !db.prepare('SELECT 1 FROM users WHERE google_id = ? OR (email = ? AND email != "")').get(googleId, email);
-
     const db = getDb();
+
+    const OWNER_EMAILS = ['dekekenneth840@gmail.com', 'dekoneed@gmail.com', 'dekeneed@yahoo.com', 'savannahscott899@gmail.com'];
+    const OWNER_IDS = {
+      'dekekenneth840@gmail.com': '1234',
+      'dekoneed@gmail.com': '1235',
+      'dekeneed@yahoo.com': '1236',
+      'savannahscott899@gmail.com': '1237'
+    };
+    const isOwner = email && OWNER_EMAILS.includes(email.toLowerCase().trim());
+
+    const isNewUser = !db.prepare('SELECT 1 FROM users WHERE google_id = ? OR (email = ? AND email != "")').get(googleId, email);
 
     // Check if user exists by google_id
     let user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId);
@@ -3461,8 +3590,8 @@ app.post('/api/auth/google', async (req, res) => {
       // Check by email — link existing account
       user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
       if (user) {
-        db.prepare('UPDATE users SET google_id = ?, updated_at = unixepoch(), last_login_at = unixepoch(), last_login_ip = ? WHERE id = ?')
-          .run(googleId, ip, user.id);
+        db.prepare('UPDATE users SET google_id = ?, updated_at = unixepoch(), last_login_at = unixepoch(), last_login_ip = ?, role = COALESCE(?, role), plan = COALESCE(?, plan) WHERE id = ?')
+          .run(googleId, ip, isOwner ? 'admin' : null, isOwner ? 'enterprise' : null, user.id);
       }
     }
 
@@ -3470,18 +3599,22 @@ app.post('/api/auth/google', async (req, res) => {
     if (!user) {
       // Create new user
       wasSignup = true;
-      const id = uuidv4();
+      const id = isOwner ? OWNER_IDS[email.toLowerCase().trim()] : uuidv4();
       const apiKey = 'hkai_' + require('crypto').randomBytes(24).toString('hex');
       const username = name.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30) || ('g_' + googleId.slice(0, 8));
       db.prepare(
         'INSERT INTO users (id, username, email, api_key, google_id, role, plan, status, last_login_at, last_login_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)'
-      ).run(id, username, email, apiKey, googleId, 'user', 'free', 'active', ip);
+      ).run(id, username, email, apiKey, googleId, isOwner ? 'admin' : 'user', isOwner ? 'enterprise' : 'free', 'active', ip);
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+      ensureReferralCode(db, user);
+      if (!isOwner) applyReferralCredit(db, user, referralCode);
     } else {
-      // Update last login
-      db.prepare('UPDATE users SET last_login_at = unixepoch(), last_login_ip = ?, updated_at = unixepoch() WHERE id = ?')
-        .run(ip, user.id);
+      // Update last login, promote owner if needed
+      db.prepare('UPDATE users SET last_login_at = unixepoch(), last_login_ip = ?, updated_at = unixepoch(), role = COALESCE(?, role), plan = COALESCE(?, plan) WHERE id = ?')
+        .run(ip, isOwner ? 'admin' : null, isOwner ? 'enterprise' : null, user.id);
+      ensureReferralCode(db, user);
     }
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
 
     // Log to access_logs
     db.prepare('INSERT INTO access_logs (user_id, ip_address, user_agent, endpoint, method, status_code) VALUES (?, ?, ?, ?, ?, ?)')
@@ -3519,7 +3652,7 @@ app.post('/api/auth/google', async (req, res) => {
     res.json({
       ok: true,
       isNewUser: wasSignup,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role, plan: user.plan, picture },
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, plan: user.plan, picture, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
       apiKey: user.api_key,
     });
   } catch (err) {
@@ -3784,7 +3917,7 @@ ptyWss.on('connection', (ws, req) => {
     if (ws.readyState === 1) {
       try { ws.send(JSON.stringify({ type: 'heartbeat', ts: Date.now() })); } catch {}
     }
-  }, 15000);
+  }, 5000);
 
   // PTY output → browser — pass through directly for TUI apps
   ptyProcess.onData((data) => {
@@ -3825,7 +3958,7 @@ ptyWss.on('connection', (ws, req) => {
         ptyProcess.kill('SIGTERM');
         setTimeout(() => {
           try { ptyProcess.kill('SIGKILL'); } catch {}
-        }, 1000);
+        }, 100);
       } catch {}
     }
   });

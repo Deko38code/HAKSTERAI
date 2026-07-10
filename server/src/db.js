@@ -87,6 +87,10 @@ function initSchema(db) {
       username      TEXT UNIQUE NOT NULL,
       email         TEXT,
       api_key       TEXT UNIQUE NOT NULL,
+      google_id     TEXT UNIQUE,
+      referral_code TEXT UNIQUE,
+      referred_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+      token_balance INTEGER NOT NULL DEFAULT 0,
       role          TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user','guest')),
       plan          TEXT NOT NULL DEFAULT 'free' CHECK(plan IN ('free','pro','enterprise')),
       status        TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','banned')),
@@ -96,10 +100,25 @@ function initSchema(db) {
       last_login_at INTEGER,
       last_login_ip TEXT
     );
-
     CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key);
     CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+    -- Referrals — tracks friend signups and one-time token rewards
+    CREATE TABLE IF NOT EXISTS referrals (
+      id                TEXT PRIMARY KEY,
+      referrer_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referred_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referral_code     TEXT NOT NULL,
+      reward_tokens     INTEGER NOT NULL DEFAULT 0,
+      referred_tokens   INTEGER NOT NULL DEFAULT 0,
+      status            TEXT NOT NULL DEFAULT 'credited' CHECK(status IN ('pending','credited','void')),
+      created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+      UNIQUE(referred_user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_user_id);
+    CREATE INDEX IF NOT EXISTS idx_referrals_code ON referrals(referral_code);
 
     -- Access logs — every session start logs IP, user agent, session ID
     CREATE TABLE IF NOT EXISTS access_logs (
@@ -191,7 +210,152 @@ function initSchema(db) {
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_command_allowlist_command ON command_allowlist(command);
+
+    -- User activity log — tracks every user action with full IP/device tracking
+    CREATE TABLE IF NOT EXISTS user_activity (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id       TEXT REFERENCES users(id) ON DELETE SET NULL,
+      action        TEXT NOT NULL,  -- login, logout, signup, chat_start, tool_use, api_call, google_auth
+      ip_address    TEXT,
+      user_agent    TEXT,
+      endpoint      TEXT,
+      method        TEXT DEFAULT 'POST',
+      status_code   INTEGER DEFAULT 200,
+      device_type   TEXT,           -- desktop, tablet, mobile
+      os_name       TEXT,
+      browser       TEXT,
+      screen_size   TEXT,           -- e.g. "1920x1080"
+      language      TEXT,
+      timezone      TEXT,
+      session_id    TEXT,
+      metadata      TEXT,           -- JSON blob for extra context
+      created_at    INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_activity_user ON user_activity(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_activity_action ON user_activity(action);
+    CREATE INDEX IF NOT EXISTS idx_user_activity_ip ON user_activity(ip_address);
+    CREATE INDEX IF NOT EXISTS idx_user_activity_created ON user_activity(created_at);
+
+    -- Payments / receipts — tracks every payment transaction
+    CREATE TABLE IF NOT EXISTS payments (
+      id              TEXT PRIMARY KEY,          -- internal receipt ID (e.g. rcpt_xxx)
+      user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount          REAL NOT NULL DEFAULT 0,
+      currency        TEXT NOT NULL DEFAULT 'USD',
+      plan            TEXT NOT NULL DEFAULT 'pro',  -- free, pro, enterprise
+      billing_cycle   TEXT NOT NULL DEFAULT 'monthly', -- monthly, yearly, lifetime
+      status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','completed','failed','refunded','cancelled')),
+      payment_method  TEXT,  -- stripe, paypal, crypto, manual
+      provider_id     TEXT,  -- Stripe charge/sub ID, PayPal txn ID, etc.
+      description     TEXT,
+      metadata        TEXT,  -- JSON blob for extra context
+      created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+      completed_at    INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+    CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+    CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(created_at);
+    CREATE INDEX IF NOT EXISTS idx_payments_provider ON payments(provider_id);
+
+    -- User devices — remembers every device a user has logged in from (for "remember me" and device management)
+    CREATE TABLE IF NOT EXISTS user_devices (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id           TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      device_fingerprint TEXT NOT NULL,  -- hash of UA + screen + GPU + timezone
+      device_name       TEXT,            -- e.g. "iPhone 15 Pro" or "Windows Desktop"
+      device_type       TEXT,            -- desktop, mobile, tablet, tv
+      os_name           TEXT,
+      os_version        TEXT,
+      browser           TEXT,
+      browser_version   TEXT,
+      user_agent        TEXT,
+      ip_address        TEXT,
+      screen_resolution TEXT,
+      gpu               TEXT,
+      timezone          TEXT,
+      language          TEXT,
+      is_trusted        INTEGER NOT NULL DEFAULT 0,
+      last_seen_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+      first_seen_at     INTEGER NOT NULL DEFAULT (unixepoch()),
+      created_at        INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_devices_user ON user_devices(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_devices_fp ON user_devices(device_fingerprint);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_devices_user_fp ON user_devices(user_id, device_fingerprint);
+
+    -- Subscriptions — active subscription state per user
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id              TEXT PRIMARY KEY,
+      user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan            TEXT NOT NULL DEFAULT 'pro',
+      billing_cycle   TEXT NOT NULL DEFAULT 'monthly',
+      status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','cancelled','expired','past_due','trialing')),
+      current_period_start INTEGER,
+      current_period_end   INTEGER,
+      cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+      payment_id      TEXT REFERENCES payments(id) ON DELETE SET NULL,
+      provider_sub_id TEXT,  -- Stripe subscription ID
+      metadata        TEXT,
+      created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at      INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
   `);
+
+  // ── Migrations: add columns to existing tables if missing ──
+  try {
+    const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+    if (!userCols.includes('google_id')) {
+      db.prepare("ALTER TABLE users ADD COLUMN google_id TEXT").run();
+      console.log('  [migration] Added google_id column to users');
+    }
+    if (!userCols.includes('usage_count')) {
+      db.prepare("ALTER TABLE users ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0").run();
+      console.log('  [migration] Added usage_count column to users');
+    }
+    if (!userCols.includes('usage_reset_at')) {
+      db.prepare("ALTER TABLE users ADD COLUMN usage_reset_at INTEGER NOT NULL DEFAULT 0").run();
+      console.log('  [migration] Added usage_reset_at column to users');
+    }
+    if (!userCols.includes('referral_code')) {
+      db.prepare("ALTER TABLE users ADD COLUMN referral_code TEXT").run();
+      console.log('  [migration] Added referral_code column to users');
+    }
+    if (!userCols.includes('referred_by')) {
+      db.prepare("ALTER TABLE users ADD COLUMN referred_by TEXT REFERENCES users(id) ON DELETE SET NULL").run();
+      console.log('  [migration] Added referred_by column to users');
+    }
+    if (!userCols.includes('token_balance')) {
+      db.prepare("ALTER TABLE users ADD COLUMN token_balance INTEGER NOT NULL DEFAULT 0").run();
+      console.log('  [migration] Added token_balance column to users');
+    }
+    // Create google_id index after column is added
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)").run();
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code_unique ON users(referral_code) WHERE referral_code IS NOT NULL").run();
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)").run();
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by)").run();
+  } catch (e) { /* table may not exist yet */ }
+
+  // ── Migrate client_contexts: add enhanced detection columns ──
+  try {
+    const ctxCols = db.prepare("PRAGMA table_info(client_contexts)").all().map(c => c.name);
+    const newCtxCols = [
+      'device_model', 'engine', 'engine_version', 'languages', 'timezone_offset',
+      'screen_avail_width', 'screen_avail_height', 'screen_color_depth',
+      'screen_orientation', 'viewport_width', 'viewport_height',
+      'max_touch_points', 'connection_type', 'connection_downlink', 'connection_rtt',
+      'connection_save_data', 'cookies_enabled', 'do_not_track', 'pdf_viewer',
+      'webdriver', 'is_bot', 'gpu', 'dark_mode', 'reduced_motion',
+    ];
+    for (const col of newCtxCols) {
+      if (!ctxCols.includes(col)) {
+        db.prepare(`ALTER TABLE client_contexts ADD COLUMN ${col} TEXT`).run();
+        console.log(`  [migration] Added ${col} column to client_contexts`);
+      }
+    }
+  } catch (e) { /* table may not exist yet */ }
 
   // Seed admin user if no users exist
   const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;

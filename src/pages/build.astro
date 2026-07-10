@@ -59,6 +59,14 @@ import Layout from '../layouts/Layout.astro';
                 </div>
                 <div id="sidebar-account-apikey" class="rounded-lg bg-[#0a0a0f] border border-[#333] px-2 py-1.5 text-[10px] font-mono text-white/40 break-all cursor-pointer hover:text-white/70 transition" title="Click to copy API key">—</div>
                 <div id="sidebar-account-usage" class="text-[10px] text-white/40 text-center">Loading usage…</div>
+                <div id="sidebar-referral-card" class="hidden rounded-lg border border-[#333] bg-[#0a0a0f] px-2 py-2 space-y-1.5">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[9px] font-semibold uppercase tracking-[0.14em] text-white/30">Referral</span>
+                    <span id="sidebar-token-balance" class="rounded bg-[#7c3aed]/20 px-1.5 py-0.5 text-[10px] font-bold text-[#a855f7]">0 tokens</span>
+                  </div>
+                  <button id="sidebar-referral-link" type="button" class="w-full rounded-md border border-[#1e1e2e] bg-[#111118] px-2 py-1.5 text-left text-[10px] font-mono text-white/45 hover:text-white/80 hover:border-[#7c3aed]/40 transition truncate" title="Click to copy referral link">Loading referral link...</button>
+                  <div id="sidebar-referral-meta" class="text-[10px] text-white/35">Earn tokens when a friend signs up.</div>
+                </div>
                 <button id="sidebar-account-logout" class="w-full flex items-center justify-center gap-1.5 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 hover:bg-[#ef4444]/20 text-[#ef4444] text-xs font-semibold py-1.5 transition">
                   <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
                   Sign Out
@@ -2573,6 +2581,12 @@ import Layout from '../layouts/Layout.astro';
     let googleUser: any = null;
     let googleToken: string | null = null;
 
+    function getReferralCodeFromStorage() {
+      return (localStorage.getItem('hakster_referral_code') || '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 24);
+    }
+    const initialReferralCode = new URLSearchParams(window.location.search).get('ref') || new URLSearchParams(window.location.search).get('referral');
+    if (initialReferralCode) localStorage.setItem('hakster_referral_code', initialReferralCode.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 24));
+
     function loadGoogleIdentity() {
       // GSI library not needed for Desktop app OAuth — using redirect flow
       // Just check for existing session from URL callback
@@ -2616,7 +2630,7 @@ import Layout from '../layouts/Layout.astro';
         const res = await fetch(`${API}/api/auth/google`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credential, device }),
+          body: JSON.stringify({ credential, device, referralCode: getReferralCodeFromStorage() }),
         });
         const data = await res.json();
         if (data.ok) {
@@ -2625,6 +2639,7 @@ import Layout from '../layouts/Layout.astro';
           localStorage.setItem('hakster_google_token', googleToken!);
           localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
           localStorage.setItem('hakster_user_data', JSON.stringify({ name: data.user.username || data.user.email || 'User', email: data.user.email || '', picture: data.user.picture || '' }));
+          localStorage.removeItem('hakster_referral_code');
           (window as any).haksterSessionTouch?.();
           showGoogleUserBadge(data.user);
         }
@@ -2685,6 +2700,7 @@ import Layout from '../layouts/Layout.astro';
       });
       // Load usage stats
       loadUsageStats();
+      loadReferralCard();
     }
 
     // Fetch and display usage stats
@@ -2697,7 +2713,7 @@ import Layout from '../layouts/Layout.astro';
         const el = document.getElementById('sidebar-account-usage');
         if (!el) return;
         if (data.remaining === -1) {
-          el.textContent = '✦ Unlimited (Pro)';
+          el.textContent = `✦ Unlimited · ${(data.tokenBalance || 0).toLocaleString()} tokens`;
           el.style.color = '#a855f7';
         } else if (data.limitEnabled) {
           el.textContent = `${data.remaining}/${data.limit} free uses left`;
@@ -2707,6 +2723,27 @@ import Layout from '../layouts/Layout.astro';
           el.style.color = '#64748b';
         }
       } catch {}
+    }
+
+    async function loadReferralCard() {
+      const token = localStorage.getItem('hakster_google_token');
+      const card = document.getElementById('sidebar-referral-card');
+      const linkBtn = document.getElementById('sidebar-referral-link') as HTMLButtonElement | null;
+      const tokenEl = document.getElementById('sidebar-token-balance');
+      const metaEl = document.getElementById('sidebar-referral-meta');
+      if (!token || !card || !linkBtn) return;
+      try {
+        const res = await fetch(`${API}/api/referrals`, { headers: { 'x-api-key': token } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to load referrals');
+        card.classList.remove('hidden');
+        if (tokenEl) tokenEl.textContent = `${(data.tokenBalance || 0).toLocaleString()} tokens`;
+        linkBtn.textContent = data.referralLink || 'Referral link unavailable';
+        linkBtn.dataset.link = data.referralLink || '';
+        if (metaEl) metaEl.textContent = `${data.totalReferrals || 0} referrals · +${(data.rewardTokens || 0).toLocaleString()} tokens per friend`;
+      } catch {
+        card.classList.add('hidden');
+      }
     }
 
     // Logout — shared handler for both logout buttons
@@ -2729,7 +2766,8 @@ import Layout from '../layouts/Layout.astro';
 
     // Fallback Google buttons — use redirect-based OAuth flow
     function triggerGoogleRedirect() {
-      window.location.href = `${API}/api/auth/google/redirect`;
+      const ref = getReferralCodeFromStorage();
+      window.location.href = `${API}/api/auth/google/redirect${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`;
     }
     document.getElementById('google-fallback-btn')?.addEventListener('click', triggerGoogleRedirect);
     document.getElementById('sidebar-google-fallback')?.addEventListener('click', triggerGoogleRedirect);
@@ -2749,6 +2787,7 @@ import Layout from '../layouts/Layout.astro';
             localStorage.setItem('hakster_google_token', googleToken!);
             localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
             localStorage.setItem('hakster_user_data', JSON.stringify({ name: data.user.username || data.user.email || 'User', email: data.user.email || '', picture: data.user.picture || '' }));
+            localStorage.removeItem('hakster_referral_code');
             (window as any).haksterSessionTouch?.();
             showGoogleUserBadge(data.user);
           }
@@ -2762,6 +2801,18 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     checkGoogleCallback();
+
+    document.getElementById('sidebar-referral-link')?.addEventListener('click', async (event) => {
+      const btn = event.currentTarget as HTMLButtonElement;
+      const link = btn.dataset.link || btn.textContent || '';
+      if (!link) return;
+      try {
+        await navigator.clipboard.writeText(link);
+        const original = btn.textContent;
+        btn.textContent = 'Copied referral link';
+        setTimeout(() => { btn.textContent = original; }, 1600);
+      } catch {}
+    });
 
     // Click API key to copy
     document.getElementById('sidebar-account-apikey')?.addEventListener('click', async () => {

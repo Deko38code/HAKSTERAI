@@ -299,6 +299,9 @@
 
   // Check for existing session
   (function() {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref') || params.get('referral');
+    if (ref) localStorage.setItem('hakster_referral_code', ref.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 24));
     const token = localStorage.getItem('hakster_google_token');
     const user = localStorage.getItem('hakster_google_user');
     if (token && user) {
@@ -311,7 +314,8 @@
 
   // Google Sign-In button → redirect-based OAuth
   document.getElementById('hero-google-signin')?.addEventListener('click', function() {
-    window.location.href = `${API}/api/auth/google/redirect`;
+    const ref = localStorage.getItem('hakster_referral_code') || '';
+    window.location.href = `${API}/api/auth/google/redirect${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`;
   });
 
   // Handle OAuth callback if redirected back to landing page
