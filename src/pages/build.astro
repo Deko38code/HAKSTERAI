@@ -2562,7 +2562,7 @@ import Layout from '../layouts/Layout.astro';
         if (!hadResults || err.message?.includes('limit')) {
           let errorContent = `Error: ${err.message || String(err)}`;
           if (err.status === 402 || (err.message && err.message.includes('limit'))) {
-            errorContent = '⚠️ **Free usage limit reached**\n\nYou\'ve used all your free questions. Upgrade to a paid plan for unlimited access.';
+            errorContent = '⚠️ **Free usage limit reached**\n\nFree users get 10 commands/questions. Upgrade to a paid plan for unlimited access.';
           }
           const errMsg: Message = { role: 'assistant', content: errorContent };
           conv.messages.push(errMsg); saveConversation(conv); addMessageBubble(errMsg);

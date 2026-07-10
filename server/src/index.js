@@ -29,7 +29,7 @@ const FS_ROOT = process.env.FS_ROOT || process.cwd();
 
 // ── Usage limits ─────────────────────────────────────────────────
 const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED === 'true'; // default: off
-const FREE_USAGE_LIMIT = parseInt(process.env.FREE_USAGE_LIMIT || '5', 10);
+const FREE_USAGE_LIMIT = 10;
 const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
 const REFERRAL_REWARD_TOKENS = parseInt(process.env.REFERRAL_REWARD_TOKENS || '10000', 10);
 const REFERRAL_SIGNUP_TOKENS = parseInt(process.env.REFERRAL_SIGNUP_TOKENS || '2500', 10);
@@ -39,8 +39,8 @@ const PRICING_CATALOG = [
     id: 'free',
     name: 'HaksterAI Free',
     stripeProductName: 'HaksterAI Free',
-    description: 'Starter access for trying HaksterAI.',
-    features: ['Free usage allowance', 'Local Ollama support', 'Basic chat and terminal tools'],
+    description: 'Free users get 10 commands or questions, then must upgrade.',
+    features: ['10 free commands or questions', 'Upgrade required after free limit', 'Local Ollama support', 'Basic chat and terminal tools'],
     prices: [
       {
         id: 'free',

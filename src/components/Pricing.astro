@@ -8,7 +8,8 @@ const plans = [
     tone: 'text-[#94a3b8]',
     border: 'border-[#1e1e2e]',
     button: 'border border-[#1e1e2e] bg-[#111118] text-[#e2e8f0] hover:border-[#7c3aed]/50',
-    features: ['Free usage allowance', 'Local models', 'Basic chat tools'],
+    note: '10 free commands/questions',
+    features: ['10 free commands or questions', 'Upgrade required after limit', 'Local models', 'Basic chat tools'],
   },
   {
     name: 'Starter',
@@ -78,6 +79,11 @@ const plans = [
             <span class="text-3xl font-bold text-[#f8fafc]">{plan.price}</span>
             <span class="pb-1 text-xs text-[#64748b]">/{plan.cadence}</span>
           </div>
+          {plan.note && (
+            <div class="mb-3 rounded-md border border-[#ef4444]/25 bg-[#ef4444]/10 px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#fca5a5]">
+              {plan.note} then upgrade
+            </div>
+          )}
           <div class="mb-4 rounded-md bg-[#0a0a0f] px-2 py-1 text-[10px] font-mono text-[#64748b]">{plan.tag}</div>
           <ul class="mb-5 space-y-2 text-xs text-[#94a3b8]">
             {plan.features.map((feature) => (
