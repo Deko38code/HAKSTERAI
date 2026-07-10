@@ -48,40 +48,42 @@ const features = [
 ];
 ---
 
-<section id="features" class="relative py-24 px-6">
+<section id="features" class="relative py-20 px-6">
   <!-- Section divider -->
   <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#7c3aed]/30 to-transparent"></div>
 
   <div class="mx-auto max-w-6xl">
     <!-- Header -->
-    <div class="text-center mb-16">
+    <div class="text-center mb-10">
       <div class="inline-flex items-center gap-2 rounded-full border border-[#1e1e2e] bg-[#111118] px-4 py-1.5 text-xs font-semibold text-[#7c3aed] tracking-widest uppercase mb-4">
         Features
       </div>
-      <h2 class="text-4xl md:text-5xl font-bold text-[#e2e8f0] mb-4">
+      <h2 class="text-3xl md:text-4xl font-bold text-[#e2e8f0] mb-3">
         The top-tier agent.<br />
         <span class="text-[#64748b]">Always running.</span>
       </h2>
-      <p class="text-[#64748b] text-lg max-w-xl mx-auto">
+      <p class="text-[#64748b] text-base max-w-xl mx-auto">
         haksterAi doesn't just chat — it reasons, plans, and executes. Real-time thinking grids, autonomous task completion, and job-done alerts built in.
       </p>
     </div>
 
     <!-- Feature grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
       {features.map((f) => (
-        <div class="group relative rounded-xl border border-[#1e1e2e] bg-[#111118] p-6 hover:border-[#7c3aed]/40 hover:bg-[#14141f] transition-all duration-200">
+        <div class="group relative rounded-lg border border-[#1e1e2e] bg-[#111118] p-4 hover:border-[#7c3aed]/40 hover:bg-[#14141f] transition-all duration-200">
           <!-- Hover glow -->
-          <div class="pointer-events-none absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+          <div class="pointer-events-none absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             style="background: radial-gradient(400px circle at 50% 50%, rgba(124,58,237,0.04), transparent);">
           </div>
 
-          <div class="relative z-10">
-            <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-lg border border-[#1e1e2e] bg-[#0d0d14] text-2xl">
+          <div class="relative z-10 flex gap-3">
+            <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[#1e1e2e] bg-[#0d0d14] text-lg">
               {f.icon}
             </div>
-            <h3 class="mb-2 text-base font-bold text-[#e2e8f0]">{f.title}</h3>
-            <p class="text-sm text-[#64748b] leading-relaxed">{f.description}</p>
+            <div class="min-w-0">
+              <h3 class="mb-1 text-sm font-bold text-[#e2e8f0]">{f.title}</h3>
+              <p class="text-xs text-[#64748b] leading-relaxed">{f.description}</p>
+            </div>
           </div>
         </div>
       ))}
