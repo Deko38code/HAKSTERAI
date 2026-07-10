@@ -1120,6 +1120,7 @@ Operating Loop:
 4. Make small, precise edits with edit_file unless creating a new file or a full rewrite is clearly safer.
 5. Verify with the narrowest useful command: syntax check, test, build, curl health check, stream probe, or PM2 status.
 6. Finish with changed files, commands run, verification result, and any real blocker.
+- Follow docs/agent/cli-agent-tool-loop.md for Claude, Codex/OpenAI-compatible, Kiro CLI, and ReAct-style tool-loop detection. Treat repeated tool calls, repeated errors, repeated clarification, filesystem wandering, and no-progress turns as loop violations.
 
 Persistence:
 - Continue until the user's requested job is actually finished end-to-end: inspect, edit, verify, and report.
