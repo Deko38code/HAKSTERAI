@@ -4067,7 +4067,7 @@ ptyWss.on('connection', (ws, req) => {
   // PTY output → browser — pass through directly for TUI apps
   ptyProcess.onData((data) => {
     if (ws.readyState !== 1) return;
-    ws.send(JSON.stringify({ type: 'pty', data }));
+    ws.send(Buffer.from(data, 'utf8'), { binary: true });
   });
 
   ptyProcess.onExit(({ exitCode }) => {

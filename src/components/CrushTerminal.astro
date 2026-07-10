@@ -452,6 +452,8 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
   function connectPane(pane) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     pane.ws = new WebSocket(proto + '//' + location.host + '/pty');
+    pane.ws.binaryType = 'arraybuffer';
+    pane._decoder = pane._decoder || new TextDecoder('utf-8');
     pane.reconnAttempts = 0;
 
     pane.ws.onopen = () => {
@@ -462,24 +464,36 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
       pane.term.focus();
     };
 
+    const flushPtyWrite = () => {
+      pane._writeRaf = null;
+      const data = pane._writeBuf;
+      if (!data) return;
+      pane._writeBuf = '';
+      pane.term.write(data);
+    };
+
+    const enqueuePtyWrite = (data) => {
+      if (!pane.term || !data) return;
+      if (!_decodeShown) showDecodeFlash(pane.term.rows);
+      pane._writeBuf += data;
+      if (!pane._writeRaf) pane._writeRaf = requestAnimationFrame(flushPtyWrite);
+    };
+
     pane.ws.onmessage = (ev) => {
       try {
+        if (ev.data instanceof ArrayBuffer) {
+          enqueuePtyWrite(pane._decoder.decode(ev.data, { stream: true }));
+          return;
+        }
+        if (ev.data instanceof Blob) {
+          ev.data.arrayBuffer().then((buf) => enqueuePtyWrite(pane._decoder.decode(buf, { stream: true }))).catch(() => {});
+          return;
+        }
         const m = JSON.parse(ev.data);
         if (m.type === 'pong') { if (latencyEl) latencyEl.textContent = Math.round(performance.now() - pingSendTime) + 'ms'; return; }
         if (m.type === 'exit') { updateStatus('disconnected'); pane.term.write('\r\n\x1b[90m[Connection closed]\x1b[0m\r\n'); return; }
         if (m.type === 'pty' && pane.term) {
-          // Show decode flash on first data received
-          if (!_decodeShown) showDecodeFlash(pane.term.rows);
-          // Pass PTY data through directly — no PTY-level scrambling
-          // (crush is a TUI app using alternate screen, scrambling breaks it)
-          pane._writeBuf += m.data;
-          if (!pane._writeRaf) {
-            pane._writeRaf = requestAnimationFrame(() => {
-              pane.term.write(pane._writeBuf);
-              pane._writeBuf = '';
-              pane._writeRaf = null;
-            });
-          }
+          enqueuePtyWrite(m.data);
         }
       } catch {}
     };

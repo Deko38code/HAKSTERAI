@@ -2389,8 +2389,23 @@ import Layout from '../layouts/Layout.astro';
           const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
           const lastBubble = messagesContainer.querySelector('.msg-assistant:last-child .msg-body') as HTMLElement;
           if (lastBubble) lastBubble.textContent = '';
-          const scriptOutputs = new Map<string, { el: HTMLElement; msg: Message }>();
+          const scriptOutputs = new Map<string, { el: HTMLElement; msg: Message; rawEl?: HTMLElement | null; pending?: string; raf?: number | null }>();
           const webOutputs = new Map<string, Message>();
+          const flushScriptOutput = (entry: { el: HTMLElement; msg: Message; rawEl?: HTMLElement | null; pending?: string; raf?: number | null }) => {
+            entry.raf = null;
+            const next = entry.pending || '';
+            entry.pending = '';
+            if (next) entry.msg.content += next;
+            if (entry.msg.content.length > 12000) {
+              entry.msg.content = `${entry.msg.content.slice(0, 12000)}\n... (output truncated in chat)`;
+              entry.pending = '';
+            }
+            if (!entry.rawEl) entry.rawEl = entry.el.closest('.msg-bubble')?.querySelector('.script-raw') as HTMLElement | null;
+            if (entry.rawEl) entry.rawEl.textContent = entry.msg.content;
+            entry.el.innerHTML = renderScriptLines(entry.msg.content);
+            saveConversation(conv);
+            maybeScroll();
+          };
           let tokenCount = 0;
           let renderTimer: any = null;
           while (true) {
@@ -2451,18 +2466,13 @@ import Layout from '../layouts/Layout.astro';
                     scriptOutputs.set(key, entry);
                   }
                   const prefix = event.stream === 'stderr' ? '[stderr] ' : '';
-                  const rawEl = entry.el.closest('.msg-bubble')?.querySelector('.script-raw') as HTMLElement;
-                  if (rawEl) rawEl.textContent += `${prefix}${event.data || ''}`;
-                  entry.msg.content += `${prefix}${event.data || ''}`;
-                  if (entry.msg.content.length > 12000) {
-                    entry.msg.content = `${entry.msg.content.slice(0, 12000)}\n... (output truncated in chat)`;
-                    if (rawEl) rawEl.textContent = entry.msg.content;
-                  }
-                  entry.el.innerHTML = renderScriptLines(entry.msg.content);
-                  saveConversation(conv);
+                  entry.pending = `${entry.pending || ''}${prefix}${event.data || ''}`;
+                  if (!entry.raf) entry.raf = requestAnimationFrame(() => flushScriptOutput(entry));
                 } else if (event.type === 'shell_end') {
                   const entry = scriptOutputs.get(event.tool_call_id || '');
                   if (entry) {
+                    if (entry.raf) cancelAnimationFrame(entry.raf);
+                    flushScriptOutput(entry);
                     const rawEl = entry.el.closest('.msg-bubble')?.querySelector('.script-raw') as HTMLElement;
                     const exitLine = `\n[exit ${event.exit_code ?? '?'}]`;
                     entry.msg.content += exitLine;
@@ -2473,6 +2483,8 @@ import Layout from '../layouts/Layout.astro';
                 } else if (event.type === 'shell_error') {
                   const entry = scriptOutputs.get(event.tool_call_id || '');
                   if (entry) {
+                    if (entry.raf) cancelAnimationFrame(entry.raf);
+                    flushScriptOutput(entry);
                     const rawEl = entry.el.closest('.msg-bubble')?.querySelector('.script-raw') as HTMLElement;
                     const errLine = `\n[error] ${event.error || 'Script failed'}`;
                     entry.msg.content += errLine;
