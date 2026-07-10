@@ -1,4 +1,4 @@
 {
-  "provider": "ollama",
-  "model": "kimi-k2.7-code:cloud"
+  "provider": "nous",
+  "model": "nousresearch/hermes-4-70b"
 }

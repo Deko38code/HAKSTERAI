@@ -110,9 +110,9 @@ const PROVIDERS = {
     type: 'codex',
   },
   nous: {
-    name: 'Nous Claude Fable',
+    name: 'Nous / Hermes',
     baseURL: process.env.NOUS_BASE_URL || 'https://inference-api.nousresearch.com/v1',
-    defaultModel: process.env.NOUS_MODEL || '~anthropic/claude-fable-latest',
+    defaultModel: process.env.NOUS_MODEL || 'nousresearch/hermes-4-70b',
     apiKey: process.env.NOUS_API_KEY || process.env.CODEX_API_KEY || '',
     apiKeyEnv: 'NOUS_API_KEY',
     type: 'nous',
@@ -792,6 +792,7 @@ async function listModels(provider) {
 
     if (cfg.type === 'nous') {
       return [
+        { id: 'nousresearch/hermes-4-70b', name: 'Hermes 4 70B' },
         { id: '~anthropic/claude-fable-latest', name: 'Claude Fable Latest' },
         { id: 'anthropic/claude-fable-latest', name: 'Claude Fable Latest' },
         { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5', thinking: true },
