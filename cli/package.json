@@ -4,7 +4,8 @@
   "description": "haksterAi CLI — manage files, sessions, and agent interactions from the terminal",
   "main": "index.js",
   "bin": {
-    "hakster": "./index.js"
+    "hakster": "./index.js",
+    "haksterai": "./index.js"
   },
   "scripts": {
     "start": "node index.js"

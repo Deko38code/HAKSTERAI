@@ -15,6 +15,13 @@ Full documentation: https://docs.astro.build
 Hakster agent loop guidance:
 
 - [CLI Agent Tool Loop Playbook](docs/agent/cli-agent-tool-loop.md)
+- [CLI Agent Playbooks And Cheatsheets](docs/agent/cli-agent-playbooks.md)
+- [Detailed Tool Call Map](docs/agent/tool-call-map.md)
+- [Agent MD Brain Index](docs/agent/agent-md-brain-index.md)
+- [Multi Project Session](docs/agent/multi-project-session.md)
+- [Patching Skills Brain](docs/agent/patching-skills-brain.md)
+- [Phantom MD Brain](docs/agent/phantom-md-brain.md)
+- [Hakster Phantom Unified Brain](docs/agent/hakster-phantom-unified-brain.md)
 
 Consult these guides before working on related tasks:
 

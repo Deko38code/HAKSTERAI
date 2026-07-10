@@ -37,6 +37,10 @@ import Layout from '../layouts/Layout.astro';
             <select id="sidebar-model-select" class="w-full rounded-lg border border-[#333] bg-[#1a1a1a] px-2 py-1.5 text-xs text-white/80 outline-none focus:border-[#7c3aed]/50 backdrop-blur">
               <option value="">Loading models...</option>
             </select>
+            <select id="sidebar-project-select" class="w-full rounded-lg border border-[#333] bg-[#1a1a1a] px-2 py-1.5 text-xs text-white/80 outline-none focus:border-[#7c3aed]/50 backdrop-blur" title="Active project for agent tool calls">
+              <option value="">Session workspace</option>
+            </select>
+            <div id="sidebar-project-path" class="truncate text-[10px] text-white/30">Project: session workspace</div>
             <div class="flex items-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-2 py-1.5 text-xs text-[#999]">
               <span id="sidebar-fc-dot" class="h-2 w-2 rounded-full bg-yellow-300"></span>
               <span id="sidebar-fc-text">Checking agents...</span>
@@ -811,6 +815,8 @@ import Layout from '../layouts/Layout.astro';
     const clearBtn = document.getElementById('clear-output')!;
     const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
     const sidebarModelSelect = document.getElementById('sidebar-model-select') as HTMLSelectElement;
+    const sidebarProjectSelect = document.getElementById('sidebar-project-select') as HTMLSelectElement | null;
+    const sidebarProjectPath = document.getElementById('sidebar-project-path') as HTMLElement | null;
     const fcDot = document.getElementById('fc-dot')!;
     const fcStatus = document.getElementById('fc-status')!;
     const sidebarFcDot = document.getElementById('sidebar-fc-dot')!;
@@ -1496,6 +1502,7 @@ import Layout from '../layouts/Layout.astro';
     let currentProvider = 'ollama';
     let currentModel = '';
     let totalTokens = 0;
+    let activeProjectCwd = localStorage.getItem('hakster-active-project-cwd') || '';
     let pendingImages: UploadedImage[] = [];
     let voiceEnabled = localStorage.getItem('hakster-voice-enabled') === '1';
     let recognition: any = null;
@@ -2011,7 +2018,7 @@ import Layout from '../layouts/Layout.astro';
     let settingsOpen = false;
     settingsToggle.addEventListener('click', () => {
       settingsOpen = !settingsOpen;
-      if (settingsOpen) { settingsPanel.style.maxHeight = '200px'; settingsPanel.style.opacity = '1'; settingsChevron.style.transform = 'rotate(180deg)'; }
+      if (settingsOpen) { settingsPanel.style.maxHeight = '260px'; settingsPanel.style.opacity = '1'; settingsChevron.style.transform = 'rotate(180deg)'; }
       else { settingsPanel.style.maxHeight = '0'; settingsPanel.style.opacity = '0'; settingsChevron.style.transform = ''; }
     });
     newHackBtn.addEventListener('click', () => { setActiveId(null); showHeroView(); chatInput.value = ''; chatInput.focus(); renderHistoryList(); });
@@ -2044,6 +2051,52 @@ import Layout from '../layouts/Layout.astro';
       'anthropic/claude-opus-4.8',
       'anthropic/claude-haiku-4.5',
     ];
+
+    function updateProjectPathLabel() {
+      if (!sidebarProjectPath) return;
+      sidebarProjectPath.textContent = activeProjectCwd ? `Project: ${activeProjectCwd}` : 'Project: session workspace';
+      sidebarProjectPath.title = activeProjectCwd || 'Session workspace';
+    }
+
+    async function loadProjects() {
+      if (!sidebarProjectSelect) return;
+      const previous = activeProjectCwd;
+      sidebarProjectSelect.innerHTML = '';
+      const fallback = document.createElement('option');
+      fallback.value = '';
+      fallback.textContent = 'Session workspace';
+      sidebarProjectSelect.appendChild(fallback);
+      try {
+        const res = await fetch(`${API}/api/machine-context`);
+        if (res.ok) {
+          const data = await res.json();
+          const seen = new Set<string>();
+          (data.folders || []).forEach((folder: any) => {
+            const folderPath = String(folder?.path || '');
+            if (!folderPath || seen.has(folderPath)) return;
+            seen.add(folderPath);
+            const opt = document.createElement('option');
+            opt.value = folderPath;
+            opt.textContent = folder?.label ? `${folder.label} — ${folderPath}` : folderPath;
+            sidebarProjectSelect.appendChild(opt);
+          });
+        }
+      } catch {}
+      if (previous && [...sidebarProjectSelect.options].some(opt => opt.value === previous)) {
+        sidebarProjectSelect.value = previous;
+      } else if (previous) {
+        activeProjectCwd = '';
+        localStorage.removeItem('hakster-active-project-cwd');
+      }
+      updateProjectPathLabel();
+    }
+
+    sidebarProjectSelect?.addEventListener('change', () => {
+      activeProjectCwd = sidebarProjectSelect.value;
+      if (activeProjectCwd) localStorage.setItem('hakster-active-project-cwd', activeProjectCwd);
+      else localStorage.removeItem('hakster-active-project-cwd');
+      updateProjectPathLabel();
+    });
 
     function isCerebrasModel(model: any) {
       const id = typeof model === 'string' ? model : `${model?.id || ''} ${model?.name || ''}`;
@@ -2323,6 +2376,7 @@ import Layout from '../layouts/Layout.astro';
           const res = await fetch(endpoint, {
             method: 'POST', headers: authHeaders,
             body: JSON.stringify({ provider: currentProvider, model, sessionId: conv.id, stream: true,
+              cwd: activeProjectCwd || undefined,
               messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-10)] }),
           });
           if (!res.ok || !res.body) {
@@ -2482,7 +2536,7 @@ import Layout from '../layouts/Layout.astro';
           const allMessages = conv.messages.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
           const res = await fetch(endpoint, {
             method: 'POST', headers: authHeaders,
-            body: JSON.stringify({ provider: currentProvider, model, messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-10)] }),
+            body: JSON.stringify({ provider: currentProvider, model, sessionId: conv.id, cwd: activeProjectCwd || undefined, messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-10)] }),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Chat request failed');
@@ -2828,7 +2882,7 @@ import Layout from '../layouts/Layout.astro';
     checkGoogleCallback(); // Handle OAuth redirect result
 
     // ===== Init =====
-    loadModels(); loadCapabilities(); renderHistoryList();
+    loadModels(); loadProjects(); loadCapabilities(); renderHistoryList();
     const initActiveId = getActiveId();
     if (initActiveId) {
       const conv = loadConversations().find(c => c.id === initActiveId);
