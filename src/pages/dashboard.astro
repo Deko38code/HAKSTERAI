@@ -15,7 +15,10 @@ import Layout from '../layouts/Layout.astro';
       <div class="w-2 h-8 bg-[#7c3aed] rounded-full"></div>
       <h1 class="text-2xl font-bold tracking-tight">📊 Dashboard</h1>
       <span class="text-xs text-[#64748b] bg-[#111118] px-2 py-1 rounded-full border border-[#1e1e2e]" id="status-badge">connecting...</span>
-      <a href="/terminal" class="ml-auto text-xs bg-[#7c3aed]/20 text-[#7c3aed] hover:bg-[#7c3aed]/30 px-3 py-1.5 rounded-lg border border-[#7c3aed]/30 transition-colors flex items-center gap-1.5">
+      <a href="/" class="ml-auto text-xs bg-[#111118] text-[#cbd5e1] hover:text-[#7c3aed] hover:bg-[#1e1e2e] px-3 py-1.5 rounded-lg border border-[#1e1e2e] hover:border-[#7c3aed]/40 transition-colors flex items-center gap-1.5">
+        🏠 Home
+      </a>
+      <a href="/terminal" class="text-xs bg-[#7c3aed]/20 text-[#7c3aed] hover:bg-[#7c3aed]/30 px-3 py-1.5 rounded-lg border border-[#7c3aed]/30 transition-colors flex items-center gap-1.5">
         ⌨️ Open Terminal
       </a>
     </div>
@@ -100,6 +103,43 @@ import Layout from '../layouts/Layout.astro';
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" id="crush-tools-grid"></div>
     </div>
 
+    <!-- Memory Bank & Autocompact -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">🧠 Memory Bank</h2>
+        <div class="space-y-2">
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Total Memories</span><span id="mem-total" class="font-bold text-[#a855f7]">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Categories</span><span id="mem-categories" class="text-[#00ff88]">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Last Compact</span><span id="mem-last-compact" class="text-xs text-[#ffd700]">—</span></div>
+        </div>
+        <div class="mt-3">
+          <div class="flex justify-between text-xs text-[#64748b] mb-1"><span>📦 Context Usage</span><span id="mem-context-pct">—</span></div>
+          <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+            <div id="mem-context-bar" class="h-full bg-gradient-to-r from-[#00ff88] to-[#ffd700] rounded-full transition-all duration-500" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">⏰ Autocompact Clock</h2>
+        <div class="space-y-2">
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Next Compact</span><span id="compact-next" class="font-bold text-[#00bfff]">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Interval</span><span class="text-[#ffd700]">Every 15 min</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Status</span><span id="compact-status" class="text-[#00ff88]">Idle</span></div>
+        </div>
+        <button id="compact-now-btn" class="mt-3 w-full rounded-lg bg-[#7c3aed]/20 hover:bg-[#7c3aed]/30 border border-[#7c3aed]/30 text-[#7c3aed] text-sm font-semibold py-2 px-4 transition-all active:scale-95">Compact Now</button>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">🛡️ Security Health</h2>
+        <div class="space-y-2">
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Critical</span><span id="sec-critical" class="font-bold text-[#ff4444]">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">High</span><span id="sec-high" class="text-[#ff6b6b]">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Medium</span><span id="sec-medium" class="text-[#ffd700]">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-[#64748b]">Low</span><span id="sec-low" class="text-[#00ff88]">—</span></div>
+        </div>
+        <a href="/build" class="mt-3 block text-center w-full rounded-lg bg-[#7c3aed]/20 hover:bg-[#7c3aed]/30 border border-[#7c3aed]/30 text-[#7c3aed] text-sm font-semibold py-2 px-4 transition-all">View Full Audit</a>
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
       <!-- System Info -->
       <div id="system-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
@@ -174,13 +214,34 @@ import Layout from '../layouts/Layout.astro';
     </div>
 
     <!-- Provider Breakdown -->
-    <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+    <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
       <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
         📊 Requests by Provider
       </h2>
       <div id="provider-breakdown" class="space-y-3">
-        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- Recent Users & Activity Log -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+          👥 Recent Users
+        </h2>
+        <div id="recent-users-list" class="space-y-2 max-h-[400px] overflow-auto">
+          <div class="text-sm text-[#64748b] text-center py-4">Loading...</div>
+        </div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+          📋 Activity Log
+        </h2>
+        <div id="activity-log-list" class="space-y-1.5 max-h-[400px] overflow-auto">
+          <div class="text-sm text-[#64748b] text-center py-4">Loading...</div>
+        </div>
       </div>
     </div>
   </div>
@@ -320,7 +381,7 @@ import Layout from '../layouts/Layout.astro';
 
         // Providers
         const providersGrid = document.getElementById('providers-grid');
-        const provIcons = { ollama: '🦙', anthropic: '🤖', openai: '⚡', openrouter: '🌐', hermes: '🔥', 'claude-proxy': '🔮' };
+        const provIcons = { ollama: '🦙', anthropic: '🤖', openai: '⚡', openrouter: '🌐', hermes: '🔥', 'claude-proxy': '🔮', codex: '🧠', nous: '✨' };
         providersGrid.innerHTML = data.providers.map(p => {
           const icon = provIcons[p.id] || '🧠';
           const isActive = p.id === data.crush.provider;
@@ -368,5 +429,158 @@ import Layout from '../layouts/Layout.astro';
     loadDashboard();
     // Refresh every 15s
     setInterval(loadDashboard, 15000);
+
+    // Memory bank stats
+    async function loadMemoryStats() {
+      try {
+        const res = await fetch('/api/memory');
+        const data = await res.json();
+        const entries = data.entries || data.memories || [];
+        document.getElementById('mem-total').textContent = entries.length;
+        const cats = new Set(entries.map(e => e.category || 'general'));
+        document.getElementById('mem-categories').textContent = cats.size;
+        document.getElementById('mem-last-compact').textContent = data.lastCompact || 'Never';
+        const pct = Math.min(100, Math.round((entries.length / 100) * 100));
+        document.getElementById('mem-context-pct').textContent = pct + '%';
+        document.getElementById('mem-context-bar').style.width = pct + '%';
+      } catch {}
+    }
+    loadMemoryStats();
+    setInterval(loadMemoryStats, 30000);
+
+    // Autocompact clock
+    let compactNextTime = null;
+    function updateCompactClock() {
+      const now = new Date();
+      if (!compactNextTime) compactNextTime = new Date(now.getTime() + 15 * 60000);
+      const diff = compactNextTime - now;
+      if (diff <= 0) {
+        compactNextTime = new Date(now.getTime() + 15 * 60000);
+        document.getElementById('compact-status').textContent = 'Compacting...';
+        document.getElementById('compact-status').className = 'text-[#ffd700]';
+        setTimeout(() => {
+          document.getElementById('compact-status').textContent = 'Idle';
+          document.getElementById('compact-status').className = 'text-[#00ff88]';
+        }, 3000);
+      }
+      const mins = Math.floor(diff / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      document.getElementById('compact-next').textContent = mins + 'm ' + secs + 's';
+    }
+    updateCompactClock();
+    setInterval(updateCompactClock, 1000);
+
+    document.getElementById('compact-now-btn')?.addEventListener('click', async () => {
+      try {
+        document.getElementById('compact-status').textContent = 'Compacting...';
+        await fetch('/api/memory/compact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        document.getElementById('compact-status').textContent = 'Done!';
+        compactNextTime = new Date(new Date().getTime() + 15 * 60000);
+        loadMemoryStats();
+        setTimeout(() => { document.getElementById('compact-status').textContent = 'Idle'; }, 3000);
+      } catch {}
+    });
+
+    // Security health summary
+    async function loadSecuritySummary() {
+      try {
+        const res = await fetch('/api/health/security');
+        const data = await res.json();
+        const findings = data.findings || [];
+        const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+        for (const f of findings) counts[f.severity] = (counts[f.severity] || 0) + 1;
+        document.getElementById('sec-critical').textContent = counts.critical || 0;
+        document.getElementById('sec-high').textContent = counts.high || 0;
+        document.getElementById('sec-medium').textContent = counts.medium || 0;
+        document.getElementById('sec-low').textContent = counts.low || 0;
+      } catch {}
+    }
+    loadSecuritySummary();
+    setInterval(loadSecuritySummary, 60000);
+
+    // Recent users with IP tracking
+    async function loadRecentUsers() {
+      try {
+        const res = await fetch('/api/users/recent?limit=20');
+        const data = await res.json();
+        const list = document.getElementById('recent-users-list');
+        if (!data.users || data.users.length === 0) {
+          list.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No users yet</div>';
+          return;
+        }
+        list.innerHTML = data.users.map(u => {
+          const created = new Date((u.created_at || 0) * 1000);
+          const lastLogin = u.last_login_at ? new Date(u.last_login_at * 1000) : null;
+          const isNew = (Date.now() / 1000 - (u.created_at || 0)) < 3600;
+          const badge = isNew ? '<span class="text-[8px] bg-[#00ff88]/20 text-[#00ff88] px-1.5 py-0.5 rounded-full ml-1">NEW</span>' : '';
+          const statusColor = u.status === 'active' ? 'text-[#00ff88]' : 'text-[#ff4444]';
+          const deviceInfo = [u.last_device, u.last_os, u.last_browser].filter(Boolean).join(' · ') || '—';
+          return `<div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3 hover:border-[#7c3aed]/30 transition-colors">
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-medium text-white/80">${u.username}${badge}</span>
+                <span class="text-[8px] ${statusColor} px-1.5 py-0.5 rounded-full bg-[#1e1e2e]">${u.status}</span>
+              </div>
+              <span class="text-[10px] text-[#64748b]">${created.toLocaleDateString()} ${created.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
+            </div>
+            <div class="text-xs text-[#64748b]">${u.email || '—'}</div>
+            <div class="flex items-center justify-between mt-1.5 text-[10px] text-[#4b5563]">
+              <span>🌐 ${u.last_ip || u.last_login_ip || '—'}</span>
+              <span>📱 ${deviceInfo}</span>
+            </div>
+            <div class="flex items-center justify-between mt-1 text-[10px] text-[#4b5563]">
+              <span>🔑 ${u.login_count || 0} logins</span>
+              <span>⏱️ ${lastLogin ? lastLogin.toLocaleDateString() + ' ' + lastLogin.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : 'Never'}</span>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        console.error('Recent users load failed:', e);
+      }
+    }
+    loadRecentUsers();
+    setInterval(loadRecentUsers, 30000);
+
+    // Activity log
+    async function loadActivityLog() {
+      try {
+        const res = await fetch('/api/users/activity?limit=50');
+        const data = await res.json();
+        const list = document.getElementById('activity-log-list');
+        if (!data.activity || data.activity.length === 0) {
+          list.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No activity yet</div>';
+          return;
+        }
+        const actionIcons = {
+          signup: '🎉', login: '🔓', logout: '🔒', chat_start: '💬',
+          tool_use: '🔧', api_call: '🌐', google_auth: '🔐',
+        };
+        const actionColors = {
+          signup: 'text-[#00ff88]', login: 'text-[#00bfff]', logout: 'text-[#ff6b6b]',
+          chat_start: 'text-[#a855f7]', tool_use: 'text-[#ffd700]', api_call: 'text-[#64748b]', google_auth: 'text-[#7c3aed]',
+        };
+        list.innerHTML = data.activity.map(a => {
+          const time = new Date((a.created_at || 0) * 1000);
+          const icon = actionIcons[a.action] || '📌';
+          const color = actionColors[a.action] || 'text-[#64748b]';
+          const ip = a.ip_address || '—';
+          const device = [a.device_type, a.browser].filter(Boolean).join(' ') || '';
+          return `<div class="flex items-start gap-2 text-xs bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-3 py-2">
+            <span class="${color}">${icon}</span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between">
+                <span class="${color} font-medium">${a.action}</span>
+                <span class="text-[#4b5563] text-[10px]">${time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
+              </div>
+              <div class="text-[#64748b] text-[10px] truncate">${a.username || a.email || 'anonymous'} · 🌐 ${ip}${device ? ' · 📱 ' + device : ''}</div>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        console.error('Activity log load failed:', e);
+      }
+    }
+    loadActivityLog();
+    setInterval(loadActivityLog, 15000);
   </script>
 </Layout>

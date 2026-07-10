@@ -18,6 +18,11 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: auto;
+  overflow-y: scroll;
+  scrollbar-color: #7c3aed #0a0a0f;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable both-edges;
 }
 
 body {
@@ -26,25 +31,96 @@ body {
   font-family: var(--font-mono), ui-monospace, monospace;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  overflow-x: auto;
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: #0a0a0f;
 }
 ::-webkit-scrollbar-thumb {
   background: #1e1e2e;
-  border-radius: 3px;
+  border: 1px solid #0a0a0f;
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #7c3aed;
+}
+::-webkit-scrollbar-corner {
+  background: #0a0a0f;
+}
+
+* {
+  scrollbar-color: #7c3aed #0a0a0f;
+  scrollbar-width: thin;
 }
 
 /* Selection */
 ::selection {
   background: #7c3aed44;
   color: #e2e8f0;
+}
+
+.global-fullscreen-btn {
+  position: fixed;
+  top: 5.75rem;
+  right: 1rem;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(17, 17, 24, 0.82);
+  color: rgba(226, 232, 240, 0.72);
+  backdrop-filter: blur(12px);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+
+.global-fullscreen-btn:hover {
+  color: #fff;
+  border-color: rgba(124, 58, 237, 0.55);
+  background: rgba(124, 58, 237, 0.18);
+}
+
+.global-fullscreen-btn:active {
+  transform: scale(0.96);
+}
+
+.global-fullscreen-btn svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.global-fullscreen-btn .fullscreen-exit {
+  display: none;
+}
+
+.global-fullscreen-btn.active .fullscreen-enter {
+  display: none;
+}
+
+.global-fullscreen-btn.active .fullscreen-exit {
+  display: block;
+}
+
+.global-fullscreen-fallback {
+  min-height: 100dvh;
+  overflow: auto;
+}
+
+@media (max-width: 768px) {
+  .global-fullscreen-btn {
+    top: 5.25rem;
+    right: 0.75rem;
+    width: 2.35rem;
+    height: 2.35rem;
+  }
 }

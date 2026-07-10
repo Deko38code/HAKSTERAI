@@ -1,4 +1,4 @@
 {
   "provider": "ollama",
-  "model": "gpt-oss:120b-cloud"
+  "model": "kimi-k2.7-code:cloud"
 }

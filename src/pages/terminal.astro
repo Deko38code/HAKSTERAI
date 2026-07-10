@@ -14,21 +14,34 @@ import CrushTerminal from '../components/CrushTerminal.astro';
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'JetBrains Mono', monospace; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'JetBrains Mono', monospace; scrollbar-color: #7c3aed #0a0a0f; scrollbar-width: thin; }
+      * { scrollbar-color: #7c3aed #0a0a0f; scrollbar-width: thin; }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #0a0a0f; }
+      ::-webkit-scrollbar-thumb { background: #1e1e2e; border: 1px solid #0a0a0f; border-radius: 999px; }
+      ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+      ::-webkit-scrollbar-corner { background: #0a0a0f; }
 
       /* ── Layout ── */
       #terminal-root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
 
       /* ── Top nav bar ── */
-      #term-nav { height: 32px; min-height: 32px; background: #0a0a0f; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; z-index: 100; user-select: none; flex-shrink: 0; }
-      #term-nav a { color: #64748b; text-decoration: none; font-size: 11px; font-weight: 500; letter-spacing: 0.5px; transition: color 0.2s; }
+      #term-nav { height: 42px; min-height: 42px; background: #0a0a0f; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; z-index: 100; user-select: none; flex-shrink: 0; }
+      #term-nav a { color: #94a3b8; text-decoration: none; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; transition: color 0.2s; }
       #term-nav a:hover { color: #e2e8f0; }
       #term-nav .brand { display: flex; align-items: center; gap: 8px; }
-      #term-nav .brand img { width: 18px; height: 18px; border-radius: 3px; }
-      #term-nav .brand span { color: #e2e8f0; font-size: 12px; font-weight: 700; }
+      #term-nav .brand img { width: 22px; height: 22px; border-radius: 4px; }
+      #term-nav .brand span { color: #e2e8f0; font-size: 15px; font-weight: 800; }
       #term-nav .brand .ai { color: #7c3aed; }
-      #term-nav .links { display: flex; gap: 14px; align-items: center; }
+      #term-nav .links { display: flex; gap: 18px; align-items: center; }
       #term-nav .links .active { color: #7c3aed; font-weight: 700; }
+      .term-fullscreen-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; border: 1px solid #1e1e2e; background: #111118; color: #94a3b8; cursor: pointer; transition: all 0.15s; }
+      .term-fullscreen-btn:hover { color: #fff; border-color: #7c3aed; background: #1a1a2e; }
+      .term-fullscreen-btn svg { width: 15px; height: 15px; }
+      .term-fullscreen-btn .fullscreen-exit { display: none; }
+      .term-fullscreen-btn.active .fullscreen-enter { display: none; }
+      .term-fullscreen-btn.active .fullscreen-exit { display: block; }
+      #terminal-root.term-fullscreen-fallback { position: fixed; inset: 0; z-index: 9999; width: 100vw; height: 100dvh; }
 
       /* ── Main area: sidebar + terminal ── */
       #term-main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
@@ -36,7 +49,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       /* ── Sidebar ── */
       #term-sidebar {
         width: 220px; min-width: 220px; background: #0d0d14; border-right: 1px solid #1e1e2e;
-        display: flex; flex-direction: column; overflow-y: auto; transition: width 0.2s, min-width 0.2s;
+        display: flex; flex-direction: column; overflow: auto; transition: width 0.2s, min-width 0.2s;
         font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e2e8f0; z-index: 50;
       }
       #term-sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; border-right: none; }
@@ -72,7 +85,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       /* ── Right sidebar (crush tools/info) ── */
       #crush-sidebar {
         width: 240px; min-width: 240px; background: #0d0d14; border-left: 1px solid #1e1e2e;
-        display: flex; flex-direction: column; overflow-y: auto; transition: width 0.2s, min-width 0.2s;
+        display: flex; flex-direction: column; overflow: auto; transition: width 0.2s, min-width 0.2s;
         font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e2e8f0; z-index: 50;
       }
       #crush-sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; border-left: none; }
@@ -91,7 +104,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       #crush-sidebar .cs-tool-icon { width: 14px; text-align: center; font-size: 12px; }
       #crush-sidebar .cs-tool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
       #crush-sidebar .cs-tool-count { color: #7c3aed; font-weight: 600; min-width: 24px; text-align: right; }
-      #crush-sidebar .cs-list { max-height: 190px; overflow-y: auto; padding-right: 2px; }
+      #crush-sidebar .cs-list { max-height: 190px; overflow: auto; padding-right: 2px; }
       #crush-sidebar .cs-list.tall { max-height: 260px; }
       #crush-sidebar .cs-chip-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; min-width: 0; }
       #crush-sidebar .cs-chip-main { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
@@ -120,12 +133,12 @@ import CrushTerminal from '../components/CrushTerminal.astro';
 
       /* ── Responsive: hide sidebars on small screens ── */
       @media (max-width: 768px) {
-        #term-sidebar { position: fixed; top: 32px; left: 0; bottom: 0; z-index: 60; transform: translateX(-100%); transition: transform 0.2s; }
+        #term-sidebar { position: fixed; top: 42px; left: 0; bottom: 0; z-index: 60; transform: translateX(-100%); transition: transform 0.2s; }
         #term-sidebar.mobile-open { transform: translateX(0); width: 240px; min-width: 240px; }
         #sidebar-toggle-btn { width: 28px; min-width: 28px; }
-        #sidebar-overlay { display: none; position: fixed; inset: 0; top: 32px; background: rgba(0,0,0,0.5); z-index: 55; }
+        #sidebar-overlay { display: none; position: fixed; inset: 0; top: 42px; background: rgba(0,0,0,0.5); z-index: 55; }
         #sidebar-overlay.active { display: block; }
-        #crush-sidebar { position: fixed; top: 32px; right: 0; bottom: 0; z-index: 60; transform: translateX(100%); transition: transform 0.2s; }
+        #crush-sidebar { position: fixed; top: 42px; right: 0; bottom: 0; z-index: 60; transform: translateX(100%); transition: transform 0.2s; }
         #crush-sidebar.mobile-open { transform: translateX(0); width: 260px; min-width: 260px; }
       }
     </style>
@@ -138,9 +151,15 @@ import CrushTerminal from '../components/CrushTerminal.astro';
           <a href="/"><span>hakster<span class="ai">Ai</span></span></a>
         </div>
         <div class="links">
+          <a href="/">🏠 Home</a>
           <a href="/hack">💀 Hack</a>
-          <a href="/terminal" class="active">⌨️ Terminal</a>
+          <a href="/build">💬 Chat</a>
+          <a href="/labs">🧪 Labs</a>
           <a href="/dashboard">📊 Dashboard</a>
+          <button type="button" id="term-fullscreen-btn" class="term-fullscreen-btn" title="Fullscreen" aria-label="Fullscreen" aria-pressed="false">
+            <svg class="fullscreen-enter" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5"/></svg>
+            <svg class="fullscreen-exit" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6"/></svg>
+          </button>
         </div>
       </div>
       <div id="term-main">
@@ -253,7 +272,17 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       </div>
     </div>
 
+    <script is:inline src="/js/session-timeout.js"></script>
     <script>
+      // ── Auth gate: redirect to landing if not signed in ─────────
+      (function() {
+        const token = localStorage.getItem('hakster_google_token');
+        const authParam = new URLSearchParams(window.location.search).get('google_auth');
+        if (!token && !authParam) {
+          window.location.href = '/';
+        }
+      })();
+
       // ── Sidebar toggle ──────────────────────────────────────────
       const sidebar = document.getElementById('term-sidebar');
       const toggleBtn = document.getElementById('sidebar-toggle-btn');
@@ -563,6 +592,43 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       // Initial load + auto-refresh every 15s
       refreshCrushSidebar();
       setInterval(refreshCrushSidebar, 15000);
+
+      // Fullscreen terminal
+      const termRoot = document.getElementById('terminal-root');
+      const termFullscreenBtn = document.getElementById('term-fullscreen-btn');
+      function setTermFullscreenState(active) {
+        if (!termFullscreenBtn) return;
+        termFullscreenBtn.classList.toggle('active', active);
+        termFullscreenBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        termFullscreenBtn.title = active ? 'Exit fullscreen' : 'Fullscreen';
+        termFullscreenBtn.setAttribute('aria-label', termFullscreenBtn.title);
+      }
+      termFullscreenBtn?.addEventListener('click', async () => {
+        try {
+          if (document.fullscreenElement === termRoot) {
+            await document.exitFullscreen();
+          } else if (termRoot?.requestFullscreen) {
+            if (document.fullscreenElement) await document.exitFullscreen();
+            await termRoot.requestFullscreen();
+          } else {
+            termRoot?.classList.toggle('term-fullscreen-fallback');
+            setTermFullscreenState(termRoot?.classList.contains('term-fullscreen-fallback'));
+          }
+        } catch {
+          termRoot?.classList.toggle('term-fullscreen-fallback');
+          setTermFullscreenState(termRoot?.classList.contains('term-fullscreen-fallback'));
+        }
+      });
+      document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement) termRoot?.classList.remove('term-fullscreen-fallback');
+        setTermFullscreenState(document.fullscreenElement === termRoot || Boolean(termRoot?.classList.contains('term-fullscreen-fallback')));
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && termRoot?.classList.contains('term-fullscreen-fallback')) {
+          termRoot.classList.remove('term-fullscreen-fallback');
+          setTermFullscreenState(false);
+        }
+      });
     </script>
   </body>
 </html>

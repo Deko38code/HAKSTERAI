@@ -20,27 +20,38 @@ import Layout from '../layouts/Layout.astro';
     <!-- Content -->
     <div class="relative z-10 flex flex-col items-center text-center max-w-5xl mx-auto w-full gap-8">
 
-      <!-- Badge -->
-      <div class="inline-flex items-center gap-2 rounded-full border border-[#7c3aed]/50 bg-[#7c3aed]/10 px-5 py-2.5 backdrop-blur-sm shadow-lg shadow-[#7c3aed]/10">
-        <span class="relative flex h-2 w-2">
-          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#a855f7] opacity-75"></span>
-          <span class="relative inline-flex rounded-full h-2 w-2 bg-[#7c3aed]"></span>
-        </span>
-        <span class="text-sm font-semibold tracking-widest text-[#a855f7] uppercase">hakster</span>
-        <span class="text-xs text-[#64748b] border-l border-[#7c3aed]/30 pl-2">labs · offensive security</span>
+      <!-- Intro with logo backdrop -->
+      <div class="relative flex flex-col items-center gap-8 px-2 py-8 md:px-8 md:py-12">
+        <img
+          src="/logo.png"
+          alt=""
+          aria-hidden="true"
+          class="pointer-events-none absolute left-1/2 top-0 -z-10 w-[min(92vw,680px)] -translate-x-1/2 opacity-20 blur-[1px] saturate-125"
+        />
+        <div class="pointer-events-none absolute left-1/2 top-6 -z-10 h-[min(72vw,520px)] w-[min(92vw,680px)] -translate-x-1/2 bg-gradient-to-b from-transparent via-[#06070d]/55 to-[#0a0a0f]"></div>
+
+        <!-- Badge -->
+        <div class="inline-flex items-center gap-2 rounded-full border border-[#7c3aed]/50 bg-[#080911]/70 px-5 py-2.5 backdrop-blur-md shadow-lg shadow-[#7c3aed]/10">
+          <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#a855f7] opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-[#7c3aed]"></span>
+          </span>
+          <span class="text-sm font-semibold tracking-widest text-[#a855f7] uppercase">hakster</span>
+          <span class="text-xs text-[#64748b] border-l border-[#7c3aed]/30 pl-2">labs · offensive security</span>
+        </div>
+
+        <!-- Heading -->
+        <h1 class="text-5xl md:text-7xl font-bold leading-tight tracking-tight">
+          <span class="text-[#f8fafc] drop-shadow-[0_2px_18px_rgba(0,0,0,0.85)]">The hacking</span><br />
+          <span class="bg-gradient-to-r from-[#38bdf8] via-[#a855f7] to-[#c084fc] bg-clip-text text-transparent drop-shadow-[0_2px_18px_rgba(0,0,0,0.85)]">
+            lab.
+          </span>
+        </h1>
+
+        <p class="max-w-2xl text-lg md:text-xl text-[#cbd5e1] leading-relaxed drop-shadow-[0_2px_14px_rgba(0,0,0,0.9)]">
+          Autonomous pentest agents, live exploit terminals, and security research tools — all running in your browser, powered by local AI.
+        </p>
       </div>
-
-      <!-- Heading -->
-      <h1 class="text-5xl md:text-7xl font-bold leading-tight tracking-tight">
-        <span class="text-[#e2e8f0]">The hacking</span><br />
-        <span class="bg-gradient-to-r from-[#7c3aed] via-[#a855f7] to-[#c084fc] bg-clip-text text-transparent">
-          lab.
-        </span>
-      </h1>
-
-      <p class="max-w-2xl text-lg md:text-xl text-[#64748b] leading-relaxed">
-        Autonomous pentest agents, live exploit terminals, and security research tools — all running in your browser, powered by local AI.
-      </p>
 
       <!-- Lab cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 w-full mt-6">
@@ -174,6 +185,163 @@ import Layout from '../layouts/Layout.astro';
             Browse <span>→</span>
           </div>
         </a>
+
+      </div>
+
+      <!-- Pentester Learning Resources -->
+      <div class="w-full mt-16">
+
+        <div class="text-center mb-10">
+          <h2 class="text-3xl md:text-4xl font-bold text-[#e2e8f0] mb-3">Pentester Learning Resources</h2>
+          <p class="text-[#64748b] text-base max-w-2xl mx-auto">Curated links across 3 categories — learn, practice, and research offensive security.</p>
+        </div>
+
+        <!-- Category 1: Hands-On Practice Platforms -->
+        <div class="mb-10">
+          <h3 class="text-lg font-bold text-[#7c3aed] mb-4 flex items-center gap-2">
+            <span class="text-xl">🎯</span> Hands-On Practice Platforms
+          </h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <a href="https://tryhackme.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">TryHackMe</span>
+              <span class="text-xs text-[#64748b]">Beginner-to-pro labs & guided paths</span>
+            </a>
+            <a href="https://www.hackthebox.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">Hack The Box</span>
+              <span class="text-xs text-[#64748b]">Live machines, challenges, pro labs</span>
+            </a>
+            <a href="https://portswigger.net/web-security" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">PortSwigger Academy</span>
+              <span class="text-xs text-[#64748b]">Free web security labs + Burp Suite</span>
+            </a>
+            <a href="https://www.vulnhub.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">VulnHub</span>
+              <span class="text-xs text-[#64748b]">Downloadable vulnerable VMs</span>
+            </a>
+            <a href="https://www.offensive-security.com/labs/" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">OffSec Proving Grounds</span>
+              <span class="text-xs text-[#64748b]">OSCP-style practice machines</span>
+            </a>
+            <a href="https://ctftime.org" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">CTFtime</span>
+              <span class="text-xs text-[#64748b]">Global CTF event tracker & archives</span>
+            </a>
+            <a href="https://picoctf.org" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">picoCTF</span>
+              <span class="text-xs text-[#64748b]">Beginner-friendly CTF challenges</span>
+            </a>
+            <a href="https://overthewire.org" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">OverTheWire</span>
+              <span class="text-xs text-[#64748b]">Wargames: Bandit, Natas, Leviathan</span>
+            </a>
+            <a href="https://www.hackthissite.org" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">HackThisSite</span>
+              <span class="text-xs text-[#64748b]">Mission-based security challenges</span>
+            </a>
+            <a href="https://pentesterlab.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#7c3aed]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#a855f7] transition-colors">PentesterLab</span>
+              <span class="text-xs text-[#64748b]">Structured exploit exercises</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Category 2: Tools & Cheat Sheets -->
+        <div class="mb-10">
+          <h3 class="text-lg font-bold text-[#00ff88] mb-4 flex items-center gap-2">
+            <span class="text-xl">🛠️</span> Tools & Cheat Sheets
+          </h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <a href="https://nmap.org" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">Nmap</span>
+              <span class="text-xs text-[#64748b]">Network discovery & auditing</span>
+            </a>
+            <a href="https://www.metasploit.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">Metasploit</span>
+              <span class="text-xs text-[#64748b]">Exploitation framework</span>
+            </a>
+            <a href="https://owasp.org/www-project-top-ten/" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">OWASP Top 10</span>
+              <span class="text-xs text-[#64748b]">Critical web app security risks</span>
+            </a>
+            <a href="https://github.com/swisskyrepo/PayloadsAllTheThings" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">PayloadsAllTheThings</span>
+              <span class="text-xs text-[#64748b]">Attack payloads & bypass cheat sheet</span>
+            </a>
+            <a href="https://gtfobins.github.io" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">GTFOBins</span>
+              <span class="text-xs text-[#64748b]">Unix binary privilege escalation</span>
+            </a>
+            <a href="https://lolbas-project.github.io" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">LOLBAS</span>
+              <span class="text-xs text-[#64748b]">Windows living-off-the-land binaries</span>
+            </a>
+            <a href="https://github.com/carlospolop/PEASS-ng" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">LinPEAS / WinPEAS</span>
+              <span class="text-xs text-[#64748b]">Auto privilege escalation enumeration</span>
+            </a>
+            <a href="https://github.com/rebootuser/LinEnum" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">LinEnum</span>
+              <span class="text-xs text-[#64748b]">Linux enumeration script</span>
+            </a>
+            <a href="https://requestbin.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">RequestBin</span>
+              <span class="text-xs text-[#64748b]">Inspect HTTP webhook requests</span>
+            </a>
+            <a href="https://www.wireshark.org" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#00ff88]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#00ff88] transition-colors">Wireshark</span>
+              <span class="text-xs text-[#64748b]">Network protocol analyzer</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Category 3: Vulnerability DBs & Research -->
+        <div class="mb-6">
+          <h3 class="text-lg font-bold text-[#ffd700] mb-4 flex items-center gap-2">
+            <span class="text-xl">🔍</span> Vulnerability Databases & Research
+          </h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <a href="https://www.exploit-db.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">Exploit-DB</span>
+              <span class="text-xs text-[#64748b]">Public exploit archive & search</span>
+            </a>
+            <a href="https://cve.mitre.org" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">CVE Details</span>
+              <span class="text-xs text-[#64748b]">All known vulnerability entries</span>
+            </a>
+            <a href="https://www.rapid7.com/db/" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">Rapid7 DB</span>
+              <span class="text-xs text-[#64748b]">Vuln & exploit database</span>
+            </a>
+            <a href="https://www.shodan.io" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">Shodan</span>
+              <span class="text-xs text-[#64748b]">Search engine for internet devices</span>
+            </a>
+            <a href="https://securitytrails.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">SecurityTrails</span>
+              <span class="text-xs text-[#64748b]">DNS, domain & IP intelligence</span>
+            </a>
+            <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">CISA KEV</span>
+              <span class="text-xs text-[#64748b]">Known exploited vulnerabilities catalog</span>
+            </a>
+            <a href="https://www.virustotal.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">VirusTotal</span>
+              <span class="text-xs text-[#64748b]">Malware & file/URL analysis</span>
+            </a>
+            <a href="https://attack.mitre.org" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">MITRE ATT&CK</span>
+              <span class="text-xs text-[#64748b]">Adversary tactics & techniques</span>
+            </a>
+            <a href="https://github.com/kbandla/APTnotes" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">APTnotes</span>
+              <span class="text-xs text-[#64748b]">APT campaign research papers</span>
+            </a>
+            <a href="https://packetstormsecurity.com" target="_blank" rel="noopener" class="group flex flex-col gap-1 rounded-xl border border-[#1e1e2e] bg-[#0d0d14] p-4 hover:border-[#ffd700]/50 transition-all hover:-translate-y-0.5">
+              <span class="font-semibold text-[#e2e8f0] text-sm group-hover:text-[#ffd700] transition-colors">Packet Storm</span>
+              <span class="text-xs text-[#64748b]">Security tools & exploit archive</span>
+            </a>
+          </div>
+        </div>
 
       </div>
 

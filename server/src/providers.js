@@ -105,8 +105,17 @@ const PROVIDERS = {
     name: 'Codex (Nous Research)',
     baseURL: process.env.CODEX_BASE_URL || 'https://inference-api.nousresearch.com/v1',
     defaultModel: 'openai/gpt-5.5',
+    apiKey: process.env.CODEX_API_KEY || process.env.NOUS_API_KEY || '',
     apiKeyEnv: 'CODEX_API_KEY',
     type: 'codex',
+  },
+  nous: {
+    name: 'Nous Claude Fable',
+    baseURL: process.env.NOUS_BASE_URL || 'https://inference-api.nousresearch.com/v1',
+    defaultModel: process.env.NOUS_MODEL || '~anthropic/claude-fable-latest',
+    apiKey: process.env.NOUS_API_KEY || process.env.CODEX_API_KEY || '',
+    apiKeyEnv: 'NOUS_API_KEY',
+    type: 'nous',
   },
 };
 
@@ -178,7 +187,15 @@ function getClient(provider) {
     case 'codex':
       // Nous Research OpenAI-compatible endpoint (GPT-5.5 non-US)
       return new OpenAI({
-        apiKey: process.env.CODEX_API_KEY || '',
+        apiKey: process.env.CODEX_API_KEY || process.env.NOUS_API_KEY || '',
+        baseURL: cfg.baseURL,
+        timeout: 120000,
+      });
+
+    case 'nous':
+      // Nous Research OpenAI-compatible endpoint for Claude Fable/latest models
+      return new OpenAI({
+        apiKey: process.env.NOUS_API_KEY || process.env.CODEX_API_KEY || '',
         baseURL: cfg.baseURL,
         timeout: 120000,
       });
@@ -773,6 +790,16 @@ async function listModels(provider) {
       ];
     }
 
+    if (cfg.type === 'nous') {
+      return [
+        { id: '~anthropic/claude-fable-latest', name: 'Claude Fable Latest' },
+        { id: 'anthropic/claude-fable-latest', name: 'Claude Fable Latest' },
+        { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5', thinking: true },
+        { id: 'anthropic/claude-opus-4.8', name: 'Claude Opus 4.8', thinking: true },
+        { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5' },
+      ];
+    }
+
     if (cfg.type === 'openrouter') {
       return [
         { id: 'thudm/glm-5.2:cloud',          name: 'GLM 5.2 Cloud (1M ctx)', thinking: true },
@@ -1006,6 +1033,49 @@ const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'guardian',
+      description: 'Run Guardian CLI pentest commands. Guardian is an AI-powered penetration testing framework with 19 security tools and smart workflows. Use for recon, scanning, vulnerability assessment, and pentest report generation. Commands: scan (nmap port scan), recon (reconnaissance workflow), analyze (AI analysis of scan results), report (generate pentest report), workflow (run/list pentest workflows), models (list AI models), kb (knowledge base), init (initialize config). Example: guardian scan --target 10.10.10.1',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Guardian subcommand + args (e.g. "scan --target 10.10.10.1", "recon --target example.com", "workflow --list", "report --format html")' },
+          timeout_ms: { type: 'number', description: 'Optional timeout in ms, default 120000 (pentest scans can be slow)' },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_skills',
+      description: 'List all available skills in the haksterAi skill library. Returns skill names, categories, file paths, and descriptions. Use to discover what skills are available before reading specific ones. The library contains 750+ markdown skill files across categories like pentesting, coding, cloud ops, IPTV, and more.',
+      parameters: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', description: 'Optional category filter (e.g. "pentest", "coding", "cloud", "iptv")' },
+          search: { type: 'string', description: 'Optional search term to filter skills by name or content' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_skill',
+      description: 'Read the full content of a specific skill file by name or path. Use after list_skills to find relevant skills, then read the detailed instructions, commands, and procedures from the skill file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Skill name or file path (e.g. "nmap-recon" or "pentest-agents/skills/nmap-recon.md")' },
+        },
+        required: ['name'],
+      },
+    },
+  },
 ];
 
 let agentBrowser = null;
@@ -1035,8 +1105,15 @@ Identity:
 - Do not reintroduce yourself every turn unless the user asks who you are or it is the first reply in a new session.
 - Treat the user's app, IPTV stack, cloud runtime, and coding projects as production systems unless told otherwise.
 
+Skill Library:
+- You have access to a large skill library with 750+ markdown skill files across categories: pentesting, coding, cloud ops, IPTV, security, and more.
+- ALWAYS use list_skills and read_skill tools to discover and leverage relevant skills before tackling complex tasks.
+- Skills contain detailed procedures, commands, configurations, and workflows written by experts.
+- When a user asks about a topic, first check if a relevant skill exists using list_skills with a search term, then read_skill for the full procedure.
+- This is critical — you have 750+ skills, not 16. Always pull from your full skill library.
+
 Operating Loop:
-1. Classify the request into one or more modes: Coding, IPTV, Movie Servers, Cloud/Ops, Database, Frontend, Research, or General.
+1. Classify the request into one or more modes: Coding, IPTV, Movie Servers, Cloud/Ops, Database, Frontend, Research, Pentest, or General.
 2. Inspect before changing: list files, read relevant code/config, and identify the running process when needed.
 3. State the working assumption briefly, then act.
 4. Make small, precise edits with edit_file unless creating a new file or a full rewrite is clearly safer.
@@ -1125,6 +1202,7 @@ Tool Use:
 - exec_shell: use for builds, tests, git status, PM2 checks, curl health checks, stream probes, and diagnostics. Use timeout_ms for slow commands.
 - spawn_agent: delegate isolated investigations or large parallel searches, then validate important results yourself.
 - web_search: use when the user asks about current information, recent events, documentation, or anything requiring up-to-date data. Returns titles, URLs, and snippets from web results.
+- guardian: run Guardian CLI pentest commands for security assessment. Use for port scanning (guardian scan --target IP), reconnaissance (guardian recon --target domain), vulnerability analysis (guardian analyze), report generation (guardian report --format html), and workflow execution (guardian workflow --list to see available workflows, guardian workflow --run <name> --target <host>). Guardian has 19 security tools including nmap, nuclei, sqlmap, nikto, ffuf, gobuster, httpx, subfinder, and more. Pentest scans can be slow — set timeout_ms appropriately (default 120s, max 300s).
 
 Shell Guidance:
 - Prefer fast targeted commands: rg, npm scripts, node -c, curl health endpoints, pm2 status/logs.
@@ -1133,11 +1211,31 @@ Shell Guidance:
 - Avoid interactive or long-lived foreground commands in exec_shell. Use PM2, nohup, timeout wrappers, or the browser terminal for long-running services.
 - Do not run destructive commands, database wipes, credential dumps, or broad filesystem deletes without explicit confirmation.
 
+Pentest Mode:
+- Use the guardian tool for security assessments, vulnerability scanning, and penetration testing tasks.
+- Guardian has 19 security tools (nmap, nuclei, sqlmap, nikto, ffuf, gobuster, httpx, subfinder, masscan, sslyze, wpscan, etc) and 19 workflows (web_pentest, api_pentest, network_pentest, cloud_audit, osint, jwt_audit, llm_redteam, etc).
+- Common commands: guardian scan --target <IP>, guardian recon --target <domain>, guardian workflow --list, guardian workflow --run <name> --target <host>.
+- Pentest scans are slow — use timeout_ms: 300000 for full scans, 120000 default for quick scans.
+- Initialize guardian first if not configured: guardian init.
+- Store scan results and reports in the workspace outputs directory.
+
 Response Style:
 - Keep responses concise and concrete.
 - Mention exact file paths and key command output when relevant.
 - If blocked, name the missing credential, permission, dependency, or external service and give the next concrete step.
 - Provide complete runnable code when the user asks for code, but do not force code into non-coding answers.
+
+Client Awareness:
+- You receive CLIENT DEVICE CONTEXT in your system prompt showing the user's browser, OS, device type, screen size, and more.
+- Use this to tailor responses: suggest mobile-friendly layouts for phone users, note touch vs mouse, adapt UI advice to screen size.
+- When the user is on Android/iOS, account for mobile-specific tools and limitations.
+- If you don't see CLIENT DEVICE CONTEXT, the user's browser info wasn't captured — still proceed normally.
+
+File Delivery:
+- When you write_file or edit_file, the user automatically gets a download button in the chat UI for that file.
+- Use write_file to deliver generated scripts, configs, reports, wordlists, payloads, or any file the user asked you to create.
+- Name files descriptively so the download button is clear (e.g. recon-report.txt, exploit.py, payload.sh).
+- For large outputs (reports, data dumps), write to a file instead of pasting in chat — the user can download it.
 
 ANTI-LOOP RULES (CRITICAL):
 - NEVER repeat the same action or command that already failed. If a tool call returns an error, change your approach — do not retry with the same arguments.
@@ -1678,6 +1776,141 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
         } catch (err) {
           return `Error recalling memory: ${err.message}`;
         }
+      }
+      case 'guardian': {
+        const guardianCmd = args.command || '';
+        if (!guardianCmd) return 'Error: guardian command is required';
+        const guardianTimeout = Math.min(Number(args.timeout_ms || 120000), 300000);
+        const guardianWrapper = '/home/ghost/.local/bin/guardian-wrapper';
+        if (!fs.existsSync(guardianWrapper)) {
+          return 'Error: guardian-wrapper not found at ' + guardianWrapper;
+        }
+
+        // Build the full command — guardian-wrapper passes args to python -m cli.main
+        const fullCmd = `${guardianWrapper} ${guardianCmd}`;
+
+        // Stream output if onStream is available
+        if (typeof onStream === 'function') {
+          return await new Promise((resolve, reject) => {
+            const chunks = [];
+            const errChunks = [];
+            let killed = false;
+            let totalBytes = 0;
+            const maxBytes = 6 * 1024 * 1024;
+
+            onStream({ type: 'shell_start', command: fullCmd, cwd });
+            const child = spawn('bash', ['-c', fullCmd], {
+              cwd,
+              env: {
+                ...process.env,
+                CI: process.env.CI || '1',
+                TERM: process.env.TERM || 'xterm-256color',
+              },
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+
+            const timer = setTimeout(() => {
+              killed = true;
+              child.kill('SIGTERM');
+              setTimeout(() => child.kill('SIGKILL'), 2000);
+            }, guardianTimeout);
+
+            child.stdout.on('data', (data) => {
+              totalBytes += data.length;
+              let text = data.toString('utf8').replace(/\x00/g, '');
+              if (totalBytes > maxBytes) {
+                if (!killed) {
+                  killed = true;
+                  child.kill('SIGTERM');
+                  setTimeout(() => child.kill('SIGKILL'), 500);
+                }
+                return;
+              }
+              chunks.push(text);
+              onStream({ type: 'shell_data', stream: 'stdout', data: text });
+            });
+
+            child.stderr.on('data', (data) => {
+              const text = data.toString('utf8').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+              errChunks.push(text);
+              onStream({ type: 'shell_data', stream: 'stderr', data: text });
+            });
+
+            child.on('error', (err) => {
+              clearTimeout(timer);
+              onStream({ type: 'shell_error', error: err.message });
+              resolve(`exit_code: error\n${err.message}`);
+            });
+
+            child.on('close', (code, signal) => {
+              clearTimeout(timer);
+              const exitCode = killed ? 'timeout' : (code ?? (signal ? `signal:${signal}` : 1));
+              const stdout = chunks.join('');
+              const stderr = errChunks.join('');
+              onStream({ type: 'shell_end', exit_code: exitCode });
+              const truncated = totalBytes > maxBytes ? '\n[output truncated at 6 MiB]' : '';
+              if (killed) {
+                resolve(`exit_code: timeout\nGuardian command timed out after ${guardianTimeout}ms.\nstdout:\n${stdout}${truncated}\nstderr:\n${stderr}`);
+              } else {
+                resolve(`exit_code: ${exitCode}\nstdout:\n${stdout}${truncated}\nstderr:\n${stderr}`);
+              }
+            });
+          });
+        }
+
+        // Non-streaming fallback
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execAsync = util.promisify(exec);
+        try {
+          const { stdout, stderr } = await execAsync(fullCmd, {
+            cwd,
+            timeout: guardianTimeout,
+            killSignal: 'SIGTERM',
+            maxBuffer: 6 * 1024 * 1024,
+            encoding: 'utf8',
+            env: { ...process.env, CI: process.env.CI || '1' },
+          });
+          const output = (stdout || '').trim().replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+          const errput = (stderr || '').trim().replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+          if (output && errput) return `exit_code: 0\nstdout:\n${output}\nstderr:\n${errput}`;
+          if (output) return `exit_code: 0\nstdout:\n${output}`;
+          if (errput) return `exit_code: 0\nstderr:\n${errput}`;
+          return `exit_code: 0\n(empty output)`;
+        } catch (err) {
+          const stdout = (err.stdout || '').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+          const stderr = (err.stderr || '').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+          const code = err.killed ? 'timeout' : (err.code ?? 1);
+          if (err.killed) return `exit_code: timeout\nGuardian command timed out after ${guardianTimeout}ms.\nstdout:\n${stdout}\nstderr:\n${stderr}`;
+          return `exit_code: ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`;
+        }
+      }
+      case 'list_skills': {
+        const { listSkills } = require('./skills');
+        const skills = listSkills({ category: args.category, search: args.search });
+        if (!skills || skills.length === 0) return 'No skills found. The skill library may still be indexing.';
+        const grouped = {};
+        for (const s of skills) {
+          const cat = s.category || 'other';
+          if (!grouped[cat]) grouped[cat] = [];
+          grouped[cat].push(s);
+        }
+        let out = `Total skills: ${skills.length}\n\n`;
+        for (const [cat, items] of Object.entries(grouped)) {
+          out += `## ${cat} (${items.length})\n`;
+          for (const s of items.slice(0, 20)) {
+            out += `  - ${s.name}${s.description ? ': ' + s.description.slice(0, 80) : ''}\n`;
+          }
+          if (items.length > 20) out += `  ... and ${items.length - 20} more\n`;
+          out += '\n';
+        }
+        return out;
+      }
+      case 'read_skill': {
+        const { readSkill } = require('./skills');
+        const content = readSkill(args.name);
+        if (!content) return `Skill "${args.name}" not found. Use list_skills to see available skills.`;
+        return content;
       }
       default:
         return `Unknown tool: ${name}`;

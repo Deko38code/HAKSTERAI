@@ -16,14 +16,105 @@ const { getDb } = require('./db');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys } = require('./providers');
-const { saveMemory, getMemory, searchMemories, listMemories, deleteMemory, getMemoryContext, getMemoryStats, CATEGORIES: MEMORY_CATEGORIES } = require('./memory');
+const { saveMemory, getMemory, searchMemories, listMemories, deleteMemory, getMemoryContext, getMemoryStats, compactMemories, CATEGORIES: MEMORY_CATEGORIES } = require('./memory');
+const { runSecurityAudit, startSecurityScanner, getSecurityNotifications, acknowledgeSecurityNotification, acknowledgeAllSecurityNotifications, SEVERITY: SECURITY_SEVERITY } = require('./security');
 const compression = require('compression');
 
 // ── Config ────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || '3579', 10);
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:4321,http://localhost:3000').split(',').map(s => s.trim());
 const FS_ROOT = process.env.FS_ROOT || process.cwd();
+
+// ── Usage limits ─────────────────────────────────────────────────
+const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED === 'true'; // default: off
+const FREE_USAGE_LIMIT = parseInt(process.env.FREE_USAGE_LIMIT || '5', 10);
+const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
+
+const PRICING_CATALOG = [
+  {
+    id: 'free',
+    name: 'HaksterAI Free',
+    stripeProductName: 'HaksterAI Free',
+    description: 'Starter access for trying HaksterAI.',
+    features: ['Free usage allowance', 'Local Ollama support', 'Basic chat and terminal tools'],
+    prices: [
+      {
+        id: 'free',
+        name: 'Free',
+        billingCycle: 'monthly',
+        amount: 0,
+        currency: 'usd',
+        lookupKey: 'haksterai_free',
+        stripePriceId: process.env.STRIPE_PRICE_FREE || null,
+      },
+    ],
+  },
+  {
+    id: 'pro',
+    name: 'HaksterAI Pro',
+    stripeProductName: 'HaksterAI Pro',
+    description: 'Unlimited personal access for builders and operators.',
+    features: ['Unlimited app usage', 'Cloud model routing', 'Agent tools', 'Memory and task history'],
+    prices: [
+      {
+        id: 'starter_monthly',
+        name: 'Starter Monthly',
+        billingCycle: 'monthly',
+        amount: parseInt(process.env.PRICE_STARTER_MONTHLY_CENTS || '400', 10),
+        currency: 'usd',
+        lookupKey: 'haksterai_starter_monthly',
+        stripePriceId: process.env.STRIPE_PRICE_STARTER_MONTHLY || null,
+      },
+      {
+        id: 'pro_monthly',
+        name: 'Pro Monthly',
+        billingCycle: 'monthly',
+        amount: parseInt(process.env.PRICE_PRO_MONTHLY_CENTS || '1900', 10),
+        currency: 'usd',
+        lookupKey: 'haksterai_pro_monthly',
+        stripePriceId: process.env.STRIPE_PRICE_PRO_MONTHLY || null,
+      },
+      {
+        id: 'pro_yearly',
+        name: 'Pro Yearly',
+        billingCycle: 'yearly',
+        amount: parseInt(process.env.PRICE_PRO_YEARLY_CENTS || '19000', 10),
+        currency: 'usd',
+        lookupKey: 'haksterai_pro_yearly',
+        stripePriceId: process.env.STRIPE_PRICE_PRO_YEARLY || null,
+      },
+    ],
+  },
+  {
+    id: 'enterprise',
+    name: 'HaksterAI Enterprise',
+    stripeProductName: 'HaksterAI Enterprise',
+    description: 'Team access, admin controls, and custom deployment support.',
+    features: ['Team seats', 'Higher limits', 'Admin dashboard', 'Priority support'],
+    prices: [
+      {
+        id: 'enterprise_monthly',
+        name: 'Enterprise Monthly',
+        billingCycle: 'monthly',
+        amount: parseInt(process.env.PRICE_ENTERPRISE_MONTHLY_CENTS || '9900', 10),
+        currency: 'usd',
+        lookupKey: 'haksterai_enterprise_monthly',
+        stripePriceId: process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY || null,
+      },
+      {
+        id: 'enterprise_yearly',
+        name: 'Enterprise Yearly',
+        billingCycle: 'yearly',
+        amount: parseInt(process.env.PRICE_ENTERPRISE_YEARLY_CENTS || '99000', 10),
+        currency: 'usd',
+        lookupKey: 'haksterai_enterprise_yearly',
+        stripePriceId: process.env.STRIPE_PRICE_ENTERPRISE_YEARLY || null,
+      },
+    ],
+  },
+];
 
 // ── In-memory caches ──────────────────────────────────────────────
 let _skillsCache = null;
@@ -33,7 +124,7 @@ let _toolsCache = null;
 let _toolsCacheTime = 0;
 const TOOLS_CACHE_TTL = 300000; // 5 min
 
-function walkMarkdownFiles(dir, maxFiles = 500) {
+function walkMarkdownFiles(dir, maxFiles = 5000) {
   const files = [];
   const stack = [dir];
   while (stack.length && files.length < maxFiles) {
@@ -67,6 +158,17 @@ function getSkillsInventory() {
     path.join(ghostHome, 'haksterAi', 'pentest-agents', 'skills'),
     path.join(ghostHome, 'skills'),
     path.join(FS_ROOT, '.hakster', 'skills'),
+    path.join(FS_ROOT, '.hakster'),
+    path.join(ghostHome, 'haksterAi', '.hakster', 'skills'),
+    path.join(ghostHome, 'haksterAi', '.hakster'),
+  ];
+  const phantomKnowledgeFiles = [
+    '/media/ghost/USB2/phantom-knowledge.md',
+    '/media/ghost/BOOT/phantom-knowledge.md',
+    '/media/ghost/USB STICK/phantom-knowledge.md',
+  ];
+  const claudeKnowledgeFiles = [
+    path.join(ghostHome, 'haksterAi', 'CLAUDE.md'),
   ];
   const seen = new Set();
   const skills = [];
@@ -89,6 +191,30 @@ function getSkillsInventory() {
         source: root,
       });
     }
+  }
+  for (const file of phantomKnowledgeFiles) {
+    if (!fs.existsSync(file)) continue;
+    const key = `phantom:${file}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    skills.push({
+      name: 'phantom-knowledge',
+      category: 'phantom',
+      path: file,
+      source: 'phantom-knowledge',
+    });
+  }
+  for (const file of claudeKnowledgeFiles) {
+    if (!fs.existsSync(file)) continue;
+    const key = `claude:${file}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    skills.push({
+      name: path.basename(file, '.md').toLowerCase(),
+      category: 'claude',
+      path: file,
+      source: 'claude-project-docs',
+    });
   }
   skills.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
   const categories = {};
@@ -198,6 +324,45 @@ async function openAICompatStreamFetch(baseURL, payload, signal) {
 // Existing health endpoint
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0', providers: Object.keys(PROVIDERS) });
+});
+
+app.get('/api/health/security', async (_req, res) => {
+  try {
+    const report = await runSecurityAudit(path.join(__dirname, '..'), CORS_ORIGINS);
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: err.message, summary: { passed: false, total: 0 } });
+  }
+});
+
+app.get('/api/health/security/notifications', (req, res) => {
+  try {
+    const acknowledged = req.query.acknowledged === 'true';
+    const limit = parseInt(req.query.limit) || 50;
+    const notifications = getSecurityNotifications({ acknowledged, limit });
+    res.json({ notifications, count: notifications.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/health/security/notifications/:id/acknowledge', (req, res) => {
+  try {
+    const result = acknowledgeSecurityNotification(req.params.id);
+    if (!result.changes) return res.status(404).json({ error: 'Notification not found' });
+    res.json({ ok: true, acknowledged: req.params.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/health/security/notifications/acknowledge-all', (_req, res) => {
+  try {
+    const result = acknowledgeAllSecurityNotifications();
+    res.json({ ok: true, count: result.changes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/agent/capabilities', (_req, res) => {
@@ -567,10 +732,10 @@ function parseClientContext(body, headers) {
   if (!os_name && ua) {
     if (/Windows NT 10\.0/i.test(ua)) { os_name = 'Windows'; os_version = '10/11'; }
     else if (/Windows NT/i.test(ua)) { os_name = 'Windows'; }
-    else if (/Macintosh|Mac OS X/i.test(ua)) { os_name = 'macOS'; os_version = (ua.match(/Mac OS X ([0-9_.]+)/)?.[1] || '').replace(/_/g, '.'); }
-    else if (/Linux/i.test(ua)) { os_name = 'Linux'; }
     else if (/Android/i.test(ua)) { os_name = 'Android'; os_version = ua.match(/Android ([0-9.]+)/)?.[1] || ''; device_type = 'mobile'; }
     else if (/iPhone|iPad|iPod/i.test(ua)) { os_name = 'iOS'; os_version = ua.match(/OS ([0-9_]+)/)?.[1]?.replace(/_/g, '.') || ''; device_type = /iPad/.test(ua) ? 'tablet' : 'mobile'; }
+    else if (/Macintosh|Mac OS X/i.test(ua)) { os_name = 'macOS'; os_version = (ua.match(/Mac OS X ([0-9_.]+)/)?.[1] || '').replace(/_/g, '.'); }
+    else if (/Linux/i.test(ua)) { os_name = 'Linux'; }
   }
 
   // Parse platform/OS from navigator.platform / Sec-CH-UA-Platform
@@ -602,21 +767,45 @@ function parseClientContext(body, headers) {
     session_id: body.session_id,
     ip_address: body.ip_address || headers['x-forwarded-for']?.split(',')[0] || null,
     user_agent: ua,
-    platform: platform || null,
-    os_name: os_name || null,
-    os_version: os_version || null,
-    browser: browser || null,
-    browser_version: browser_version || null,
-    device_type: device_type || null,
+    platform: platform || body.platform || null,
+    os_name: os_name || body.os_name || null,
+    os_version: os_version || body.os_version || null,
+    browser: browser || body.browser || null,
+    browser_version: browser_version || body.browser_version || null,
+    device_type: device_type || body.device_type || null,
+    device_model: body.device_model || null,
+    engine: body.engine || null,
+    engine_version: body.engine_version || null,
+    languages: body.languages || null,
+    timezone: body.timezone || null,
+    timezone_offset: body.timezone_offset ?? null,
     screen_width: body.screen_width || null,
     screen_height: body.screen_height || null,
+    screen_avail_width: body.screen_avail_width || null,
+    screen_avail_height: body.screen_avail_height || null,
+    screen_color_depth: body.screen_color_depth || null,
+    screen_orientation: body.screen_orientation || null,
+    viewport_width: body.viewport_width || null,
+    viewport_height: body.viewport_height || null,
     device_pixel_ratio: body.device_pixel_ratio || null,
     language: body.language || null,
-    timezone: body.timezone || null,
     online: body.online,
     cores: body.cores || null,
     memory_gb: body.memory_gb || null,
+    max_touch_points: body.max_touch_points || null,
     touch_support: body.touch_support,
+    connection_type: body.connection_type || null,
+    connection_downlink: body.connection_downlink || null,
+    connection_rtt: body.connection_rtt || null,
+    connection_save_data: body.connection_save_data,
+    cookies_enabled: body.cookies_enabled,
+    do_not_track: body.do_not_track,
+    pdf_viewer: body.pdf_viewer,
+    webdriver: body.webdriver,
+    is_bot: body.is_bot,
+    gpu: body.gpu || null,
+    dark_mode: body.dark_mode,
+    reduced_motion: body.reduced_motion,
   };
 }
 
@@ -628,27 +817,121 @@ app.post('/api/client-context', (req, res) => {
 
   const ip = ctx.ip_address || req.ip || req.headers['x-forwarded-for']?.split(',')[0] || 'unknown';
 
+  // Ensure session exists (frontend may generate local IDs not yet in DB)
+  db.prepare(`INSERT OR IGNORE INTO sessions (id, title, provider, model) VALUES (?, ?, 'unknown', 'unknown')`)
+    .run(ctx.session_id, `Device: ${ctx.os_name || ctx.platform || 'unknown'}`);
+
   db.prepare(`
     INSERT INTO client_contexts (session_id, ip_address, user_agent, platform, os_name, os_version,
-      browser, browser_version, device_type, screen_width, screen_height, device_pixel_ratio,
-      language, timezone, online, cores, memory_gb, touch_support)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      browser, browser_version, device_type, device_model, engine, engine_version,
+      screen_width, screen_height, screen_avail_width, screen_avail_height, screen_color_depth,
+      screen_orientation, viewport_width, viewport_height, device_pixel_ratio,
+      language, languages, timezone, timezone_offset, online, cores, memory_gb,
+      max_touch_points, touch_support, connection_type, connection_downlink, connection_rtt,
+      connection_save_data, cookies_enabled, do_not_track, pdf_viewer, webdriver, is_bot,
+      gpu, dark_mode, reduced_motion)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(session_id) DO UPDATE SET
       ip_address=excluded.ip_address, user_agent=excluded.user_agent, platform=excluded.platform,
       os_name=excluded.os_name, os_version=excluded.os_version, browser=excluded.browser,
       browser_version=excluded.browser_version, device_type=excluded.device_type,
+      device_model=excluded.device_model, engine=excluded.engine, engine_version=excluded.engine_version,
       screen_width=excluded.screen_width, screen_height=excluded.screen_height,
-      device_pixel_ratio=excluded.device_pixel_ratio, language=excluded.language,
-      timezone=excluded.timezone, online=excluded.online, cores=excluded.cores,
-      memory_gb=excluded.memory_gb, touch_support=excluded.touch_support, updated_at=unixepoch()
-  `).run(ctx.session_id, ip, ctx.user_agent, ctx.platform, ctx.os_name, ctx.os_version,
-    ctx.browser, ctx.browser_version, ctx.device_type,
-    ctx.screen_width, ctx.screen_height, ctx.device_pixel_ratio,
-    ctx.language, ctx.timezone, ctx.online ? 1 : 0, ctx.cores, ctx.memory_gb,
-    ctx.touch_support ? 1 : 0);
+      screen_avail_width=excluded.screen_avail_width, screen_avail_height=excluded.screen_avail_height,
+      screen_color_depth=excluded.screen_color_depth, screen_orientation=excluded.screen_orientation,
+      viewport_width=excluded.viewport_width, viewport_height=excluded.viewport_height,
+      device_pixel_ratio=excluded.device_pixel_ratio, language=excluded.language, languages=excluded.languages,
+      timezone=excluded.timezone, timezone_offset=excluded.timezone_offset, online=excluded.online,
+      cores=excluded.cores, memory_gb=excluded.memory_gb, max_touch_points=excluded.max_touch_points,
+      touch_support=excluded.touch_support, connection_type=excluded.connection_type,
+      connection_downlink=excluded.connection_downlink, connection_rtt=excluded.connection_rtt,
+      connection_save_data=excluded.connection_save_data, cookies_enabled=excluded.cookies_enabled,
+      do_not_track=excluded.do_not_track, pdf_viewer=excluded.pdf_viewer, webdriver=excluded.webdriver,
+      is_bot=excluded.is_bot, gpu=excluded.gpu, dark_mode=excluded.dark_mode,
+      reduced_motion=excluded.reduced_motion, updated_at=unixepoch()
+  `).run(
+    ctx.session_id, ip, ctx.user_agent, ctx.platform, ctx.os_name, ctx.os_version,
+    ctx.browser, ctx.browser_version, ctx.device_type, ctx.device_model, ctx.engine, ctx.engine_version,
+    ctx.screen_width, ctx.screen_height, ctx.screen_avail_width, ctx.screen_avail_height, ctx.screen_color_depth,
+    ctx.screen_orientation, ctx.viewport_width, ctx.viewport_height, ctx.device_pixel_ratio,
+    ctx.language, ctx.languages, ctx.timezone, ctx.timezone_offset, ctx.online ? 1 : 0, ctx.cores, ctx.memory_gb,
+    ctx.max_touch_points, ctx.touch_support ? 1 : 0, ctx.connection_type, ctx.connection_downlink, ctx.connection_rtt,
+    ctx.connection_save_data ? 1 : 0, ctx.cookies_enabled ? 1 : 0, ctx.do_not_track, ctx.pdf_viewer ? 1 : 0, ctx.webdriver ? 1 : 0, ctx.is_bot ? 1 : 0,
+    ctx.gpu, ctx.dark_mode ? 1 : 0, ctx.reduced_motion ? 1 : 0
+  );
 
-  res.json({ ok: true, session_id: ctx.session_id, detected: { os_name: ctx.os_name, platform: ctx.platform, browser: ctx.browser, device_type: ctx.device_type } });
+  // ── Device fingerprinting: remember this device for the user ──
+  const fingerprint = crypto.createHash('sha256').update([
+    ctx.user_agent || '', ctx.screen_width || '', ctx.screen_height || '',
+    ctx.timezone || '', ctx.language || '', ctx.gpu || '', ctx.device_pixel_ratio || '',
+  ].join('|')).digest('hex').slice(0, 32);
+
+  // Check if a logged-in user matches this request (via API key header)
+  const apiKey = req.headers['x-api-key'];
+  let trackedUserId = null;
+  if (apiKey) {
+    const u = db.prepare('SELECT id FROM users WHERE api_key = ?').get(apiKey);
+    if (u) trackedUserId = u.id;
+  }
+
+  if (trackedUserId) {
+    const deviceName = ctx.device_model || [ctx.os_name, ctx.device_type].filter(Boolean).join(' ');
+    db.prepare(`
+      INSERT INTO user_devices (user_id, device_fingerprint, device_name, device_type, os_name, os_version,
+        browser, browser_version, user_agent, ip_address, screen_resolution, gpu, timezone, language, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(user_id, device_fingerprint) DO UPDATE SET
+        device_name=excluded.device_name, device_type=excluded.device_type, os_name=excluded.os_name,
+        os_version=excluded.os_version, browser=excluded.browser, browser_version=excluded.browser_version,
+        user_agent=excluded.user_agent, ip_address=excluded.ip_address, screen_resolution=excluded.screen_resolution,
+        gpu=excluded.gpu, timezone=excluded.timezone, language=excluded.language,
+        last_seen_at=unixepoch()
+    `).run(
+      trackedUserId, fingerprint, deviceName, ctx.device_type, ctx.os_name, ctx.os_version,
+      ctx.browser, ctx.browser_version, ctx.user_agent, ip,
+      ctx.screen_width && ctx.screen_height ? `${ctx.screen_width}x${ctx.screen_height}` : null,
+      ctx.gpu, ctx.timezone, ctx.language
+    );
+  }
+
+  res.json({
+    ok: true, session_id: ctx.session_id, fingerprint,
+    detected: { os_name: ctx.os_name, platform: ctx.platform, browser: ctx.browser, device_type: ctx.device_type, device_model: ctx.device_model, engine: ctx.engine },
+  });
 });
+
+// ── Helper: build client device context string for LLM system prompts ──
+function getClientContextString(sessionId) {
+  if (!sessionId) return '';
+  try {
+    const db = getDb();
+    const cc = db.prepare(`SELECT * FROM client_contexts WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1`).get(sessionId);
+    if (!cc) return '';
+    const lines = ['\n=== CLIENT DEVICE CONTEXT ==='];
+    lines.push(`The user is connecting from this device/browser:`);
+    if (cc.device_type) lines.push(`  Device type: ${cc.device_type}`);
+    if (cc.device_model) lines.push(`  Device model: ${cc.device_model}`);
+    if (cc.os_name || cc.os_version) lines.push(`  OS: ${[cc.os_name, cc.os_version].filter(Boolean).join(' ')}`);
+    if (cc.platform) lines.push(`  Platform: ${cc.platform}`);
+    if (cc.browser || cc.browser_version) lines.push(`  Browser: ${[cc.browser, cc.browser_version].filter(Boolean).join(' ')}`);
+    if (cc.engine) lines.push(`  Engine: ${[cc.engine, cc.engine_version].filter(Boolean).join(' ')}`);
+    if (cc.screen_width && cc.screen_height) lines.push(`  Screen: ${cc.screen_width}×${cc.screen_height}${cc.device_pixel_ratio ? ` @${cc.device_pixel_ratio}x` : ''}`);
+    if (cc.viewport_width && cc.viewport_height) lines.push(`  Viewport: ${cc.viewport_width}×${cc.viewport_height}`);
+    if (cc.touch_support) lines.push(`  Touch: Yes (${cc.max_touch_points || 'multi'} touch points)`);
+    if (cc.language) lines.push(`  Language: ${cc.language}${cc.languages ? ` (supports: ${cc.languages})` : ''}`);
+    if (cc.timezone) lines.push(`  Timezone: ${cc.timezone}${cc.timezone_offset ? ` (UTC${cc.timezone_offset > 0 ? '-' : '+'}${Math.abs(cc.timezone_offset / 60)}h)` : ''}`);
+    if (cc.cores) lines.push(`  CPU cores: ${cc.cores}`);
+    if (cc.memory_gb) lines.push(`  Memory: ${cc.memory_gb} GB`);
+    if (cc.connection_type) lines.push(`  Connection: ${cc.connection_type}${cc.connection_downlink ? ` (${cc.connection_downlink} Mbps, RTT ${cc.connection_rtt}ms)` : ''}`);
+    if (cc.gpu) lines.push(`  GPU: ${cc.gpu}`);
+    if (cc.is_bot) lines.push(`  ⚠ Bot/crawler detected`);
+    if (cc.webdriver) lines.push(`  ⚠ Automated browser (WebDriver)`);
+    if (cc.dark_mode !== null && cc.dark_mode !== undefined) lines.push(`  Dark mode: ${cc.dark_mode ? 'on' : 'off'}`);
+    if (cc.ip_address) lines.push(`  IP: ${cc.ip_address}`);
+    lines.push('=== END CLIENT DEVICE CONTEXT ===\n');
+    return lines.join('\n');
+  } catch (_) { return ''; }
+}
 
 app.get('/api/client-context/:sessionId', (req, res) => {
   const db = getDb();
@@ -776,6 +1059,16 @@ app.post('/api/memory/search', (req, res) => {
   res.json({ results });
 });
 
+app.post('/api/memory/compact', (req, res) => {
+  try {
+    const { maxKeep, maxAgeDays } = req.body || {};
+    const result = compactMemories({ maxKeep: maxKeep || 40, maxAgeDays: maxAgeDays || 14 });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Sessions CRUD ─────────────────────────────────────────────────
 app.post('/api/sessions', (req, res) => {
   const db = getDb();
@@ -828,9 +1121,22 @@ app.post('/api/chat', async (req, res) => {
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'messages array required' });
   }
+  // Usage check
+  const user = getUserByApiKey(req);
+  const usageCheck = checkUsageLimit(user);
+  if (!usageCheck.allowed) {
+    return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
+  }
+
+  // Inject client device context into system prompt
+  const clientCtxStr = getClientContextString(sessionId);
+  const deviceAwareness = clientCtxStr
+    ? '\nYou are aware of the user\'s browser and device via CLIENT DEVICE CONTEXT. Tailor your responses accordingly (mobile vs desktop, touch vs mouse, screen size). When you write files via write_file, the user gets a download button automatically.\n'
+    : '';
+  const effectiveSystem = (system ? system + '\n\n' : '') + clientCtxStr + deviceAwareness;
 
   try {
-    const result = await chat({ provider, model, messages, system });
+    const result = await chat({ provider, model, messages, system: effectiveSystem || undefined });
     const db = getDb();
 
     // Log the request
@@ -848,8 +1154,8 @@ app.post('/api/chat', async (req, res) => {
     }
 
     res.json(result);
+    incrementUsage(user);
   } catch (err) {
-    console.error('[chat] error:', err);
     const db = getDb();
     const reqId = uuidv4();
     db.prepare(
@@ -868,6 +1174,12 @@ app.post('/api/chat/stream', async (req, res) => {
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'messages array required' });
   }
+  // Usage check
+  const user = getUserByApiKey(req);
+  const usageCheck = checkUsageLimit(user);
+  if (!usageCheck.allowed) {
+    return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
+  }
 
   // SSE heartbeat — prevent idle disconnect
   const chatHeartbeat = setInterval(() => {
@@ -881,12 +1193,19 @@ app.post('/api/chat/stream', async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
+  // Inject client device context into system prompt
+  const clientCtxStr = getClientContextString(sessionId);
+  const deviceAwareness = clientCtxStr
+    ? '\nYou are aware of the user\'s browser and device via CLIENT DEVICE CONTEXT. Tailor your responses accordingly (mobile vs desktop, touch vs mouse, screen size). When you write files via write_file, the user gets a download button automatically.\n'
+    : '';
+  const effectiveSystem = (system ? system + '\n\n' : '') + clientCtxStr + deviceAwareness;
+
   try {
     let fullContent = '';
     let fullThinking = '';
     let finalMeta = null;
 
-    for await (const event of chatStream({ provider, model, messages, system, thinking })) {
+    for await (const event of chatStream({ provider, model, messages, system: effectiveSystem || undefined, thinking })) {
       if (event.type === 'delta') {
         fullContent += event.content;
         res.write(`data: ${JSON.stringify({ type: 'delta', content: event.content })}\n\n`);
@@ -919,6 +1238,7 @@ app.post('/api/chat/stream', async (req, res) => {
     }
 
     res.write(`data: ${JSON.stringify({ type: 'done', ...(finalMeta || {}) })}\n\n`);
+    incrementUsage(user);
     res.end();
   } catch (err) {
     console.error('[stream] error:', err);
@@ -953,16 +1273,19 @@ app.get('/api/agent/allowlist', (_req, res) => {
 });
 
 app.post('/api/agent/allow', (req, res) => {
-  const { command } = req.body;
+  const { command, permanent, sessionId } = req.body;
   if (!command) return res.status(400).json({ error: 'command is required' });
   const cmd = command.trim();
-  // Add to in-memory allowlist for all sessions
-  if (!sessionAllowedCommands.has('default')) sessionAllowedCommands.set('default', new Set());
-  sessionAllowedCommands.get('default').add(cmd);
-  // Persist to DB for cross-session reuse (no session_id — global permanent allowlist)
-  const db = getDb();
-  db.prepare('INSERT OR IGNORE INTO command_allowlist (command, source, session_id) VALUES (?, ?, ?)').run(cmd, 'user', 'default');
-  res.json({ ok: true, command: cmd, permanent: true });
+  const sid = sessionId || 'default';
+  // Add to in-memory allowlist for this session
+  if (!sessionAllowedCommands.has(sid)) sessionAllowedCommands.set(sid, new Set());
+  sessionAllowedCommands.get(sid).add(cmd);
+  // Persist to DB only when permanent flag is set (cross-session reuse)
+  if (permanent !== false) {
+    const db = getDb();
+    db.prepare('INSERT OR IGNORE INTO command_allowlist (command, source, session_id) VALUES (?, ?, ?)').run(cmd, 'user', permanent === true ? 'default' : sid);
+  }
+  res.json({ ok: true, command: cmd, permanent: permanent !== false });
 });
 
 app.delete('/api/agent/allowlist/:id', (req, res) => {
@@ -987,6 +1310,12 @@ app.post('/api/agent/run', async (req, res) => {
   }
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'messages array required' });
+  }
+  // Usage check
+  const user = getUserByApiKey(req);
+  const usageCheck = checkUsageLimit(user);
+  if (!usageCheck.allowed) {
+    return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   }
 
   const cfg = PROVIDERS[provider];
@@ -1100,31 +1429,16 @@ ${dirListing}
   ];
 
   // ── Inject client device context if available ──────────────────────
-  if (sessionId) {
-    try {
-      const db = getDb();
-      const clientCtx = db.prepare(`SELECT * FROM client_contexts WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1`).get(sessionId);
-      if (clientCtx) {
-        const lines = ['\n=== CLIENT DEVICE CONTEXT ==='];
-        lines.push(`The user is connecting from a DIFFERENT device than the server.`);
-        lines.push(`Server: See MACHINE CONTEXT above (where I run)`);
-        lines.push(`Client (where the user is):`);
-        if (clientCtx.device_type) lines.push(`  Device: ${clientCtx.device_type}`);
-        if (clientCtx.os_name || clientCtx.os_version) lines.push(`  OS: ${[clientCtx.os_name, clientCtx.os_version].filter(Boolean).join(' ')}`);
-        if (clientCtx.platform) lines.push(`  Platform: ${clientCtx.platform}`);
-        if (clientCtx.browser || clientCtx.browser_version) lines.push(`  Browser: ${[clientCtx.browser, clientCtx.browser_version].filter(Boolean).join(' ')}`);
-        if (clientCtx.screen_width && clientCtx.screen_height) lines.push(`  Screen: ${clientCtx.screen_width}×${clientCtx.screen_height}${clientCtx.device_pixel_ratio ? ` @${clientCtx.device_pixel_ratio}x` : ''}`);
-        if (clientCtx.language) lines.push(`  Language: ${clientCtx.language}`);
-        if (clientCtx.timezone) lines.push(`  Timezone: ${clientCtx.timezone}`);
-        if (clientCtx.cores) lines.push(`  CPU cores: ${clientCtx.cores}`);
-        if (clientCtx.memory_gb) lines.push(`  Memory: ${clientCtx.memory_gb} GB`);
-        if (clientCtx.touch_support) lines.push(`  Touch: Yes`);
-        if (clientCtx.ip_address) lines.push(`  IP: ${clientCtx.ip_address}`);
-        lines.push('=== END CLIENT DEVICE CONTEXT ===\n');
-        agentMessages[0].content += lines.join('\n');
-      }
-    } catch (_) { /* client context not available — skip */ }
+  const clientCtxStr = getClientContextString(sessionId);
+  if (clientCtxStr) {
+    agentMessages[0].content += clientCtxStr;
   }
+
+  // ── Inject pentester fingerprint (stable device identity) ──
+  const { fingerprint: getServerFingerprint } = require('./fingerprint');
+  const serverFp = getServerFingerprint();
+  agentMessages[0].content += `\n\n## 🔐 Pentester Device Identity\n- Device UID: ${serverFp.device_uid.device_id}\n- Session UID: ${serverFp.session_uid}\n- Hostname: ${serverFp.hostname}\n- MAC Hash: ${serverFp.mac_hash || 'N/A'}\n- OS: ${serverFp.os.name} ${serverFp.os.release}\nThis is your stable device identity for session tracking, audit logs, and receipts.`;
+  // (Client Awareness and File Delivery instructions are already in AGENT_SYSTEM_PROMPT)
 
   // ── Pre-process multimodal messages: convert images to text for non-vision models ──
   const VISION_CAPABLE_PATTERNS = [
@@ -1614,9 +1928,15 @@ ${dirListing}
         // Notify frontend: tool call result
         res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
 
-        // If a file was written/edited, emit a file event so frontend can show a download button
+        // If a file was written/edited, emit a file event so frontend can show a download button.
+        // Only emit on success — the tool result must not be an error and the file must actually exist,
+        // otherwise the user sees an "error" message alongside a dead download button.
         if (['write_file', 'edit_file', 'patch_file', 'multi_patch'].includes(toolName) && toolArgs.path) {
-          res.write(`data: ${JSON.stringify({ type: 'file_created', path: toolArgs.path, tool: toolName })}\n\n`);
+          const isErr = /^Error[:\n]/i.test(String(result).trim()) || /^\u274c/i.test(String(result).trim());
+          const fullPath = path.resolve(workDir, toolArgs.path);
+          if (!isErr && fs.existsSync(fullPath)) {
+            res.write(`data: ${JSON.stringify({ type: 'file_created', path: fullPath, tool: toolName })}\n\n`);
+          }
         }
 
         // Notify workspace watchers if a file was written/edited
@@ -1640,7 +1960,9 @@ ${dirListing}
 
         // ── Tool-error loop detection ──
         // Track consecutive errors from the same tool — if a tool errors 3x in a row, break the loop
-        const isError = result.toLowerCase().includes('error') || result.toLowerCase().includes('failed') || result.toLowerCase().includes('exception');
+        // Only match actual error lines (starting with "Error:" or "❌"), not file paths containing "error"
+        const resultLower = result.toLowerCase();
+        const isError = /^(error|❌)/.test(result.trim()) || resultLower.startsWith('error:') || resultLower.startsWith('failed:') || resultLower.startsWith('exception:');
         if (isError) {
           const existing = loopDetect.consecutiveToolErrors.find(e => e.name === toolName);
           if (existing) {
@@ -1669,6 +1991,7 @@ ${dirListing}
     // Hit max turns
     clearInterval(heartbeat);
     res.write(`data: ${JSON.stringify({ type: 'max_turns', maxTurns })}\n\n`);
+    incrementUsage(user);
     res.end();
   } catch (err) {
     clearInterval(heartbeat);
@@ -1701,8 +2024,21 @@ app.post('/api/sessions/:id/messages', (req, res) => {
 // ── File system API (scoped to FS_ROOT) ───────────────────────────
 
 function safePath(reqPath) {
-  const resolved = path.resolve(FS_ROOT, '.' + reqPath);
-  if (!resolved.startsWith(path.resolve(FS_ROOT))) {
+  // Handle absolute paths directly; resolve relative paths against FS_ROOT.
+  // path.resolve() normalizes away any leading "./" or "../" segments safely.
+  const resolved = path.isAbsolute(reqPath)
+    ? path.resolve(reqPath)
+    : path.resolve(FS_ROOT, reqPath);
+  // Security: must be within FS_ROOT or a known safe directory.
+  // Use path.relative to guard against traversal (handles trailing-slash edge cases).
+  const fsRootResolved = path.resolve(FS_ROOT);
+  const safeRoots = [fsRootResolved, '/tmp', '/home/ghost'];
+  const allowed = safeRoots.some(root => {
+    if (root === '/') return true;
+    const rel = path.relative(root, resolved);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  });
+  if (!allowed) {
     throw new Error('Path traversal blocked');
   }
   return resolved;
@@ -1919,6 +2255,12 @@ app.post('/api/generate', async (req, res) => {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
   if (!description && images.length === 0) return res.status(400).json({ error: 'description or images required' });
+  // Usage check
+  const user = getUserByApiKey(req);
+  const usageCheck = checkUsageLimit(user);
+  if (!usageCheck.allowed) {
+    return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
+  }
 
   const cfg = PROVIDERS[provider];
   if (!cfg) return res.status(400).json({ error: `Unknown provider: ${provider}` });
@@ -2347,10 +2689,17 @@ app.get('/preview/:id', (req, res) => {
 app.post('/api/images/generate', async (req, res) => {
   const { provider = 'openai', model = 'dall-e-3', prompt, size = '1024x1024', quality = 'standard' } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  // Usage check
+  const user = getUserByApiKey(req);
+  const usageCheck = checkUsageLimit(user);
+  if (!usageCheck.allowed) {
+    return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
+  }
 
   try {
     const result = await generateImage({ provider, model, prompt, size, quality });
     res.json(result);
+    incrementUsage(user);
   } catch (err) {
     console.error('[image-gen] error:', err);
     res.status(500).json({ error: err.message });
@@ -2652,16 +3001,530 @@ app.get('/api/users', (_req, res) => {
   res.json({ users, stats });
 });
 
+// ── User activity & tracking ──────────────────────────────────────
+app.get('/api/users/activity', (req, res) => {
+  const db = getDb();
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const action = req.query.action;
+  let query = `SELECT ua.*, u.username, u.email
+    FROM user_activity ua LEFT JOIN users u ON ua.user_id = u.id`;
+  const params = [];
+  if (action) { query += ` WHERE ua.action = ?`; params.push(action); }
+  query += ` ORDER BY ua.created_at DESC LIMIT ?`;
+  params.push(limit);
+  const activity = db.prepare(query).all(...params);
+  res.json({ activity, count: activity.length });
+});
+
+app.get('/api/users/recent', (req, res) => {
+  const db = getDb();
+  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+  const users = db.prepare(
+    `SELECT u.id, u.username, u.email, u.role, u.plan, u.status, u.created_at, u.last_login_at, u.last_login_ip,
+     (SELECT COUNT(*) FROM user_activity ua WHERE ua.user_id = u.id AND ua.action = 'login') as login_count,
+     (SELECT ua.ip_address FROM user_activity ua WHERE ua.user_id = u.id ORDER BY ua.created_at DESC LIMIT 1) as last_ip,
+     (SELECT ua.device_type FROM user_activity ua WHERE ua.user_id = u.id ORDER BY ua.created_at DESC LIMIT 1) as last_device,
+     (SELECT ua.os_name FROM user_activity ua WHERE ua.user_id = u.id ORDER BY ua.created_at DESC LIMIT 1) as last_os,
+     (SELECT ua.browser FROM user_activity ua WHERE ua.user_id = u.id ORDER BY ua.created_at DESC LIMIT 1) as last_browser,
+     (SELECT ua.user_agent FROM user_activity ua WHERE ua.user_id = u.id ORDER BY ua.created_at DESC LIMIT 1) as last_user_agent
+     FROM users u ORDER BY u.created_at DESC LIMIT ?`
+  ).all(limit);
+  res.json({ users, count: users.length });
+});
+
+app.post('/api/users/track', (req, res) => {
+  const db = getDb();
+  const { action, userId, sessionId, device } = req.body;
+  if (!action) return res.status(400).json({ error: 'action is required' });
+  const ip = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || '';
+  const userAgent = req.get('User-Agent') || '';
+  const dev = device || {};
+  db.prepare(
+    `INSERT INTO user_activity (user_id, action, ip_address, user_agent, endpoint, method, device_type, os_name, browser, screen_size, language, timezone, session_id, metadata)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    userId || null, action, ip, userAgent, req.path, req.method,
+    dev.deviceType || null, dev.osName || null, dev.browser || null,
+    dev.screenSize || null, dev.language || null, dev.timezone || null,
+    sessionId || null, JSON.stringify(dev.metadata || {})
+  );
+  res.json({ ok: true });
+});
+
 app.get('/api/users/:id', (req, res) => {
   const db = getDb();
   const user = db.prepare(`SELECT id, username, email, role, plan, status, created_at, updated_at, last_login_at, last_login_ip FROM users WHERE id = ?`).get(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  // Get user's sessions and requests
-  const sessions = db.prepare(`SELECT id, provider, model, total_tokens, total_cost, created_at, updated_at FROM sessions WHERE id IN (SELECT session_id FROM requests WHERE ? = 'placeholder') ORDER BY updated_at DESC LIMIT 20`).all();
-  const requestCount = db.prepare(`SELECT COUNT(*) as c FROM requests`).get().c;
   const accessLogs = db.prepare(`SELECT * FROM access_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`).all(req.params.id);
   const auditLogs = db.prepare(`SELECT * FROM api_key_audit WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`).all(req.params.id);
-  res.json({ ...user, requestCount, accessLogs, auditLogs });
+  const activity = db.prepare(`SELECT * FROM user_activity WHERE user_id = ? ORDER BY created_at DESC LIMIT 30`).all(req.params.id);
+  const devices = db.prepare(`SELECT * FROM user_devices WHERE user_id = ? ORDER BY last_seen_at DESC`).all(req.params.id);
+  const payments = db.prepare(`SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`).all(req.params.id);
+  const subscription = db.prepare(`SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1`).get(req.params.id);
+  res.json({ ...user, accessLogs, auditLogs, activity, devices, payments, subscription });
+});
+
+// ── User Devices API ──
+app.get('/api/devices', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  const devices = db.prepare(`SELECT * FROM user_devices WHERE user_id = ? ORDER BY last_seen_at DESC`).all(user.id);
+  res.json({ devices, count: devices.length });
+});
+
+// ── Server Fingerprint API ──
+const { fingerprint: getServerFingerprint } = require('./fingerprint');
+app.get('/api/fingerprint', (req, res) => {
+  res.json(getServerFingerprint());
+});
+
+// ── Pentester Agent API ──
+const { execSync } = require('child_process');
+app.post('/api/pentester/run', (req, res) => {
+  const target = (req.body && req.body.target) || '';
+  if (!target) return res.status(400).json({ error: 'target required' });
+
+  // Basic validation — reject obviously invalid targets
+  if (!/^[\w.\-:/]+$/.test(target)) return res.status(400).json({ error: 'Invalid target format' });
+
+  const scriptDir = path.join(__dirname, '..', '..', 'scripts');
+  try {
+    const raw = execSync(`cd ${JSON.stringify(scriptDir)} && python3 pentester_agent.py ${JSON.stringify(target)} 2>&1`, {
+      encoding: 'utf-8',
+      timeout: 60000,
+      maxBuffer: 1024 * 1024 * 10,
+    });
+    // Parse the two JSON blocks (plan + final state)
+    const blocks = raw.split(/\n(?=\{)/).filter(b => b.trim().startsWith('{'));
+    const plan = blocks.length > 0 ? JSON.parse(blocks[0]) : null;
+    const finalState = blocks.length > 1 ? JSON.parse(blocks[1]) : null;
+    res.json({ ok: true, plan, state: finalState, raw });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stdout: err.stdout || '' });
+  }
+});
+
+// ── Pentester tools (real implementations) ──
+app.post('/api/pentester/scan', (req, res) => {
+  const { target, tool } = req.body || {};
+  if (!target) return res.status(400).json({ error: 'target required' });
+
+  const allowedTools = {
+    port_scan: `nmap -sT -T4 --top-ports 1000 ${JSON.stringify(target)} 2>&1`,
+    os_probe: `nmap -O ${JSON.stringify(target)} 2>&1`,
+    http_probe: `curl -sI --max-time 10 ${JSON.stringify(target)} 2>&1 | head -30`,
+    dir_enum: `gobuster dir -u ${JSON.stringify('http://' + target)} -w /usr/share/wordlists/dirb/common.txt -q 2>&1 | head -50`,
+    service_map: `nmap -sV ${JSON.stringify(target)} 2>&1`,
+    exploit_check: `searchsploit --nmap ${JSON.stringify(target)} 2>&1 || echo 'searchsploit not installed'`,
+  };
+
+  const cmd = allowedTools[tool];
+  if (!cmd) return res.status(400).json({ error: `Unknown tool: ${tool}. Available: ${Object.keys(allowedTools).join(', ')}` });
+
+  try {
+    const output = execSync(cmd, { encoding: 'utf-8', timeout: 120000, maxBuffer: 1024 * 1024 * 10 });
+    res.json({ ok: true, tool, target, output });
+  } catch (err) {
+    res.json({ ok: true, tool, target, output: err.stdout || err.message });
+  }
+});
+
+app.get('/api/pentester/fingerprint', (req, res) => {
+  try {
+    const scriptDir = path.join(__dirname, '..', '..', 'scripts');
+    const raw = execSync(`cd ${JSON.stringify(scriptDir)} && python3 pentester_fingerprint.py 2>&1`, {
+      encoding: 'utf-8',
+      timeout: 10000,
+    });
+    res.json(JSON.parse(raw));
+  } catch (err) {
+    // Fallback to JS fingerprint
+    res.json(getServerFingerprint());
+  }
+});
+
+app.post('/api/devices/:id/trust', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  db.prepare('UPDATE user_devices SET is_trusted = 1 WHERE id = ? AND user_id = ?').run(req.params.id, user.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/devices/:id', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  db.prepare('DELETE FROM user_devices WHERE id = ? AND user_id = ?').run(req.params.id, user.id);
+  res.json({ ok: true });
+});
+
+// ── Receipts / Payments API ──
+app.get('/api/receipts', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  const receipts = db.prepare(`SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC`).all(user.id);
+  res.json({ receipts, count: receipts.length });
+});
+
+app.get('/api/receipts/:id', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  const receipt = db.prepare(`SELECT * FROM payments WHERE id = ? AND user_id = ?`).get(req.params.id, user.id);
+  if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
+  res.json(receipt);
+});
+
+app.post('/api/receipts', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  const { amount, currency, plan, billing_cycle, payment_method, provider_id, description, metadata } = req.body;
+  const receiptId = 'rcpt_' + crypto.randomBytes(16).toString('hex');
+  db.prepare(`INSERT INTO payments (id, user_id, amount, currency, plan, billing_cycle, status, payment_method, provider_id, description, metadata) VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)`)
+    .run(receiptId, user.id, amount || 0, currency || 'USD', plan || 'pro', billing_cycle || 'monthly', payment_method || 'stripe', provider_id || null, description || null, metadata ? JSON.stringify(metadata) : null);
+  const receipt = db.prepare(`SELECT * FROM payments WHERE id = ?`).get(receiptId);
+  res.json({ ok: true, receipt });
+});
+
+// ── Subscriptions API ──
+app.get('/api/subscription', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  const sub = db.prepare(`SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`).get(user.id);
+  res.json({ subscription: sub || null });
+});
+
+app.post('/api/subscription', (req, res) => {
+  const db = getDb();
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  const { plan, billing_cycle, current_period_start, current_period_end, provider_sub_id, payment_id, metadata } = req.body;
+  const subId = 'sub_' + crypto.randomBytes(16).toString('hex');
+  // Deactivate previous subscriptions
+  db.prepare('UPDATE subscriptions SET status = ? WHERE user_id = ? AND status = ?', 'expired', user.id, 'active').run();
+  db.prepare(`INSERT INTO subscriptions (id, user_id, plan, billing_cycle, status, current_period_start, current_period_end, provider_sub_id, payment_id, metadata) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`)
+    .run(subId, user.id, plan || 'pro', billing_cycle || 'monthly', current_period_start || null, current_period_end || null, provider_sub_id || null, payment_id || null, metadata ? JSON.stringify(metadata) : null);
+  // Update user plan
+  db.prepare('UPDATE users SET plan = ?, updated_at = unixepoch() WHERE id = ?').run(plan || 'pro', user.id);
+  const sub = db.prepare(`SELECT * FROM subscriptions WHERE id = ?`).get(subId);
+  res.json({ ok: true, subscription: sub });
+});
+
+app.get('/api/pricing', (_req, res) => {
+  res.json({
+    currency: 'usd',
+    plans: PRICING_CATALOG,
+    stripe: {
+      configured: Boolean(process.env.STRIPE_SECRET_KEY),
+      publishableKeyConfigured: Boolean(process.env.STRIPE_PUBLISHABLE_KEY),
+    },
+  });
+});
+
+// ── Google OAuth ──────────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+
+app.get('/api/auth/google/client-id', (_req, res) => {
+  res.json({ clientId: GOOGLE_CLIENT_ID, configured: !!GOOGLE_CLIENT_ID });
+});
+
+// Redirect to Google OAuth consent screen
+app.get('/api/auth/google/redirect', (req, res) => {
+  if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Google OAuth not configured' });
+  // Use a canonical redirect URI — strip www, always use same proto/host
+  const proto = req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http');
+  let host = req.hostname || 'localhost';
+  // Strip www. prefix so redirect_uri always matches
+  if (host.startsWith('www.')) host = host.slice(4);
+  const port = (host === 'localhost' || host === '127.0.0.1') ? `:${req.socket.localPort}` : '';
+  const redirectUri = `${proto}://${host}${port}/api/auth/google/callback`;
+  const state = require('crypto').randomBytes(16).toString('hex');
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile',
+    access_type: 'offline',
+    prompt: 'select_account',
+    state,
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/auth?${params.toString()}`);
+});
+
+// Google OAuth callback
+app.get('/api/auth/google/callback', async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.redirect(`/build?google_error=${encodeURIComponent(error)}`);
+  if (!code) return res.redirect('/build?google_error=no_code');
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.redirect('/build?google_error=not_configured');
+
+  try {
+    const proto = req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http');
+    let host = req.hostname || 'localhost';
+    if (host.startsWith('www.')) host = host.slice(4);
+    const port = (host === 'localhost' || host === '127.0.0.1') ? `:${req.socket.localPort}` : '';
+    const redirectUri = `${proto}://${host}${port}/api/auth/google/callback`;
+
+    // Exchange authorization code for tokens
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
+    });
+    if (!tokenRes.ok) {
+      const errBody = await tokenRes.text();
+      console.error('Google token exchange failed:', errBody);
+      return res.redirect(`/build?google_error=token_exchange_failed`);
+    }
+    const tokens = await tokenRes.json();
+    const idToken = tokens.id_token;
+    if (!idToken) return res.redirect('/build?google_error=no_id_token');
+
+    // Verify the ID token
+    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    if (!verifyRes.ok) return res.redirect('/build?google_error=invalid_token');
+    const payload = await verifyRes.json();
+    if (payload.aud !== GOOGLE_CLIENT_ID) return res.redirect('/build?google_error=audience_mismatch');
+    if (payload.exp && parseInt(payload.exp) < Math.floor(Date.now() / 1000)) return res.redirect('/build?google_error=expired_token');
+
+    const googleId = payload.sub;
+    const email = payload.email || '';
+    const name = payload.name || email.split('@')[0] || 'google_user';
+    const picture = payload.picture || '';
+    const ip = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || '';
+    const userAgent = req.get('User-Agent') || '';
+
+    const db = getDb();
+
+    // Check if user exists
+    let user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId);
+    let wasSignup = false;
+
+    if (!user && email) {
+      user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+      if (user) {
+        db.prepare('UPDATE users SET google_id = ?, updated_at = unixepoch(), last_login_at = unixepoch(), last_login_ip = ? WHERE id = ?')
+          .run(googleId, ip, user.id);
+      }
+    }
+
+    if (!user) {
+      wasSignup = true;
+      const id = uuidv4();
+      const apiKey = 'hkai_' + require('crypto').randomBytes(24).toString('hex');
+      const username = name.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30) || ('g_' + googleId.slice(0, 8));
+      db.prepare(
+        'INSERT INTO users (id, username, email, api_key, google_id, role, plan, status, last_login_at, last_login_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)'
+      ).run(id, username, email, apiKey, googleId, 'user', 'free', 'active', ip);
+      user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    } else {
+      db.prepare('UPDATE users SET last_login_at = unixepoch(), last_login_ip = ?, updated_at = unixepoch() WHERE id = ?')
+        .run(ip, user.id);
+    }
+
+    // Log to access_logs
+    db.prepare('INSERT INTO access_logs (user_id, ip_address, user_agent, endpoint, method, status_code) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(user.id, ip, userAgent, '/auth/google/callback', 'GET', 200);
+
+    // Log to user_activity
+    db.prepare(
+      `INSERT INTO user_activity (user_id, action, ip_address, user_agent, endpoint, method, status_code, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(user.id, wasSignup ? 'signup' : 'login', ip, userAgent, '/auth/google/callback', 'GET', 200,
+      JSON.stringify({ googleId: googleId.slice(0, 8) + '...', email, name, picture: picture ? true : false }));
+
+    // Push real-time notification
+    notifPush(`👤 ${wasSignup ? 'New user' : 'Login'}: ${user.username} (${email}) from ${ip}`, {
+      type: wasSignup ? 'user_signup' : 'user_login',
+      priority: wasSignup ? 'high' : 'normal',
+      source: 'auth',
+    });
+
+    // Encode user data into redirect URL for frontend to pick up
+    const userData = encodeURIComponent(JSON.stringify({
+      ok: true,
+      isNewUser: wasSignup,
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key },
+      apiKey: user.api_key,
+    }));
+    res.redirect(`/build?google_auth=${userData}`);
+  } catch (err) {
+    console.error('Google OAuth callback error:', err);
+    res.redirect(`/build?google_error=${encodeURIComponent(err.message || 'unknown')}`);
+  }
+});
+
+// ── Usage tracking & limits ───────────────────────────────────────
+function getUserByApiKey(req) {
+  const apiKey = req.headers['x-api-key'] || req.body?.apiKey;
+  if (!apiKey) return null;
+  const db = getDb();
+  return db.prepare('SELECT * FROM users WHERE api_key = ?').get(apiKey);
+}
+
+function checkUsageLimit(user) {
+  if (!USAGE_LIMIT_ENABLED) return { allowed: true };
+  if (!user) return { allowed: true }; // no user = no tracking, let it through
+  if (user.plan !== 'free') return { allowed: true, plan: user.plan }; // paid plans unlimited
+  const now = Math.floor(Date.now() / 1000);
+  // Reset count if reset period passed
+  if (user.usage_reset_at && now > user.usage_reset_at) {
+    const db = getDb();
+    db.prepare('UPDATE users SET usage_count = 0, usage_reset_at = ? WHERE id = ?').run(now + USAGE_RESET_DAYS * 86400, user.id);
+    user.usage_count = 0;
+    user.usage_reset_at = now + USAGE_RESET_DAYS * 86400;
+  }
+  if (user.usage_count >= FREE_USAGE_LIMIT) {
+    return { allowed: false, limit: FREE_USAGE_LIMIT, used: user.usage_count, plan: user.plan };
+  }
+  return { allowed: true, used: user.usage_count, limit: FREE_USAGE_LIMIT, plan: user.plan };
+}
+
+function incrementUsage(user) {
+  if (!user) return;
+  const db = getDb();
+  // Set reset_at if not yet set
+  if (!user.usage_reset_at) {
+    db.prepare('UPDATE users SET usage_count = usage_count + 1, usage_reset_at = ? WHERE id = ?')
+      .run(Math.floor(Date.now() / 1000) + USAGE_RESET_DAYS * 86400, user.id);
+  } else {
+    db.prepare('UPDATE users SET usage_count = usage_count + 1 WHERE id = ?').run(user.id);
+  }
+}
+
+// GET /api/usage — returns current usage stats for the authenticated user
+app.get('/api/usage', (req, res) => {
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Invalid or missing API key' });
+  res.json({
+    plan: user.plan,
+    used: user.usage_count || 0,
+    limit: user.plan === 'free' ? FREE_USAGE_LIMIT : -1, // -1 = unlimited
+    remaining: user.plan === 'free' ? Math.max(0, FREE_USAGE_LIMIT - (user.usage_count || 0)) : -1,
+    limitEnabled: USAGE_LIMIT_ENABLED,
+    resetAt: user.usage_reset_at || null,
+  });
+});
+
+app.post('/api/auth/google', async (req, res) => {
+  const { credential, device } = req.body;
+  if (!credential) return res.status(400).json({ error: 'credential (JWT) is required' });
+  if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Google OAuth not configured — set GOOGLE_CLIENT_ID in .env' });
+
+  try {
+    // Verify the Google ID token via Google's tokeninfo endpoint
+    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+    if (!verifyRes.ok) return res.status(401).json({ error: 'Invalid Google token' });
+    const payload = await verifyRes.json();
+
+    // Verify audience matches our client ID
+    if (payload.aud !== GOOGLE_CLIENT_ID) {
+      return res.status(401).json({ error: 'Token audience mismatch' });
+    }
+
+    // Verify token hasn't expired
+    if (payload.exp && parseInt(payload.exp) < Math.floor(Date.now() / 1000)) {
+      return res.status(401).json({ error: 'Token expired' });
+    }
+
+    // Verify issuer
+    if (payload.iss && !payload.iss.includes('accounts.google.com') && !payload.iss.includes('google.com')) {
+      return res.status(401).json({ error: 'Invalid token issuer' });
+    }
+
+    const googleId = payload.sub;
+    const email = payload.email || '';
+    const name = payload.name || email.split('@')[0] || 'google_user';
+    const picture = payload.picture || '';
+    const ip = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || '';
+    const userAgent = req.get('User-Agent') || '';
+    const isNewUser = !db.prepare('SELECT 1 FROM users WHERE google_id = ? OR (email = ? AND email != "")').get(googleId, email);
+
+    const db = getDb();
+
+    // Check if user exists by google_id
+    let user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId);
+
+    if (!user && email) {
+      // Check by email — link existing account
+      user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+      if (user) {
+        db.prepare('UPDATE users SET google_id = ?, updated_at = unixepoch(), last_login_at = unixepoch(), last_login_ip = ? WHERE id = ?')
+          .run(googleId, ip, user.id);
+      }
+    }
+
+    let wasSignup = false;
+    if (!user) {
+      // Create new user
+      wasSignup = true;
+      const id = uuidv4();
+      const apiKey = 'hkai_' + require('crypto').randomBytes(24).toString('hex');
+      const username = name.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30) || ('g_' + googleId.slice(0, 8));
+      db.prepare(
+        'INSERT INTO users (id, username, email, api_key, google_id, role, plan, status, last_login_at, last_login_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)'
+      ).run(id, username, email, apiKey, googleId, 'user', 'free', 'active', ip);
+      user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    } else {
+      // Update last login
+      db.prepare('UPDATE users SET last_login_at = unixepoch(), last_login_ip = ?, updated_at = unixepoch() WHERE id = ?')
+        .run(ip, user.id);
+    }
+
+    // Log to access_logs
+    db.prepare('INSERT INTO access_logs (user_id, ip_address, user_agent, endpoint, method, status_code) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(user.id, ip, userAgent, '/api/auth/google', 'POST', 200);
+
+    // Log to user_activity with full device tracking
+    const dev = device || {};
+    db.prepare(
+      `INSERT INTO user_activity (user_id, action, ip_address, user_agent, endpoint, method, status_code, device_type, os_name, browser, screen_size, language, timezone, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      user.id,
+      wasSignup ? 'signup' : 'login',
+      ip,
+      userAgent,
+      '/api/auth/google',
+      'POST',
+      200,
+      dev.deviceType || null,
+      dev.osName || null,
+      dev.browser || null,
+      dev.screenSize || null,
+      dev.language || null,
+      dev.timezone || null,
+      JSON.stringify({ googleId: googleId.slice(0, 8) + '...', email, name, picture: picture ? true : false })
+    );
+
+    // Push real-time notification to dashboard
+    notifPush(`👤 ${wasSignup ? 'New user' : 'Login'}: ${user.username} (${email}) from ${ip}`, {
+      type: wasSignup ? 'user_signup' : 'user_login',
+      priority: wasSignup ? 'high' : 'normal',
+      source: 'auth',
+    });
+
+    res.json({
+      ok: true,
+      isNewUser: wasSignup,
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, plan: user.plan, picture },
+      apiKey: user.api_key,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Google auth failed: ' + err.message });
+  }
 });
 
 app.get('/api/access-logs', (req, res) => {
@@ -2774,6 +3637,31 @@ if (fs.existsSync(distPath)) {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true, maxReceivedFrameSize: 16 * 1024 * 1024, maxReceivedMessageSize: 32 * 1024 * 1024 });
 
+// Wire skills.js auto-update events to WS broadcast
+try {
+  const { events: skillsEvents } = require('./skills');
+  skillsEvents.on('update', ({ count, delta }) => {
+    if (typeof wss !== 'undefined' && wss && wss.clients) {
+      const payload = JSON.stringify({
+        type: 'notification',
+        notificationType: 'skills_update',
+        message: delta > 0
+          ? `📚 Skill library updated: ${count} skills${delta > 0 ? ` (+${delta} new)` : ''}`
+          : `📚 Skill library refreshed: ${count} skills`,
+        priority: 'normal',
+        source: 'skills',
+        timestamp: new Date().toISOString(),
+      });
+      wss.clients.forEach(client => {
+        if (client.readyState === 1) client.send(payload);
+      });
+    }
+  });
+  console.log('[ws] Skills auto-update broadcaster wired');
+} catch (e) {
+  console.log('[ws] Skills broadcaster skipped:', e.message);
+}
+
 wss.on('connection', (ws) => {
   console.log('[ws] client connected');
 
@@ -2829,11 +3717,17 @@ const pty = require('node-pty');
 
 const ptyWss = new WebSocketServer({ noServer: true, maxReceivedFrameSize: 16 * 1024 * 1024, maxReceivedMessageSize: 32 * 1024 * 1024 });
 
-ptyWss.on('connection', (ws) => {
+ptyWss.on('connection', (ws, req) => {
   let ptyProcess = null;
   let closed = false;
 
+  let ptyMode = 'crush';
+  try {
+    const url = new URL(req.url || '/pty', 'http://localhost');
+    ptyMode = url.searchParams.get('mode') === 'shell' ? 'shell' : 'crush';
+  } catch {}
   const crushBin = process.env.CRUSH_BIN || 'crush';
+  const shellBin = process.env.TERMINAL_SHELL || process.env.SHELL || '/bin/bash';
   const workDir = process.env.TERMINAL_CWD || process.env.FS_ROOT || '/home/ghost';
 
   // Sync haksterAi model config into crush config before spawning crush
@@ -2864,7 +3758,9 @@ ptyWss.on('connection', (ws) => {
   } catch {}
 
   try {
-    ptyProcess = pty.spawn(crushBin, [], {
+    const spawnBin = ptyMode === 'shell' ? shellBin : crushBin;
+    const spawnArgs = ptyMode === 'shell' ? ['-l'] : [];
+    ptyProcess = pty.spawn(spawnBin, spawnArgs, {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
@@ -2876,7 +3772,7 @@ ptyWss.on('connection', (ws) => {
         HOME: process.env.HOME || '/home/ghost',
       }
     });
-    console.log(`[pty] spawned crush: ${crushBin} (pid=${ptyProcess.pid})`);
+    console.log(`[pty] spawned ${ptyMode}: ${spawnBin} (pid=${ptyProcess.pid})`);
   } catch (err) {
     console.error('[pty] failed to spawn:', err);
     ws.send(JSON.stringify({ type: 'error', error: `Failed to spawn terminal: ${err.message}` }));
@@ -2897,7 +3793,7 @@ ptyWss.on('connection', (ws) => {
   });
 
   ptyProcess.onExit(({ exitCode }) => {
-    console.log(`[pty] crush exited (code=${exitCode})`);
+    console.log(`[pty] ${ptyMode} exited (code=${exitCode})`);
     if (ws.readyState === 1) {
       ws.send(JSON.stringify({ type: 'exit', exitCode }));
     }
@@ -2922,7 +3818,7 @@ ptyWss.on('connection', (ws) => {
     if (closed) return;
     closed = true;
     clearInterval(heartbeat);
-    console.log(`[pty] client disconnected, killing crush (pid=${ptyProcess?.pid})`);
+    console.log(`[pty] client disconnected, killing ${ptyMode} (pid=${ptyProcess?.pid})`);
     if (ptyProcess) {
       try {
         // Send Ctrl+C then quit command for graceful exit
@@ -2937,11 +3833,13 @@ ptyWss.on('connection', (ws) => {
 
 // Upgrade handler — route /ws to chat WSS, /pty to PTY WSS.
 server.on('upgrade', (req, socket, head) => {
-  if (req.url === '/pty') {
+  let pathname = req.url || '';
+  try { pathname = new URL(req.url || '/', 'http://localhost').pathname; } catch {}
+  if (pathname === '/pty') {
     ptyWss.handleUpgrade(req, socket, head, (ws) => {
       ptyWss.emit('connection', ws, req);
     });
-  } else if (req.url === '/ws') {
+  } else if (pathname === '/ws') {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
     });
@@ -2964,4 +3862,8 @@ server.listen(PORT, () => {
   console.log(`  ║  Providers: ${Object.keys(PROVIDERS).join(', ').padEnd(26)}║`);
   console.log(`  ║  FS Root: ${FS_ROOT.substring(0, 30).padEnd(34)}║`);
   console.log(`  ╚══════════════════════════════════════════╝\n`);
+
+  // Start background security scanner (5-min interval, notifies on persistent risks)
+  startSecurityScanner(path.join(__dirname, '..'), CORS_ORIGINS, notifPush);
+  console.log('  ✓ Security scanner started (5-min interval, persistent risk notifications)');
 });

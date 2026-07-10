@@ -1,12 +1,15 @@
 ---
 import Layout from '../layouts/Layout.astro';
 ---
+<link rel="stylesheet" href="/css/xterm.css" />
+<script is:inline src="/js/xterm.js"></script>
+<script is:inline src="/js/addon-fit.js"></script>
 
 <Layout title="haksterAi — Hack">
   <section id="hacker-chat" class="h-dvh min-h-0 flex flex-row bg-[#141414] text-white overflow-hidden">
 
     <!-- LEFT SIDEBAR -->
-    <aside id="sidebar" class="hidden md:flex flex-col w-64 min-w-[256px] border-r border-[#333] bg-[#111] relative z-10 transition-all duration-300">
+    <aside id="sidebar" class="chat-side-grid hidden md:flex flex-col w-64 min-w-[256px] border-r border-[#333] bg-[#111] relative z-10 transition-all duration-300 fixed md:relative inset-y-0 left-0 z-40 md:z-10">
       <div class="flex items-center justify-between px-4 py-3 border-b border-[#333]">
         <a href="/" class="flex items-center gap-2">
           <img src="/logo-32.png" alt="haksterAi" class="h-6 w-6 rounded" />
@@ -39,6 +42,36 @@ import Layout from '../layouts/Layout.astro';
               <span id="sidebar-fc-text">Checking agents...</span>
             </div>
             <div id="sidebar-token-counter" class="text-[10px] text-white/30">Tokens: 0</div>
+            <!-- Account section -->
+            <div class="pt-2 border-t border-[#333] space-y-2">
+              <div class="text-[9px] font-semibold uppercase tracking-[0.14em] text-white/30">Account</div>
+              <div id="sidebar-account-info" class="hidden rounded-lg border border-[#333] bg-[#1a1a1a] px-2.5 py-2 space-y-1.5">
+                <div class="flex items-center gap-2">
+                  <img id="sidebar-account-avatar" class="h-6 w-6 rounded-full" alt="" />
+                  <div class="min-w-0 flex-1">
+                    <div id="sidebar-account-name" class="text-xs font-medium text-white/80 truncate">—</div>
+                    <div id="sidebar-account-email" class="text-[10px] text-white/40 truncate">—</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] text-white/40">
+                  <span id="sidebar-account-role" class="rounded bg-[#7c3aed]/20 px-1.5 py-0.5 text-[#a855f7]">user</span>
+                  <span id="sidebar-account-plan" class="rounded bg-[#333] px-1.5 py-0.5">free</span>
+                </div>
+                <div id="sidebar-account-apikey" class="rounded-lg bg-[#0a0a0f] border border-[#333] px-2 py-1.5 text-[10px] font-mono text-white/40 break-all cursor-pointer hover:text-white/70 transition" title="Click to copy API key">—</div>
+                <div id="sidebar-account-usage" class="text-[10px] text-white/40 text-center">Loading usage…</div>
+                <button id="sidebar-account-logout" class="w-full flex items-center justify-center gap-1.5 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 hover:bg-[#ef4444]/20 text-[#ef4444] text-xs font-semibold py-1.5 transition">
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                  Sign Out
+                </button>
+              </div>
+              <div id="sidebar-account-signin" class="rounded-lg border border-[#333] bg-[#1a1a1a] px-2.5 py-2">
+                <div class="text-[10px] text-white/40 mb-1.5">Not signed in</div>
+                <button id="settings-google-fallback" class="w-full flex items-center justify-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-2 text-xs text-white/70 hover:bg-[#252525] hover:border-[#555] transition">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                  Sign in with Google
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -52,11 +85,24 @@ import Layout from '../layouts/Layout.astro';
 
       <div id="history-list" class="flex-1 overflow-y-auto px-2 space-y-0.5 sidebar-scroll"></div>
 
-      <div class="border-t border-[#333] px-3 py-2.5 flex items-center justify-between">
-        <a href="/" class="flex items-center gap-1.5 text-white/30 hover:text-white/60 transition text-xs">
-          <img src="/logo-32.png" alt="" class="h-3.5 w-3.5 rounded" />haksterAi
-        </a>
-        <button id="clear-history-btn" class="text-[10px] text-white/20 hover:text-[#ef4444] transition uppercase tracking-wider">Clear History</button>
+      <div class="border-t border-[#333] px-3 py-2.5">
+        <div id="sidebar-google-signin" class="mb-2" style="display:none;"></div>
+        <!-- Fallback sidebar Google button -->
+        <button id="sidebar-google-fallback" class="w-full flex items-center justify-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-2 text-xs text-white/70 hover:bg-[#252525] hover:border-[#555] transition mb-2">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          Sign in with Google
+        </button>
+        <div id="sidebar-google-badge" class="hidden items-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-2 py-1.5 mb-2">
+          <img id="sidebar-google-avatar" class="h-4 w-4 rounded-full" alt="" />
+          <span id="sidebar-google-name" class="text-xs text-white/70 truncate">—</span>
+          <button id="sidebar-google-logout" class="ml-auto text-[10px] text-white/30 hover:text-[#ef4444] transition">Logout</button>
+        </div>
+        <div class="flex items-center justify-between">
+          <a href="/" class="flex items-center gap-1.5 text-white/30 hover:text-white/60 transition text-xs">
+            <img src="/logo-32.png" alt="" class="h-3.5 w-3.5 rounded" />haksterAi
+          </a>
+          <button id="clear-history-btn" class="text-[10px] text-white/20 hover:text-[#ef4444] transition uppercase tracking-wider">Clear History</button>
+        </div>
       </div>
     </aside>
 
@@ -65,15 +111,43 @@ import Layout from '../layouts/Layout.astro';
       <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7"/></svg>
     </button>
 
+    <!-- Mobile sidebar overlay backdrop -->
+    <div id="sidebar-backdrop" class="md:hidden hidden fixed inset-0 bg-black/60 z-30"></div>
+
+    <!-- Mobile sidebar toggle + logout -->
+    <div class="md:hidden absolute left-3 top-3 z-20 flex items-center gap-2">
+      <button id="mobile-sidebar-btn" class="flex items-center justify-center w-9 h-9 rounded-lg border border-[#333] bg-[#1a1a1a] text-white/60 hover:text-white transition" title="Open menu">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="flex flex-col items-start">
+        <span class="text-[8px] uppercase tracking-wider text-[#ef4444]/60 mb-0.5 pl-0.5">Logout</span>
+        <button id="mobile-chat-logout" class="flex items-center justify-center gap-1 h-9 px-3 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 text-[#ef4444] text-xs font-semibold hover:bg-[#ef4444]/20 transition" title="Sign out">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+          Sign Out
+        </button>
+      </div>
+    </div>
+
     <!-- MAIN CONTENT -->
     <div class="relative flex-1 flex flex-col min-w-0 overflow-hidden">
+      <button type="button" id="chat-fullscreen-btn" class="chat-fullscreen-btn" title="Fullscreen chat" aria-label="Fullscreen chat" aria-pressed="false">
+        <svg class="fullscreen-enter h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5"/>
+        </svg>
+        <svg class="fullscreen-exit hidden h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6"/>
+        </svg>
+      </button>
       <!-- Messages Area -->
-      <div id="messages-area" class="hidden relative flex-1 overflow-y-auto px-4 sm:px-6 pt-4 pb-24">
-        <div id="messages-container" class="max-w-3xl mx-auto w-full space-y-4"></div>
+      <div id="messages-area" class="hidden relative flex-1 overflow-y-auto px-2 sm:px-4 lg:px-6 pt-4 pb-24 chat-grid-bg">
+        <div class="chat-ink-frame w-full">
+          <span class="ink-corner-tr"></span><span class="ink-corner-bl"></span>
+          <div id="messages-container" class="space-y-4"></div>
+        </div>
       </div>
 
       <!-- Hero area -->
-      <div id="hero-area" class="relative flex-1 flex flex-col items-center justify-center px-4 sm:px-6 max-w-3xl mx-auto w-full">
+      <div id="hero-area" class="relative flex-1 flex flex-col items-center justify-center px-4 sm:px-6 w-full">
         <div class="mb-6 flex items-center gap-2">
           <a href="/" class="flex items-center gap-2">
             <img src="/logo-32.png" alt="haksterAi" class="h-8 w-8 rounded" />
@@ -90,11 +164,24 @@ import Layout from '../layouts/Layout.astro';
             <option value="">Loading models...</option>
           </select>
         </div>
+        <!-- Google Sign-In -->
+        <div id="google-auth-area" class="mt-6 flex items-center gap-3">
+          <div id="google-signin-btn" style="display:none;"></div>
+          <!-- Fallback custom button (shown if GSI doesn't render) -->
+          <button id="google-fallback-btn" class="flex items-center gap-2 rounded-full border border-[#333] bg-[#1a1a1a] px-4 py-2 text-sm text-white/80 hover:bg-[#252525] hover:border-[#555] transition cursor-pointer">
+            <svg class="h-4 w-4" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            Sign in with Google
+          </button>
+          <div id="google-user-badge" class="hidden flex items-center gap-2 rounded-full border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-xs text-white/80">
+            <img id="google-user-avatar" class="h-5 w-5 rounded-full" alt="" />
+            <span id="google-user-name">—</span>
+          </div>
+        </div>
       </div>
 
       <!-- Legacy output panel -->
-      <div id="output-panel" class="hidden relative flex-1 overflow-y-auto px-4 sm:px-6 pt-4 pb-24">
-        <div class="max-w-3xl mx-auto w-full">
+      <div id="output-panel" class="hidden relative flex-1 overflow-y-auto px-2 sm:px-4 lg:px-6 pt-4 pb-24 chat-grid-bg">
+        <div class="agent-output-frame w-full">
           <div class="flex items-center justify-between mb-3">
             <span class="text-xs font-mono text-white/30">Output</span>
             <button id="clear-output" class="text-[10px] text-white/20 hover:text-white/40 transition">Clear</button>
@@ -104,7 +191,7 @@ import Layout from '../layouts/Layout.astro';
       </div>
 
       <!-- Chat composer -->
-      <form id="chat-form" class="relative z-10 w-full max-w-3xl mx-auto px-4 sm:px-6 pb-4">
+      <form id="chat-form" class="relative z-10 w-full px-2 sm:px-4 lg:px-6 pb-4">
         <div id="composer" class="rounded-[22px] border border-[#333] bg-[#1a1a1a] py-3 shadow-[0_12px_32px_rgba(0,0,0,0.02)] overflow-hidden">
           <div class="overflow-y-auto pl-4 pr-2">
             <textarea id="chat-input" rows="3" placeholder="Ask haksterAi to hack, search, scrape, build, or analyze..." class="min-h-[28px] w-full resize-none border-0 bg-transparent p-0 pt-[1px] text-base leading-6 text-white outline-none placeholder:text-[#999]"></textarea>
@@ -116,9 +203,18 @@ import Layout from '../layouts/Layout.astro';
             <button type="button" id="firecrawl-btn" class="composer-btn" title="Search &amp; scrape with Firecrawl"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-4.3-4.3"/></svg></button>
             <button type="button" id="mode-btn" class="composer-pill"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg><span id="mode-label">Agent</span></button>
             <button type="button" id="scrape-btn" class="composer-btn" title="Scrape a URL"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a3 3 0 0 0-3 3v1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-5V5a3 3 0 0 0-3-3zm0 2a1 1 0 0 0-1 1v1h2V5a1 1 0 0 0-1-1zM9 9h6v2H9V9z"/></svg></button>
+            <button type="button" id="shell-btn" class="composer-btn" title="Run a shell command"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7 9 3 3-3 3m5 0h5"/><rect x="2" y="4" width="20" height="16" rx="2" stroke-width="2"/></svg></button>
+            <button type="button" id="patch-btn" class="composer-btn" title="Patch / edit a file"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 20 4-1 9-9-3-3-9 9-1 4zM14 7l3 3"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 4l3 3-3 3-3-3 3-3z"/></svg></button>
             <button type="button" id="image-btn" class="composer-btn" title="Generate an image"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.5" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 15-5-5L5 21"/></svg></button>
             <button type="button" id="voice-input-btn" class="composer-btn" title="Dictate to agent"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 10v1a7 7 0 0 1-14 0v-1m7 8v3m-4 0h8"/></svg></button>
             <button type="button" id="voice-output-btn" class="composer-btn" title="Read replies aloud"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5 6 9H3v6h3l5 4V5Z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8 8 0 0 1 0 12"/></svg></button>
+            <button type="button" id="skills-btn" class="composer-btn" title="Review skills before starting"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></button>
+            <button type="button" id="memory-btn" class="composer-btn" title="Open memory bank"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg></button>
+            <button type="button" id="todo-btn" class="composer-btn" title="Task grid"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg></button>
+            <button type="button" id="checkpoint-btn" class="composer-btn" title="Save / restore checkpoints"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg></button>
+            <button type="button" id="autopilot-btn" class="composer-btn" title="Toggle autopilot mode"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></button>
+            <button type="button" id="terminal-btn" class="composer-btn" title="Open terminal"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 17 6-6-6-6"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19h8"/></svg></button>
+            <button type="button" id="pentester-btn" class="composer-btn" title="Launch pentester agent"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5M2 12l10 5 10-5"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v6m-3-3h6" /></svg></button>
             <div class="flex-1"></div>
             <button type="submit" id="send-btn" class="send-btn" disabled><svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m-7 7 7-7 7 7"/></svg></button>
           </div>
@@ -127,6 +223,8 @@ import Layout from '../layouts/Layout.astro';
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Scan this target for vulnerabilities and report findings">🎯 Pentest scan</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use Firecrawl to search for the latest exploits and CVEs for this target">🔍 Search exploits</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Scrape this reference URL and recreate the functionality">🌐 Scrape &amp; build</button>
+            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Run this shell command with exec_shell and report the output: ">⌘ Shell command</button>
+            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Inspect the file, then use edit_file to patch the bug and verify with a syntax check or test: ">🩹 Patch file</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Write a full exploit script for this vulnerability and explain each step">💣 Exploit script</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use the generate_image tool to create a professional logo for this brand. Design it with modern aesthetics, bold colors, and clean lines.">🎨 Create a logo</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use the generate_image tool to enhance and upscale this image with better detail, lighting, and resolution.">✨ Enhance image</button>
@@ -178,6 +276,170 @@ import Layout from '../layouts/Layout.astro';
         </div>
       </div>
     </div>
+
+    <!-- Skill Review Panel -->
+    <div id="skill-review-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur">
+      <div class="w-full max-w-lg rounded-2xl border border-[#333] bg-[#1a1a1a] shadow-2xl">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-[#333]">
+          <div class="flex items-center gap-2">
+            <svg class="h-4 w-4 text-[#7c3aed]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <h3 class="text-sm font-semibold text-white">Skill Review</h3>
+          </div>
+          <button id="close-skill-review" class="text-white/40 hover:text-white transition"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+        <div class="px-5 py-4">
+          <p class="text-xs text-white/40 mb-3">Review and toggle skills before the agent starts working on your project.</p>
+          <div id="skill-review-grid" class="grid grid-cols-2 gap-2 mb-4">
+            <!-- Skill cards injected by JS -->
+          </div>
+          <div class="flex items-center justify-between gap-3 pt-3 border-t border-[#333]">
+            <div class="flex items-center gap-2 text-xs text-white/40">
+              <span id="skill-count">0</span> skills active
+            </div>
+            <div class="flex gap-2">
+              <button id="skill-select-all" class="text-xs text-white/50 hover:text-white border border-[#333] rounded-lg px-3 py-1.5 transition">Select All</button>
+              <button id="skill-start-work" class="text-xs bg-[#7c3aed] hover:bg-[#6d28d9] text-white font-semibold rounded-lg px-4 py-1.5 transition">Start Work →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Memory Bank Panel -->
+    <div id="memory-bank-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur">
+      <div class="w-full max-w-2xl rounded-2xl border border-[#333] bg-[#1a1a1a] shadow-2xl max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-[#333]">
+          <div class="flex items-center gap-2">
+            <svg class="h-4 w-4 text-[#7c3aed]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            <h3 class="text-sm font-semibold text-white">Memory Bank</h3>
+            <span id="mem-entry-count" class="text-[10px] text-white/30 bg-white/5 px-2 py-0.5 rounded-full border border-[#333]">0 entries</span>
+          </div>
+          <button id="close-memory-bank" class="text-white/40 hover:text-white transition"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+        <!-- Context + Autocompact status bar -->
+        <div class="flex items-center gap-3 px-5 py-3 border-b border-[#333] bg-[#111]">
+          <div class="flex-1">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[10px] font-semibold uppercase tracking-wider text-white/40">Context Window</span>
+              <span id="mem-context-pct" class="text-[10px] text-[#7c3aed] font-mono">0%</span>
+            </div>
+            <div class="h-1.5 rounded-full bg-[#1a1a1a] overflow-hidden">
+              <div id="mem-context-bar" class="h-full rounded-full bg-gradient-to-r from-[#7c3aed] to-[#a855f7] transition-all duration-500" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="w-px h-8 bg-[#333]"></div>
+          <div class="flex flex-col items-center">
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-white/40">Autocompact</span>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span id="mem-ac-dot" class="h-2 w-2 rounded-full bg-green-400 animate-pulse"></span>
+              <span id="mem-ac-status" class="text-[10px] text-white/50">Idle</span>
+            </div>
+          </div>
+          <div class="w-px h-8 bg-[#333]"></div>
+          <div class="flex flex-col items-center">
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-white/40">Next Compact</span>
+            <span id="mem-ac-clock" class="text-[10px] text-white/50 font-mono">--:--</span>
+          </div>
+        </div>
+        <!-- Memory entries -->
+        <div class="flex-1 overflow-y-auto px-5 py-3 sidebar-scroll">
+          <div id="mem-entries-list" class="space-y-2">
+            <div class="text-xs text-white/30 text-center py-8">Loading memory bank...</div>
+          </div>
+        </div>
+        <!-- Add memory -->
+        <div class="border-t border-[#333] px-5 py-3 flex gap-2">
+          <input id="mem-add-key" type="text" placeholder="key" class="flex-1 min-w-0 rounded-lg border border-[#333] bg-[#111] px-3 py-2 text-xs text-white outline-none focus:border-[#7c3aed]/50" />
+          <input id="mem-add-value" type="text" placeholder="value / context to remember" class="flex-[2] min-w-0 rounded-lg border border-[#333] bg-[#111] px-3 py-2 text-xs text-white outline-none focus:border-[#7c3aed]/50" />
+          <button id="mem-add-btn" class="rounded-lg bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-semibold px-4 py-2 transition flex-shrink-0">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Todo Grid (inline in chat) -->
+    <div id="todo-grid-panel" class="chat-side-grid hidden absolute right-4 top-16 z-40 w-72 rounded-2xl border border-[#333] bg-[#111] shadow-2xl max-h-[60vh] flex flex-col">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-[#333]">
+        <div class="flex items-center gap-2">
+          <svg class="h-4 w-4 text-[#7c3aed]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+          <h3 class="text-sm font-semibold text-white">Task Grid</h3>
+          <span id="todo-grid-count" class="text-[10px] text-white/30 bg-white/5 px-2 py-0.5 rounded-full border border-[#333]">0/0</span>
+        </div>
+        <button id="close-todo-grid" class="text-white/40 hover:text-white transition"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div id="todo-grid-items" class="chat-side-grid-body flex-1 overflow-y-auto px-3 py-2 space-y-1.5 sidebar-scroll">
+        <div class="text-xs text-white/30 text-center py-6">No active tasks</div>
+      </div>
+      <div class="border-t border-[#333] px-3 py-2 flex gap-2">
+        <input id="todo-grid-input" type="text" placeholder="Add a task..." class="flex-1 min-w-0 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-xs text-white outline-none focus:border-[#7c3aed]/50" />
+        <button id="todo-grid-add" class="rounded-lg bg-[#7c3aed] hover:bg-[#6d28d9] text-white px-3 py-1.5 text-xs font-semibold transition flex-shrink-0">+</button>
+      </div>
+    </div>
+
+    <!-- Checkpoint Panel (inline in chat) -->
+    <div id="checkpoint-panel" class="chat-side-grid hidden absolute right-4 top-16 z-40 w-80 rounded-2xl border border-[#333] bg-[#111] shadow-2xl max-h-[60vh] flex flex-col">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-[#333]">
+        <div class="flex items-center gap-2">
+          <svg class="h-4 w-4 text-[#7c3aed]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+          <h3 class="text-sm font-semibold text-white">Checkpoints</h3>
+          <span id="checkpoint-count" class="text-[10px] text-white/30 bg-white/5 px-2 py-0.5 rounded-full border border-[#333]">0</span>
+        </div>
+        <button id="close-checkpoint-panel" class="text-white/40 hover:text-white transition"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div id="checkpoint-list" class="chat-side-grid-body flex-1 overflow-y-auto px-3 py-2 space-y-1.5 sidebar-scroll">
+        <div class="text-xs text-white/30 text-center py-6">No checkpoints saved.<br>Click the bookmark icon to save the current conversation state.</div>
+      </div>
+      <div class="border-t border-[#333] px-3 py-2">
+        <button id="save-checkpoint-btn" class="w-full rounded-lg bg-[#7c3aed] hover:bg-[#6d28d9] text-white px-3 py-1.5 text-xs font-semibold transition flex items-center justify-center gap-1.5">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Save Checkpoint Now
+        </button>
+      </div>
+    </div>
+
+    <!-- Terminal Panel (slide-up from bottom) -->
+    <div id="chat-terminal-panel" class="chat-side-grid hidden absolute bottom-[120px] left-0 right-0 z-40 h-[280px] border-t border-[#333] bg-[#0a0a0f] flex flex-col">
+      <div class="flex items-center justify-between px-4 py-2 border-b border-[#333] bg-[#111]">
+        <div class="flex items-center gap-2">
+          <svg class="h-4 w-4 text-[#00ff88]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 17 6-6-6-6"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19h8"/></svg>
+          <span class="text-xs font-semibold text-white/70">Terminal</span>
+          <span id="terminal-status" class="text-[10px] text-white/30">disconnected</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="terminal-reconnect-btn" class="text-[10px] text-white/40 hover:text-white border border-[#333] rounded-lg px-2 py-1 transition">Reconnect</button>
+          <button id="close-terminal-panel" class="text-white/40 hover:text-white transition"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+      </div>
+      <div id="terminal-container" class="flex-1 overflow-hidden relative"></div>
+    </div>
+
+    <!-- Pentester Panel -->
+    <div id="pentester-panel" class="chat-side-grid hidden absolute bottom-[120px] left-0 right-0 z-40 h-[320px] border-t border-[#333] bg-[#0a0a0f] flex flex-col">
+      <div class="flex items-center justify-between px-4 py-2 border-b border-[#333] bg-[#111]">
+        <div class="flex items-center gap-2">
+          <svg class="h-4 w-4 text-[#ff4444]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5"/></svg>
+          <span class="text-xs font-semibold text-white/70">Pentester Agent</span>
+          <span id="pentester-status" class="text-[10px] text-white/30">idle</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="pentester-fp-btn" class="text-[10px] text-white/40 hover:text-white border border-[#333] rounded-lg px-2 py-1 transition">Fingerprint</button>
+          <button id="close-pentester-panel" class="text-white/40 hover:text-white transition"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+      </div>
+      <div class="px-4 py-3 border-b border-[#222] flex items-center gap-2">
+        <input id="pentester-target" type="text" placeholder="Target (IP / hostname)" class="flex-1 bg-[#111] border border-[#333] rounded-lg px-3 py-1.5 text-xs text-white/80 focus:outline-none focus:border-[#ff4444]/50" />
+        <button id="pentester-run-btn" class="text-xs font-medium text-white bg-[#ff4444]/20 border border-[#ff4444]/30 rounded-lg px-3 py-1.5 hover:bg-[#ff4444]/30 transition">Run Agent</button>
+        <select id="pentester-tool-select" class="bg-[#111] border border-[#333] rounded-lg px-2 py-1.5 text-[10px] text-white/60">
+          <option value="">Quick tool…</option>
+          <option value="port_scan">Port Scan</option>
+          <option value="os_probe">OS Probe</option>
+          <option value="http_probe">HTTP Probe</option>
+          <option value="dir_enum">Dir Enum</option>
+          <option value="service_map">Service Map</option>
+          <option value="exploit_check">Exploit Check</option>
+        </select>
+      </div>
+      <div id="pentester-output" class="agent-output-frame flex-1 overflow-y-auto px-4 py-3 text-xs font-mono text-white/75 whitespace-pre-wrap"></div>
+    </div>
   </section>
 
   <style>
@@ -191,22 +453,47 @@ import Layout from '../layouts/Layout.astro';
     .send-btn { display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; padding: 0; width: 32px; height: 32px; min-width: 0; background: #fff; color: #000; border: none; cursor: pointer; transition: opacity 0.15s; flex-shrink: 0; }
     .send-btn:disabled { pointer-events: none; opacity: 0.3; }
     .send-btn:hover { opacity: 0.9; }
-    .output-user { color: #a855f7; }
-    .output-error { color: #ef4444; }
-    .output-result { color: #e2e8f0; }
-    .output-thinking { color: #7c3aed; opacity: 0.7; }
-    .msg-bubble { max-width: 85%; }
-    .msg-user { background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3); }
-    .msg-assistant { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
-    .msg-thinking { background: rgba(124,58,237,0.06); border: 1px solid rgba(124,58,237,0.15); color: rgba(124,58,237,0.7); }
-    .msg-image { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); }
-    .msg-script { background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.18); }
-    .msg-script .tui-code-block { border-color: rgba(16,185,129,0.25); background: rgba(2,1,8,0.95); }
-    .msg-script .tui-code-header { background: rgba(16,185,129,0.08); border-bottom-color: rgba(16,185,129,0.2); }
-    .msg-script .tui-code-lang { color: #6ee7b7; }
-    .msg-script .ln { color: rgba(16,185,129,0.35); border-right-color: rgba(16,185,129,0.12); }
-    .msg-search { background: rgba(251,191,36,0.07); border: 1px solid rgba(251,191,36,0.18); }
-    .msg-confirmation { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25); }
+    .chat-fullscreen-btn {
+      position: absolute;
+      top: 0.75rem;
+      right: 0.75rem;
+      z-index: 25;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.25rem;
+      height: 2.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(17,17,17,0.78);
+      color: rgba(255,255,255,0.58);
+      backdrop-filter: blur(12px);
+      transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.15s;
+    }
+    .chat-fullscreen-btn:hover {
+      color: #fff;
+      border-color: rgba(124,58,237,0.45);
+      background: rgba(124,58,237,0.16);
+    }
+    .chat-fullscreen-btn:active { transform: scale(0.96); }
+    #hacker-chat.chat-fullscreen-fallback {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      height: 100dvh;
+      width: 100vw;
+    }
+    #messages-area,
+    #output-panel {
+      min-height: 0;
+      scroll-behavior: smooth;
+      overscroll-behavior: contain;
+    }
+    .output-user { color: #c084fc; }
+    .output-error { color: #ff7b7b; }
+    .output-result { color: #f1f5f9; }
+    .output-thinking { color: #38bdf8; opacity: 0.9; }
+    /* Message styles moved to Ink & grid section below */
     .bubble-action { display: inline-flex; align-items: center; justify-content: center; gap: 0.2rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); padding: 0.12rem 0.4rem; font-size: 0.55rem; color: rgba(255,255,255,0.45); transition: all 0.15s; cursor: pointer; }
     .bubble-action:hover { color: #fff; border-color: rgba(124,58,237,0.4); background: rgba(124,58,237,0.12); }
     .bubble-action.copied { color: #34d399; border-color: rgba(52,211,153,0.5); background: rgba(52,211,153,0.1); }
@@ -218,20 +505,47 @@ import Layout from '../layouts/Layout.astro';
     .attachment-chip { display: inline-flex; align-items: center; gap: 0.5rem; max-width: 220px; border-radius: 0.75rem; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); padding: 0.35rem 0.5rem; }
 
     /* ── TUI Code Block Styling ── */
-    .tui-code-block { position: relative; border-radius: 0.5rem; border: 1px solid rgba(124,58,237,0.18); background: rgba(2,1,8,0.92); overflow: hidden; margin: 0.5rem 0; }
-    .tui-code-header { display: flex; align-items: center; justify-content: space-between; padding: 0.35rem 0.75rem; background: rgba(124,58,237,0.08); border-bottom: 1px solid rgba(124,58,237,0.15); }
-    .tui-code-lang { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #c084fc; font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+    .tui-code-block {
+      position: relative;
+      border-radius: 0.5rem;
+      border: 1px solid rgba(56,189,248,0.22);
+      background:
+        linear-gradient(90deg, rgba(56,189,248,0.06) 0 3px, transparent 3px),
+        rgba(2,6,16,0.96);
+      overflow: hidden;
+      margin: 0.75rem 0;
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.12) inset, 0 10px 28px rgba(0,0,0,0.24);
+    }
+    .tui-code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.45rem 0.75rem;
+      background: linear-gradient(90deg, rgba(56,189,248,0.12), rgba(124,58,237,0.1));
+      border-bottom: 1px solid rgba(56,189,248,0.18);
+    }
+    .tui-code-lang { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #7dd3fc; font-family: 'JetBrains Mono', 'Fira Code', monospace; }
     .tui-code-copy { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.6rem; color: rgba(255,255,255,0.35); cursor: pointer; transition: color 0.15s; }
     .tui-code-copy:hover { color: #fff; }
     .tui-code-copy.copied { color: #34d399; }
     .tui-code-copy svg { width: 10px; height: 10px; }
-    .tui-code-body { padding: 0.75rem; overflow-x: auto; }
-    .tui-code-body pre { margin: 0; font-size: 0.78rem; line-height: 1.5; font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace; white-space: pre; color: #e0e0e0; }
-    .tui-code-body pre .ln { display: inline-block; width: 2rem; color: rgba(255,255,255,0.2); text-align: right; padding-right: 0.75rem; user-select: none; border-right: 1px solid rgba(255,255,255,0.06); margin-right: 0.5rem; }
-    .tui-code-body pre code { color: #e0e0e0; }
+    .tui-code-download { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.6rem; color: rgba(255,255,255,0.3); cursor: pointer; transition: color 0.15s; }
+    .tui-code-download:hover { color: #7c3aed; }
+    .tui-code-download.copied { color: #34d399; }
+    .tui-code-download svg { width: 10px; height: 10px; }
+    .tui-code-body {
+      padding: 0;
+      overflow: auto;
+      background:
+        linear-gradient(90deg, rgba(8,13,25,0.96) 0 3.1rem, rgba(56,189,248,0.14) 3.1rem 3.16rem, transparent 3.16rem),
+        repeating-linear-gradient(to bottom, rgba(255,255,255,0.045) 0 1px, transparent 1px 1.5em);
+    }
+    .tui-code-body pre { margin: 0; padding: 0.75rem 0.9rem 0.85rem 0; font-size: 0.8rem; line-height: 1.5; font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace; white-space: pre; color: #edf2f7; text-shadow: 0 0 8px rgba(56,189,248,0.08); }
+    .tui-code-body pre .ln { display: inline-block; width: 2.7rem; color: rgba(125,211,252,0.58); text-align: right; padding-right: 0.7rem; user-select: none; margin-right: 0.65rem; }
+    .tui-code-body pre code { color: #edf2f7; }
     /* Inline code */
     .msg-body code:not(pre code) { background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.2); border-radius: 0.25rem; padding: 0.1rem 0.35rem; font-size: 0.85em; font-family: 'JetBrains Mono', 'Fira Code', monospace; color: #d8b4fe; }
-    .msg-body { line-height: 1.6; word-break: break-word; }
+    .msg-body { line-height: 1.65; word-break: break-word; color: #e5e7eb; }
     .msg-body p { margin: 0.25rem 0; }
     .msg-body ul, .msg-body ol { margin: 0.25rem 0; padding-left: 1.25rem; }
     .msg-body li { margin: 0.1rem 0; }
@@ -245,9 +559,237 @@ import Layout from '../layouts/Layout.astro';
     .history-item { transition: all 0.12s; }
     .history-item:hover { background: rgba(255,255,255,0.04); }
     .history-item.active { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.3); }
-    .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+    .sidebar-scroll { overflow: auto; scrollbar-color: #7c3aed transparent; scrollbar-width: thin; }
+    .sidebar-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
     .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
-    .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+    .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.45); border-radius: 999px; }
+    .sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.85); }
+    .sidebar-scroll::-webkit-scrollbar-corner { background: transparent; }
+
+    /* ── Ink & grid layout around chats ── */
+    /* Faint blueprint grid behind the message stream */
+    .chat-grid-bg {
+      position: relative;
+      background-color: #101010;
+      background-image:
+        linear-gradient(to right, rgba(56,189,248,0.16) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(56,189,248,0.16) 1px, transparent 1px),
+        linear-gradient(to right, rgba(124,58,237,0.11) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(124,58,237,0.11) 1px, transparent 1px),
+        linear-gradient(to right, rgba(255,255,255,0.055) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.055) 1px, transparent 1px),
+        radial-gradient(circle at top center, rgba(56,189,248,0.08), transparent 48%);
+      background-size: 96px 96px, 96px 96px, 48px 48px, 48px 48px, 24px 24px, 24px 24px, 100% 100%;
+      background-position: -1px -1px, -1px -1px, -1px -1px, -1px -1px, -1px -1px, -1px -1px, 0 0;
+    }
+    .chat-grid-bg::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image: url('/logo.png');
+      background-repeat: no-repeat;
+      background-position: center 18%;
+      background-size: min(92vw, 980px) auto;
+      opacity: 0.18;
+      mix-blend-mode: screen;
+      filter: saturate(1.18) blur(0.5px);
+      z-index: 0;
+    }
+    .chat-grid-bg::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at center 20%, transparent 0 22%, rgba(16,16,16,0.72) 58%, rgba(16,16,16,0.9) 100%);
+      z-index: 0;
+    }
+    .chat-grid-bg > * {
+      position: relative;
+      z-index: 1;
+    }
+    .chat-side-grid {
+      overflow: hidden;
+      background:
+        linear-gradient(to right, rgba(56,189,248,0.2) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(56,189,248,0.2) 1px, transparent 1px),
+        linear-gradient(to right, rgba(124,58,237,0.13) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(124,58,237,0.13) 1px, transparent 1px),
+        radial-gradient(circle at top right, rgba(56,189,248,0.2), transparent 48%),
+        rgba(8,10,18,0.96);
+      background-size: 32px 32px, 32px 32px, 16px 16px, 16px 16px, 100% 100%, 100% 100%;
+      box-shadow: 0 0 0 1px rgba(56,189,248,0.12) inset, 0 18px 38px rgba(0,0,0,0.42);
+    }
+    .chat-side-grid::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image: url('/logo.png');
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: min(92%, 340px) auto;
+      opacity: 0.13;
+      mix-blend-mode: screen;
+      filter: saturate(1.2) blur(0.5px);
+      z-index: 0;
+    }
+    .chat-side-grid::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(8,10,18,0.18), rgba(8,10,18,0.68));
+      z-index: 0;
+    }
+    .chat-side-grid > * {
+      position: relative;
+      z-index: 1;
+    }
+    .chat-side-grid-body {
+      background:
+        linear-gradient(to bottom, rgba(255,255,255,0.035) 1px, transparent 1px),
+        rgba(0,0,0,0.08);
+      background-size: 100% 28px, 100% 100%;
+    }
+    .chat-side-grid .todo-row,
+    .chat-side-grid .cp-row {
+      background: rgba(15,23,42,0.78) !important;
+      border-color: rgba(56,189,248,0.16) !important;
+    }
+    #sidebar.chat-side-grid > div,
+    .chat-side-grid input,
+    .chat-side-grid select,
+    .chat-side-grid button,
+    .chat-side-grid .history-item {
+      position: relative;
+      z-index: 1;
+    }
+    #sidebar.chat-side-grid #history-list {
+      background:
+        linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px),
+        rgba(0,0,0,0.08);
+      background-size: 100% 28px, 100% 100%;
+    }
+    #sidebar.chat-side-grid .history-item,
+    #sidebar.chat-side-grid #new-hack-btn,
+    #sidebar.chat-side-grid #sidebar-account-info,
+    #sidebar.chat-side-grid #sidebar-account-signin,
+    #sidebar.chat-side-grid #sidebar-google-fallback,
+    #sidebar.chat-side-grid #sidebar-google-badge {
+      background-color: rgba(15,23,42,0.72) !important;
+      border-color: rgba(56,189,248,0.16) !important;
+    }
+    /* Message bubbles — improved borders & spacing */
+    .msg-bubble {
+      max-width: 85%;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1rem;
+      position: relative;
+    }
+    /* Divider line between messages */
+    #messages-container > .msg-bubble + .msg-bubble {
+      border-top: 1px solid rgba(124,58,237,0.1);
+      padding-top: 1rem;
+      margin-top: 0.5rem;
+    }
+    .msg-user { background: linear-gradient(135deg, rgba(124,58,237,0.18), rgba(8,13,25,0.78)); border: 1px solid rgba(168,85,247,0.34); box-shadow: 0 2px 12px rgba(124,58,237,0.1); }
+    .msg-assistant { background: linear-gradient(135deg, rgba(15,23,42,0.92), rgba(3,7,18,0.84)); border: 1px solid rgba(56,189,248,0.2); box-shadow: 0 2px 14px rgba(0,0,0,0.24); }
+    .msg-thinking { background: rgba(8,47,73,0.28); border: 1px solid rgba(56,189,248,0.22); color: rgba(125,211,252,0.9); }
+    .msg-image { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); }
+    .msg-script { background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.18); }
+    .msg-script .tui-code-block { border-color: rgba(16,185,129,0.25); background: rgba(2,1,8,0.95); }
+    .msg-script .tui-code-header { background: rgba(16,185,129,0.08); border-bottom-color: rgba(16,185,129,0.2); }
+    .msg-script .tui-code-lang { color: #6ee7b7; }
+    .msg-script .ln { color: rgba(16,185,129,0.35); border-right-color: rgba(16,185,129,0.12); }
+    .msg-search { background: rgba(251,191,36,0.07); border: 1px solid rgba(251,191,36,0.18); }
+    .msg-confirmation { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25); }
+    /* Ink-wash frame with corner brackets around the chat column */
+    .chat-ink-frame {
+      position: relative;
+      padding: 18px 14px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(56,189,248,0.22);
+      background:
+        linear-gradient(to right, rgba(56,189,248,0.08) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(56,189,248,0.08) 1px, transparent 1px),
+        radial-gradient(120% 80% at 50% -10%, rgba(56,189,248,0.1), transparent 60%),
+        linear-gradient(180deg, rgba(2,6,16,0.62), rgba(0,0,0,0.18));
+      background-size: 32px 32px, 32px 32px, 100% 100%, 100% 100%;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.45) inset, 0 8px 30px rgba(0,0,0,0.28);
+    }
+    .chat-ink-frame::before,
+    .chat-ink-frame::after {
+      content: '';
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border: 2px solid rgba(124,58,237,0.55);
+      pointer-events: none;
+    }
+    .chat-ink-frame::before {
+      top: 8px; left: 8px;
+      border-right: none; border-bottom: none;
+      border-top-left-radius: 6px;
+      filter: drop-shadow(0 0 4px rgba(124,58,237,0.35));
+    }
+    .chat-ink-frame::after {
+      bottom: 8px; right: 8px;
+      border-left: none; border-top: none;
+      border-bottom-right-radius: 6px;
+      filter: drop-shadow(0 0 4px rgba(124,58,237,0.35));
+    }
+    /* Corner brackets on the opposite corners via accent elements */
+    .chat-ink-frame > .ink-corner-tr,
+    .chat-ink-frame > .ink-corner-bl {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border: 2px solid rgba(168,85,247,0.35);
+      pointer-events: none;
+    }
+    .chat-ink-frame > .ink-corner-tr {
+      top: 8px; right: 8px;
+      border-left: none; border-bottom: none;
+      border-top-right-radius: 6px;
+    }
+    .chat-ink-frame > .ink-corner-bl {
+      bottom: 8px; left: 8px;
+      border-right: none; border-top: none;
+      border-bottom-left-radius: 6px;
+    }
+    .agent-output-frame {
+      padding: 1rem;
+      border: 1px solid rgba(56,189,248,0.22);
+      border-radius: 14px;
+      background:
+        linear-gradient(to right, rgba(56,189,248,0.08) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(56,189,248,0.08) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(2,6,16,0.9), rgba(3,7,18,0.78));
+      background-size: 28px 28px, 28px 28px, 100% 100%;
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.1) inset, 0 10px 28px rgba(0,0,0,0.28);
+      color: #e5e7eb;
+    }
+    #output-area {
+      border-top: 1px solid rgba(56,189,248,0.12);
+      padding-top: 0.75rem;
+      color: #e5e7eb;
+    }
+    @media (max-width: 640px) {
+      .chat-ink-frame { padding: 12px 8px 10px; }
+      .chat-ink-frame::before, .chat-ink-frame::after,
+      .chat-ink-frame > .ink-corner-tr, .chat-ink-frame > .ink-corner-bl { width: 16px; height: 16px; }
+    }
+    /* ── Skill review cards ── */
+    .skill-card { user-select: none; }
+    .skill-checkbox { flex-shrink: 0; }
+
+    /* ── Todo grid rows ── */
+    .todo-row { user-select: none; }
+
+    /* ── Memory entry cards ── */
+    .mem-entry { transition: border-color 0.15s; }
+    .mem-entry:hover { border-color: rgba(124,58,237,0.3); }
   </style>
 
   <script>
@@ -283,6 +825,606 @@ import Layout from '../layouts/Layout.astro';
     const heroArea = document.getElementById('hero-area')!;
     const messagesArea = document.getElementById('messages-area')!;
     const messagesContainer = document.getElementById('messages-container')!;
+    const hackerChat = document.getElementById('hacker-chat')!;
+    const chatFullscreenBtn = document.getElementById('chat-fullscreen-btn') as HTMLButtonElement | null;
+
+    // ── Skill Review, Memory Bank, Todo Grid ──
+    const skillsBtn = document.getElementById('skills-btn')!;
+    const skillReviewModal = document.getElementById('skill-review-modal')!;
+    const closeSkillReview = document.getElementById('close-skill-review')!;
+    const skillReviewGrid = document.getElementById('skill-review-grid')!;
+    const skillCount = document.getElementById('skill-count')!;
+    const skillSelectAll = document.getElementById('skill-select-all')!;
+    const skillStartWork = document.getElementById('skill-start-work')!;
+    const memoryBtn = document.getElementById('memory-btn')!;
+    const memoryBankModal = document.getElementById('memory-bank-modal')!;
+    const closeMemoryBank = document.getElementById('close-memory-bank')!;
+    const memEntriesList = document.getElementById('mem-entries-list')!;
+    const memEntryCount = document.getElementById('mem-entry-count')!;
+    const memContextBar = document.getElementById('mem-context-bar')!;
+    const memContextPct = document.getElementById('mem-context-pct')!;
+    const memAcDot = document.getElementById('mem-ac-dot')!;
+    const memAcStatus = document.getElementById('mem-ac-status')!;
+    const memAcClock = document.getElementById('mem-ac-clock')!;
+    const memAddKey = document.getElementById('mem-add-key') as HTMLInputElement;
+    const memAddValue = document.getElementById('mem-add-value') as HTMLInputElement;
+    const memAddBtn = document.getElementById('mem-add-btn')!;
+    const todoBtn = document.getElementById('todo-btn')!;
+    const todoGridPanel = document.getElementById('todo-grid-panel')!;
+    const closeTodoGrid = document.getElementById('close-todo-grid')!;
+    const todoGridItems = document.getElementById('todo-grid-items')!;
+    const todoGridCount = document.getElementById('todo-grid-count')!;
+    const todoGridInput = document.getElementById('todo-grid-input') as HTMLInputElement;
+    const todoGridAdd = document.getElementById('todo-grid-add')!;
+
+    // ── Agent Skills Roster (mirrors Copilot CLI skill model) ──
+    interface SkillCard { id: string; name: string; icon: string; desc: string; enabled: boolean; }
+    const AGENT_SKILLS: SkillCard[] = [
+      { id: 'coding', name: 'Coding', icon: '⌨️', desc: 'Read, edit, write files & fix bugs', enabled: true },
+      { id: 'shell', name: 'Shell', icon: '🖥️', desc: 'Run shell commands, builds, tests', enabled: true },
+      { id: 'patch', name: 'Patch', icon: '🩹', desc: 'Precise file edits with verification', enabled: true },
+      { id: 'iptv', name: 'IPTV', icon: '📺', desc: 'M3U, Xtream, Stalker, EPG streams', enabled: false },
+      { id: 'movie-servers', name: 'Movie Servers', icon: '🎬', desc: 'vidsrc/devsrc, CineVault, proxies', enabled: false },
+      { id: 'cloud-ops', name: 'Cloud Ops', icon: '☁️', desc: 'PM2, systemd, ports, health checks', enabled: true },
+      { id: 'pentest', name: 'Pentest', icon: '🎯', desc: 'Guardian security scanning & recon', enabled: false },
+      { id: 'firecrawl', name: 'Firecrawl', icon: '🔥', desc: 'Web search, scrape & extract', enabled: true },
+      { id: 'image-gen', name: 'Image Gen', icon: '🎨', desc: 'DALL-E image generation inline', enabled: true },
+      { id: 'memory', name: 'Memory', icon: '🧠', desc: 'Persistent context across sessions', enabled: true },
+    ];
+    let activeSkills = new Set(AGENT_SKILLS.filter(s => s.enabled).map(s => s.id));
+
+    function setChatFullscreenState(active: boolean) {
+      if (!chatFullscreenBtn) return;
+      chatFullscreenBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      chatFullscreenBtn.title = active ? 'Exit fullscreen chat' : 'Fullscreen chat';
+      chatFullscreenBtn.setAttribute('aria-label', chatFullscreenBtn.title);
+      chatFullscreenBtn.querySelector('.fullscreen-enter')?.classList.toggle('hidden', active);
+      chatFullscreenBtn.querySelector('.fullscreen-exit')?.classList.toggle('hidden', !active);
+      setTimeout(() => {
+        maybeScroll(outputPanel.classList.contains('hidden') ? messagesArea : outputPanel);
+      }, 80);
+    }
+
+    function isChatFullscreen() {
+      return document.fullscreenElement === hackerChat || hackerChat.classList.contains('chat-fullscreen-fallback');
+    }
+
+    chatFullscreenBtn?.addEventListener('click', async () => {
+      try {
+        if (document.fullscreenElement === hackerChat) {
+          await document.exitFullscreen();
+          return;
+        }
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        }
+        if (hackerChat.requestFullscreen) {
+          await hackerChat.requestFullscreen();
+        } else {
+          hackerChat.classList.toggle('chat-fullscreen-fallback');
+          setChatFullscreenState(isChatFullscreen());
+        }
+      } catch {
+        hackerChat.classList.toggle('chat-fullscreen-fallback');
+        setChatFullscreenState(isChatFullscreen());
+      }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement) hackerChat.classList.remove('chat-fullscreen-fallback');
+      setChatFullscreenState(isChatFullscreen());
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && hackerChat.classList.contains('chat-fullscreen-fallback')) {
+        hackerChat.classList.remove('chat-fullscreen-fallback');
+        setChatFullscreenState(false);
+      }
+    });
+
+    function renderSkillGrid() {
+      skillReviewGrid.innerHTML = AGENT_SKILLS.map(s => `
+        <label class="skill-card flex items-start gap-2.5 rounded-xl border px-3 py-2.5 cursor-pointer transition-all ${s.enabled ? 'border-[#7c3aed]/40 bg-[#7c3aed]/8' : 'border-[#333] bg-[#111]'} hover:border-[#7c3aed]/30" data-skill="${s.id}">
+          <input type="checkbox" class="skill-checkbox mt-0.5 accent-[#7c3aed]" ${s.enabled ? 'checked' : ''} />
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5 text-xs font-semibold text-white">${s.icon} ${s.name}</div>
+            <div class="text-[10px] text-white/40 leading-tight mt-0.5">${s.desc}</div>
+          </div>
+        </label>`).join('');
+      skillReviewGrid.querySelectorAll('.skill-card').forEach(card => {
+        const cb = card.querySelector('.skill-checkbox') as HTMLInputElement;
+        cb.addEventListener('change', () => {
+          const id = (card as HTMLElement).dataset.skill!;
+          if (cb.checked) { activeSkills.add(id); card.classList.add('border-[#7c3aed]/40','bg-[#7c3aed]/8'); card.classList.remove('border-[#333]','bg-[#111]'); }
+          else { activeSkills.delete(id); card.classList.remove('border-[#7c3aed]/40','bg-[#7c3aed]/8'); card.classList.add('border-[#333]','bg-[#111]'); }
+          skillCount.textContent = String(activeSkills.size);
+        });
+      });
+      skillCount.textContent = String(activeSkills.size);
+    }
+    skillsBtn.addEventListener('click', () => { renderSkillGrid(); skillReviewModal.classList.remove('hidden'); });
+    closeSkillReview.addEventListener('click', () => skillReviewModal.classList.add('hidden'));
+    skillReviewModal.addEventListener('click', (e) => { if (e.target === skillReviewModal) skillReviewModal.classList.add('hidden'); });
+    skillSelectAll.addEventListener('click', () => {
+      const allOn = activeSkills.size === AGENT_SKILLS.length;
+      AGENT_SKILLS.forEach(s => { if (allOn) activeSkills.delete(s.id); else activeSkills.add(s.id); s.enabled = !allOn; });
+      renderSkillGrid();
+    });
+    skillStartWork.addEventListener('click', () => {
+      skillReviewModal.classList.add('hidden');
+      const skillList = AGENT_SKILLS.filter(s => activeSkills.has(s.id)).map(s => s.name).join(', ');
+      chatInput.value = `[Skills active: ${skillList}]\n\n`;
+      setReadyState(); chatInput.focus();
+    });
+
+    // ── Memory Bank ──
+    let memEntries: {key:string; value:string; category:string; created_at:number}[] = [];
+    let compactNextAt: number | null = null;
+    let compactInterval: number = 5 * 60 * 1000; // 5 min default
+
+    async function loadMemoryBank() {
+      try {
+        const res = await fetch(`${API}/api/memory`);
+        const data = await res.json();
+        memEntries = data.entries || data.memories || [];
+        renderMemEntries();
+        updateMemContextBar();
+      } catch { memEntries = []; renderMemEntries(); }
+    }
+    function renderMemEntries() {
+      memEntryCount.textContent = `${memEntries.length} entries`;
+      if (memEntries.length === 0) { memEntriesList.innerHTML = '<div class="text-xs text-white/30 text-center py-8">No memories stored yet</div>'; return; }
+      memEntriesList.innerHTML = memEntries.map(m => `
+        <div class="rounded-lg border border-[#333] bg-[#111] px-3 py-2 hover:border-[#7c3aed]/30 transition group">
+          <div class="flex items-center justify-between gap-2 mb-0.5">
+            <span class="text-[10px] font-mono font-semibold text-[#a855f7] truncate">${escapeHtml(m.key)}</span>
+            <button class="mem-delete opacity-0 group-hover:opacity-100 transition text-white/30 hover:text-red-400 text-[10px]" data-key="${escapeHtml(m.key)}">✕</button>
+          </div>
+          <div class="text-xs text-white/60 leading-relaxed break-words">${escapeHtml(m.value)}</div>
+        </div>`).join('');
+      memEntriesList.querySelectorAll('.mem-delete').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const key = (btn as HTMLElement).dataset.key || '';
+          try { await fetch(`${API}/api/memory/${encodeURIComponent(key)}`, { method: 'DELETE' }); loadMemoryBank(); } catch {}
+        });
+      });
+    }
+    function updateMemContextBar() {
+      const chars = memEntries.reduce((sum, m) => sum + (m.value?.length || 0), 0);
+      const maxChars = 50000;
+      const pct = Math.min(100, Math.round((chars / maxChars) * 100));
+      memContextBar.style.width = pct + '%';
+      memContextPct.textContent = pct + '%';
+      // Autocompact triggers when context > 80%
+      if (pct > 80) { memAcDot.className = 'h-2 w-2 rounded-full bg-orange-400 animate-pulse'; memAcStatus.textContent = 'Compacting...'; }
+      else if (pct > 60) { memAcDot.className = 'h-2 w-2 rounded-full bg-yellow-400'; memAcStatus.textContent = 'Watching'; }
+      else { memAcDot.className = 'h-2 w-2 rounded-full bg-green-400'; memAcStatus.textContent = 'Idle'; }
+      updateCompactClock();
+    }
+    function updateCompactClock() {
+      if (!compactNextAt) { memAcClock.textContent = '--:--'; return; }
+      const remaining = Math.max(0, compactNextAt - Date.now());
+      const mins = Math.floor(remaining / 60000);
+      const secs = Math.floor((remaining % 60000) / 1000);
+      memAcClock.textContent = `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+    }
+    memAddBtn.addEventListener('click', async () => {
+      const key = memAddKey.value.trim(); const value = memAddValue.value.trim();
+      if (!key || !value) return;
+      try {
+        await fetch(`${API}/api/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value, category: 'context' }) });
+        memAddKey.value = ''; memAddValue.value = ''; loadMemoryBank();
+      } catch {}
+    });
+    memoryBtn.addEventListener('click', () => { loadMemoryBank(); memoryBankModal.classList.remove('hidden'); });
+    closeMemoryBank.addEventListener('click', () => memoryBankModal.classList.add('hidden'));
+    memoryBankModal.addEventListener('click', (e) => { if (e.target === memoryBankModal) memoryBankModal.classList.add('hidden'); });
+
+    // ── Autocompact Clock (runs every 5 min, triggers compact at threshold) ──
+    async function triggerAutocompact() {
+      const chars = memEntries.reduce((s, m) => s + (m.value?.length || 0), 0);
+      if (chars < 30000) { compactNextAt = Date.now() + compactInterval; return; }
+      memAcDot.className = 'h-2 w-2 rounded-full bg-orange-400 animate-pulse'; memAcStatus.textContent = 'Compacting...';
+      try {
+        await fetch(`${API}/api/memory/compact`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+        loadMemoryBank();
+      } catch {}
+      memAcStatus.textContent = 'Idle'; memAcDot.className = 'h-2 w-2 rounded-full bg-green-400';
+      compactNextAt = Date.now() + compactInterval;
+    }
+    compactNextAt = Date.now() + compactInterval;
+    setInterval(() => { updateCompactClock(); }, 1000);
+    setInterval(() => { triggerAutocompact(); }, compactInterval);
+
+    // ── Todo Grid ──
+    interface TodoItem { id: string; text: string; done: boolean; }
+    let todoItems: TodoItem[] = [];
+    function loadTodos() { try { todoItems = JSON.parse(localStorage.getItem('hakster-todos') || '[]'); } catch { todoItems = []; } renderTodoGrid(); }
+    function saveTodos() { localStorage.setItem('hakster-todos', JSON.stringify(todoItems)); }
+    function renderTodoGrid() {
+      const done = todoItems.filter(t => t.done).length;
+      todoGridCount.textContent = `${done}/${todoItems.length}`;
+      if (todoItems.length === 0) { todoGridItems.innerHTML = '<div class="text-xs text-white/30 text-center py-6">No active tasks</div>'; return; }
+      todoGridItems.innerHTML = todoItems.map(t => `
+        <label class="todo-row flex items-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-2.5 py-2 cursor-pointer hover:border-[#7c3aed]/30 transition ${t.done ? 'opacity-50' : ''}" data-id="${t.id}">
+          <input type="checkbox" class="todo-checkbox accent-[#7c3aed]" ${t.done ? 'checked' : ''} />
+          <span class="text-xs text-white/70 flex-1 ${t.done ? 'line-through' : ''}">${escapeHtml(t.text)}</span>
+          <button class="todo-delete text-white/20 hover:text-red-400 text-[10px] flex-shrink-0" data-id="${t.id}">✕</button>
+        </label>`).join('');
+      todoGridItems.querySelectorAll('.todo-checkbox').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const row = cb.closest('.todo-row') as HTMLElement;
+          const id = row.dataset.id!;
+          const item = todoItems.find(t => t.id === id);
+          if (item) { item.done = (cb as HTMLInputElement).checked; saveTodos(); renderTodoGrid(); }
+        });
+      });
+      todoGridItems.querySelectorAll('.todo-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const id = (btn as HTMLElement).dataset.id!;
+          todoItems = todoItems.filter(t => t.id !== id);
+          saveTodos(); renderTodoGrid();
+        });
+      });
+    }
+    todoBtn.addEventListener('click', () => { todoGridPanel.classList.toggle('hidden'); });
+    closeTodoGrid.addEventListener('click', () => todoGridPanel.classList.add('hidden'));
+    todoGridAdd.addEventListener('click', () => {
+      const text = todoGridInput.value.trim(); if (!text) return;
+      todoItems.push({ id: `todo-${Date.now()}`, text, done: false });
+      todoGridInput.value = ''; saveTodos(); renderTodoGrid();
+    });
+    todoGridInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); todoGridAdd.click(); } });
+    loadTodos();
+
+    // ===== Checkpoints =====
+    const checkpointBtn = document.getElementById('checkpoint-btn')!;
+    const checkpointPanel = document.getElementById('checkpoint-panel')!;
+    const closeCheckpointPanel = document.getElementById('close-checkpoint-panel')!;
+    const checkpointList = document.getElementById('checkpoint-list')!;
+    const checkpointCount = document.getElementById('checkpoint-count')!;
+    const saveCheckpointBtn = document.getElementById('save-checkpoint-btn')!;
+    const CHECKPOINT_KEY = 'hakster-hack-checkpoints';
+
+    interface Checkpoint { id: string; convId: string; title: string; messages: Message[]; model: string; savedAt: number; }
+    function loadCheckpoints(): Checkpoint[] {
+      try { return JSON.parse(localStorage.getItem(CHECKPOINT_KEY) || '[]'); } catch { return []; }
+    }
+    function saveCheckpoints(cps: Checkpoint[]) { localStorage.setItem(CHECKPOINT_KEY, JSON.stringify(cps)); }
+    function renderCheckpoints() {
+      const cps = loadCheckpoints();
+      checkpointCount.textContent = String(cps.length);
+      if (cps.length === 0) {
+        checkpointList.innerHTML = '<div class="text-xs text-white/30 text-center py-6">No checkpoints saved.<br>Click the bookmark icon to save the current conversation state.</div>';
+        return;
+      }
+      checkpointList.innerHTML = cps.map(cp => {
+        const date = new Date(cp.savedAt).toLocaleString();
+        const msgCount = cp.messages.length;
+        return `<div class="rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-2 hover:border-[#7c3aed]/40 transition group">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-medium text-white/80 truncate flex-1">${cp.title || 'Untitled'}</span>
+            <span class="text-[9px] text-white/30 ml-2">${date}</span>
+          </div>
+          <div class="text-[10px] text-white/40 mb-2">${msgCount} messages · ${cp.model || 'unknown'}</div>
+          <div class="flex gap-1.5">
+            <button class="cp-restore text-[10px] rounded border border-[#333] hover:border-[#7c3aed]/50 px-2 py-1 text-white/60 hover:text-white transition" data-cp-id="${cp.id}">↩ Restore</button>
+            <button class="cp-delete text-[10px] rounded border border-[#333] hover:border-[#ef4444]/50 px-2 py-1 text-white/40 hover:text-[#ef4444] transition" data-cp-id="${cp.id}">🗑 Delete</button>
+          </div>
+        </div>`;
+      }).join('');
+      checkpointList.querySelectorAll('.cp-restore').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = (btn as HTMLElement).dataset.cpId!;
+          const cps = loadCheckpoints();
+          const cp = cps.find(c => c.id === id);
+          if (!cp) return;
+          // Create a new conversation from the checkpoint
+          const newConv: Conversation = { id: `hack-${Date.now()}-${Math.random().toString(36).slice(2,7)}`, title: `${cp.title} (restored)`, messages: [...cp.messages], model: cp.model || currentModel, created: Date.now() };
+          const convs = loadConversations(); convs.unshift(newConv); saveConversations(convs); setActiveId(newConv.id);
+          renderMessages(newConv.messages); showMessagesView(); renderHistoryList();
+          checkpointPanel.classList.add('hidden');
+        });
+      });
+      checkpointList.querySelectorAll('.cp-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = (btn as HTMLElement).dataset.cpId!;
+          const cps = loadCheckpoints().filter(c => c.id !== id);
+          saveCheckpoints(cps); renderCheckpoints();
+        });
+      });
+    }
+    function saveCheckpointNow() {
+      const activeId = getActiveId();
+      const convs = loadConversations();
+      const conv = convs.find(c => c.id === activeId);
+      if (!conv || conv.messages.length === 0) { alert('No active conversation to checkpoint.'); return; }
+      const cp: Checkpoint = { id: `cp-${Date.now()}`, convId: conv.id, title: conv.title, messages: [...conv.messages], model: conv.model, savedAt: Date.now() };
+      const cps = loadCheckpoints(); cps.unshift(cp); saveCheckpoints(cps); renderCheckpoints();
+    }
+    checkpointBtn.addEventListener('click', () => { checkpointPanel.classList.toggle('hidden'); renderCheckpoints(); });
+    closeCheckpointPanel.addEventListener('click', () => checkpointPanel.classList.add('hidden'));
+    saveCheckpointBtn.addEventListener('click', saveCheckpointNow);
+    renderCheckpoints();
+
+    // ===== Autopilot =====
+    const autopilotBtn = document.getElementById('autopilot-btn') as HTMLButtonElement;
+    let autopilotActive = false;
+    let autopilotTimer: any = null;
+    let autopilotStep = 0;
+
+    function setAutopilotVisual(active: boolean) {
+      autopilotActive = active;
+      if (active) {
+        autopilotBtn.style.background = '#7c3aed';
+        autopilotBtn.style.color = '#fff';
+        autopilotBtn.title = 'Autopilot ON — click to stop';
+      } else {
+        autopilotBtn.style.background = '';
+        autopilotBtn.style.color = '';
+        autopilotBtn.title = 'Toggle autopilot mode';
+      }
+    }
+
+    function autopilotNext() {
+      if (!autopilotActive || busy) return;
+      autopilotStep++;
+      const prompts = [
+        'Continue working on the task. Pick up where you left off and proceed with the next logical step.',
+        'Review what you have done so far, identify any issues or gaps, and fix them.',
+        'Verify the current state of the work. Run any necessary checks or tests, then proceed to the next step.',
+        'Summarize the current progress in 2-3 sentences, then continue with the next phase of work.',
+        'Apply any remaining improvements or optimizations you can think of to complete the task.',
+      ];
+      const prompt = prompts[autopilotStep % prompts.length];
+      sendMessage(prompt);
+    }
+
+    function startAutopilot() {
+      setAutopilotVisual(true);
+      autopilotStep = 0;
+      // Kick off immediately
+      autopilotNext();
+    }
+
+    function stopAutopilot() {
+      setAutopilotVisual(false);
+      if (autopilotTimer) { clearTimeout(autopilotTimer); autopilotTimer = null; }
+    }
+
+    autopilotBtn.addEventListener('click', () => {
+      if (autopilotActive) { stopAutopilot(); }
+      else { startAutopilot(); }
+    });
+
+    // ===== Terminal Panel (embedded PTY) =====
+    const terminalBtn = document.getElementById('terminal-btn')!;
+    const chatTerminalPanel = document.getElementById('chat-terminal-panel')!;
+    const closeTerminalPanel = document.getElementById('close-terminal-panel')!;
+    const terminalContainer = document.getElementById('terminal-container')!;
+    const terminalStatus = document.getElementById('terminal-status')!;
+    const terminalReconnectBtn = document.getElementById('terminal-reconnect-btn')!;
+    let chatTerm: any = null;
+    let chatTermFit: any = null;
+    let chatTermWs: WebSocket | null = null;
+
+    function getWsBase() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${proto}//${window.location.host}`;
+    }
+
+    function initChatTerminal() {
+      if (!window.Terminal || !window.FitAddon?.FitAddon) {
+        terminalContainer.innerHTML = '<div style="color:#e50914;padding:1rem;font-family:monospace">Terminal libraries not loaded. Visit /terminal first to cache them.</div>';
+        return;
+      }
+      if (chatTerm) return; // already initialized
+      chatTerm = new window.Terminal({
+        theme: { background: '#0a0a0f', foreground: '#c084fc', cursor: '#7c3aed' },
+        fontFamily: 'JetBrains Mono, monospace', fontSize: 13,
+        cursorBlink: true, cursorStyle: 'bar', scrollback: 5000,
+        allowTransparency: true, convertEol: false,
+      });
+      chatTermFit = new window.FitAddon.FitAddon();
+      chatTerm.loadAddon(chatTermFit);
+      chatTerm.open(terminalContainer);
+      setTimeout(() => { try { chatTermFit.fit(); } catch {} }, 50);
+      chatTerm.writeln('\x1b[1;38;5;177m⚡ haksterAi Chat Terminal\x1b[0m');
+      chatTerm.writeln('\x1b[2;38;5;240mConnect to start using the shell.\x1b[0m\r\n');
+      chatTerm.onData((data: string) => {
+        if (chatTermWs && chatTermWs.readyState === WebSocket.OPEN) {
+          chatTermWs.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+      chatTerm.onResize((size: any) => {
+        if (chatTermWs && chatTermWs.readyState === WebSocket.OPEN) {
+          chatTermWs.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
+        }
+      });
+    }
+
+    function connectChatTerminal() {
+      if (!chatTerm) initChatTerminal();
+      if (!chatTerm) return;
+      if (chatTermWs && chatTermWs.readyState !== WebSocket.CLOSED) return;
+      terminalStatus.textContent = 'connecting...';
+      terminalStatus.style.color = '#fbbf24';
+      const wsUrl = `${getWsBase()}/ws/pty`;
+      chatTermWs = new WebSocket(wsUrl);
+      chatTermWs.onopen = () => {
+        terminalStatus.textContent = 'connected';
+        terminalStatus.style.color = '#00ff88';
+        chatTerm?.writeln('\x1b[1;32m[Connected]\x1b[0m\r\n');
+        try { chatTermFit?.fit(); } catch {}
+      };
+      chatTermWs.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'output' || msg.type === 'data') chatTerm?.write(msg.data || '');
+          else if (msg.type === 'error') chatTerm?.writeln(`\x1b[31m[Error] ${msg.error}\x1b[0m`);
+        } catch {}
+      };
+      chatTermWs.onclose = () => {
+        terminalStatus.textContent = 'disconnected';
+        terminalStatus.style.color = '#64748b';
+        chatTerm?.writeln('\r\n\x1b[33m[Disconnected]\x1b[0m');
+      };
+      chatTermWs.onerror = () => {
+        terminalStatus.textContent = 'error';
+        terminalStatus.style.color = '#ef4444';
+      };
+    }
+
+    terminalBtn.addEventListener('click', () => {
+      const isHidden = chatTerminalPanel.classList.contains('hidden');
+      if (isHidden) {
+        chatTerminalPanel.classList.remove('hidden');
+        // Resize messages area to make room
+        const ma = document.getElementById('messages-area');
+        if (ma) ma.style.paddingBottom = '300px';
+        setTimeout(() => {
+          initChatTerminal();
+          connectChatTerminal();
+          try { chatTermFit?.fit(); chatTerm?.focus(); } catch {}
+        }, 100);
+      } else {
+        chatTerminalPanel.classList.add('hidden');
+        const ma = document.getElementById('messages-area');
+        if (ma) ma.style.paddingBottom = '';
+      }
+    });
+    closeTerminalPanel.addEventListener('click', () => {
+      chatTerminalPanel.classList.add('hidden');
+      const ma = document.getElementById('messages-area');
+      if (ma) ma.style.paddingBottom = '';
+      if (chatTermWs) { try { chatTermWs.close(); } catch {} }
+    });
+    terminalReconnectBtn.addEventListener('click', () => {
+      if (chatTermWs) { try { chatTermWs.close(); } catch {} }
+      setTimeout(connectChatTerminal, 200);
+    });
+    window.addEventListener('resize', () => { try { chatTermFit?.fit(); } catch {} });
+
+    // ===== Pentester Agent =====
+    const pentesterBtn = document.getElementById('pentester-btn')!;
+    const pentesterPanel = document.getElementById('pentester-panel')!;
+    const closePentesterPanel = document.getElementById('close-pentester-panel')!;
+    const pentesterRunBtn = document.getElementById('pentester-run-btn')!;
+    const pentesterFpBtn = document.getElementById('pentester-fp-btn')!;
+    const pentesterTarget = document.getElementById('pentester-target') as HTMLInputElement;
+    const pentesterToolSelect = document.getElementById('pentester-tool-select') as HTMLSelectElement;
+    const pentesterOutput = document.getElementById('pentester-output')!;
+    const pentesterStatus = document.getElementById('pentester-status')!;
+
+    pentesterBtn.addEventListener('click', () => {
+      const isHidden = pentesterPanel.classList.contains('hidden');
+      if (isHidden) {
+        pentesterPanel.classList.remove('hidden');
+        const ma = document.getElementById('messages-area');
+        if (ma) ma.style.paddingBottom = '340px';
+      } else {
+        pentesterPanel.classList.add('hidden');
+        const ma = document.getElementById('messages-area');
+        if (ma) ma.style.paddingBottom = '';
+      }
+    });
+    closePentesterPanel.addEventListener('click', () => {
+      pentesterPanel.classList.add('hidden');
+      const ma = document.getElementById('messages-area');
+      if (ma) ma.style.paddingBottom = '';
+    });
+
+    function scrollPentesterOutput() {
+      requestAnimationFrame(() => {
+        pentesterOutput.scrollTop = pentesterOutput.scrollHeight;
+      });
+    }
+
+    pentesterFpBtn.addEventListener('click', async () => {
+      pentesterStatus.textContent = 'fingerprinting...';
+      pentesterOutput.textContent = 'Fetching device fingerprint...\n';
+      scrollPentesterOutput();
+      try {
+        const res = await fetch(`${API}/api/pentester/fingerprint`);
+        const data = await res.json();
+        pentesterOutput.textContent = JSON.stringify(data, null, 2);
+        scrollPentesterOutput();
+        pentesterStatus.textContent = 'fingerprint ready';
+      } catch (err: any) {
+        pentesterOutput.textContent = `Error: ${err.message}`;
+        scrollPentesterOutput();
+        pentesterStatus.textContent = 'error';
+      }
+    });
+
+    pentesterRunBtn.addEventListener('click', async () => {
+      const target = pentesterTarget.value.trim();
+      if (!target) { pentesterOutput.textContent = 'Please enter a target.'; return; }
+      pentesterStatus.textContent = 'running...';
+      pentesterRunBtn.disabled = true;
+      pentesterOutput.textContent = `🎯 Running pentester agent against ${target}...\n\n`;
+      scrollPentesterOutput();
+      try {
+        const res = await fetch(`${API}/api/pentester/run`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...(gtoken ? { 'x-api-key': gtoken } : {}) },
+          body: JSON.stringify({ target }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          if (data.plan) pentesterOutput.textContent += `📋 Plan:\n${JSON.stringify(data.plan, null, 2)}\n\n`;
+          if (data.state) pentesterOutput.textContent += `📊 Final State:\n${JSON.stringify(data.state, null, 2)}\n`;
+          scrollPentesterOutput();
+          pentesterStatus.textContent = `done (${data.state?.round || 0} rounds)`;
+        } else {
+          pentesterOutput.textContent += `❌ Error: ${data.error}\n`;
+          scrollPentesterOutput();
+          pentesterStatus.textContent = 'error';
+        }
+      } catch (err: any) {
+        pentesterOutput.textContent += `❌ Error: ${err.message}\n`;
+        scrollPentesterOutput();
+        pentesterStatus.textContent = 'error';
+      } finally {
+        pentesterRunBtn.disabled = false;
+      }
+    });
+
+    pentesterToolSelect.addEventListener('change', async () => {
+      const tool = pentesterToolSelect.value;
+      const target = pentesterTarget.value.trim();
+      if (!tool || !target) { pentesterToolSelect.value = ''; return; }
+      pentesterStatus.textContent = `running ${tool}...`;
+      pentesterOutput.textContent = `🔧 ${tool} → ${target}\n\n`;
+      scrollPentesterOutput();
+      try {
+        const res = await fetch(`${API}/api/pentester/scan`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...(gtoken ? { 'x-api-key': gtoken } : {}) },
+          body: JSON.stringify({ target, tool }),
+        });
+        const data = await res.json();
+        pentesterOutput.textContent += data.output || data.error || 'No output';
+        scrollPentesterOutput();
+        pentesterStatus.textContent = `${tool} done`;
+      } catch (err: any) {
+        pentesterOutput.textContent += `Error: ${err.message}`;
+        scrollPentesterOutput();
+        pentesterStatus.textContent = 'error';
+      }
+      pentesterToolSelect.value = '';
+    });
+
+    // ===== Autopilot hook: after sendMessage completes, schedule next step =====
+    const _origSendMessage = sendMessage;
+    // We hook via the finally block — patch the busy flag watcher
+    const _checkAutopilot = setInterval(() => {
+      if (autopilotActive && !busy && !chatInput.value.trim()) {
+        if (autopilotTimer) { clearTimeout(autopilotTimer); }
+        autopilotTimer = setTimeout(() => {
+          if (autopilotActive && !busy) autopilotNext();
+        }, 2000);
+      }
+    }, 3000);
 
     // ── Smart Autoscroll ──
     // Pauses when user scrolls up, resumes when they scroll back to bottom.
@@ -297,18 +1439,40 @@ import Layout from '../layouts/Layout.astro';
     scrollArrow.innerHTML = '<svg fill="none" stroke="white" viewBox="0 0 24 24" style="width:14px;height:14px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>';
     messagesArea.parentElement?.appendChild(scrollArrow);
 
-    messagesArea.addEventListener('scroll', () => {
-      const atBottom = messagesArea.scrollTop + messagesArea.clientHeight >= messagesArea.scrollHeight - 40;
+    function activeScrollPanel() {
+      return outputPanel.classList.contains('hidden') ? messagesArea : outputPanel;
+    }
+
+    function isNearBottom(panel: HTMLElement) {
+      return panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 80;
+    }
+
+    function scrollPanelToBottom(panel: HTMLElement, force = false) {
+      if (!force && !autoScroll) return;
+      requestAnimationFrame(() => {
+        panel.scrollTop = panel.scrollHeight;
+      });
+    }
+
+    function updateAutoScroll(panel: HTMLElement) {
+      const atBottom = isNearBottom(panel);
       autoScroll = atBottom;
       if (scrollArrow) scrollArrow.style.display = atBottom ? 'none' : 'flex';
+    }
+
+    messagesArea.addEventListener('scroll', () => {
+      updateAutoScroll(messagesArea);
+    });
+    outputPanel.addEventListener('scroll', () => {
+      updateAutoScroll(outputPanel);
     });
     scrollArrow.addEventListener('click', () => {
       autoScroll = true;
-      messagesArea.scrollTop = messagesArea.scrollHeight;
+      scrollPanelToBottom(activeScrollPanel(), true);
       if (scrollArrow) scrollArrow.style.display = 'none';
     });
 
-    function maybeScroll() { if (autoScroll) messagesArea.scrollTop = messagesArea.scrollHeight; }
+    function maybeScroll(panel: HTMLElement = activeScrollPanel()) { scrollPanelToBottom(panel); }
     const sidebar = document.getElementById('sidebar')!;
     const collapseSidebarBtn = document.getElementById('collapse-sidebar-btn')!;
     const expandSidebarBtn = document.getElementById('expand-sidebar-btn')!;
@@ -330,24 +1494,160 @@ import Layout from '../layouts/Layout.astro';
     let listening = false;
     let availableVoices: SpeechSynthesisVoice[] = [];
 
-    // ===== Client Device Detection =====
-    // Collects browser/device info and sends to backend so agent knows what device user is on
+    // ===== Client Device Detection (comprehensive) =====
+    // Collects every available browser/device signal and sends to backend
     async function sendClientContext(sessionId: string) {
       try {
         const nav: any = navigator;
-        const ctx: any = {
-          session_id: sessionId,
-          user_agent: nav.userAgent || '',
-          platform: nav.platform || '',
-          language: nav.language || '',
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+        const ua = nav.userAgent || '';
+        const langs = nav.languages || [nav.language || ''];
+
+        // ── Screen info ──
+        const screenInfo = {
           screen_width: screen.width || null,
           screen_height: screen.height || null,
+          screen_avail_width: screen.availWidth || null,
+          screen_avail_height: screen.availHeight || null,
+          screen_color_depth: screen.colorDepth || null,
+          screen_pixel_depth: screen.pixelDepth || null,
+          screen_orientation: screen.orientation?.type || null,
           device_pixel_ratio: window.devicePixelRatio || null,
-          online: nav.onLine,
+          viewport_width: window.innerWidth || null,
+          viewport_height: window.innerHeight || null,
+        };
+
+        // ── Hardware ──
+        const hardware = {
           cores: nav.hardwareConcurrency || null,
           memory_gb: nav.deviceMemory || null,
+          max_touch_points: nav.maxTouchPoints || 0,
           touch_support: ('ontouchstart' in window) || (nav.maxTouchPoints > 0),
+        };
+
+        // ── Network ──
+        const connection = nav.connection || nav.mozConnection || nav.webkitConnection || {};
+        const network = {
+          online: nav.onLine,
+          connection_type: connection.effectiveType || null,
+          connection_downlink: connection.downlink || null,
+          connection_rtt: connection.rtt || null,
+          connection_save_data: connection.saveData || false,
+        };
+
+        // ── Browser & engine detection ──
+        let browser = '', browser_version = '', engine = '', engine_version = '';
+        // Order matters: Edge/UAs that contain Chrome must check Edge first
+        if (/Edg\//i.test(ua)) { browser = 'Edge'; browser_version = ua.match(/Edg\/([0-9.]+)/)?.[1] || ''; engine = 'Blink'; }
+        else if (/OPR\//i.test(ua) || /Opera/i.test(ua)) { browser = 'Opera'; browser_version = ua.match(/OPR\/([0-9.]+)/)?.[1] || ua.match(/Opera\/([0-9.]+)/)?.[1] || ''; engine = 'Blink'; }
+        else if (/SamsungBrowser/i.test(ua)) { browser = 'Samsung Internet'; browser_version = ua.match(/SamsungBrowser\/([0-9.]+)/)?.[1] || ''; engine = 'Blink'; }
+        else if (/CriOS/i.test(ua)) { browser = 'Chrome iOS'; browser_version = ua.match(/CriOS\/([0-9.]+)/)?.[1] || ''; engine = 'WebKit'; }
+        else if (/Chrome/i.test(ua)) { browser = 'Chrome'; browser_version = ua.match(/Chrome\/([0-9.]+)/)?.[1] || ''; engine = 'Blink'; }
+        else if (/Firefox/i.test(ua)) { browser = 'Firefox'; browser_version = ua.match(/Firefox\/([0-9.]+)/)?.[1] || ''; engine = 'Gecko'; engine_version = ua.match(/rv:([0-9.]+)/)?.[1] || ''; }
+        else if (/FxiOS/i.test(ua)) { browser = 'Firefox iOS'; browser_version = ua.match(/FxiOS\/([0-9.]+)/)?.[1] || ''; engine = 'WebKit'; }
+        else if (/Version\/.*Safari/i.test(ua)) { browser = 'Safari'; browser_version = ua.match(/Version\/([0-9.]+)/)?.[1] || ''; engine = 'WebKit'; engine_version = ua.match(/AppleWebKit\/([0-9.]+)/)?.[1] || ''; }
+        else if (/Trident/i.test(ua)) { browser = 'IE'; browser_version = ua.match(/rv:([0-9.]+)/)?.[1] || ''; engine = 'Trident'; }
+        else if (ua) browser = 'Unknown';
+
+        // ── OS detection (multi-method) ──
+        let os_name = '', os_version = '', device_type = '';
+        // Method 1: User-Agent Client Hints (modern browsers)
+        const uaData = nav.userAgentData;
+        if (uaData) {
+          const platform = uaData.platform || '';
+          if (platform === 'Android') { os_name = 'Android'; device_type = 'mobile'; }
+          else if (platform === 'Chrome OS') { os_name = 'ChromeOS'; }
+          else if (platform === 'iOS') { os_name = 'iOS'; device_type = 'mobile'; }
+          else if (platform === 'macOS') { os_name = 'macOS'; }
+          else if (platform === 'Windows') { os_name = 'Windows'; }
+          else if (platform === 'Linux') { os_name = 'Linux'; }
+          else if (platform) os_name = platform;
+          // Get high-entropy OS info
+          if (uaData.getHighEntropyValues) {
+            try {
+              const hev = await uaData.getHighEntropyValues(['platformVersion', 'architecture', 'bitness', 'model', 'fullVersionList']);
+              if (hev.platformVersion) os_version = hev.platformVersion;
+              if (hev.model) device_type = /phone|mobile/i.test(hev.model) ? 'mobile' : device_type;
+            } catch {}
+          }
+        }
+        // Method 2: User-Agent string parsing (fallback)
+        if (!os_name) {
+          if (/Android/i.test(ua)) { os_name = 'Android'; os_version = ua.match(/Android ([0-9.]+)/)?.[1] || ''; device_type = 'mobile'; }
+          else if (/iPhone/i.test(ua)) { os_name = 'iOS'; os_version = (ua.match(/OS ([0-9_]+)/)?.[1] || '').replace(/_/g, '.'); device_type = 'mobile'; }
+          else if (/iPad/i.test(ua)) { os_name = 'iPadOS'; os_version = (ua.match(/OS ([0-9_]+)/)?.[1] || '').replace(/_/g, '.'); device_type = 'tablet'; }
+          else if (/iPod/i.test(ua)) { os_name = 'iOS'; os_version = (ua.match(/OS ([0-9_]+)/)?.[1] || '').replace(/_/g, '.'); device_type = 'mobile'; }
+          else if (/CrOS/i.test(ua)) { os_name = 'ChromeOS'; os_version = ua.match(/CrOS \w+ ([0-9.]+)/)?.[1] || ''; }
+          else if (/Windows NT 10/i.test(ua)) { os_name = 'Windows'; os_version = '10/11'; }
+          else if (/Windows NT 6\.3/i.test(ua)) { os_name = 'Windows'; os_version = '8.1'; }
+          else if (/Windows NT 6\.2/i.test(ua)) { os_name = 'Windows'; os_version = '8'; }
+          else if (/Windows NT 6\.1/i.test(ua)) { os_name = 'Windows'; os_version = '7'; }
+          else if (/Windows NT/i.test(ua)) { os_name = 'Windows'; }
+          else if (/Mac OS X/i.test(ua)) { os_name = 'macOS'; os_version = (ua.match(/Mac OS X ([0-9_.]+)/)?.[1] || '').replace(/_/g, '.'); }
+          else if (/Macintosh/i.test(ua)) { os_name = 'macOS'; }
+          else if (/Linux/i.test(ua)) { os_name = 'Linux'; }
+          else if (/FreeBSD/i.test(ua)) { os_name = 'FreeBSD'; }
+          else if (/OpenBSD/i.test(ua)) { os_name = 'OpenBSD'; }
+          else if (/X11/i.test(ua)) { os_name = 'Unix'; }
+        }
+        // Method 3: navigator.platform (legacy)
+        const platform = nav.platform || '';
+
+        // ── Device type (multi-signal) ──
+        if (!device_type) {
+          if (/Mobi|Android|iPhone|iPod/i.test(ua)) device_type = 'mobile';
+          else if (/iPad|Tablet|Kindle|Silk/i.test(ua)) device_type = 'tablet';
+          else if (/TV|SmartTV|Bravia/i.test(ua)) device_type = 'tv';
+          else if (screen.width <= 480 || screen.height <= 480) device_type = 'mobile';
+          else if (screen.width <= 1024) device_type = 'tablet';
+          else device_type = 'desktop';
+        }
+
+        // ── Device model (from UA) ──
+        let device_model = '';
+        if (os_name === 'Android') { device_model = ua.match(/Android[^;]*;\s*([^)]+)\)/)?.[1]?.trim() || ''; }
+        else if (os_name === 'iOS' || os_name === 'iPadOS') { device_model = ua.match(/\((iPhone|iPad|iPod)[^)]*\)/)?.[1] || ''; }
+
+        // ── Bot detection ──
+        const is_bot = /bot|crawler|spider|crawling|slurp|baidu|bingpreview|facebookexternalhit|twitterbot|linkedinbot|semrushbot|googlebot/i.test(ua);
+
+        // ── Additional signals ──
+        const cookies_enabled = nav.cookieEnabled;
+        const do_not_track = nav.doNotTrack;
+        const pdf_viewer = nav.pdfViewerEnabled;
+        const webdriver = nav.webdriver;
+        const gpu = (() => {
+          try {
+            const c = document.createElement('canvas');
+            const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+            if (!gl) return null;
+            const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+            return dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null;
+          } catch { return null; }
+        })();
+        const dark_mode = window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ?? null;
+        const reduced_motion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? null;
+
+        const ctx: any = {
+          session_id: sessionId,
+          user_agent: ua,
+          platform,
+          os_name, os_version, device_type, device_model,
+          browser, browser_version, engine, engine_version,
+          language: nav.language || '',
+          languages: langs.join(','),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+          timezone_offset: new Date().getTimezoneOffset(),
+          ...screenInfo,
+          ...hardware,
+          ...network,
+          cookies_enabled,
+          do_not_track,
+          pdf_viewer,
+          webdriver,
+          is_bot,
+          gpu,
+          dark_mode,
+          reduced_motion,
         };
         await fetch(`${API}/api/client-context`, {
           method: 'POST',
@@ -433,7 +1733,8 @@ import Layout from '../layouts/Layout.astro';
         const lineNumbers = lines.map((_, i) => `<span class="ln">${i + 1}</span>`).join('');
         // We'll store raw code in data attribute for copy; render with line numbers
         const codeHtml = lines.map((line, i) => `<span class="ln">${i + 1}</span>${escapeHtml(line)}`).join('\n');
-        parts.push(`<div class="tui-code-block"><div class="tui-code-header"><span class="tui-code-lang">${langLabel}</span><span class="tui-code-copy" data-code-id="${codeId}"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><span class="tui-copy-label">Copy</span></span></div><div class="tui-code-body"><pre><code id="${codeId}">${codeHtml}</code></pre></div></div>`);
+        const downloadIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:10px;height:10px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>`;
+        parts.push(`<div class="tui-code-block"><div class="tui-code-header"><span class="tui-code-lang">${langLabel}</span><div class="flex items-center gap-2"><span class="tui-code-download" data-code-id="${codeId}" data-lang="${lang}" title="Download as file">${downloadIcon}</span><span class="tui-code-copy" data-code-id="${codeId}"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><span class="tui-copy-label">Copy</span></span></div></div><div class="tui-code-body"><pre><code id="${codeId}">${codeHtml}</code></pre></div></div>`);
         lastIdx = match.index + match[0].length;
       }
       // Remaining text after last fence
@@ -489,6 +1790,23 @@ import Layout from '../layouts/Layout.astro';
           setTimeout(() => { if (labelEl) { labelEl.textContent = 'Copy'; btn.classList.remove('copied'); btn.querySelector('svg')?.remove(); btn.insertAdjacentHTML('afterbegin', copyIcon); } }, 1500);
         });
       });
+      container.querySelectorAll('.tui-code-download').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const codeId = (btn as HTMLElement).dataset.codeId;
+          const lang = (btn as HTMLElement).dataset.lang || 'txt';
+          const codeEl = codeId ? document.getElementById(codeId) : null;
+          if (!codeEl) return;
+          const text = (codeEl.textContent || '').replace(/^\d+/gm, '');
+          const ext = lang === 'javascript' ? 'js' : lang === 'typescript' ? 'ts' : lang === 'python' ? 'py' : lang === 'bash' || lang === 'sh' || lang === 'shell' ? 'sh' : lang === 'json' ? 'json' : lang === 'html' ? 'html' : lang === 'css' ? 'css' : lang === 'go' ? 'go' : lang === 'rust' ? 'rs' : lang === 'java' ? 'java' : lang === 'sql' ? 'sql' : 'txt';
+          const blob = new Blob([text], { type: 'text/plain' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = `snippet-${Date.now()}.${ext}`; a.click();
+          URL.revokeObjectURL(url);
+          btn.classList.add('copied');
+          setTimeout(() => btn.classList.remove('copied'), 1500);
+        });
+      });
     }
 
     function renderMessages(messages: Message[]) {
@@ -501,7 +1819,7 @@ import Layout from '../layouts/Layout.astro';
       if (msg.role === 'image') {
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble msg-image rounded-xl px-4 py-3';
-        bubble.innerHTML = `<div class="text-xs text-white/40 mb-1">${escapeHtml(msg.prompt || 'Generated image')}</div><img src="${msg.url}" alt="${escapeHtml(msg.prompt || 'Image')}" class="rounded-lg max-w-full max-h-96" loading="lazy" /><a href="${msg.url}" download="haksterai-image.png" class="inline-flex items-center gap-1 text-xs text-[#7c3aed] hover:text-[#a855f7] mt-2 transition">⬇ Download</a>`;
+        bubble.innerHTML = `<div class="text-xs text-white/40 mb-1">${escapeHtml(msg.prompt || 'Generated image')}</div><img src="${msg.url}" alt="${escapeHtml(msg.prompt || 'Image')}" class="rounded-lg max-w-full max-h-96" loading="lazy" /><a href="${msg.url}" download="haksterai-image.png" class="inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 rounded-lg bg-[#7c3aed]/20 border border-[#7c3aed]/30 text-xs font-medium text-[#a855f7] hover:bg-[#7c3aed]/30 hover:border-[#7c3aed]/50 transition">⬇ Download Image</a>`;
         messagesContainer.appendChild(bubble);
       } else {
         const bubble = document.createElement('div');
@@ -518,6 +1836,7 @@ import Layout from '../layouts/Layout.astro';
         const checkIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
         const allowIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
         const denyIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
+        const pinIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v2l-2 2v6l3 3H4l3-3V9L5 7V5z"/></svg>`;
         let bodyHtml = '';
         if (isAssistant && msg.url) {
           // File created by agent — show download button
@@ -533,7 +1852,7 @@ import Layout from '../layouts/Layout.astro';
         } else {
           bodyHtml = escapeHtml(msg.content);
         }
-        const allowBtn = isConfirmation ? `<button type="button" class="bubble-action" data-action="allow" title="Allow this command">${allowIcon}<span>Allow</span></button><button type="button" class="bubble-action" data-action="deny" title="Deny this command">${denyIcon}<span>Deny</span></button>` : '';
+        const allowBtn = isConfirmation ? `<button type="button" class="bubble-action" data-action="allow" title="Allow this command once">${allowIcon}<span>Allow</span></button><button type="button" class="bubble-action" data-action="allow-always" title="Add to permanent allow list">${pinIcon}<span>Always</span></button><button type="button" class="bubble-action" data-action="deny" title="Deny this command">${denyIcon}<span>Deny</span></button>` : '';
         bubble.innerHTML = `<div class="flex items-center justify-between gap-3 mb-1"><div class="text-[10px] font-semibold uppercase tracking-wider ${labelColor}">${label}</div><div class="flex items-center gap-1">${allowBtn}<button type="button" class="bubble-action" data-action="copy" title="Copy message">${copyIcon}<span class="copy-label">Copy</span></button><button type="button" class="bubble-action" data-action="paste" title="Paste into composer">${pasteIcon}<span>Paste</span></button></div></div><div class="${bodyClass}">${bodyHtml}</div>`;
         if (isAssistant || isScript) attachCodeCopyHandlers(bubble);
         const copyBtn = bubble.querySelector('[data-action="copy"]');
@@ -557,21 +1876,45 @@ import Layout from '../layouts/Layout.astro';
           btn.style.pointerEvents = 'none';
           const denyBtn = bubble.querySelector('[data-action="deny"]') as HTMLElement;
           if (denyBtn) denyBtn.style.display = 'none';
+          const alwaysBtn = bubble.querySelector('[data-action="allow-always"]') as HTMLElement;
+          if (alwaysBtn) alwaysBtn.style.display = 'none';
           try {
             await fetch(`${API}/api/agent/allow`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ command: msg.command || '' }),
+              body: JSON.stringify({ command: msg.command || '', permanent: false }),
             });
           } catch {}
           // Re-trigger the agent so it retries with the command now on the allowlist
           if (!busy) sendMessage(chatInput.value.trim() || `Run the command again: ${msg.command || ''}`);
         });
+        bubble.querySelector('[data-action="allow-always"]')?.addEventListener('click', async () => {
+          const btn = bubble.querySelector('[data-action="allow-always"]') as HTMLElement;
+          if (!btn) return;
+          btn.innerHTML = `${pinIcon}<span class="copy-label">Pinned ✓</span>`;
+          btn.classList.add('copied');
+          btn.style.pointerEvents = 'none';
+          const denyBtn = bubble.querySelector('[data-action="deny"]') as HTMLElement;
+          if (denyBtn) denyBtn.style.display = 'none';
+          const allowBtnEl = bubble.querySelector('[data-action="allow"]') as HTMLElement;
+          if (allowBtnEl) allowBtnEl.style.display = 'none';
+          try {
+            await fetch(`${API}/api/agent/allow`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ command: msg.command || '', permanent: true }),
+            });
+          } catch {}
+          // Re-trigger the agent so it retries with the command now permanently allowed
+          if (!busy) sendMessage(chatInput.value.trim() || `Run the command again: ${msg.command || ''}`);
+        });
         bubble.querySelector('[data-action="deny"]')?.addEventListener('click', () => {
           const denyBtn = bubble.querySelector('[data-action="deny"]') as HTMLElement;
           const allowBtn = bubble.querySelector('[data-action="allow"]') as HTMLElement;
+          const alwaysBtn = bubble.querySelector('[data-action="allow-always"]') as HTMLElement;
           if (denyBtn) { denyBtn.innerHTML = `${denyIcon}<span>Denied ✗</span>`; denyBtn.style.pointerEvents = 'none'; }
           if (allowBtn) allowBtn.style.display = 'none';
+          if (alwaysBtn) alwaysBtn.style.display = 'none';
         });
         messagesContainer.appendChild(bubble);
       }
@@ -592,7 +1935,8 @@ import Layout from '../layouts/Layout.astro';
       const pasteIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`;
       const checkIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
       const headerHtml = renderScriptLines(header);
-      bubble.innerHTML = `<div class="flex items-center justify-between gap-3 mb-1"><div class="text-[10px] font-semibold uppercase tracking-wider text-emerald-300/70">Script</div><div class="flex items-center gap-1"><button type="button" class="bubble-action" data-action="copy" title="Copy script output">${copyIcon}<span class="copy-label">Copy</span></button><button type="button" class="bubble-action" data-action="paste" title="Paste into composer">${pasteIcon}<span>Paste</span></button></div></div><div class="tui-code-block"><div class="tui-code-header"><span class="tui-code-lang">SHELL</span><span class="tui-code-copy" data-code-id="${scriptId}"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><span class="tui-copy-label">Copy</span></span></div><div class="tui-code-body"><pre class="script-output" id="${scriptId}">${headerHtml}\n</pre></div></div>`;
+      const downloadIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>`;
+      bubble.innerHTML = `<div class="flex items-center justify-between gap-3 mb-1"><div class="text-[10px] font-semibold uppercase tracking-wider text-emerald-300/70">Script</div><div class="flex items-center gap-1"><button type="button" class="bubble-action" data-action="copy" title="Copy script output">${copyIcon}<span class="copy-label">Copy</span></button><button type="button" class="bubble-action" data-action="download" title="Download as file">${downloadIcon}<span>Save</span></button><button type="button" class="bubble-action" data-action="paste" title="Paste into composer">${pasteIcon}<span>Paste</span></button></div></div><div class="tui-code-block"><div class="tui-code-header"><span class="tui-code-lang">SHELL</span><span class="tui-code-copy" data-code-id="${scriptId}"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><span class="tui-copy-label">Copy</span></span></div><div class="tui-code-body"><pre class="script-output" id="${scriptId}">${headerHtml}\n</pre></div></div>`;
       attachCodeCopyHandlers(bubble);
       const body = bubble.querySelector('.script-output') as HTMLElement;
       const rawBody = document.createElement('div');
@@ -606,6 +1950,16 @@ import Layout from '../layouts/Layout.astro';
         const labelEl = copyBtn.querySelector('.copy-label');
         if (labelEl) { labelEl.textContent = 'Copied!'; copyBtn.classList.add('copied'); copyBtn.querySelector('svg')?.remove(); copyBtn.insertAdjacentHTML('afterbegin', checkIcon); }
         setTimeout(() => { if (labelEl) { labelEl.textContent = 'Copy'; copyBtn.classList.remove('copied'); copyBtn.querySelector('svg')?.remove(); copyBtn.insertAdjacentHTML('afterbegin', copyIcon); } }, 1500);
+      });
+      bubble.querySelector('[data-action="download"]')?.addEventListener('click', () => {
+        const text = rawBody.textContent || '';
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `script-${Date.now()}.sh`; a.click();
+        URL.revokeObjectURL(url);
+        const dlBtn = bubble.querySelector('[data-action="download"]') as HTMLElement;
+        if (dlBtn) { dlBtn.classList.add('copied'); const lbl = dlBtn.querySelector('span'); if (lbl) { const prev = lbl.textContent; lbl.textContent = 'Saved ✓'; setTimeout(() => { lbl.textContent = prev; dlBtn.classList.remove('copied'); }, 1500); } }
       });
       bubble.querySelector('[data-action="paste"]')?.addEventListener('click', () => {
         chatInput.value = rawBody.textContent || '';
@@ -622,7 +1976,13 @@ import Layout from '../layouts/Layout.astro';
       scriptEl.innerHTML = renderScriptLines(raw);
     }
 
-    function showMessagesView() { heroArea.classList.add('hidden'); messagesArea.classList.remove('hidden'); }
+    function showMessagesView() {
+      heroArea.classList.add('hidden');
+      outputPanel.classList.add('hidden');
+      messagesArea.classList.remove('hidden');
+      autoScroll = true;
+      maybeScroll(messagesArea);
+    }
     function showHeroView() { heroArea.classList.remove('hidden'); messagesArea.classList.add('hidden'); outputPanel.classList.add('hidden'); }
 
     function loadConversation(id: string) {
@@ -668,6 +2028,13 @@ import Layout from '../layouts/Layout.astro';
       'anthropic/claude-opus-4.8', 'anthropic/claude-sonnet-5',
       'deepseek/deepseek-r1',
     ];
+    const NOUS_FALLBACK_MODELS = [
+      '~anthropic/claude-fable-latest',
+      'anthropic/claude-fable-latest',
+      'anthropic/claude-sonnet-5',
+      'anthropic/claude-opus-4.8',
+      'anthropic/claude-haiku-4.5',
+    ];
 
     function isCerebrasModel(model: any) {
       const id = typeof model === 'string' ? model : `${model?.id || ''} ${model?.name || ''}`;
@@ -678,6 +2045,7 @@ import Layout from '../layouts/Layout.astro';
       let models: string[] = [...FALLBACK_MODELS];
       // Use codex fallbacks when codex provider is active
       if (currentProvider === 'codex') models = [...CODEX_FALLBACK_MODELS];
+      if (currentProvider === 'nous') models = [...NOUS_FALLBACK_MODELS];
       try {
         const dashboardRes = await fetch(`${API}/api/dashboard`);
         if (dashboardRes.ok) {
@@ -773,7 +2141,8 @@ import Layout from '../layouts/Layout.astro';
     function appendOutput(text: string, cls = 'result') {
       outputPanel.classList.remove('hidden');
       const line = document.createElement('div'); line.className = `output-${cls}`; line.textContent = text;
-      outputArea.appendChild(line); outputArea.scrollTop = outputArea.scrollHeight;
+      outputArea.appendChild(line);
+      scrollPanelToBottom(outputPanel, true);
     }
 
     function persistVoiceSettings() {
@@ -898,6 +2267,14 @@ import Layout from '../layouts/Layout.astro';
       const url = prompt('Enter URL to scrape with Firecrawl:');
       if (url) { chatInput.value = `Use Firecrawl to scrape and analyze this URL: ${url}\n\nExtract the main content, structure, and key information. Then implement or explain based on what you find.`; setReadyState(); chatInput.focus(); }
     });
+    document.getElementById('shell-btn')!.addEventListener('click', () => {
+      const cmd = prompt('Enter a shell command to run:');
+      if (cmd) { chatInput.value = `Run this shell command using the exec_shell tool and report the full stdout/stderr:\n\n\`\`\`\n${cmd}\n\`\`\``; setReadyState(); chatInput.focus(); }
+    });
+    document.getElementById('patch-btn')!.addEventListener('click', () => {
+      const file = prompt('Which file should I patch?');
+      if (file) { chatInput.value = `Inspect \`${file}\`, identify the bug or requested change, then use the edit_file tool to apply a precise patch. After patching, verify with the narrowest useful command (syntax check, test, or build).`; setReadyState(); chatInput.focus(); }
+    });
 
     // ===== Core Send Message =====
     const IMAGE_INSTRUCTION = [
@@ -920,6 +2297,11 @@ import Layout from '../layouts/Layout.astro';
       const userMsg: Message = { role: 'user', content: attachedImages.length ? `${userPrompt}\n\n[${attachedImages.length} image attachment${attachedImages.length === 1 ? '' : 's'}]` : userPrompt };
       conv.messages.push(userMsg); saveConversation(conv); addMessageBubble(userMsg); renderHistoryList();
       const endpoint = agentMode ? `${API}/api/agent/run` : `${API}/api/chat`;
+      const authHeaders: Record<string,string> = { 'Content-Type': 'application/json' };
+      const gtoken = localStorage.getItem('hakster_google_token');
+      if (gtoken) authHeaders['x-api-key'] = gtoken;
+      let fileCreatedThisStream = false;
+      let assistantContent = '';
       try {
         if (agentMode) {
           const allMessages = conv.messages.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
@@ -930,11 +2312,14 @@ import Layout from '../layouts/Layout.astro';
             ];
           }
           const res = await fetch(endpoint, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: authHeaders,
             body: JSON.stringify({ provider: currentProvider, model, sessionId: conv.id, stream: true,
               messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-10)] }),
           });
-          if (!res.ok || !res.body) throw new Error(`Agent request failed (${res.status})`);
+          if (!res.ok || !res.body) {
+            const errData = await res.json().catch(() => ({}));
+            throw { status: res.status, message: errData.error || `Agent request failed (${res.status})` };
+          }
           const assistantMsg: Message = { role: 'assistant', content: '' };
           conv.messages.push(assistantMsg); saveConversation(conv);
           addMessageBubble({ role: 'assistant', content: '...' });
@@ -1046,6 +2431,7 @@ import Layout from '../layouts/Layout.astro';
                   }
                 } else if (event.type === 'file_created') {
                   // Agent wrote/edited a file — show a download button in chat
+                  fileCreatedThisStream = true;
                   const filePath = event.path || '';
                   const fileName = filePath.split('/').pop() || 'file';
                   const downloadUrl = `${API}/api/fs/download?path=${encodeURIComponent(filePath)}`;
@@ -1059,7 +2445,13 @@ import Layout from '../layouts/Layout.astro';
                   const confirmMsg: Message = { role: 'confirmation', content: `⚠️ ${event.reason || 'Dangerous command requires approval'}`, command: event.command || '', toolCallId: event.tool_call_id || '', sessionId: conv.id };
                   conv.messages.push(confirmMsg); saveConversation(conv); addMessageBubble(confirmMsg);
                 } else if (event.type === 'error') {
-                  addMessageBubble({ role: 'assistant', content: `Error: ${event.error}` });
+                  const errText = event.error || event.message || 'Unknown error';
+                  // Skip aborted streams and duplicate errors; suppress non-critical errors if a file was already downloaded
+                  if (errText && !errText.includes('aborted') && !conv.messages.some(m => m.content === `Error: ${errText}`)) {
+                    if (!fileCreatedThisStream || errText.includes('limit') || errText.includes('timed out')) {
+                      addMessageBubble({ role: 'assistant', content: `Error: ${errText}` });
+                    }
+                  }
                 } else if (event.content) {
                   if (lastBubble) lastBubble.textContent += event.content;
                   assistantMsg.content += event.content; tokenCount++;
@@ -1069,6 +2461,7 @@ import Layout from '../layouts/Layout.astro';
             }
           }
           assistantMsg.content = lastBubble?.textContent || assistantMsg.content;
+          assistantContent = assistantMsg.content;
           // Final code block render pass — re-render with full content
           if (lastBubble && assistantMsg.content.includes('```')) {
             lastBubble.innerHTML = renderCodeBlocks(assistantMsg.content);
@@ -1079,7 +2472,7 @@ import Layout from '../layouts/Layout.astro';
         } else {
           const allMessages = conv.messages.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
           const res = await fetch(endpoint, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: authHeaders,
             body: JSON.stringify({ provider: currentProvider, model, messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-10)] }),
           });
           const data = await res.json();
@@ -1089,8 +2482,16 @@ import Layout from '../layouts/Layout.astro';
           conv.messages.push(reply); saveConversation(conv); addMessageBubble(reply);
         }
       } catch (err: any) {
-        const errMsg: Message = { role: 'assistant', content: `Error: ${err.message || String(err)}` };
-        conv.messages.push(errMsg); saveConversation(conv); addMessageBubble(errMsg);
+        // Don't show error if the stream already delivered results (file download, content, etc.)
+        const hadResults = assistantContent.trim().length > 0 || fileCreatedThisStream;
+        if (!hadResults || err.message?.includes('limit')) {
+          let errorContent = `Error: ${err.message || String(err)}`;
+          if (err.status === 402 || (err.message && err.message.includes('limit'))) {
+            errorContent = '⚠️ **Free usage limit reached**\n\nYou\'ve used all your free questions. Upgrade to a paid plan for unlimited access.';
+          }
+          const errMsg: Message = { role: 'assistant', content: errorContent };
+          conv.messages.push(errMsg); saveConversation(conv); addMessageBubble(errMsg);
+        }
       } finally {
         busy = false; if (sendState) sendState.textContent = 'Ready'; chatInput.disabled = false; chatInput.value = '';
         pendingImages = []; renderAttachments();
@@ -1146,7 +2547,7 @@ import Layout from '../layouts/Layout.astro';
       const quality = (document.querySelector('input[name="image-quality"]:checked') as HTMLInputElement)?.value || 'standard';
       try {
         const res = await fetch(`${API}/api/images/generate`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...(localStorage.getItem('hakster_google_token') ? { 'x-api-key': localStorage.getItem('hakster_google_token')! } : {}) },
           body: JSON.stringify({ provider: 'openai', model, prompt, size, quality }),
         });
         const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Image generation failed');
@@ -1166,6 +2567,213 @@ import Layout from '../layouts/Layout.astro';
         imageStatus.textContent = `Error: ${err.message || String(err)}`; imageStatus.style.color = '#ef4444';
       } finally { generateImageBtn.disabled = false; generateImageBtn.textContent = 'Generate Image'; }
     });
+
+    // ===== Google Sign-In =====
+    let googleUser: any = null;
+    let googleToken: string | null = null;
+
+    function loadGoogleIdentity() {
+      // GSI library not needed for Desktop app OAuth — using redirect flow
+      // Just check for existing session from URL callback
+    }
+
+    async function initGoogleButton() {
+      try {
+        const res = await fetch(`${API}/api/auth/google/client-id`);
+        const data = await res.json();
+        if (!data.configured) return;
+
+        // Check for existing session
+        const storedToken = localStorage.getItem('hakster_google_token');
+        const storedUser = localStorage.getItem('hakster_google_user');
+        if (storedToken && storedUser) {
+          try {
+            googleToken = storedToken;
+            googleUser = JSON.parse(storedUser);
+            showGoogleUserBadge(googleUser);
+          } catch {}
+        }
+        // No GSI rendering — Desktop app client uses redirect flow via fallback buttons
+      } catch (e) {
+        console.log('Google Identity init skipped:', e);
+      }
+    }
+
+    async function handleGoogleCredential(response: any) {
+      const credential = response.credential;
+      if (!credential) return;
+      // Collect device info for tracking
+      const device = {
+        deviceType: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+        osName: navigator.platform || 'unknown',
+        browser: navigator.userAgent.match(/(Chrome|Firefox|Safari|Edge|Opera)\/?[\s\d.]+/i)?.[0]?.split('/')[0] || 'unknown',
+        screenSize: `${screen.width}x${screen.height}`,
+        language: navigator.language || '',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      };
+      try {
+        const res = await fetch(`${API}/api/auth/google`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential, device }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          googleToken = data.apiKey;
+          googleUser = data.user;
+          localStorage.setItem('hakster_google_token', googleToken!);
+          localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
+          localStorage.setItem('hakster_user_data', JSON.stringify({ name: data.user.username || data.user.email || 'User', email: data.user.email || '', picture: data.user.picture || '' }));
+          (window as any).haksterSessionTouch?.();
+          showGoogleUserBadge(data.user);
+        }
+      } catch (e) {
+        console.error('Google auth failed:', e);
+      }
+    }
+
+    function showGoogleUserBadge(user: any) {
+      // Hero area badge
+      const badge = document.getElementById('google-user-badge');
+      const nameEl = document.getElementById('google-user-name') as HTMLSpanElement;
+      const avatarEl = document.getElementById('google-user-avatar') as HTMLImageElement;
+      if (badge && nameEl) {
+        nameEl.textContent = user.username || user.email || 'User';
+        if (avatarEl && user.picture) avatarEl.src = user.picture;
+        badge.classList.remove('hidden');
+        badge.classList.add('flex');
+      }
+      // Sidebar badge (bottom)
+      const sidebarBadge = document.getElementById('sidebar-google-badge');
+      const sidebarName = document.getElementById('sidebar-google-name') as HTMLSpanElement;
+      const sidebarAvatar = document.getElementById('sidebar-google-avatar') as HTMLImageElement;
+      if (sidebarBadge && sidebarName) {
+        sidebarName.textContent = user.username || user.email || 'User';
+        if (sidebarAvatar && user.picture) sidebarAvatar.src = user.picture;
+        sidebarBadge.classList.remove('hidden');
+        sidebarBadge.classList.add('flex');
+      }
+      // Settings panel account info
+      const accountInfo = document.getElementById('sidebar-account-info');
+      const accountSignin = document.getElementById('sidebar-account-signin');
+      const accountName = document.getElementById('sidebar-account-name') as HTMLSpanElement;
+      const accountEmail = document.getElementById('sidebar-account-email') as HTMLSpanElement;
+      const accountAvatar = document.getElementById('sidebar-account-avatar') as HTMLImageElement;
+      const accountRole = document.getElementById('sidebar-account-role') as HTMLSpanElement;
+      const accountPlan = document.getElementById('sidebar-account-plan') as HTMLSpanElement;
+      const accountKey = document.getElementById('sidebar-account-apikey') as HTMLDivElement;
+      if (accountInfo && accountSignin) {
+        accountInfo.classList.remove('hidden');
+        accountSignin.classList.add('hidden');
+        if (accountName) accountName.textContent = user.username || user.email || 'User';
+        if (accountEmail) accountEmail.textContent = user.email || '—';
+        if (accountAvatar && user.picture) accountAvatar.src = user.picture;
+        if (accountRole) accountRole.textContent = user.role || 'user';
+        if (accountPlan) accountPlan.textContent = user.plan || 'free';
+        if (accountKey && googleToken) {
+          const short = googleToken.slice(0, 12) + '...' + googleToken.slice(-4);
+          accountKey.textContent = short;
+          accountKey.title = 'Click to copy full API key';
+        }
+      }
+      // Hide all sign-in buttons (both GSI placeholders and fallback buttons)
+      ['google-signin-btn', 'sidebar-google-signin', 'sidebar-settings-google-btn',
+       'google-fallback-btn', 'sidebar-google-fallback', 'settings-google-fallback'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      // Load usage stats
+      loadUsageStats();
+    }
+
+    // Fetch and display usage stats
+    async function loadUsageStats() {
+      const token = localStorage.getItem('hakster_google_token');
+      if (!token) return;
+      try {
+        const res = await fetch(`${API}/api/usage`, { headers: { 'x-api-key': token } });
+        const data = await res.json();
+        const el = document.getElementById('sidebar-account-usage');
+        if (!el) return;
+        if (data.remaining === -1) {
+          el.textContent = '✦ Unlimited (Pro)';
+          el.style.color = '#a855f7';
+        } else if (data.limitEnabled) {
+          el.textContent = `${data.remaining}/${data.limit} free uses left`;
+          el.style.color = data.remaining <= 1 ? '#ef4444' : '#64748b';
+        } else {
+          el.textContent = `${data.used} uses · ${data.plan} plan`;
+          el.style.color = '#64748b';
+        }
+      } catch {}
+    }
+
+    // Logout — shared handler for both logout buttons
+    function googleLogout() {
+      localStorage.removeItem('hakster_google_token');
+      localStorage.removeItem('hakster_google_user');
+      localStorage.removeItem('hakster_user_data');
+      localStorage.removeItem('hakster_last_activity');
+      googleToken = null;
+      googleUser = null;
+      if (window.google && window.google.accounts && window.google.accounts.id) {
+        window.google.accounts.id.disableAutoSelect();
+      }
+      location.reload();
+    }
+
+    document.getElementById('sidebar-google-logout')?.addEventListener('click', googleLogout);
+    document.getElementById('sidebar-account-logout')?.addEventListener('click', googleLogout);
+    document.getElementById('mobile-chat-logout')?.addEventListener('click', googleLogout);
+
+    // Fallback Google buttons — use redirect-based OAuth flow
+    function triggerGoogleRedirect() {
+      window.location.href = `${API}/api/auth/google/redirect`;
+    }
+    document.getElementById('google-fallback-btn')?.addEventListener('click', triggerGoogleRedirect);
+    document.getElementById('sidebar-google-fallback')?.addEventListener('click', triggerGoogleRedirect);
+    document.getElementById('settings-google-fallback')?.addEventListener('click', triggerGoogleRedirect);
+
+    // Check for OAuth callback result in URL
+    function checkGoogleCallback() {
+      const params = new URLSearchParams(window.location.search);
+      const googleAuth = params.get('google_auth');
+      const googleError = params.get('google_error');
+      if (googleAuth) {
+        try {
+          const data = JSON.parse(decodeURIComponent(googleAuth));
+          if (data.ok) {
+            googleToken = data.apiKey;
+            googleUser = data.user;
+            localStorage.setItem('hakster_google_token', googleToken!);
+            localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
+            localStorage.setItem('hakster_user_data', JSON.stringify({ name: data.user.username || data.user.email || 'User', email: data.user.email || '', picture: data.user.picture || '' }));
+            (window as any).haksterSessionTouch?.();
+            showGoogleUserBadge(data.user);
+          }
+        } catch {}
+        // Clean URL
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+      if (googleError) {
+        console.error('Google auth error:', googleError);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
+    checkGoogleCallback();
+
+    // Click API key to copy
+    document.getElementById('sidebar-account-apikey')?.addEventListener('click', async () => {
+      if (!googleToken) return;
+      try {
+        await navigator.clipboard.writeText(googleToken);
+        const el = document.getElementById('sidebar-account-apikey');
+        if (el) { const t = el.textContent; el.textContent = '✓ Copied!'; setTimeout(() => { if (el) el.textContent = t; }, 1500); }
+      } catch {}
+    });
+
+    initGoogleButton(); // Check for existing Google session
+    checkGoogleCallback(); // Handle OAuth redirect result
 
     // ===== Init =====
     loadModels(); loadCapabilities(); renderHistoryList();

