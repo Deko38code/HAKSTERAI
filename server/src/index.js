@@ -436,6 +436,28 @@ app.get('/api/agent/capabilities', (_req, res) => {
   const firecrawlKeyCount = getFirecrawlKeys().length;
   const defaultAgent = getHaksterModelConfig();
   const osInfo = { name: os.type(), version: os.release(), arch: os.arch() };
+  const localToolNames = [
+    'nmap', 'nc', 'openssl', 'whatweb', 'curl', 'nikto', 'ffuf', 'gobuster', 'dirb',
+    'dig', 'host', 'nslookup', 'smbclient', 'subfinder', 'theHarvester', 'whois',
+    'nuclei', 'masscan', 'amass', 'httpx', 'katana', 'dalfox', 'sqlmap', 'dirsearch',
+    'searchsploit', 'wget', 'python3', 'node', 'crontab', 'find', 'shred', 'sudo',
+  ];
+  const localTools = {};
+  try {
+    const { execFileSync } = require('child_process');
+    for (const name of localToolNames) {
+      try {
+        const safeName = name.replace(/'/g, "'\\''");
+        const rawPath = execFileSync('/bin/sh', ['-lc', `command -v '${safeName}'`], { encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'] });
+        const toolPath = rawPath.split('\n').map(s => s.trim()).find(s => s.startsWith('/') && !s.includes(' ')) || '';
+        localTools[name] = { installed: Boolean(toolPath), path: toolPath || null };
+      } catch {
+        localTools[name] = { installed: false, path: null };
+      }
+    }
+  } catch {
+    for (const name of localToolNames) localTools[name] = { installed: false, path: null };
+  }
   const subAgents = [
     { id: 'search', name: 'Search Agent', purpose: 'Find files, docs, references, and implementation examples.' },
     { id: 'builder', name: 'Build Agent', purpose: 'Implement app changes, components, routes, and integrations.' },
@@ -454,6 +476,7 @@ app.get('/api/agent/capabilities', (_req, res) => {
     defaultAgent,
     subAgents,
     tools: AGENT_TOOLS.map((tool) => tool.function?.name).filter(Boolean),
+    localTools,
     os: osInfo,
   });
 });
@@ -1372,7 +1395,8 @@ app.delete('/api/agent/allowlist/:id', (req, res) => {
 });
 
 app.post('/api/agent/run', async (req, res) => {
-  const { provider = 'ollama', model, messages, sessionId, cwd } = req.body;
+  const { provider = 'ollama', model, messages, sessionId, cwd, thinking: thinkingParam } = req.body;
+  const thinking = thinkingParam !== false;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -1398,7 +1422,7 @@ app.post('/api/agent/run', async (req, res) => {
   if (!cwd) {
     fs.mkdirSync(workDir, { recursive: true });
   }
-  const maxTurns = 25;
+  const maxTurns = Math.max(25, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '80', 10) || 80);
   const agentModel = model || cfg.defaultModel;
 
   // ── Loop detection (per-request, not module-level) ────────────
@@ -1410,7 +1434,7 @@ app.post('/api/agent/run', async (req, res) => {
     recentToolCalls: [],            // [{name, args}] — last N tool calls for duplicate detection
     totalToolCalls: 0,              // Running total of tool calls made
   };
-  const NO_PROGRESS_LIMIT = 4;       // Break after this many no-progress turns
+  const NO_PROGRESS_LIMIT = 8;       // Let long jobs keep driving before declaring no-progress
   const SEMANTIC_LOOP_WINDOW = 3;    // How many recent prefixes to check
   const SEMANTIC_LOOP_THRESHOLD = 2;  // How many similar prefixes → loop
   const TOOL_ERROR_LOOP_LIMIT = 3;   // Same tool erroring this many times → break
@@ -1532,13 +1556,16 @@ app.post('/api/agent/run', async (req, res) => {
   }
 
   async function anthropicAgentStream(payload, signal) {
-    const stream = await client.messages.stream({
+    const budgetTokens = Math.min(10000, Math.max(1024, payload.max_tokens - 1500));
+    const streamPayload = {
       model: payload.model,
       max_tokens: payload.max_tokens,
       system: payload.messages.find(m => m.role === 'system')?.content || systemContent,
       messages: anthropicMessagesFromAgentMessages(payload.messages),
       tools: anthropicToolsFromAgentTools(AGENT_TOOLS),
-    }, { signal });
+      ...(payload.thinking ? { thinking: { type: 'enabled', budget_tokens: budgetTokens } } : {}),
+    };
+    const stream = await client.messages.stream(streamPayload, { signal });
 
     async function* iterator() {
       const toolIndexes = new Map();
@@ -1637,6 +1664,11 @@ ${dirListing}
     { role: 'system', content: systemContent },
     ...messages.filter(m => m.role !== 'system'),
   ];
+
+  // When "thinking aloud" is enabled for non-Anthropic providers, ask the model to expose reasoning.
+  if (thinking && !isAnthropicAgentProvider) {
+    agentMessages[0].content += `\n\nThink out loud: show your reasoning/chain-of-thought wrapped in <thinking>…</thinking> tags before your final answer when it helps the user follow your work.`;
+  }
 
   // ── Inject client device context if available ──────────────────────
   const clientCtxStr = getClientContextString(sessionId);
@@ -1866,17 +1898,20 @@ ${dirListing}
       const streamAbort = new AbortController();
       const streamTimeout = setTimeout(() => {
         streamAbort.abort();
-        console.warn('[agent] Stream timed out after 60s, aborting');
-      }, 60000);
+        console.warn('[agent] Stream timed out after 300s, aborting');
+      }, 300000);
 
       let stream;
       try {
+        const isO1 = /^o1/i.test(agentModel);
         const streamPayload = {
           model: agentModel,
           messages: sanitizeMessagesForProvider(agentMessages, provider),
           tools: AGENT_TOOLS,
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
+          ...(thinking ? { thinking: true } : {}),
+          ...(thinking && isO1 ? { reasoning_effort: 'high' } : {}),
         };
         stream = isAnthropicAgentProvider
           ? await anthropicAgentStream(streamPayload, streamAbort.signal)
@@ -1886,7 +1921,7 @@ ${dirListing}
       } catch (streamErr) {
         clearTimeout(streamTimeout);
         if (streamErr.name === 'AbortError') {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (60s). Try again.' })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (300s). Try again.' })}\n\n`);
           break;
         }
         throw streamErr;
@@ -2936,166 +2971,180 @@ app.post('/api/images/analyze', async (req, res) => {
 // ── Stats ──────────────────────────────────────────────────────────
 // ── Dashboard stats ────────────────────────────────────────────────
 app.get('/api/dashboard', (_req, res) => {
-  const db = getDb();
-
-  // Request stats
-  const totalRequests = db.prepare(`SELECT COUNT(*) as count FROM requests`).get().count;
-  const totalTokens = db.prepare(`SELECT SUM(input_tokens + output_tokens) as total FROM requests`).get().total || 0;
-  const totalCost = db.prepare(`SELECT SUM(cost) as total FROM requests`).get().total || 0;
-  const byProvider = db.prepare(
-    `SELECT provider, COUNT(*) as requests, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(cost) as cost FROM requests GROUP BY provider`
-  ).all();
-  const toolCallRows = db.prepare(
-    `SELECT SUM(output_tokens) as total FROM requests WHERE status = 'ok'`
-  ).get();
-  const totalToolCalls = toolCallRows?.total || 0;
-  const sessionCount = db.prepare(`SELECT COUNT(*) as count FROM sessions`).get().count;
-  const messageCount = db.prepare(`SELECT COUNT(*) as count FROM messages`).get().count;
-  const artifactCount = db.prepare(`SELECT COUNT(*) as count FROM artifacts`).get().count;
-
-  // Active sessions (updated in last hour)
-  const activeSessions = db.prepare(
-    `SELECT COUNT(*) as count FROM sessions WHERE updated_at > datetime('now', '-1 hour')`
-  ).get().count;
-
-  // System info
-  const cpus = os.cpus().length;
-  const totalMem = os.totalmem();
-  const freeMem = os.freemem();
-  const uptime = os.uptime();
-
-  // Running servers / ports — dynamically detected
-  const runningServices = [];
-  const knownServices = {
-    22: { name: 'SSH' },
-    80: { name: 'Apache' },
-    3579: { name: 'haksterAi' },
-    4040: { name: 'ngrok' },
-    8081: { name: 'CineVault' },
-    8888: { name: 'StalkerHEK' },
-    9999: { name: 'StalkerHEK-SSL' },
-    11434: { name: 'Ollama' },
-    20241: { name: 'cloudflared' },
-  };
-  const hiddenProcesses = new Set(['systemd', 'systemd-resolve', 'cupsd', 'tor', 'containerd', 'obfs4proxy', 'warpinator', '.cline']);
   try {
-    const { execSync } = require('child_process');
-    const ssOut = execSync("ss -tlnp 2>/dev/null | awk 'NR>1 {print $4, $6}'", { encoding: 'utf8' });
-    const portMap = {};
-    for (const line of ssOut.split('\n').filter(Boolean)) {
-      const m = line.match(/[:](\d+)\s+(.*)/);
-      if (m) portMap[m[1]] = m[2].trim();
-    }
-    for (const [port, info] of Object.entries(portMap)) {
-      const procName = (info.match(/"([^"]+)"/) || [])[1] || info.split(/[\s(]/)[0].replace(/^users:/, '') || 'node';
-      if (hiddenProcesses.has(procName)) continue;
-      const known = knownServices[port];
-      runningServices.push({
-        name: known?.name || procName || 'unknown',
-        port: parseInt(port, 10),
-        status: 'running',
-        process: procName,
-      });
-    }
-  } catch {
-    runningServices.push({ name: 'haksterAi', port: PORT, status: 'running' });
-  }
+    const db = getDb();
 
-  // HaksterAi model config (separate from crush — crush overwrites its own config)
-  const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');
-  let haksterModel = 'gpt-oss:120b-cloud';
-  let haksterProvider = 'ollama';
-  try {
-    const haksterCfg = JSON.parse(fs.readFileSync(haksterConfigPath, 'utf8'));
-    haksterModel = haksterCfg.model || haksterModel;
-    haksterProvider = haksterCfg.provider || haksterProvider;
-  } catch {}
-  let crushModel = haksterModel;
-  let crushProvider = haksterProvider;
-  const skillsInventory = getSkillsInventory();
-  const toolInventory = getToolInventory();
+    // Request stats
+    const totalRequests = db.prepare(`SELECT COUNT(*) as count FROM requests`).get().count;
+    const totalTokens = db.prepare(`SELECT SUM(input_tokens + output_tokens) as total FROM requests`).get().total || 0;
+    const totalCost = db.prepare(`SELECT SUM(cost) as total FROM requests`).get().total || 0;
+    const byProvider = db.prepare(
+      `SELECT provider, COUNT(*) as requests, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(cost) as cost FROM requests GROUP BY provider`
+    ).all();
+    const toolCallRows = db.prepare(
+      `SELECT SUM(output_tokens) as total FROM requests WHERE status = 'ok'`
+    ).get();
+    const totalToolCalls = toolCallRows?.total || 0;
+    const sessionCount = db.prepare(`SELECT COUNT(*) as count FROM sessions`).get().count;
+    const messageCount = db.prepare(`SELECT COUNT(*) as count FROM messages`).get().count;
+    const artifactCount = db.prepare(`SELECT COUNT(*) as count FROM artifacts`).get().count;
 
-  // Crush DB stats (tool calls, reasoning, sessions)
-  let crushStats = { sessions: 0, messages: 0, promptTokens: 0, completionTokens: 0, toolCalls: 0, uniqueTools: 0, toolBreakdown: {}, reasoningSteps: 0, files: 0 };
-  const crushDbPaths = [
-    path.join('/home/ghost', '.crush', 'crush.db'),
-    path.join(os.homedir(), '.crush', 'crush.db'),
-  ];
-  for (const crushDbPath of crushDbPaths) {
+    // Active sessions (updated in last hour)
+    const activeSessions = db.prepare(
+      `SELECT COUNT(*) as count FROM sessions WHERE updated_at > unixepoch() - 3600`
+    ).get().count;
+
+    // System info
+    const cpus = os.cpus().length;
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const uptime = os.uptime();
+
+    // Running servers / ports — dynamically detected
+    const runningServices = [];
+    const knownServices = {
+      22: { name: 'SSH' },
+      80: { name: 'Apache' },
+      3579: { name: 'haksterAi' },
+      4040: { name: 'ngrok' },
+      8081: { name: 'CineVault' },
+      8888: { name: 'StalkerHEK' },
+      9999: { name: 'StalkerHEK-SSL' },
+      11434: { name: 'Ollama' },
+      20241: { name: 'cloudflared' },
+    };
+    const hiddenProcesses = new Set(['systemd', 'systemd-resolve', 'cupsd', 'tor', 'containerd', 'obfs4proxy', 'warpinator', '.cline']);
     try {
-      if (fs.existsSync(crushDbPath)) {
-        const Database = require('better-sqlite3');
-        const cdb = new Database(crushDbPath, { readonly: true });
-        crushStats.sessions = cdb.prepare('SELECT COUNT(*) as c FROM sessions').get().c || 0;
-        crushStats.messages = cdb.prepare('SELECT COUNT(*) as c FROM messages').get().c || 0;
-        crushStats.promptTokens = cdb.prepare('SELECT SUM(prompt_tokens) as s FROM sessions').get().s || 0;
-        crushStats.completionTokens = cdb.prepare('SELECT SUM(completion_tokens) as s FROM sessions').get().s || 0;
-        crushStats.files = cdb.prepare('SELECT COUNT(*) as c FROM files').get().c || 0;
+      const { execFileSync } = require('child_process');
+      const ssOut = execFileSync('ss', ['-tlnp'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] });
+      const portMap = {};
+      for (const line of ssOut.split('\n').slice(1).filter(Boolean)) {
+        const parts = line.trim().split(/\s+/);
+        const address = parts[3] || '';
+        const info = parts.slice(6).join(' ');
+        const m = address.match(/:(\d+)$/);
+        if (m) portMap[m[1]] = info;
+      }
+      for (const [port, info] of Object.entries(portMap)) {
+        const procName = (info.match(/"([^"]+)"/) || [])[1] || info.split(/[\s(]/)[0].replace(/^users:/, '') || 'node';
+        if (hiddenProcesses.has(procName)) continue;
+        const known = knownServices[port];
+        runningServices.push({
+          name: known?.name || procName || 'unknown',
+          port: parseInt(port, 10),
+          status: 'running',
+          process: procName,
+        });
+      }
+    } catch {
+      runningServices.push({ name: 'haksterAi', port: PORT, status: 'running' });
+    }
 
-        // Parse tool calls, reasoning, and tool results from messages
-        const msgs = cdb.prepare('SELECT parts FROM messages').all();
-        const toolCount = {};
-        let reasoningSteps = 0;
-        let toolResultCount = 0;
-        let browserActions = 0;
-        let snapshots = 0;
-        for (const m of msgs) {
-          try {
-            const parts = JSON.parse(m.parts);
-            for (const p of parts) {
-              if (p.type === 'tool_call' && p.data?.name) {
-                toolCount[p.data.name] = (toolCount[p.data.name] || 0) + 1;
-                // Track browser-related actions
-                const n = p.data.name.toLowerCase();
-                if (n.includes('browser') || n.includes('click') || n.includes('navigate') || n.includes('screenshot') || n.includes('snapshot') || n === 'web') {
-                  browserActions++;
-                }
-                // Track snapshot/screenshot calls
-                if (n.includes('snapshot') || n.includes('screenshot')) {
-                  snapshots++;
-                }
-              }
-              if (p.type === 'tool_result') {
-                toolResultCount++;
-                if (p.data?.name) {
+    // HaksterAi model config (separate from crush — crush overwrites its own config)
+    const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');
+    let haksterModel = 'gpt-oss:120b-cloud';
+    let haksterProvider = 'ollama';
+    try {
+      const haksterCfg = JSON.parse(fs.readFileSync(haksterConfigPath, 'utf8'));
+      haksterModel = haksterCfg.model || haksterModel;
+      haksterProvider = haksterCfg.provider || haksterProvider;
+    } catch {}
+    let crushModel = haksterModel;
+    let crushProvider = haksterProvider;
+    let skillsInventory = { total: 0, categories: {} };
+    let toolInventory = [];
+    try {
+      const inv = getSkillsInventory();
+      skillsInventory = { total: inv.total || 0, categories: inv.categories || {} };
+    } catch (e) { console.error('[dashboard] skills inventory error:', e.message); }
+    try { toolInventory = getToolInventory(); } catch (e) { console.error('[dashboard] tool inventory error:', e.message); }
+
+    // Crush DB stats (tool calls, reasoning, sessions)
+    let crushStats = { sessions: 0, messages: 0, promptTokens: 0, completionTokens: 0, toolCalls: 0, uniqueTools: 0, toolBreakdown: {}, reasoningSteps: 0, files: 0 };
+    const crushDbPaths = [
+      path.join('/home/ghost', '.crush', 'crush.db'),
+      path.join(os.homedir(), '.crush', 'crush.db'),
+    ];
+    for (const crushDbPath of crushDbPaths) {
+      try {
+        if (fs.existsSync(crushDbPath)) {
+          const Database = require('better-sqlite3');
+          const cdb = new Database(crushDbPath, { readonly: true });
+          const tableExists = (table) => !!cdb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(table);
+          const columnExists = (table, column) => tableExists(table) && cdb.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+          crushStats.sessions = tableExists('sessions') ? cdb.prepare('SELECT COUNT(*) as c FROM sessions').get().c || 0 : 0;
+          crushStats.messages = tableExists('messages') ? cdb.prepare('SELECT COUNT(*) as c FROM messages').get().c || 0 : 0;
+          crushStats.promptTokens = columnExists('sessions', 'prompt_tokens') ? cdb.prepare('SELECT SUM(prompt_tokens) as s FROM sessions').get().s || 0 : 0;
+          crushStats.completionTokens = columnExists('sessions', 'completion_tokens') ? cdb.prepare('SELECT SUM(completion_tokens) as s FROM sessions').get().s || 0 : 0;
+          crushStats.files = tableExists('files') ? cdb.prepare('SELECT COUNT(*) as c FROM files').get().c || 0 : 0;
+
+          // Parse tool calls, reasoning, and tool results from messages
+          const msgs = tableExists('messages') ? cdb.prepare('SELECT parts FROM messages ORDER BY created_at DESC LIMIT 5000').all() : [];
+          const toolCount = {};
+          let reasoningSteps = 0;
+          let toolResultCount = 0;
+          let browserActions = 0;
+          let snapshots = 0;
+          for (const m of msgs) {
+            try {
+              const parts = JSON.parse(m.parts);
+              for (const p of parts) {
+                if (p.type === 'tool_call' && p.data?.name) {
+                  toolCount[p.data.name] = (toolCount[p.data.name] || 0) + 1;
+                  // Track browser-related actions
                   const n = p.data.name.toLowerCase();
                   if (n.includes('browser') || n.includes('click') || n.includes('navigate') || n.includes('screenshot') || n.includes('snapshot') || n === 'web') {
                     browserActions++;
                   }
+                  // Track snapshot/screenshot calls
+                  if (n.includes('snapshot') || n.includes('screenshot')) {
+                    snapshots++;
+                  }
                 }
+                if (p.type === 'tool_result') {
+                  toolResultCount++;
+                  if (p.data?.name) {
+                    const n = p.data.name.toLowerCase();
+                    if (n.includes('browser') || n.includes('click') || n.includes('navigate') || n.includes('screenshot') || n.includes('snapshot') || n === 'web') {
+                      browserActions++;
+                    }
+                  }
+                }
+                if (p.type === 'reasoning') reasoningSteps++;
               }
-              if (p.type === 'reasoning') reasoningSteps++;
-            }
-          } catch {}
+            } catch {}
+          }
+          crushStats.toolCalls = Object.values(toolCount).reduce((a, b) => a + b, 0);
+          crushStats.uniqueTools = Object.keys(toolCount).length;
+          crushStats.toolBreakdown = toolCount;
+          crushStats.reasoningSteps = reasoningSteps;
+          crushStats.toolResults = toolResultCount;
+          crushStats.browserActions = browserActions;
+          crushStats.snapshots = snapshots;
+          cdb.close();
+          break; // found it, stop searching
         }
-        crushStats.toolCalls = Object.values(toolCount).reduce((a, b) => a + b, 0);
-        crushStats.uniqueTools = Object.keys(toolCount).length;
-        crushStats.toolBreakdown = toolCount;
-        crushStats.reasoningSteps = reasoningSteps;
-        crushStats.toolResults = toolResultCount;
-        crushStats.browserActions = browserActions;
-        crushStats.snapshots = snapshots;
-        cdb.close();
-        break; // found it, stop searching
-      }
-    } catch (e) { console.error('[dashboard] crush stats error for', crushDbPath, ':', e.message); }
+      } catch (e) { console.error('[dashboard] crush stats error for', crushDbPath, ':', e.message); }
+    }
+
+    // Keep the dashboard fast. Calling the local crush wrapper can open an interactive menu.
+    const crushVersion = 'local';
+
+    res.json({
+      requests: { total: totalRequests, totalTokens, totalCost, byProvider, outputTokens: totalToolCalls },
+      sessions: { total: sessionCount, active: activeSessions, messages: messageCount, artifacts: artifactCount },
+      system: { cpus, totalMem, freeMem, uptime, hostname: os.hostname(), platform: os.platform(), arch: os.arch() },
+      services: runningServices,
+      crush: { model: crushModel, provider: crushProvider, version: crushVersion, stats: crushStats },
+      agent: { tools: toolInventory, skills: skillsInventory },
+      providers: Object.entries(PROVIDERS)
+        .filter(([key, cfg]) => !isCerebrasValue(key) && !isCerebrasValue(cfg.name) && !isCerebrasValue(cfg.defaultModel))
+        .map(([key, cfg]) => ({ id: key, name: cfg.name, type: cfg.type, defaultModel: cfg.defaultModel })),
+    });
+  } catch (err) {
+    console.error('[dashboard] stats error:', err);
+    res.status(500).json({ error: 'dashboard stats failed', detail: err.message });
   }
-
-  // Crush version + latest GitHub release
-  let crushVersion = 'unknown';
-  try { crushVersion = require('child_process').execSync('crush --version 2>/dev/null', { encoding: 'utf8' }).trim().split('\n').pop().replace(/^.*?(\d+\.\d+\.\d+).*$/, '$1'); } catch {}
-
-  res.json({
-    requests: { total: totalRequests, totalTokens, totalCost, byProvider, outputTokens: totalToolCalls },
-    sessions: { total: sessionCount, active: activeSessions, messages: messageCount, artifacts: artifactCount },
-    system: { cpus, totalMem, freeMem, uptime, hostname: os.hostname(), platform: os.platform(), arch: os.arch() },
-    services: runningServices,
-    crush: { model: crushModel, provider: crushProvider, version: crushVersion, stats: crushStats },
-    agent: { tools: toolInventory, skills: skillsInventory },
-    providers: Object.entries(PROVIDERS)
-      .filter(([key, cfg]) => !isCerebrasValue(key) && !isCerebrasValue(cfg.name) && !isCerebrasValue(cfg.defaultModel))
-      .map(([key, cfg]) => ({ id: key, name: cfg.name, type: cfg.type, defaultModel: cfg.defaultModel })),
-  });
 });
 
 // ── Crush config update (model/provider switch) ──────────────────
@@ -3170,8 +3219,8 @@ app.get('/api/crush-update', async (_req, res) => {
     // Find latest stable (non-prerelease) release
     const stable = (Array.isArray(ghData) ? ghData : []).find(r => !r.prerelease && r.tag_name);
     const latestTag = stable ? stable.tag_name.replace(/^v/, '') : '';
-    let currentVer = 'unknown';
-    try { currentVer = require('child_process').execSync('crush --version 2>/dev/null', { encoding: 'utf8' }).trim().split('\n').pop().replace(/^.*?(\d+\.\d+\.\d+).*$/, '$1'); } catch {}
+    // The local `crush` wrapper is interactive, so never call it from the web server.
+    const currentVer = 'local';
     const needsUpdate = latestTag && currentVer !== 'unknown' && latestTag !== currentVer;
     _crushUpdateCache = {
       data: { currentVersion: currentVer, latestVersion: latestTag || 'unknown', needsUpdate, releaseUrl: stable?.html_url || '', releaseNotes: (stable?.body || '').substring(0, 500), publishedAt: stable?.published_at || '' },
@@ -4083,14 +4132,30 @@ ptyWss.on('connection', (ws, req) => {
     }
   }, 5000);
 
-  // PTY output → browser — pass through directly for TUI apps
+  // PTY output → browser — short batching keeps noisy commands from flooding the UI.
+  let ptyOutBuffer = '';
+  let ptyOutTimer = null;
+  const flushPtyOutput = () => {
+    ptyOutTimer = null;
+    if (ws.readyState !== 1 || !ptyOutBuffer) return;
+    const out = ptyOutBuffer;
+    ptyOutBuffer = '';
+    try { ws.send(Buffer.from(out, 'utf8'), { binary: true }); } catch {}
+  };
   ptyProcess.onData((data) => {
     if (ws.readyState !== 1) return;
-    ws.send(Buffer.from(data, 'utf8'), { binary: true });
+    ptyOutBuffer += data;
+    if (ptyOutBuffer.length >= 65536) {
+      flushPtyOutput();
+    } else if (!ptyOutTimer) {
+      ptyOutTimer = setTimeout(flushPtyOutput, 12);
+    }
   });
 
   ptyProcess.onExit(({ exitCode }) => {
     console.log(`[pty] ${ptyMode} exited (code=${exitCode})`);
+    if (ptyOutTimer) { clearTimeout(ptyOutTimer); ptyOutTimer = null; }
+    flushPtyOutput();
     if (ws.readyState === 1) {
       ws.send(JSON.stringify({ type: 'exit', exitCode }));
     }
@@ -4115,6 +4180,8 @@ ptyWss.on('connection', (ws, req) => {
     if (closed) return;
     closed = true;
     clearInterval(heartbeat);
+    if (ptyOutTimer) { clearTimeout(ptyOutTimer); ptyOutTimer = null; }
+    ptyOutBuffer = '';
     console.log(`[pty] client disconnected, killing ${ptyMode} (pid=${ptyProcess?.pid})`);
     if (ptyProcess) {
       try {

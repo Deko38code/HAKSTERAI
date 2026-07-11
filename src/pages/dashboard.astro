@@ -21,6 +21,13 @@ import Layout from '../layouts/Layout.astro';
       <a href="/terminal" class="text-xs bg-[#7c3aed]/20 text-[#7c3aed] hover:bg-[#7c3aed]/30 px-3 py-1.5 rounded-lg border border-[#7c3aed]/30 transition-colors flex items-center gap-1.5">
         ⌨️ Open Terminal
       </a>
+      <button
+        type="button"
+        onclick="window.open('/admin/users','haksterAdminUsers','width=1200,height=800,scrollbars=yes,resizable=yes')"
+        class="text-xs bg-[#ef4444]/10 text-[#ef4444] hover:bg-[#ef4444]/20 px-3 py-1.5 rounded-lg border border-[#ef4444]/30 transition-colors flex items-center gap-1.5"
+      >
+        👤 Users
+      </button>
     </div>
 
     <!-- Quick nav tabs -->
@@ -63,17 +70,17 @@ import Layout from '../layouts/Layout.astro';
     </div>
 
     <!-- haksterAi Stats Row -->
-    <div id="hakster-section" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6" id="crush-stats-row">
+    <div id="hakster-section" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
       <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors col-span-2 sm:col-span-1">
         <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">🧠 haksterAi Sessions</div>
         <div class="text-2xl font-bold text-[#a855f7]" id="crush-sessions">—</div>
       </div>
       <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
-        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">🔧 Tools Used</div>
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">🔧 Commands Used</div>
         <div class="text-2xl font-bold text-[#00ff88]" id="crush-tools-used">—</div>
       </div>
       <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
-        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">⚡ Unique Tools</div>
+        <div class="text-xs text-[#7c3aed] uppercase tracking-wider mb-1 font-semibold">⚡ Unique Commands</div>
         <div class="text-2xl font-bold text-[#ffd700]" id="crush-unique-tools">—</div>
       </div>
       <div class="bg-[#111118] border border-[#7c3aed]/30 rounded-xl p-4 hover:border-[#7c3aed]/60 transition-colors">
@@ -95,7 +102,7 @@ import Layout from '../layouts/Layout.astro';
     </div>
 
     <!-- haksterAi Tool Breakdown -->
-    <div id="tools-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6" id="crush-tools-section" style="display:none">
+    <div id="tools-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6" style="display:none">
       <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.056 2.154-1.056 2.58 0a1.724 1.724 0 002.573 1.066c1.005-.482 2.17.378 1.93 1.448a1.724 1.724 0 001.056 2.573c1.056.426 1.056 2.154 0 2.58a1.724 1.724 0 00-1.066 2.573c.482 1.005-.378 2.17-1.448 1.93a1.724 1.724 0 00-2.573 1.056c-.426 1.056-2.154 1.056-2.58 0a1.724 1.724 0 00-2.573-1.066c-1.005.482-2.17-.378-1.93-1.448a1.724 1.724 0 00-1.056-2.573c-1.056-.426-1.056-2.154 0-2.58a1.724 1.724 0 001.066-2.573c-.482-1.005.378-2.17 1.448-1.93a1.724 1.724 0 002.573-1.056z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
         haksterAi Tool Breakdown
@@ -248,36 +255,46 @@ import Layout from '../layouts/Layout.astro';
 
   <script define:vars={{}}">
     function fmtNum(n) {
+      n = Number(n || 0);
       if (n > 1000000) return (n / 1000000).toFixed(1) + 'M';
       if (n > 1000) return (n / 1000).toFixed(1) + 'K';
       return n.toLocaleString();
     }
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+    function setWidth(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.style.width = value;
+    }
     async function loadDashboard() {
       try {
         const res = await fetch('/api/dashboard');
+        if (!res.ok) throw new Error('dashboard status ' + res.status);
         const data = await res.json();
 
         // Top stats
-        document.getElementById('stat-requests').textContent = data.requests.total.toLocaleString();
-        document.getElementById('stat-toolcalls').textContent = fmtNum(data.requests.outputTokens || 0);
-        document.getElementById('stat-tokens').textContent = fmtNum(data.requests.totalTokens);
-        document.getElementById('stat-sessions').textContent = data.sessions.total;
-        document.getElementById('stat-messages').textContent = data.sessions.messages.toLocaleString();
-        document.getElementById('stat-artifacts').textContent = data.sessions.artifacts;
+        setText('stat-requests', Number(data.requests?.total || 0).toLocaleString());
+        setText('stat-toolcalls', fmtNum(data.requests?.outputTokens || 0));
+        setText('stat-tokens', fmtNum(data.requests?.totalTokens || 0));
+        setText('stat-sessions', Number(data.sessions?.total || 0).toLocaleString());
+        setText('stat-messages', Number(data.sessions?.messages || 0).toLocaleString());
+        setText('stat-artifacts', Number(data.sessions?.artifacts || 0).toLocaleString());
 
         // haksterAi stats row
         const cs = data.crush?.stats || {};
-        document.getElementById('crush-sessions').textContent = cs.sessions || 0;
-        document.getElementById('crush-tools-used').textContent = cs.toolCalls || 0;
-        document.getElementById('crush-unique-tools').textContent = cs.uniqueTools || 0;
-        document.getElementById('crush-reasoning').textContent = cs.reasoningSteps || 0;
-        document.getElementById('crush-files').textContent = cs.files || 0;
-        document.getElementById('crush-prompt-tokens').textContent = fmtNum(cs.promptTokens || 0);
-        document.getElementById('crush-completion-tokens').textContent = fmtNum(cs.completionTokens || 0);
+        setText('crush-sessions', Number(cs.sessions || 0).toLocaleString());
+        setText('crush-tools-used', Number(cs.toolCalls || 0).toLocaleString());
+        setText('crush-unique-tools', Number(cs.uniqueTools || 0).toLocaleString());
+        setText('crush-reasoning', Number(cs.reasoningSteps || 0).toLocaleString());
+        setText('crush-files', Number(cs.files || 0).toLocaleString());
+        setText('crush-prompt-tokens', fmtNum(cs.promptTokens || 0));
+        setText('crush-completion-tokens', fmtNum(cs.completionTokens || 0));
 
         // haksterAi tool breakdown
         const toolsGrid = document.getElementById('crush-tools-grid');
-        const toolsSection = document.getElementById('crush-tools-section');
+        const toolsSection = document.getElementById('tools-section');
         const tb = cs.toolBreakdown || {};
         if (Object.keys(tb).length > 0) {
           toolsSection.style.display = '';
@@ -312,25 +329,26 @@ import Layout from '../layouts/Layout.astro';
         }
 
         // System
-        document.getElementById('sys-host').textContent = data.system.hostname;
-        document.getElementById('sys-platform').textContent = data.system.platform + ' / ' + data.system.arch;
-        document.getElementById('sys-cpus').textContent = data.system.cpus + ' cores';
-        const totalGB = (data.system.totalMem / 1024 / 1024 / 1024).toFixed(1);
-        const freeGB = (data.system.freeMem / 1024 / 1024 / 1024).toFixed(1);
+        setText('sys-host', data.system?.hostname || 'unknown');
+        setText('sys-platform', (data.system?.platform || 'unknown') + ' / ' + (data.system?.arch || 'unknown'));
+        setText('sys-cpus', Number(data.system?.cpus || 0).toLocaleString() + ' cores');
+        const totalGB = ((data.system?.totalMem || 0) / 1024 / 1024 / 1024).toFixed(1);
+        const freeGB = ((data.system?.freeMem || 0) / 1024 / 1024 / 1024).toFixed(1);
         const usedGB = (totalGB - freeGB).toFixed(1);
-        document.getElementById('sys-ram').textContent = usedGB + ' / ' + totalGB + ' GB';
-        const uptimeH = Math.floor(data.system.uptime / 3600);
-        const uptimeM = Math.floor((data.system.uptime % 3600) / 60);
-        document.getElementById('sys-uptime').textContent = uptimeH + 'h ' + uptimeM + 'm';
-        const memPct = ((1 - data.system.freeMem / data.system.totalMem) * 100).toFixed(0);
-        document.getElementById('mem-pct').textContent = memPct + '%';
-        document.getElementById('mem-bar').style.width = memPct + '%';
+        setText('sys-ram', usedGB + ' / ' + totalGB + ' GB');
+        const uptime = data.system?.uptime || 0;
+        const uptimeH = Math.floor(uptime / 3600);
+        const uptimeM = Math.floor((uptime % 3600) / 60);
+        setText('sys-uptime', uptimeH + 'h ' + uptimeM + 'm');
+        const memPct = data.system?.totalMem ? ((1 - data.system.freeMem / data.system.totalMem) * 100).toFixed(0) : 0;
+        setText('mem-pct', memPct + '%');
+        setWidth('mem-bar', memPct + '%');
 
         // haksterAi
-        document.getElementById('crush-model').textContent = data.crush.model;
-        document.getElementById('crush-provider').textContent = data.crush.provider;
-        document.getElementById('crush-version').textContent = data.crush.version || '—';
-        document.getElementById('crush-status').textContent = '✓ connected';
+        setText('crush-model', data.crush?.model || 'unknown');
+        setText('crush-provider', data.crush?.provider || 'unknown');
+        setText('crush-version', data.crush?.version || 'local');
+        setText('crush-status', '✓ connected');
         document.getElementById('crush-status').className = 'text-[#00ff88]';
         document.getElementById('status-badge').textContent = 'live';
         document.getElementById('status-badge').className = 'text-xs text-[#00ff88] bg-[#111118] px-2 py-1 rounded-full border border-[#00ff88]/30';
@@ -434,16 +452,23 @@ import Layout from '../layouts/Layout.astro';
     async function loadMemoryStats() {
       try {
         const res = await fetch('/api/memory');
+        if (!res.ok) throw new Error('memory status ' + res.status);
         const data = await res.json();
         const entries = data.entries || data.memories || [];
-        document.getElementById('mem-total').textContent = entries.length;
+        setText('mem-total', entries.length.toLocaleString());
         const cats = new Set(entries.map(e => e.category || 'general'));
-        document.getElementById('mem-categories').textContent = cats.size;
-        document.getElementById('mem-last-compact').textContent = data.lastCompact || 'Never';
+        setText('mem-categories', cats.size.toLocaleString());
+        setText('mem-last-compact', data.lastCompact || 'Never');
         const pct = Math.min(100, Math.round((entries.length / 100) * 100));
-        document.getElementById('mem-context-pct').textContent = pct + '%';
-        document.getElementById('mem-context-bar').style.width = pct + '%';
-      } catch {}
+        setText('mem-context-pct', pct + '%');
+        setWidth('mem-context-bar', pct + '%');
+      } catch {
+        setText('mem-total', '0');
+        setText('mem-categories', '0');
+        setText('mem-last-compact', 'Never');
+        setText('mem-context-pct', '0%');
+        setWidth('mem-context-bar', '0%');
+      }
     }
     loadMemoryStats();
     setInterval(loadMemoryStats, 30000);
@@ -485,15 +510,24 @@ import Layout from '../layouts/Layout.astro';
     async function loadSecuritySummary() {
       try {
         const res = await fetch('/api/health/security');
+        if (!res.ok) throw new Error('security status ' + res.status);
         const data = await res.json();
-        const findings = data.findings || [];
-        const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-        for (const f of findings) counts[f.severity] = (counts[f.severity] || 0) + 1;
-        document.getElementById('sec-critical').textContent = counts.critical || 0;
-        document.getElementById('sec-high').textContent = counts.high || 0;
-        document.getElementById('sec-medium').textContent = counts.medium || 0;
-        document.getElementById('sec-low').textContent = counts.low || 0;
-      } catch {}
+        const counts = data.summary
+          ? { critical: data.summary.critical || 0, high: data.summary.high || 0, medium: data.summary.medium || 0, low: data.summary.low || 0 }
+          : { critical: 0, high: 0, medium: 0, low: 0 };
+        if (!data.summary) {
+          for (const f of data.findings || []) counts[f.severity] = (counts[f.severity] || 0) + 1;
+        }
+        setText('sec-critical', counts.critical || 0);
+        setText('sec-high', counts.high || 0);
+        setText('sec-medium', counts.medium || 0);
+        setText('sec-low', counts.low || 0);
+      } catch {
+        setText('sec-critical', '0');
+        setText('sec-high', '0');
+        setText('sec-medium', '0');
+        setText('sec-low', '0');
+      }
     }
     loadSecuritySummary();
     setInterval(loadSecuritySummary, 60000);

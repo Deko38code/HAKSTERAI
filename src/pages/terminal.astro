@@ -1,5 +1,5 @@
 ---
-import CrushTerminal from '../components/CrushTerminal.astro';
+import HaksterTerminal from '../components/HaksterTerminal.astro';
 ---
 
 <!doctype html>
@@ -82,7 +82,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
       /* ── Terminal body ── */
       #term-body { flex: 1; min-width: 0; min-height: 0; position: relative; }
 
-      /* ── Right sidebar (crush tools/info) ── */
+      /* ── Right sidebar (commands/info) ── */
       #crush-sidebar {
         width: 240px; min-width: 240px; background: #0d0d14; border-left: 1px solid #1e1e2e;
         display: flex; flex-direction: column; overflow: auto; transition: width 0.2s, min-width 0.2s;
@@ -152,7 +152,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         </div>
         <div class="links">
           <a href="/">🏠 Home</a>
-          <a href="/hack">💀 Hack</a>
+          <a href="/hack">⚡ Hack Lab</a>
           <a href="/build">💬 Chat</a>
           <a href="/labs">🧪 Labs</a>
           <a href="/dashboard">📊 Dashboard</a>
@@ -170,6 +170,12 @@ import CrushTerminal from '../components/CrushTerminal.astro';
           </div>
           <div class="sb-section">
             <button class="sb-btn blue" onclick="location.href='/terminal'">⌨️ New Terminal</button>
+          </div>
+          <div class="sb-section">
+            <div class="sb-title">⚡ Decoder / Scrambler</div>
+            <button class="sb-btn" onclick="haksterFastDecoder()">Fast Decoder</button>
+            <button class="sb-btn" onclick="haksterScrambler()" style="margin-top:6px;">Scrambler</button>
+            <button class="sb-btn" onclick="haksterCrackingCode()" style="margin-top:6px;">Cracking Code</button>
           </div>
           <div class="sb-section">
             <div class="sb-title">📡 Provider</div>
@@ -220,11 +226,11 @@ import CrushTerminal from '../components/CrushTerminal.astro';
 
         <!-- Terminal -->
         <div id="term-body">
-          <CrushTerminal id="crush-main" autoStart={true} />
+          <HaksterTerminal id="crush-main" autoStart={true} ptyMode="shell" />
         </div>
 
-        <!-- Right sidebar: Crush tools & info -->
-        <button id="crush-sidebar-toggle" class="cs-toggle-btn" title="Toggle tools panel">
+        <!-- Right sidebar: commands & info -->
+        <button id="crush-sidebar-toggle" class="cs-toggle-btn" title="Toggle commands panel">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
         </button>
         <aside id="crush-sidebar">
@@ -242,13 +248,13 @@ import CrushTerminal from '../components/CrushTerminal.astro';
             <div class="cs-row"><span class="cs-label">Cost</span><span class="cs-value red" id="cs-cost">$0.00</span></div>
           </div>
           <div class="cs-section">
-            <div class="cs-title">🔧 Tools Used</div>
+            <div class="cs-title">🔧 Commands Used</div>
             <div class="cs-row"><span class="cs-label">Total Calls</span><span class="cs-value purple" id="cs-tool-calls">0</span></div>
-            <div class="cs-row"><span class="cs-label">Unique Tools</span><span class="cs-value" id="cs-unique-tools">0</span></div>
+            <div class="cs-row"><span class="cs-label">Unique Commands</span><span class="cs-value" id="cs-unique-tools">0</span></div>
             <div id="cs-tools-list" class="cs-list"></div>
           </div>
           <div class="cs-section">
-            <div class="cs-title">🧰 Available Tools</div>
+            <div class="cs-title">🧰 Available Commands</div>
             <div class="cs-row"><span class="cs-label">Loaded</span><span class="cs-value green" id="cs-tools-total">0</span></div>
             <div id="cs-tools-inventory" class="cs-list"></div>
           </div>
@@ -298,7 +304,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
           sidebar.classList.toggle('collapsed', !sidebarOpen);
         }
         toggleBtn.classList.toggle('open', sidebarOpen);
-        // Refit terminal after layout change
+        // Refit terminal after layout change (fast)
         setTimeout(() => {
           window.dispatchEvent(new Event('resize'));
           if (window.__crushTerminals && window.__crushTerminals['crush-main']) {
@@ -309,7 +315,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               }
             });
           }
-        }, 250);
+        }, 16);
       });
 
       overlay?.addEventListener('click', () => {
@@ -317,13 +323,26 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         sidebar.classList.remove('mobile-open');
         overlay.classList.remove('active');
         toggleBtn.classList.remove('open');
-        setTimeout(() => window.dispatchEvent(new Event('resize')), 250);
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 16);
       });
 
             // ── Load provider/model info ─────────────────────────────────
       const modelSelect = document.getElementById('sb-model');
       const statusEl = document.getElementById('sb-status');
       const modelInfo = document.getElementById('sb-model-info');
+
+      window.haksterFastDecoder = function() {
+        const terminal = window.__crushTerminals && window.__crushTerminals['crush-main'];
+        if (terminal && typeof terminal.fastDecoder === 'function') terminal.fastDecoder();
+      };
+      window.haksterScrambler = function() {
+        const terminal = window.__crushTerminals && window.__crushTerminals['crush-main'];
+        if (terminal && typeof terminal.scrambler === 'function') terminal.scrambler();
+      };
+      window.haksterCrackingCode = function() {
+        const terminal = window.__crushTerminals && window.__crushTerminals['crush-main'];
+        if (terminal && typeof terminal.crackingCode === 'function') terminal.crackingCode();
+      };
 
       // Set initial status
       if (statusEl) statusEl.innerHTML = '<span style="color:#ffd700">●</span> <span>Connecting...</span>';
@@ -420,7 +439,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         }).catch(() => { modelSelect.innerHTML = '<option value="">Error</option>'; if (statusEl) statusEl.innerHTML = '<span style="color:#ff4444">●</span> <span>Error</span>'; });
       });
 
-      // ── Model select → switch model in crush config + reconnect PTY ──
+      // ── Model select → switch model config + reconnect PTY ──
       document.getElementById('sb-model')?.addEventListener('change', (e) => {
         const provider = document.getElementById('sb-provider')?.value;
         const model = e.target.value;
@@ -433,14 +452,14 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         // Update model badge in terminal
         const modelBadge = document.getElementById('crush-main-model-badge');
         if (modelBadge) modelBadge.textContent = model.length > 20 ? model.substring(0, 18) + '\u2026' : model;
-        // Persist model change to crush.json so it takes effect on next session
+        // Persist model change so it takes effect on next session
         fetch('/api/crush/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ provider, model })
         }).then(r => r.json()).then(d => {
           if (d.ok) {
-            // Config saved — reconnect PTY so crush picks up new model
+            // Config saved — reconnect PTY so the agent picks up new model
             const terminals = window.__crushTerminals;
             if (terminals && terminals['crush-main']) {
               const t = terminals['crush-main'];
@@ -448,10 +467,10 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               if (pane && typeof t.reconnect === 'function') {
                 t.reconnect(pane);
               } else {
-                setTimeout(() => location.reload(), 1000);
+                location.reload();
               }
             } else {
-              setTimeout(() => location.reload(), 1000);
+              location.reload();
             }
             // Refresh dashboard data after switch
             setTimeout(() => {
@@ -462,10 +481,10 @@ import CrushTerminal from '../components/CrushTerminal.astro';
                   if (modelBadge) modelBadge.textContent = (dash.crush.model || model).length > 20 ? (dash.crush.model || model).substring(0, 18) + '\u2026' : (dash.crush.model || model);
                 }
               }).catch(() => {});
-            }, 2000);
+            }, 500);
           }
         }).catch(() => {
-          setTimeout(() => location.reload(), 1000);
+          location.reload();
         });
         // Update right sidebar stats display
         const csModel = document.getElementById('cs-model');
@@ -497,10 +516,10 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               }
             });
           }
-        }, 250);
+        }, 16);
       });
 
-      // ── Populate right sidebar with crush data ────────────────────
+      // ── Populate right sidebar with agent data ────────────────────
       function formatTokens(n) {
         if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
         if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
@@ -533,7 +552,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
             const cost = d.requests?.totalCost || 0;
             document.getElementById('cs-cost').textContent = '$' + cost.toFixed(2);
 
-            // Tools breakdown
+            // Commands breakdown
             const toolsList = document.getElementById('cs-tools-list');
             if (toolsList && s.toolBreakdown) {
               const tools = Object.entries(s.toolBreakdown).sort((a, b) => b[1] - a[1]);
@@ -545,7 +564,7 @@ import CrushTerminal from '../components/CrushTerminal.astro';
                   : name.includes('think') || name.includes('reason') ? '🧠'
                   : name.includes('edit') ? '✏️' : '🔧';
                 return '<div class="cs-tool-row"><span class="cs-tool-icon">' + icon + '</span><span class="cs-tool-name">' + escapeHtml(name) + '</span><span class="cs-tool-count">' + count + '</span></div>';
-              }).join('') : '<div class="cs-empty">No tool calls recorded yet.</div>';
+              }).join('') : '<div class="cs-empty">No command calls recorded yet.</div>';
             }
           }
 
@@ -562,9 +581,9 @@ import CrushTerminal from '../components/CrushTerminal.astro';
               toolsInventory.innerHTML = availableTools.length ? availableTools.map(t => {
                 const name = escapeHtml(t.name || 'unknown');
                 const desc = escapeHtml(t.description || '');
-                const source = escapeHtml(t.source || 'tool');
+                const source = escapeHtml(t.source || 'command');
                 return '<div class="cs-chip-row" title="' + desc + '"><span class="cs-tool-icon">🔧</span><span class="cs-chip-main">' + name + '</span><span class="cs-chip-meta">' + source + '</span></div>';
-              }).join('') : '<div class="cs-empty">No tools loaded.</div>';
+              }).join('') : '<div class="cs-empty">No commands loaded.</div>';
             }
             if (skillsList) {
               skillsList.innerHTML = skills.length ? skills.map(skill => {
@@ -589,9 +608,9 @@ import CrushTerminal from '../components/CrushTerminal.astro';
         }).catch(() => {});
       }
 
-      // Initial load + auto-refresh every 15s
+      // Initial load + auto-refresh every 5s
       refreshCrushSidebar();
-      setInterval(refreshCrushSidebar, 15000);
+      setInterval(refreshCrushSidebar, 5000);
 
       // Fullscreen terminal
       const termRoot = document.getElementById('terminal-root');

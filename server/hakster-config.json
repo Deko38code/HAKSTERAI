@@ -1,4 +1,4 @@
 {
-  "provider": "nous",
-  "model": "nousresearch/hermes-4-70b"
+  "provider": "ollama",
+  "model": "glm-5.1:cloud-ctx"
 }

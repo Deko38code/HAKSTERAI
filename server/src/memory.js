@@ -203,6 +203,65 @@ function getMemoryStats() {
   return { total, byCategory, recentAccessed };
 }
 
+/**
+ * Autocompact: consolidate older, lower-priority memories into summary entries
+ * to keep the active context window lean. Keeps recent + high-confidence items,
+ * merges older ones into per-category summary memories.
+ * Returns { compacted, kept, summaries }.
+ */
+function compactMemories({ maxKeep = 40, maxAgeDays = 14 } = {}) {
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const cutoff = now - (maxAgeDays * 86400);
+
+  // Memories to keep: high confidence OR recently updated
+  const keep = db.prepare(
+    `SELECT * FROM memories
+     WHERE confidence >= 0.85 OR updated_at >= ?
+     ORDER BY updated_at DESC
+     LIMIT ?`
+  ).all(cutoff, maxKeep);
+
+  const keepIds = new Set(keep.map(m => m.id));
+
+  // Memories to compact: everything else
+  const toCompact = db.prepare(
+    `SELECT * FROM memories WHERE id NOT IN (${keepIds.size ? keep.map(() => '?').join(',') : 'NULL'})`
+  ).all(...keepIds);
+
+  if (toCompact.length === 0) {
+    return { compacted: 0, kept: keep.length, summaries: [] };
+  }
+
+  // Group by category and build summary text
+  const byCategory = {};
+  for (const m of toCompact) {
+    const cat = m.category || 'general';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(m);
+  }
+
+  const summaries = [];
+  const now_iso = new Date().toISOString();
+  const insertStmt = db.prepare(
+    `INSERT INTO memories (id, category, key, value, source, session_id, confidence, access_count, created_at, updated_at, expires_at)
+     VALUES (?, ?, ?, ?, 'autocompact', NULL, 0.9, 0, ?, ?, NULL)`
+  );
+  const deleteStmt = db.prepare('DELETE FROM memories WHERE id = ?');
+
+  for (const [cat, mems] of Object.entries(byCategory)) {
+    const summaryKey = `autocompact:${cat}:${now_iso}`;
+    const lines = mems.map(m => `- [${m.key}] ${m.value.slice(0, 200)}`);
+    const summaryValue = `Autocompacted ${mems.length} ${cat} memories:\n${lines.join('\n')}`;
+    const id = uuidv4();
+    insertStmt.run(id, cat, summaryKey, summaryValue, now, now);
+    for (const m of mems) deleteStmt.run(m.id);
+    summaries.push({ category: cat, count: mems.length, summaryId: id });
+  }
+
+  return { compacted: toCompact.length, kept: keep.length, summaries };
+}
+
 module.exports = {
   saveMemory,
   getMemory,
@@ -211,5 +270,6 @@ module.exports = {
   deleteMemory,
   getMemoryContext,
   getMemoryStats,
+  compactMemories,
   CATEGORIES,
 };

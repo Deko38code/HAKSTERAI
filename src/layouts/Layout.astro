@@ -47,11 +47,11 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
 
         <!-- Desktop nav links -->
         <div class="hidden md:flex items-center gap-2 bg-[#111118]/80 border border-[#1e1e2e] rounded-full px-2 py-1.5 backdrop-blur-sm">
-          <a href="/labs" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#a855f7] hover:bg-[#7c3aed]/10 transition-all flex items-center gap-1.5"><span>🧪</span> Labs</a>
-          <a href="/hack" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#00ff88] hover:bg-[#00ff88]/10 transition-all flex items-center gap-1.5"><span>💀</span> Hack</a>
-          <a href="/dashboard" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5"><span>📊</span> Dashboard</a>
-          <a href="/terminal" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#a855f7] hover:bg-[#7c3aed]/10 transition-all flex items-center gap-1.5"><span>⌨️</span> Terminal</a>
-          <a href="/build" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5"><span>💬</span> Chat</a>
+          <a href="/labs" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#a855f7] hover:bg-[#7c3aed]/10 transition-all flex items-center gap-1.5"><span>🧪</span> Labs</a>
+          <a href="/hack" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#00ff88] hover:bg-[#00ff88]/10 transition-all flex items-center gap-1.5"><span>⚡</span> Hack Lab</a>
+          <a href="/dashboard" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5"><span>📊</span> Dashboard</a>
+          <a href="/terminal" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#a855f7] hover:bg-[#7c3aed]/10 transition-all flex items-center gap-1.5"><span>⌨️</span> Terminal</a>
+          <a href="/build" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5"><span>💬</span> Chat</a>
         </div>
 
         <!-- Desktop CTA + user badge + GitHub -->
@@ -104,9 +104,10 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
       class="md:hidden hidden border-t border-[#1e1e2e] bg-[#0a0a0f]/95 backdrop-blur-md"
       >
       <div class="mx-auto max-w-6xl px-6 py-4 flex flex-col gap-4">
-        <a href="/hack" class="mobile-nav-link text-sm font-semibold text-[#00ff88] hover:text-[#a855f7] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>💀</span> Hack</a>
-        <a href="/dashboard" class="mobile-nav-link text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>📊</span> Dashboard</a>
-        <a href="/build" class="mobile-nav-link text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>💬</span> Chat</a>
+        <a href="/hack" class="mobile-nav-link requires-auth text-sm font-semibold text-[#00ff88] hover:text-[#a855f7] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>⚡</span> Hack Lab</a>
+        <a href="/dashboard" class="mobile-nav-link requires-auth text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>📊</span> Dashboard</a>
+        <a href="/terminal" class="mobile-nav-link requires-auth text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>⌨️</span> Terminal</a>
+        <a href="/build" class="mobile-nav-link requires-auth text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>💬</span> Chat</a>
         <!-- Mobile user badge + logout -->
         <div id="mobile-user-section" class="hidden pt-3">
           <div class="flex items-center gap-2.5 px-1 pb-3 border-b border-[#1e1e2e]">
@@ -164,7 +165,7 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
             <span class="text-[#e2e8f0] font-bold">hakster<span class="text-[#7c3aed]">Ai</span></span>
           </div>
           <div class="flex items-center gap-6 text-sm text-[#64748b]">
-            <a href="/hack" class="hover:text-[#00ff88] transition-colors text-[#00ff88] font-semibold">💀 Hack</a>
+            <a href="/hack" class="hover:text-[#00ff88] transition-colors text-[#00ff88] font-semibold">⚡ Hack Lab</a>
             <a href="/terminal" class="hover:text-[#a855f7] transition-colors">⌨️ Terminal</a>
             <a href="/dashboard" class="hover:text-[#e2e8f0] transition-colors">📊 Dashboard</a>
             <a href="/build" class="hover:text-[#e2e8f0] transition-colors">💬 Chat</a>
@@ -192,6 +193,21 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
         if (!token && !authParam) {
           window.location.href = '/';
         }
+      })();
+
+      // ── Redirect protected nav links to Google sign-in if not logged in ─
+      (function() {
+        const API = window.location.port === '4321' ? 'http://localhost:3579' : '';
+        document.querySelectorAll('.requires-auth').forEach((link) => {
+          link.addEventListener('click', (e) => {
+            const token = localStorage.getItem('hakster_google_token');
+            if (token) return;
+            e.preventDefault();
+            const href = link.getAttribute('href');
+            sessionStorage.setItem('hakster_post_auth_redirect', href || '/dashboard');
+            window.location.href = `${API}/api/auth/google/redirect`;
+          });
+        });
       })();
 
       // ── Global logout function ──────────────────────────────────

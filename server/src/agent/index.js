@@ -13,6 +13,14 @@ const readline = require('readline');
 const { globSync } = require('glob');
 const os = require('os');
 const crypto = require('crypto');
+
+// ── Pentester fingerprint (stable device identity) ──
+const { fingerprint: getFingerprint } = require('../fingerprint');
+let _pentesterFp = null;
+function getPentesterFingerprint() {
+  if (!_pentesterFp) _pentesterFp = getFingerprint();
+  return _pentesterFp;
+}
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn } = require('./mcp');
 const { generateImage } = require('../providers');
 
@@ -158,52 +166,15 @@ When running ANY shell command or tool that could hang:
    - After 2-3 search attempts, STOP searching and use what you know.
 10. **If grep/find returns too many results, narrow your search** — add file type filters, path constraints, or more specific patterns. Do NOT just re-run with a slightly different pattern.
 
-## 📚 SKILL REGISTRY (132 skills across 45 categories)
-Always \`skill_load({name: "..."})\` before using a skill.
+## 📚 SKILL REGISTRY — DYNAMIC (use skill_list for real count)
+Skills are loaded from multiple roots: haksterAi/.hakster/skills, ~/.hakster/skills,
+~/.agents/skills, ~/skills (master library), ~/.hermes/skills, pentest-agents/skills.
+The ACTUAL skill count and categories are injected at runtime below.
+ALWAYS run \`skill_list\` first — never quote a hardcoded number.
 
-### Core Skills (load for relevant tasks)
-1. hakster-cloud-ops  2. hakster-coding  3. hakster-crush-config  4. hakster-iptv  5. hakster-movie-servers
-6. firecrawl  7. firecrawl-agent  8. firecrawl-crawl  9. firecrawl-download  10. firecrawl-instruct
-11. firecrawl-map  12. firecrawl-scrape  13. firecrawl-search  14. crush-config  15. crush-hooks  16. jq
-
-### Software Development (12)
-17. software-development/plan  18. software-development/spike  19. software-development/debugging-hermes-tui-commands  20. software-development/hermes-agent-skill-authoring  21. software-development/hermes-s6-container-supervision  22. software-development/node-inspect-debugger  23. software-development/python-debugpy  24. software-development/requesting-code-review  25. software-development/subagent-driven-development  26. software-development/systematic-debugging  27. software-development/test-driven-development  28. software-development/writing-plans
-
-### Creative (20)
-29. creative/architecture-diagram  30. creative/ascii-art  31. creative/ascii-video  32. creative/baoyu-article-illustrator  33. creative/baoyu-comic  34. creative/baoyu-infographic  35. creative/claude-design  36. creative/comfyui  37. creative/creative-ideation  38. creative/design-md  39. creative/excalidraw  40. creative/humanizer  41. creative/manim-video  42. creative/p5js  43. creative/pixel-art  44. creative/popular-web-designs  45. creative/pretext  46. creative/sketch  47. creative/songwriting-and-ai-music  48. creative/touchdesigner-mcp
-
-### MLOps (22)
-49. mlops/cloud/modal  50. mlops/evaluation/lm-evaluation-harness  51. mlops/evaluation/weights-and-biases  52. mlops/huggingface-hub  53. mlops/inference/gguf  54. mlops/inference/guidance  55. mlops/inference/llama-cpp  56. mlops/inference/obliteratus  57. mlops/inference/outlines  58. mlops/inference/vllm  59. mlops/models/audiocraft  60. mlops/models/clip  61. mlops/models/segment-anything  62. mlops/models/stable-diffusion  63. mlops/models/whisper  64. mlops/research/dspy  65. mlops/training/axolotl  66. mlops/training/grpo-rl-training  67. mlops/training/peft  68. mlops/training/pytorch-fsdp  69. mlops/training/trl-fine-tuning  70. mlops/training/unsloth
-
-### Productivity (9)
-71. productivity/airtable  72. productivity/google-workspace  73. productivity/linear  74. productivity/maps  75. productivity/nano-pdf  76. productivity/notion  77. productivity/ocr-and-documents  78. productivity/powerpoint  79. productivity/teams-meeting-pipeline
-
-### GitHub (6)
-80. github/codebase-inspection  81. github/github-auth  82. github/github-code-review  83. github/github-issues  84. github/github-pr-workflow  85. github/github-repo-management
-
-### Research (5)
-86. research/arxiv  87. research/blogwatcher  88. research/llm-wiki  89. research/polymarket  90. research/research-paper-writing
-
-### Media (5)
-91. media/gif-search  92. media/heartmula  93. media/songsee  94. media/spotify  95. media/youtube-content
-
-### Autonomous Agents (5)
-96. autonomous-ai-agents/claude-code  97. autonomous-ai-agents/codex  98. autonomous-ai-agents/hermes-agent  99. autonomous-ai-agents/kanban-codex-lane  100. autonomous-ai-agents/opencode
-
-### Apple (5)
-101. apple/apple-notes  102. apple/apple-reminders  103. apple/findmy  104. apple/imessage  105. apple/macos-computer-use
-
-### DevOps (3)
-106. devops/kanban-orchestrator  107. devops/kanban-worker  108. devops/webhook-subscriptions
-
-### Security / Pentest (8)
-109. hunting-methodology  110. recon-methodology  111. sast-methodology  112. triage-validation  113. vuln-classes  114. report-writing  115. red-teaming/godmode  116. hunt-business-logic
-
-### Hunt Skills (6)
-117. hunt-idor  118. hunt-info-disclosure  119. hunt-llm-ai  120. hunt-oauth  121. hunt-rce  122. hunt-xss
-
-### Other (10)
-123. data-science/jupyter-live-kernel  124. dogfood  125. email/himalaya  126. gaming/minecraft-modpack-server  127. gaming/pokemon-player  128. leisure/find-nearby  129. mcp/mcporter  130. mcp/native-mcp  131. note-taking/obsidian  132. smart-home/openhue
+Key categories: software-development, creative, mlops, productivity, github, research,
+media, autonomous-ai-agents, devops, security/pentest, hunt-skills, data-science, email,
+gaming, note-taking, smart-home, haksterAi core (cloud-ops, coding, iptv, movie-servers).
 
 ## 🎯 ONE-SHOT RESOLVE PATCHING
 
@@ -240,25 +211,14 @@ You are bold, decisive, and action-oriented. When you feel yourself slowing down
 - **Patch once, not five times.** Read fully, research if needed, then edit with confidence.
 - **The user wants results, not deliberation.** Ship it.
 
-## 📋 SKILL REGISTRY (16 skills)
-Always \`skill_load({name: "..."})\` before using a skill. These are your specialized knowledge modules:
+## 📋 SKILL REGISTRY — DYNAMIC
+Skills are loaded dynamically from multiple roots. The ACTUAL count is injected at runtime
+(see "Skills Available" section below). ALWAYS use \`skill_list\` to see the real, current list.
+Use \`skill_load({name: "..."})\` to load a skill before following its steps.
 
-1. **crush-config** — Crush CLI configuration, hooks, providers, MCP servers
-2. **crush-hooks** — Crush lifecycle hooks, pre/post execution, event handling
-3. **jq** — JSON query and transformation with jq patterns
-4. **hakster-cloud-ops** — Cloud/service operations: PM2, ports, health checks, env files, deployments
-5. **hakster-coding** — Codebase work: bugs, features, refactoring, tests, reviews
-6. **hakster-crush-config** — Crush config: providers, MCP, LSPs, permissions, project context
-7. **hakster-iptv** — IPTV systems: M3U/M3U8 playlists, Xtream APIs, Stalker portals, EPG, streams
-8. **hakster-movie-servers** — Movie servers: vidsrc/devsrc providers, IPTV/stalker, stream proxies, CineVault
-9. **firecrawl** — Web scraping, search, crawling, page interaction via Firecrawl CLI
-10. **firecrawl-agent** — AI-powered data extraction from websites, returns structured JSON
-11. **firecrawl-crawl** — Bulk extract content from entire websites or site sections
-12. **firecrawl-download** — Download entire websites as local files (markdown, screenshots)
-13. **firecrawl-instruct** — Control live browser sessions: click, fill forms, navigate, extract data
-14. **firecrawl-map** — Discover and list all URLs on a website with optional search filtering
-15. **firecrawl-scrape** — Extract clean markdown from any URL, including JS-rendered SPAs
-16. **firecrawl-search** — Web search with full page content extraction, real-time results
+Core haksterAi skills (always available):
+- hakster-cloud-ops, hakster-coding, hakster-crush-config, hakster-iptv, hakster-movie-servers
+- crush-config, crush-hooks, jq, firecrawl (and sub-skills)
 
 ## 📋 SKILL USAGE PATTERN — MANDATORY
 **YOU MUST check skills before starting ANY unfamiliar task. This is NOT optional.**
@@ -656,6 +616,17 @@ function buildSystemPrompt(clientContext) {
   // Auto-inject core Claude Code skill content (cached, refreshed every 60s)
   prompt += loadCoreSkills();
 
+  // ── Inject pentester fingerprint (stable device identity) ──
+  const fp = getPentesterFingerprint();
+  prompt += `\n\n## 🔐 Pentester Device Identity`;
+  prompt += `\n- Device UID: ${fp.device_uid.device_id}`;
+  prompt += `\n- Session UID: ${fp.session_uid}`;
+  prompt += `\n- Hostname: ${fp.hostname}`;
+  prompt += `\n- MAC Hash: ${fp.mac_hash || 'N/A'}`;
+  prompt += `\n- OS: ${fp.os.name} ${fp.os.release} (${fp.os.platform})`;
+  if (fp.os.arch) prompt += `\n- Arch: ${fp.os.arch}, CPUs: ${fp.os.cpus}, RAM: ${fp.os.totalmem}GB`;
+  prompt += `\nThis is your stable device identity. Use it for session tracking, audit logs, and receipts.`;
+
   return prompt;
 }
 
@@ -674,7 +645,7 @@ function getHaksterRoots() {
 }
 
 // (Idle review prompt removed — health checks now run directly via shell, no model call)
-const MAX_TURNS = 50;
+const MAX_TURNS = Math.max(50, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '80', 10) || 80);
 const IDLE_TIMEOUT_MS = 120000; // 2 minutes idle → auto review
 
 // ── TUI Config (env-var tunable) ──────────────────────────────────────────
@@ -687,7 +658,7 @@ const MAX_LOG_LINES = (() => { const v = process.env.MAX_LOG_LINES; return v !==
 // ── Module-level state for stuck-loop detection (shared with agentLoop) ──
 let _lastAssistantResponse = '';   // Tracks last model response for loop detection
 let _noProgressCount = 0;          // Counts consecutive responses without tool calls
-const NO_PROGRESS_LIMIT = 3;       // Break loop after this many no-progress turns (was 4, lowered — clarifying questions loop fast; raised from 2 because exploration-only turns now increment this counter)
+const NO_PROGRESS_LIMIT = 6;       // Break loop after sustained no-progress, but allow long jobs to keep driving.
 let _recentResponsePrefixes = [];  // Last N response prefixes for semantic loop detection
 let _emptyRetries = 0;              // Counts empty-response retries within a single agentLoop call
 const SEMANTIC_LOOP_WINDOW = 3;    // How many recent responses to check (was 5, lowered — catches loops faster)
@@ -4257,9 +4228,7 @@ function callOllama(messages, tools, { onToken } = {}) {
           if (!trimmed) continue;
           try {
             const obj = JSON.parse(trimmed);
-            // DEBUG: Log first 5 chunks to see what model returns
-            if (!global._chunkLogCount) global._chunkLogCount = 0;
-            if (global._chunkLogCount < 5) {
+            if (process.env.HAKSTER_DEBUG_AGENT === '1' && global._chunkLogCount < 5) {
               global._chunkLogCount++;
               const hasContent = !!(obj.message?.content);
               const hasThinking = !!(obj.message?.thinking);
@@ -4316,8 +4285,9 @@ function callOllama(messages, tools, { onToken } = {}) {
               }
             }
           } catch (parseErr) {
-            // DEBUG: Log parse failures (could indicate stream errors)
-            console.log(`[DEBUG callOllama] JSON parse error on chunk: ${trimmed.substring(0, 200)}`);
+            if (process.env.HAKSTER_DEBUG_AGENT === '1') {
+              console.log(`[DEBUG callOllama] JSON parse error on chunk: ${trimmed.substring(0, 200)}`);
+            }
           }
         }
       });
@@ -4659,6 +4629,13 @@ async function agentLoop(userMessage, history, silent = false) {
   _toolCallCount = 0;
   _agentActivity = 'Thinking'; _activityDetail = 'Starting'; _activityStart = Date.now();
   _lastActivityTime = Date.now();
+
+  // ── INIT: Collect pentester fingerprint for this session ──
+  const fp = getPentesterFingerprint();
+  if (!silent) {
+    log(`${C.info}🔐 Device Identity${C.reset} ${C.fgMuted}uid=${fp.device_uid.device_id}${C.reset}`);
+    log(`${C.fgMuted}   session=${fp.session_uid} hostname=${fp.hostname} os=${fp.os.name}${C.reset}`);
+  }
   history.push({ role: 'user', content: userMessage });
 
   // ── Stall guard: kickstart if no activity for 20 seconds ──
@@ -4735,26 +4712,25 @@ async function agentLoop(userMessage, history, silent = false) {
       const tokenCallback = _statusFn
         ? (preview) => _statusFn(`${C.info}◇${C.reset} ${preview}`)
         : null;
-      // DEBUG: Log what we're sending
-      console.log(`[DEBUG] callOllama: history_len=${history.length} tools_count=${TOOLS?.length || 0} model=${MODEL}`);
-      // Estimate total request size
-      const _reqBodyEst = JSON.stringify({ model: MODEL, messages: history, tools: TOOLS });
-      console.log(`[DEBUG] request body size: ${(_reqBodyEst.length / 1024).toFixed(1)}KB`);
-      // TEMP: Dump payload to file for diagnosis
-      try { fs.writeFileSync('/tmp/hakster_last_request.json', _reqBodyEst); console.log('[DEBUG] saved payload to /tmp/hakster_last_request.json'); } catch(_) {}
-      // TEMP: Dump first user message and system prompt length for diagnosis
-      const _sysMsg = history.find(m => m.role === 'system');
-      const _firstUser = history.find(m => m.role === 'user');
-      console.log(`[DEBUG] sys_prompt_len=${(_sysMsg?.content||'').length} first_user_len=${(_firstUser?.content||'').length} first_user_preview=${JSON.stringify((_firstUser?.content||'').substring(0,200))}`);
+      if (process.env.HAKSTER_DEBUG_AGENT === '1') {
+        console.log(`[DEBUG] callOllama: history_len=${history.length} tools_count=${TOOLS?.length || 0} model=${MODEL}`);
+        const _reqBodyEst = JSON.stringify({ model: MODEL, messages: history, tools: TOOLS });
+        console.log(`[DEBUG] request body size: ${(_reqBodyEst.length / 1024).toFixed(1)}KB`);
+        try { fs.writeFileSync('/tmp/hakster_last_request.json', _reqBodyEst); console.log('[DEBUG] saved payload to /tmp/hakster_last_request.json'); } catch(_) {}
+        const _sysMsg = history.find(m => m.role === 'system');
+        const _firstUser = history.find(m => m.role === 'user');
+        console.log(`[DEBUG] sys_prompt_len=${(_sysMsg?.content||'').length} first_user_len=${(_firstUser?.content||'').length} first_user_preview=${JSON.stringify((_firstUser?.content||'').substring(0,200))}`);
+      }
       // ── Activity: thinking ──
       _agentActivity = 'Thinking'; _activityDetail = `Turn ${turn + 1}/${MAX_TURNS}`; _activityStart = Date.now();
       response = await callOllama(history, TOOLS, { onToken: tokenCallback });
       _lastActivityTime = Date.now();
-      // DEBUG: Log what came back
       const _rContent = (response?.message?.content || '');
       const _rThinking = (response?.message?.thinking || '');
       const _rTC = response?.message?.tool_calls?.length || 0;
-      console.log(`[DEBUG] response: content_len=${_rContent.length} thinking_len=${_rThinking.length} tool_calls=${_rTC} content_preview=${JSON.stringify(_rContent.substring(0,100))} thinking_preview=${JSON.stringify(_rThinking.substring(0,100))}`);
+      if (process.env.HAKSTER_DEBUG_AGENT === '1') {
+        console.log(`[DEBUG] response: content_len=${_rContent.length} thinking_len=${_rThinking.length} tool_calls=${_rTC} content_preview=${JSON.stringify(_rContent.substring(0,100))} thinking_preview=${JSON.stringify(_rThinking.substring(0,100))}`);
+      }
       // ── Estimate token usage for TUI display (rough: ~4 chars per token) ──
       const _inChars = history.reduce((sum, m) => sum + (m.content || '').length + (m.thinking || '').length + JSON.stringify(m.tool_calls || []).length, 0);
       _tuiTokensIn = Math.round(_inChars / 4);
@@ -5221,9 +5197,6 @@ async function agentLoop(userMessage, history, silent = false) {
       const fnArgs = tc.function?.arguments || tc.arguments || {};
       const tcId = tc.id || tc.function?.index?.toString() || '0';
       const callNum = _toolCallCount;
-      _agentActivity = fnName === 'patch_file' || fnName === 'multi_patch' ? 'Patching' : fnName === 'shell' ? 'Executing' : fnName === 'read_file' ? 'Reading' : fnName === 'write_file' ? 'Writing' : 'Executing';
-      _activityDetail = argHint || fnName;
-      _lastActivityTime = Date.now();
 
       // Build a short arg hint for display (e.g., "path=/foo" or "cmd:ls")
       let argHint = '';
@@ -5241,6 +5214,10 @@ async function agentLoop(userMessage, history, silent = false) {
           }
         }
       } catch (_) {}
+
+      _agentActivity = fnName === 'patch_file' || fnName === 'multi_patch' ? 'Patching' : fnName === 'shell' ? 'Executing' : fnName === 'read_file' ? 'Reading' : fnName === 'write_file' ? 'Writing' : 'Executing';
+      _activityDetail = argHint || fnName;
+      _lastActivityTime = Date.now();
 
       // ── Filesystem-wandering loop detection ──
       // Check BEFORE execution so we can break the loop early
@@ -6332,6 +6309,6 @@ async function repl() {
 }
 
 // ── Export for use as module or direct run ───────────────────────────────
-module.exports = { agentLoop, TOOLS, toolExecutors, banner, buildSystemPrompt, initMcpTools, shutdownMcp, msgPush, msgDrain, msgPeek, msgClear, msgSize, serverNotify, setConfirmFn };
+module.exports = { agentLoop, TOOLS, toolExecutors, banner, buildSystemPrompt, initMcpTools, shutdownMcp, msgPush, msgDrain, msgPeek, msgClear, msgSize, serverNotify, setConfirmFn, getPentesterFingerprint };
 function setConfirmFn(fn) { _confirmFn = fn; }
 if (require.main === module) repl();

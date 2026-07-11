@@ -69,6 +69,12 @@
         <span>↓</span> Get haksterAi
       </a>
       <a
+        href="/terminal"
+        class="hero-app-link inline-flex items-center gap-2 rounded-lg border border-[#7c3aed]/40 bg-[#111118] px-6 py-3 text-base font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/70 hover:bg-[#1e1e2e] transition-all"
+      >
+        <span>⌨️</span> Terminal
+      </a>
+      <a
         href="#docs"
         class="inline-flex items-center gap-2 rounded-lg border border-[#1e1e2e] bg-[#111118] px-6 py-3 text-base font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/50 hover:bg-[#1e1e2e] transition-all"
       >
@@ -80,13 +86,13 @@
     <div id="hero-cta-logged-in" class="hidden flex-col sm:flex-row items-center gap-4">
       <a
         href="/build"
-        class="inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-6 py-3 text-base font-semibold text-white hover:bg-[#6d28d9] transition-all hover:shadow-lg hover:shadow-[#7c3aed]/30 active:scale-95"
+        class="hero-app-link inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-6 py-3 text-base font-semibold text-white hover:bg-[#6d28d9] transition-all hover:shadow-lg hover:shadow-[#7c3aed]/30 active:scale-95"
       >
         <span>💬</span> Enter Chat
       </a>
       <a
         href="/terminal"
-        class="inline-flex items-center gap-2 rounded-lg border border-[#1e1e2e] bg-[#111118] px-6 py-3 text-base font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/50 hover:bg-[#1e1e2e] transition-all"
+        class="hero-app-link inline-flex items-center gap-2 rounded-lg border border-[#1e1e2e] bg-[#111118] px-6 py-3 text-base font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/50 hover:bg-[#1e1e2e] transition-all"
       >
         <span>⌨️</span> Open Terminal
       </a>
@@ -315,7 +321,20 @@
   // Google Sign-In button → redirect-based OAuth
   document.getElementById('hero-google-signin')?.addEventListener('click', function() {
     const ref = localStorage.getItem('hakster_referral_code') || '';
+    sessionStorage.removeItem('hakster_post_auth_redirect');
     window.location.href = `${API}/api/auth/google/redirect${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`;
+  });
+
+  // Hero app links redirect to Google sign-in if not logged in
+  document.querySelectorAll('.hero-app-link').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      const token = localStorage.getItem('hakster_google_token');
+      if (token) return;
+      e.preventDefault();
+      const href = link.getAttribute('href');
+      sessionStorage.setItem('hakster_post_auth_redirect', href || '/dashboard');
+      window.location.href = `${API}/api/auth/google/redirect`;
+    });
   });
 
   // Handle OAuth callback if redirected back to landing page
@@ -328,8 +347,9 @@
         if (data.ok) {
           localStorage.setItem('hakster_google_token', data.apiKey);
           localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
-          // Redirect to chat page
-          window.location.href = '/build';
+          const postAuthRedirect = sessionStorage.getItem('hakster_post_auth_redirect');
+          if (postAuthRedirect) sessionStorage.removeItem('hakster_post_auth_redirect');
+          window.location.href = postAuthRedirect || '/build';
           return;
         }
       } catch (e) {}

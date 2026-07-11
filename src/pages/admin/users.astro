@@ -1,0 +1,175 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout title="Admin — Users | haksterAi">
+  <div class="min-h-screen pt-[80px] pb-12 bg-[#0a0a0f] text-[#e2e8f0] px-4">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight">👤 User Admin</h1>
+          <p class="text-sm text-[#64748b] mt-1">Emails, IPs, last login, roles and plans.</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <input
+            id="search"
+            type="text"
+            placeholder="Search email, username, IP..."
+            class="bg-[#111118] border border-[#1e1e2e] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] placeholder-[#64748b] focus:border-[#7c3aed] focus:outline-none w-full sm:w-64"
+          />
+          <button
+            id="refresh-btn"
+            class="bg-[#7c3aed]/20 text-[#7c3aed] hover:bg-[#7c3aed]/30 border border-[#7c3aed]/30 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            ↻ Refresh
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead class="bg-[#1e1e2e] text-xs uppercase text-[#94a3b8]">
+              <tr>
+                <th class="px-4 py-3 font-semibold">User</th>
+                <th class="px-4 py-3 font-semibold">Email</th>
+                <th class="px-4 py-3 font-semibold">Role / Plan</th>
+                <th class="px-4 py-3 font-semibold">Status</th>
+                <th class="px-4 py-3 font-semibold">Last Login</th>
+                <th class="px-4 py-3 font-semibold">Last IP</th>
+                <th class="px-4 py-3 font-semibold">Recent IPs</th>
+                <th class="px-4 py-3 font-semibold">Created</th>
+              </tr>
+            </thead>
+            <tbody id="users-body" class="divide-y divide-[#1e1e2e]">
+              <tr>
+                <td colspan="8" class="px-4 py-8 text-center text-[#64748b]">Loading users…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="px-4 py-3 border-t border-[#1e1e2e] flex items-center justify-between text-xs text-[#64748b]">
+          <span id="users-count">0 users</span>
+          <span id="logs-count">0 access logs</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script is:inline>
+    const API = location.port === '4321' ? 'http://localhost:3579' : '';
+    let allUsers = [];
+    let logsByUser = {};
+
+    function formatDate(ts) {
+      if (!ts) return '—';
+      const d = new Date(ts * 1000);
+      return d.toLocaleString();
+    }
+
+    function escapeHtml(str) {
+      if (str == null) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function renderRows(users) {
+      const tbody = document.getElementById('users-body');
+      if (!users.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-[#64748b]">No users found.</td></tr>`;
+        document.getElementById('users-count').textContent = '0 users';
+        return;
+      }
+
+      const rows = users.map(u => {
+        const recentIps = (logsByUser[u.id] || [])
+          .map(l => l.ip_address)
+          .filter(Boolean)
+          .filter((ip, i, arr) => arr.indexOf(ip) === i)
+          .slice(0, 5);
+
+        const roleClass = u.role === 'admin' ? 'bg-[#7c3aed]/20 text-[#a855f7] border-[#7c3aed]/30' :
+                           u.role === 'guest' ? 'bg-[#64748b]/10 text-[#94a3b8] border-[#64748b]/20' :
+                           'bg-[#00ff88]/10 text-[#00ff88] border-[#00ff88]/20';
+
+        const statusClass = u.status === 'active' ? 'bg-[#00ff88]/10 text-[#00ff88] border-[#00ff88]/20' :
+                             u.status === 'suspended' ? 'bg-[#ffd700]/10 text-[#ffd700] border-[#ffd700]/20' :
+                             'bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/20';
+
+        const isOwner = ['1234','1235','1236','1237'].includes(u.id);
+
+        return `<tr class="hover:bg-[#1e1e2e]/50 transition-colors ${isOwner ? 'bg-[#7c3aed]/5' : ''}">
+          <td class="px-4 py-3 font-medium text-[#e2e8f0]">
+            ${isOwner ? '<span title="Owner" class="text-[#ffd700] mr-1">★</span>' : ''}${escapeHtml(u.username)}
+            ${isOwner ? '<span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-[#ffd700]/10 text-[#ffd700] border-[#ffd700]/30">OWNER</span>' : ''}
+          </td>
+          <td class="px-4 py-3 text-[#94a3b8]">${escapeHtml(u.email || '—')}</td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border ${roleClass}">${escapeHtml(u.role)}</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-[#111118] text-[#94a3b8] border-[#1e1e2e] ml-1">${escapeHtml(u.plan)}</span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border ${statusClass}">${escapeHtml(u.status)}</span>
+          </td>
+          <td class="px-4 py-3 text-[#94a3b8]">${formatDate(u.last_login_at)}</td>
+          <td class="px-4 py-3 font-mono text-xs text-[#00bfff]">${escapeHtml(u.last_login_ip || '—')}</td>
+          <td class="px-4 py-3">
+            ${recentIps.length
+              ? `<div class="flex flex-wrap gap-1">${recentIps.map(ip => `<span class="font-mono text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-1.5 py-0.5 rounded">${escapeHtml(ip)}</span>`).join('')}</div>`
+              : '<span class="text-[#64748b]">—</span>'}
+          </td>
+          <td class="px-4 py-3 text-[#94a3b8]">${formatDate(u.created_at)}</td>
+        </tr>`;
+      }).join('');
+
+      tbody.innerHTML = rows;
+      document.getElementById('users-count').textContent = `${users.length} user${users.length === 1 ? '' : 's'}`;
+    }
+
+    async function load() {
+      try {
+        const [usersRes, logsRes] = await Promise.all([
+          fetch(`${API}/api/users`),
+          fetch(`${API}/api/access-logs?limit=1000`)
+        ]);
+
+        const usersData = await usersRes.json();
+        const logsData = await logsRes.json();
+
+        allUsers = usersData.users || [];
+
+        logsByUser = {};
+        (logsData.logs || []).forEach(log => {
+          if (!log.user_id) return;
+          if (!logsByUser[log.user_id]) logsByUser[log.user_id] = [];
+          logsByUser[log.user_id].push(log);
+        });
+
+        renderRows(allUsers);
+        document.getElementById('logs-count').textContent = `${(logsData.logs || []).length} access logs`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById('users-body').innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-[#ef4444]">Failed to load users.</td></tr>`;
+      }
+    }
+
+    document.getElementById('search')?.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      const filtered = allUsers.filter(u =>
+        (u.username || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.last_login_ip || '').toLowerCase().includes(q) ||
+        (u.role || '').toLowerCase().includes(q) ||
+        (u.plan || '').toLowerCase().includes(q)
+      );
+      renderRows(filtered);
+    });
+
+    document.getElementById('refresh-btn')?.addEventListener('click', load);
+
+    load();
+  </script>
+</Layout>

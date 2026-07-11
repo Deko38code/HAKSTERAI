@@ -5,7 +5,7 @@ import Layout from '../layouts/Layout.astro';
 <script is:inline src="/js/xterm.js"></script>
 <script is:inline src="/js/addon-fit.js"></script>
 
-<Layout title="haksterAi — Hack">
+<Layout title="haksterAi — Chat">
   <section id="hacker-chat" class="h-dvh min-h-0 flex flex-row bg-[#141414] text-white overflow-hidden">
 
     <!-- LEFT SIDEBAR -->
@@ -23,7 +23,7 @@ import Layout from '../layouts/Layout.astro';
       <div class="px-3 pt-3">
         <button id="new-hack-btn" class="w-full flex items-center justify-center gap-2 rounded-xl border border-[#333] bg-[#1a1a1a] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#222] hover:border-[#444] transition">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          New Hack
+          New Chat
         </button>
       </div>
 
@@ -166,7 +166,7 @@ import Layout from '../layouts/Layout.astro';
             <span class="text-white font-bold text-xl tracking-tight">hakster<span class="text-[#999]">Ai</span></span>
           </a>
         </div>
-        <h1 id="hero-heading" class="text-balance text-center text-4xl font-bold leading-[1.05] tracking-normal text-white sm:text-5xl lg:text-6xl mb-8">What will you hack today?</h1>
+        <h1 id="hero-heading" class="text-balance text-center text-4xl font-bold leading-[1.05] tracking-normal text-white sm:text-5xl lg:text-6xl mb-8">What will you build today?</h1>
         <div class="flex items-center gap-3">
           <div class="flex items-center gap-2 rounded-full border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-xs text-[#999]">
             <span id="fc-dot" class="h-2 w-2 rounded-full bg-yellow-300"></span>
@@ -206,7 +206,7 @@ import Layout from '../layouts/Layout.astro';
       <form id="chat-form" class="relative z-10 w-full px-2 sm:px-4 lg:px-6 pb-4">
         <div id="composer" class="rounded-[22px] border border-[#333] bg-[#1a1a1a] py-3 shadow-[0_12px_32px_rgba(0,0,0,0.02)] overflow-hidden">
           <div class="overflow-y-auto pl-4 pr-2">
-            <textarea id="chat-input" rows="3" placeholder="Ask haksterAi to hack, search, scrape, build, or analyze..." class="min-h-[28px] w-full resize-none border-0 bg-transparent p-0 pt-[1px] text-base leading-6 text-white outline-none placeholder:text-[#999]"></textarea>
+            <textarea id="chat-input" rows="3" placeholder="Ask haksterAi to search, scrape, build, or analyze..." class="min-h-[28px] w-full resize-none border-0 bg-transparent p-0 pt-[1px] text-base leading-6 text-white outline-none placeholder:text-[#999]"></textarea>
           </div>
           <div id="attachment-strip" class="hidden flex flex-wrap gap-2 px-4 pb-2"></div>
           <div class="px-3 flex gap-2 items-center min-w-0 pt-1">
@@ -214,6 +214,7 @@ import Layout from '../layouts/Layout.astro';
             <button type="button" id="attach-image-btn" class="composer-btn" title="Attach image files"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21.44 11.05-8.49 8.49a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48"/></svg></button>
             <button type="button" id="firecrawl-btn" class="composer-btn" title="Search &amp; scrape with Firecrawl"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-4.3-4.3"/></svg></button>
             <button type="button" id="mode-btn" class="composer-pill"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg><span id="mode-label">Agent</span></button>
+            <button type="button" id="thinking-btn" class="composer-pill active" title="Toggle thinking aloud (Shift+Tab)"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-1.068.304-2.112.876-3.036l-.548-.547z"/></svg><span id="thinking-label">Think</span></button>
             <button type="button" id="scrape-btn" class="composer-btn" title="Scrape a URL"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a3 3 0 0 0-3 3v1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-5V5a3 3 0 0 0-3-3zm0 2a1 1 0 0 0-1 1v1h2V5a1 1 0 0 0-1-1zM9 9h6v2H9V9z"/></svg></button>
             <button type="button" id="shell-btn" class="composer-btn" title="Run a shell command"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7 9 3 3-3 3m5 0h5"/><rect x="2" y="4" width="20" height="16" rx="2" stroke-width="2"/></svg></button>
             <button type="button" id="patch-btn" class="composer-btn" title="Patch / edit a file"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 20 4-1 9-9-3-3-9 9-1 4zM14 7l3 3"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 4l3 3-3 3-3-3 3-3z"/></svg></button>
@@ -226,18 +227,18 @@ import Layout from '../layouts/Layout.astro';
             <button type="button" id="checkpoint-btn" class="composer-btn" title="Save / restore checkpoints"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg></button>
             <button type="button" id="autopilot-btn" class="composer-btn" title="Toggle autopilot mode"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></button>
             <button type="button" id="terminal-btn" class="composer-btn" title="Open terminal"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 17 6-6-6-6"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19h8"/></svg></button>
-            <button type="button" id="pentester-btn" class="composer-btn" title="Launch pentester agent"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5M2 12l10 5 10-5"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v6m-3-3h6" /></svg></button>
+            <button type="button" id="pentester-btn" class="composer-btn" title="Launch security review agent"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5M2 12l10 5 10-5"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v6m-3-3h6" /></svg></button>
             <div class="flex-1"></div>
             <button type="submit" id="send-btn" class="send-btn" disabled><svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m-7 7 7-7 7 7"/></svg></button>
           </div>
           <div id="ask-dropdown" class="hidden absolute left-3 bottom-full mb-2 w-72 rounded-xl border border-[#333] bg-[#111] shadow-2xl p-2 z-50">
             <div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">Quick prompts</div>
-            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Scan this target for vulnerabilities and report findings">🎯 Pentest scan</button>
-            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use Firecrawl to search for the latest exploits and CVEs for this target">🔍 Search exploits</button>
+            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Review this target or codebase for security issues and report findings">🎯 Security review</button>
+            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use Firecrawl to search for the latest advisories and CVEs for this target">🔍 Search advisories</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Scrape this reference URL and recreate the functionality">🌐 Scrape &amp; build</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Run this shell command with exec_shell and report the output: ">⌘ Shell command</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Inspect the file, then use edit_file to patch the bug and verify with a syntax check or test: ">🩹 Patch file</button>
-            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Write a full exploit script for this vulnerability and explain each step">💣 Exploit script</button>
+            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Write a safe remediation or verification script and explain each step">🛠️ Fix script</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use the generate_image tool to create a professional logo for this brand. Design it with modern aesthetics, bold colors, and clean lines.">🎨 Create a logo</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use the generate_image tool to enhance and upscale this image with better detail, lighting, and resolution.">✨ Enhance image</button>
           </div>
@@ -268,7 +269,7 @@ import Layout from '../layouts/Layout.astro';
           <button id="close-image-modal" class="text-white/40 hover:text-white transition"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
         </div>
         <div class="px-5 py-4 space-y-4">
-          <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Prompt</label><textarea id="image-prompt" rows="3" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50 resize-none" placeholder="A hacker logo with purple neon..."></textarea></div>
+          <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Prompt</label><textarea id="image-prompt" rows="3" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50 resize-none" placeholder="A haksterAi logo with purple neon..."></textarea></div>
           <div class="grid grid-cols-2 gap-3">
             <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Model</label><select id="image-model" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50"><option value="dall-e-3">DALL-E 3</option><option value="gpt-image-1">GPT Image 1</option></select></div>
             <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Size</label><select id="image-size" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50"><option value="1024x1024">1024×1024</option><option value="1792x1024">1792×1024</option><option value="1024x1792">1024×1792</option><option value="512x512">512×512</option></select></div>
@@ -424,12 +425,12 @@ import Layout from '../layouts/Layout.astro';
       <div id="terminal-container" class="flex-1 overflow-hidden relative"></div>
     </div>
 
-    <!-- Pentester Panel -->
+    <!-- Security Review Panel -->
     <div id="pentester-panel" class="chat-side-grid hidden absolute bottom-[120px] left-0 right-0 z-40 h-[320px] border-t border-[#333] bg-[#0a0a0f] flex flex-col">
       <div class="flex items-center justify-between px-4 py-2 border-b border-[#333] bg-[#111]">
         <div class="flex items-center gap-2">
           <svg class="h-4 w-4 text-[#ff4444]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5"/></svg>
-          <span class="text-xs font-semibold text-white/70">Pentester Agent</span>
+          <span class="text-xs font-semibold text-white/70">Security Review Agent</span>
           <span id="pentester-status" class="text-[10px] text-white/30">idle</span>
         </div>
         <div class="flex items-center gap-2">
@@ -447,7 +448,7 @@ import Layout from '../layouts/Layout.astro';
           <option value="http_probe">HTTP Probe</option>
           <option value="dir_enum">Dir Enum</option>
           <option value="service_map">Service Map</option>
-          <option value="exploit_check">Exploit Check</option>
+          <option value="exploit_check">Advisory Check</option>
         </select>
       </div>
       <div id="pentester-output" class="agent-output-frame flex-1 overflow-y-auto px-4 py-3 text-xs font-mono text-white/75 whitespace-pre-wrap"></div>
@@ -455,7 +456,7 @@ import Layout from '../layouts/Layout.astro';
   </section>
 
   <style>
-    /* ── HackerAI-style minimal composer buttons ── */
+    /* ── Chat-style minimal composer buttons ── */
     .composer-btn { display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; border: none; background: transparent; padding: 0; width: 32px; height: 32px; min-width: 0; color: #fff; cursor: pointer; transition: background 0.15s; flex-shrink: 0; }
     .composer-btn:hover { background: #222; }
     .composer-btn:active { background: #333; }
@@ -824,6 +825,8 @@ import Layout from '../layouts/Layout.astro';
     const sidebarTokenCounter = document.getElementById('sidebar-token-counter')!;
     const modeBtn = document.getElementById('mode-btn')!;
     const modeLabel = document.getElementById('mode-label')!;
+    const thinkingBtn = document.getElementById('thinking-btn') as HTMLButtonElement | null;
+    const thinkingLabel = document.getElementById('thinking-label') as HTMLElement | null;
     const askBtn = document.getElementById('ask-btn') as HTMLButtonElement | null;
     const askDropdown = document.getElementById('ask-dropdown')!;
     const voiceInputBtn = document.getElementById('voice-input-btn') as HTMLButtonElement;
@@ -1222,10 +1225,280 @@ import Layout from '../layouts/Layout.astro';
     let chatTerm: any = null;
     let chatTermFit: any = null;
     let chatTermWs: WebSocket | null = null;
+    let chatTermDecoder: TextDecoder | null = null;
+    let chatTermWriteBuf = '';
+    let chatTermWriteRaf: number | null = null;
 
     function getWsBase() {
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       return `${proto}//${window.location.host}`;
+    }
+
+    const EMBEDDED_TERMINAL_ALLOW_KEY = 'hakster:build-terminal-allowed';
+    const EMBEDDED_TERMINAL_PATTERNS = [
+      /\brm\s+(-rf?|--force|--recursive)/i,
+      /\brm\s+.*\//i,
+      /\bshutdown\b/i,
+      /\breboot\b/i,
+      /\bhalt\b/i,
+      /\bpoweroff\b/i,
+      /\bfdisk\b/i,
+      /\bmkfs\b/i,
+      /\bdd\s+if=/i,
+      /\bformat\b/i,
+      /\bchmod\s+(-R\s+)?777/i,
+      /\bchown\s+.*root/i,
+      /\bkill\s+-9\s+/i,
+      /\bkillall\b/i,
+      /\bpkill\s+-9/i,
+      /\bfuser\s+-k\b/i,
+      /\bnpm\s+publish/i,
+      /\bgit\s+push\s+.*--force/i,
+      /\bgit\s+reset\s+--hard/i,
+      /\bgit\s+clean\s+-fd/i,
+      /\bdocker\s+(rm|rmi|system\s+prune)/i,
+      /\bsystemctl\s+(stop|disable|restart)\s+(ssh|nginx|apache|mysql|postgres)/i,
+      /\bsystemctl\s+(mask|daemon-reload)\b/i,
+      /\biptables\s+-F/i,
+      /\bcurl.*\|\s*(ba)?sh/i,
+      /\bwget.*\|\s*(ba)?sh/i,
+      /\btruncate\s+-s\s+0\b/i,
+      /\bcrontab\s+-r\b/i,
+      /\bwipefs\b/i,
+      /\bsgdisk\b/i,
+    ];
+
+    function htmlEscape(value: string) {
+      return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c));
+    }
+
+    function getBuildAllowedCommands(permanent = false): Set<string> {
+      const storage = permanent ? localStorage : sessionStorage;
+      const key = permanent ? 'hakster:terminal-allowed:always' : EMBEDDED_TERMINAL_ALLOW_KEY;
+      try { return new Set(JSON.parse(storage.getItem(key) || '[]')); }
+      catch { return new Set(); }
+    }
+
+    function isBuildTerminalAllowed(command: string) {
+      const cmd = command.trim();
+      for (const allowed of [...getBuildAllowedCommands(), ...getBuildAllowedCommands(true)]) {
+        if (cmd === allowed || cmd.startsWith(allowed)) return true;
+      }
+      return false;
+    }
+
+    function buildTerminalNeedsAllow(command: string) {
+      const cmd = command.trim();
+      if (!cmd || isBuildTerminalAllowed(cmd)) return false;
+      return EMBEDDED_TERMINAL_PATTERNS.some((pat) => pat.test(cmd));
+    }
+
+    function rememberBuildTerminalAllow(command: string, permanent: boolean) {
+      const storage = permanent ? localStorage : sessionStorage;
+      const key = permanent ? 'hakster:terminal-allowed:always' : EMBEDDED_TERMINAL_ALLOW_KEY;
+      let items: string[] = [];
+      try { items = JSON.parse(storage.getItem(key) || '[]'); } catch {}
+      if (!items.includes(command)) items.push(command);
+      storage.setItem(key, JSON.stringify(items));
+    }
+
+    function showBuildTerminalAllowPopup(command: string): Promise<'session' | 'always' | 'deny'> {
+      return new Promise((resolve) => {
+        document.querySelector('.hakster-allow-session-popup')?.remove();
+        const wrap = document.createElement('div');
+        wrap.className = 'hakster-allow-session-popup';
+        wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:18px;';
+        wrap.innerHTML = `
+          <div style="width:min(520px,100%);background:#0b0b12;border:1px solid rgba(239,68,68,.45);border-radius:8px;box-shadow:0 24px 80px rgba(0,0,0,.55);padding:16px;font-family:JetBrains Mono,monospace;color:#e5e7eb;">
+            <div style="font-weight:800;color:#f87171;font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">Confirm command</div>
+            <div style="font-size:12px;color:#cbd5e1;margin-bottom:10px;">This terminal command needs approval before it runs.</div>
+            <pre style="white-space:pre-wrap;word-break:break-word;max-height:170px;overflow:auto;background:#050509;border:1px solid #1f2937;border-radius:6px;padding:10px;color:#f8fafc;font-size:12px;margin:0 0 14px;">${htmlEscape(command)}</pre>
+            <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+              <button data-choice="deny" style="background:#111827;color:#fca5a5;border:1px solid #374151;border-radius:6px;padding:8px 10px;font-weight:700;cursor:pointer;">Deny</button>
+              <button data-choice="always" style="background:#1f2937;color:#fde68a;border:1px solid #4b5563;border-radius:6px;padding:8px 10px;font-weight:700;cursor:pointer;">Always</button>
+              <button data-choice="session" style="background:#7c3aed;color:white;border:1px solid #a855f7;border-radius:6px;padding:8px 10px;font-weight:800;cursor:pointer;">Allow this session</button>
+            </div>
+          </div>`;
+        const finish = (choice: 'session' | 'always' | 'deny') => { wrap.remove(); resolve(choice); };
+        wrap.addEventListener('click', (e) => {
+          const btn = (e.target as HTMLElement).closest('button[data-choice]') as HTMLButtonElement | null;
+          if (btn) finish((btn.dataset.choice || 'deny') as 'session' | 'always' | 'deny');
+          else if (e.target === wrap) finish('deny');
+        });
+        document.body.appendChild(wrap);
+      });
+    }
+
+    async function confirmBuildTerminalCommand(command: string) {
+      const cmd = command.trim();
+      if (!cmd || !buildTerminalNeedsAllow(cmd)) return true;
+      const choice = await showBuildTerminalAllowPopup(cmd);
+      if (choice === 'deny') return false;
+      const permanent = choice === 'always';
+      rememberBuildTerminalAllow(cmd, permanent);
+      fetch(`${API}/api/agent/allow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd, permanent, sessionId: getActiveId() || undefined }),
+      }).catch(() => {});
+      return true;
+    }
+
+    let chatTermInputLine = '';
+    let chatTermConfirming = false;
+
+    // ── Chat Terminal Scramble/Decode Effect (10-line chunks) ────────
+    // Dramatic scramble→decode: lines decode in cascading groups of 10,
+    // each pass reveals bigger chunks. 6 passes with glow/spacing fx.
+    // Total ~1.5s effect — fast enough to not block, slow enough to see.
+    const _CT_SC_CHARS = '▓░▒█⧫⬡アイウ∀∃∂∇◆◈⬢▄▀■▫⯃※✦✧⟐⟑⟒ждлофцшщыъ⬡⬢⬔⬖⬗⬘⬙⬚⟰⟱⟲⟳⟴⟵⟶⟷';
+    const _CT_SC_COLORS = ['#7c3aed','#a855f7','#c084fc','#e879f9','#22d3ee','#34d399','#f472b6','#fbbf24','#00ff88','#ff6b6b','#00bfff','#ffd700'];
+    const _CT_DECODE_WORDS = ['HAKSTERAI','CRUSH','CONNECT','DECODE','EXEC','AGENT','TERMINAL','SHELL','TASK','NEURAL','PROCESS','RUN','LOAD','SYNC','READY','ONLINE','STREAM','DATA','PARSE','SCAN','INIT','BOOT','LINK','NET','CODE','BUILD','DEPLOY','COMMIT','PUSH','PATCH','MERGE','TEST','DEBUG','TRACE','LOG','PIPE','FORK','THREAD','DAEMON','KERNEL','STACK','HEAP','CACHE','BLOCK','CHAIN','HASH','ENCRYPT','VERIFY','AUTH','SOCKET','PORT','PROXY','ROUTE','BRIDGE','TUNNEL','PROTOCOL','HANDSHAKE','NEGOTIATE','UPGRADE','TRANSFORM','COMPILE','OPTIMIZE','RENDER','PIPELINE','PARALLEL','ASYNC','AWAIT','PROMISE','RESOLVE','YIELD','GENERATOR','ITERATOR','DISPATCH','REDUCE','MAP','FILTER','SORT','SLICE','SPLICE','CONCAT','JOIN','SPLIT','TRIM','REPLACE','SEARCH','MATCH','TEST'];
+    let _chatActiveRaf: number|null = null;
+    let _chatDecodeShown = false;
+
+    function _ctRandomLine(len: number) {
+      let s = '';
+      for (let i = 0; i < len; i++) s += _CT_SC_CHARS[Math.floor(Math.random() * _CT_SC_CHARS.length)];
+      return s;
+    }
+    function _ctDecodeLine(len: number) {
+      const words: string[] = [];
+      let pos = 0;
+      while (pos < len) {
+        if (Math.random() < 0.35 && len - pos > 8) {
+          const word = _CT_DECODE_WORDS[Math.floor(Math.random() * _CT_DECODE_WORDS.length)];
+          words.push(word);
+          pos += word.length + 1;
+        } else {
+          const chunk = 2 + Math.floor(Math.random() * 6);
+          words.push(_ctRandomLine(Math.min(chunk, len - pos)));
+          pos += chunk + 1;
+        }
+      }
+      return words.join(' ').substring(0, len);
+    }
+
+    // ── NMS-style decode flash ──────────────────────────────────────
+    // Characters rapidly cycle through random symbols, then "lock in"
+    // left-to-right like the no-more-secrets (nms) command. 10-line
+    // chunks cascade with stagger. Total ~1.6s.
+    function showChatDecodeFlash() {
+      const container = document.getElementById('terminal-container');
+      if (!container || _chatDecodeShown) return;
+      _chatDecodeShown = true;
+      const old = document.getElementById('chat-decode-overlay');
+      if (old) old.remove();
+      if (_chatActiveRaf) { cancelAnimationFrame(_chatActiveRaf); _chatActiveRaf = null; }
+
+      const overlay = document.createElement('div');
+      overlay.id = 'chat-decode-overlay';
+      overlay.style.cssText = 'position:absolute;inset:0;z-index:50;pointer-events:none;overflow:hidden;font-family:JetBrains Mono,monospace;font-size:13px;line-height:1.35;padding:6px 10px;opacity:0;background:rgba(0,0,0,0.92);';
+      const panelHeight = container.offsetHeight || 280;
+      const numLines = Math.max(Math.floor(panelHeight / 18) - 2, 14);
+      const termWidth = container.offsetWidth || 800;
+      const charsPerLine = Math.floor((termWidth - 20) / 8);
+      const CHUNK_SIZE = 10;
+      const SCRAMBLE_MS = 280;
+      const LOCKIN_MS = 500;
+      const CHUNK_STAGGER = 40;
+      const FADE_START = 200;
+      const FADE_DURATION = 400;
+
+      const lines: { el: HTMLDivElement; finalText: string; charCount: number; chunkIndex: number }[] = [];
+      for (let i = 0; i < numLines; i++) {
+        const lineEl = document.createElement('div');
+        const charCount = Math.max(charsPerLine - 4, 40) + Math.floor(Math.random() * 12) - 6;
+        const finalText = _ctDecodeLine(charCount);
+        lineEl.textContent = _ctRandomLine(charCount);
+        lineEl.style.color = _CT_SC_COLORS[Math.floor(Math.random() * _CT_SC_COLORS.length)];
+        lineEl.style.whiteSpace = 'nowrap';
+        lineEl.style.overflow = 'hidden';
+        lineEl.style.textShadow = '0 0 8px currentColor';
+        overlay.appendChild(lineEl);
+        lines.push({ el: lineEl, finalText, charCount, chunkIndex: Math.floor(i / CHUNK_SIZE) });
+      }
+      container.appendChild(overlay);
+      requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+
+      const totalChunks = Math.ceil(numLines / CHUNK_SIZE);
+      const startTime = performance.now();
+
+      function frame(now: number) {
+        const elapsed = now - startTime;
+        const lastLockinEnd = SCRAMBLE_MS + (totalChunks - 1) * CHUNK_STAGGER + LOCKIN_MS;
+        const fadeOutStart = lastLockinEnd + FADE_START;
+        const fadeOutEnd = fadeOutStart + FADE_DURATION;
+
+        if (elapsed > fadeOutEnd + 100) {
+          overlay.remove();
+          _chatActiveRaf = null;
+          return;
+        }
+
+        if (elapsed > fadeOutStart) {
+          const fadeProgress = (elapsed - fadeOutStart) / FADE_DURATION;
+          overlay.style.opacity = String(Math.max(0, 1 - fadeProgress));
+        }
+
+        let allResolved = true;
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const lineStartLockin = SCRAMBLE_MS + line.chunkIndex * CHUNK_STAGGER;
+
+          if (elapsed < lineStartLockin) {
+            line.el.textContent = _ctRandomLine(line.charCount);
+            allResolved = false;
+          } else {
+            const lockinProgress = Math.min(1, (elapsed - lineStartLockin) / LOCKIN_MS);
+            const resolvedCount = Math.floor(line.charCount * lockinProgress);
+            if (resolvedCount < line.charCount) allResolved = false;
+
+            const resolved = line.finalText.slice(0, resolvedCount);
+            const remaining = line.charCount - resolvedCount;
+            if (remaining > 0) {
+              line.el.textContent = resolved + _ctRandomLine(remaining);
+            } else {
+              line.el.textContent = line.finalText;
+            }
+
+            if (lockinProgress < 0.3) {
+              line.el.style.textShadow = '0 0 12px currentColor, 0 0 24px currentColor';
+            } else if (lockinProgress < 0.6) {
+              line.el.style.textShadow = '0 0 6px currentColor';
+            } else if (lockinProgress < 0.9) {
+              line.el.style.textShadow = '0 0 2px currentColor';
+            } else {
+              line.el.style.textShadow = 'none';
+            }
+          }
+        }
+
+        if (allResolved && elapsed >= lastLockinEnd) {
+          for (let i = 0; i < lines.length; i++) {
+            lines[i].el.textContent = lines[i].finalText;
+            lines[i].el.style.textShadow = 'none';
+          }
+        }
+
+        _chatActiveRaf = requestAnimationFrame(frame);
+      }
+      _chatActiveRaf = requestAnimationFrame(frame);
+    }
+
+    function flushChatTermWrite() {
+      chatTermWriteRaf = null;
+      if (!chatTerm || !chatTermWriteBuf) return;
+      const data = chatTermWriteBuf;
+      chatTermWriteBuf = '';
+      chatTerm.write(data);
+    }
+
+    function enqueueChatTermWrite(data: string) {
+      if (!data) return;
+      if (!_chatDecodeShown) showChatDecodeFlash();
+      chatTermWriteBuf += data;
+      if (!chatTermWriteRaf) chatTermWriteRaf = requestAnimationFrame(flushChatTermWrite);
     }
 
     function initChatTerminal() {
@@ -1246,10 +1519,27 @@ import Layout from '../layouts/Layout.astro';
       setTimeout(() => { try { chatTermFit.fit(); } catch {} }, 50);
       chatTerm.writeln('\x1b[1;38;5;177m⚡ haksterAi Chat Terminal\x1b[0m');
       chatTerm.writeln('\x1b[2;38;5;240mConnect to start using the shell.\x1b[0m\r\n');
-      chatTerm.onData((data: string) => {
-        if (chatTermWs && chatTermWs.readyState === WebSocket.OPEN) {
-          chatTermWs.send(JSON.stringify({ type: 'input', data }));
+      chatTerm.onData(async (data: string) => {
+        if (!chatTermWs || chatTermWs.readyState !== WebSocket.OPEN) return;
+        if (data === '\r') {
+          const command = chatTermInputLine.trim();
+          if (command && buildTerminalNeedsAllow(command) && !chatTermConfirming) {
+            chatTermConfirming = true;
+            const allowed = await confirmBuildTerminalCommand(command);
+            chatTermConfirming = false;
+            chatTermInputLine = '';
+            chatTermWs.send(JSON.stringify({ type: 'input', data: allowed ? '\r' : '\u0015' }));
+            return;
+          }
+          chatTermInputLine = '';
+        } else if (data === '\u007f') {
+          chatTermInputLine = chatTermInputLine.slice(0, -1);
+        } else if (data === '\u0015' || data === '\u0003') {
+          chatTermInputLine = '';
+        } else if (!/[\x00-\x08\x0b-\x1f\x7f]/.test(data)) {
+          chatTermInputLine = (chatTermInputLine + data).slice(-2000);
         }
+        chatTermWs.send(JSON.stringify({ type: 'input', data }));
       });
       chatTerm.onResize((size: any) => {
         if (chatTermWs && chatTermWs.readyState === WebSocket.OPEN) {
@@ -1266,6 +1556,8 @@ import Layout from '../layouts/Layout.astro';
       terminalStatus.style.color = '#fbbf24';
       const wsUrl = `${getWsBase()}/ws/pty`;
       chatTermWs = new WebSocket(wsUrl);
+      chatTermWs.binaryType = 'arraybuffer';
+      chatTermDecoder = chatTermDecoder || new TextDecoder('utf-8');
       chatTermWs.onopen = () => {
         terminalStatus.textContent = 'connected';
         terminalStatus.style.color = '#00ff88';
@@ -1274,12 +1566,21 @@ import Layout from '../layouts/Layout.astro';
       };
       chatTermWs.onmessage = (ev) => {
         try {
+          if (ev.data instanceof ArrayBuffer) {
+            enqueueChatTermWrite(chatTermDecoder!.decode(ev.data, { stream: true }));
+            return;
+          }
+          if (ev.data instanceof Blob) {
+            ev.data.arrayBuffer().then((buf) => enqueueChatTermWrite(chatTermDecoder!.decode(buf, { stream: true }))).catch(() => {});
+            return;
+          }
           const msg = JSON.parse(ev.data);
-          if (msg.type === 'output' || msg.type === 'data') chatTerm?.write(msg.data || '');
+          if (msg.type === 'output' || msg.type === 'data' || msg.type === 'pty') enqueueChatTermWrite(msg.data || '');
           else if (msg.type === 'error') chatTerm?.writeln(`\x1b[31m[Error] ${msg.error}\x1b[0m`);
         } catch {}
       };
       chatTermWs.onclose = () => {
+        _chatDecodeShown = false;  // Allow decode flash on reconnect
         terminalStatus.textContent = 'disconnected';
         terminalStatus.style.color = '#64748b';
         chatTerm?.writeln('\r\n\x1b[33m[Disconnected]\x1b[0m');
@@ -1320,7 +1621,7 @@ import Layout from '../layouts/Layout.astro';
     });
     window.addEventListener('resize', () => { try { chatTermFit?.fit(); } catch {} });
 
-    // ===== Pentester Agent =====
+    // ===== Security Review Agent =====
     const pentesterBtn = document.getElementById('pentester-btn')!;
     const pentesterPanel = document.getElementById('pentester-panel')!;
     const closePentesterPanel = document.getElementById('close-pentester-panel')!;
@@ -1377,7 +1678,7 @@ import Layout from '../layouts/Layout.astro';
       if (!target) { pentesterOutput.textContent = 'Please enter a target.'; return; }
       pentesterStatus.textContent = 'running...';
       pentesterRunBtn.disabled = true;
-      pentesterOutput.textContent = `🎯 Running pentester agent against ${target}...\n\n`;
+      pentesterOutput.textContent = `🎯 Running security review agent against ${target}...\n\n`;
       scrollPentesterOutput();
       try {
         const res = await fetch(`${API}/api/pentester/run`, {
@@ -1505,6 +1806,7 @@ import Layout from '../layouts/Layout.astro';
     let activeProjectCwd = localStorage.getItem('hakster-active-project-cwd') || '';
     let pendingImages: UploadedImage[] = [];
     let voiceEnabled = localStorage.getItem('hakster-voice-enabled') === '1';
+    let thinkingEnabled = localStorage.getItem('hakster-thinking-enabled') !== 'false';
     let recognition: any = null;
     let listening = false;
     let availableVoices: SpeechSynthesisVoice[] = [];
@@ -1867,7 +2169,7 @@ import Layout from '../layouts/Layout.astro';
         } else {
           bodyHtml = escapeHtml(msg.content);
         }
-        const allowBtn = isConfirmation ? `<button type="button" class="bubble-action" data-action="allow" title="Allow this command once">${allowIcon}<span>Allow</span></button><button type="button" class="bubble-action" data-action="allow-always" title="Add to permanent allow list">${pinIcon}<span>Always</span></button><button type="button" class="bubble-action" data-action="deny" title="Deny this command">${denyIcon}<span>Deny</span></button>` : '';
+        const allowBtn = isConfirmation ? `<button type="button" class="bubble-action" data-action="allow" title="Allow this command for this session">${allowIcon}<span>Allow this session</span></button><button type="button" class="bubble-action" data-action="allow-always" title="Add to permanent allow list">${pinIcon}<span>Always</span></button><button type="button" class="bubble-action" data-action="deny" title="Deny this command">${denyIcon}<span>Deny</span></button>` : '';
         bubble.innerHTML = `<div class="flex items-center justify-between gap-3 mb-1"><div class="text-[10px] font-semibold uppercase tracking-wider ${labelColor}">${label}</div><div class="flex items-center gap-1">${allowBtn}<button type="button" class="bubble-action" data-action="copy" title="Copy message">${copyIcon}<span class="copy-label">Copy</span></button><button type="button" class="bubble-action" data-action="paste" title="Paste into composer">${pasteIcon}<span>Paste</span></button></div></div><div class="${bodyClass}">${bodyHtml}</div>`;
         if (isAssistant || isScript) attachCodeCopyHandlers(bubble);
         const copyBtn = bubble.querySelector('[data-action="copy"]');
@@ -1897,7 +2199,7 @@ import Layout from '../layouts/Layout.astro';
             await fetch(`${API}/api/agent/allow`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ command: msg.command || '', permanent: false }),
+              body: JSON.stringify({ command: msg.command || '', permanent: false, sessionId: msg.sessionId || getActiveId() || undefined }),
             });
           } catch {}
           // Re-trigger the agent so it retries with the command now on the allowlist
@@ -1917,7 +2219,7 @@ import Layout from '../layouts/Layout.astro';
             await fetch(`${API}/api/agent/allow`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ command: msg.command || '', permanent: true }),
+              body: JSON.stringify({ command: msg.command || '', permanent: true, sessionId: msg.sessionId || getActiveId() || undefined }),
             });
           } catch {}
           // Re-trigger the agent so it retries with the command now permanently allowed
@@ -2318,6 +2620,26 @@ import Layout from '../layouts/Layout.astro';
       modeLabel.textContent = 'Agent';
       chatInput.focus();
     });
+    function updateThinkingBtn() {
+      if (!thinkingBtn) return;
+      if (thinkingEnabled) { thinkingBtn.classList.add('active'); if (thinkingLabel) thinkingLabel.textContent = 'Think'; }
+      else { thinkingBtn.classList.remove('active'); if (thinkingLabel) thinkingLabel.textContent = 'Quiet'; }
+    }
+    if (thinkingBtn) thinkingBtn.addEventListener('click', () => {
+      thinkingEnabled = !thinkingEnabled;
+      localStorage.setItem('hakster-thinking-enabled', thinkingEnabled ? 'true' : 'false');
+      updateThinkingBtn();
+      chatInput.focus();
+    });
+    updateThinkingBtn();
+    document.addEventListener('keydown', (e) => {
+      if (e.shiftKey && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        thinkingEnabled = !thinkingEnabled;
+        localStorage.setItem('hakster-thinking-enabled', thinkingEnabled ? 'true' : 'false');
+        updateThinkingBtn();
+      }
+    });
     if (askBtn) askBtn.addEventListener('click', (e) => { e.stopPropagation(); askDropdown.classList.toggle('hidden'); });
     document.addEventListener('click', () => askDropdown.classList.add('hidden'));
     clearBtn.addEventListener('click', () => { outputArea.innerHTML = ''; outputPanel.classList.add('hidden'); });
@@ -2340,7 +2662,7 @@ import Layout from '../layouts/Layout.astro';
 
     // ===== Core Send Message =====
     const IMAGE_INSTRUCTION = [
-      'You are the Hack tab agent.',
+      'You are the Chat tab agent.',
       'For any request to create, generate, design, draw, make, improve, upscale, or enhance a logo, picture, photo, avatar, icon, banner, cover, illustration, graphic, UI mockup, product image, or visual asset, you MUST call the generate_image tool.',
       'Do not answer image/logo requests with text-only advice unless the generate_image tool fails. After the tool returns, summarize the image and include the generated image event/result.',
       'For web/current info, use web_search first; for page content, use firecrawl_scrape.'
@@ -2376,6 +2698,7 @@ import Layout from '../layouts/Layout.astro';
           const res = await fetch(endpoint, {
             method: 'POST', headers: authHeaders,
             body: JSON.stringify({ provider: currentProvider, model, sessionId: conv.id, stream: true,
+              thinking: thinkingEnabled,
               cwd: activeProjectCwd || undefined,
               messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-10)] }),
           });
@@ -2856,6 +3179,12 @@ import Layout from '../layouts/Layout.astro';
             localStorage.removeItem('hakster_referral_code');
             (window as any).haksterSessionTouch?.();
             showGoogleUserBadge(data.user);
+            const postAuthRedirect = sessionStorage.getItem('hakster_post_auth_redirect');
+            if (postAuthRedirect) {
+              sessionStorage.removeItem('hakster_post_auth_redirect');
+              window.location.href = postAuthRedirect;
+              return;
+            }
           }
         } catch {}
         // Clean URL

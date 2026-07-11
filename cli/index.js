@@ -193,4 +193,63 @@ program
     }
   });
 
+// ── guardian ──────────────────────────────────────────────────────
+program
+  .command('guardian [args...]')
+  .description('Run Guardian pentest CLI commands (scan, recon, analyze, report, workflow)')
+  .option('-t, --timeout <ms>', 'Timeout in ms (default 120000)')
+  .allowUnknownOption()
+  .action(async (args, opts) => {
+    const { execFileSync } = require('child_process');
+    const wrapper = '/home/ghost/.local/bin/guardian-wrapper';
+    if (!fs.existsSync(wrapper)) {
+      console.error('guardian-wrapper not found. Install guardian-cli first.');
+      process.exit(1);
+    }
+    const timeout = parseInt(opts.timeout || '120000', 10);
+    const cmdArgs = args.join(' ');
+    if (!cmdArgs) {
+      console.log('Usage: hakster guardian <command> [options]');
+      console.log('');
+      console.log('Commands:');
+      console.log('  init         Initialize Guardian configuration');
+      console.log('  scan         Quick port scan using Nmap (e.g. scan --target 10.10.10.1)');
+      console.log('  recon        Run reconnaissance workflow (e.g. recon --target example.com)');
+      console.log('  analyze      Analyze scan results using AI');
+      console.log('  report       Generate penetration testing report');
+      console.log('  workflow     Run or list pentest workflows');
+      console.log('  ai           Explain AI decisions and reasoning');
+      console.log('  models       List available AI models');
+      console.log('  version      Show Guardian version');
+      console.log('  kb           Knowledge base maintenance');
+      console.log('');
+      console.log('Examples:');
+      console.log('  hakster guardian scan --target 10.10.10.1');
+      console.log('  hakster guardian recon --target example.com');
+      console.log('  hakster guardian workflow --list');
+      console.log('  hakster guardian report --format html');
+      return;
+    }
+    try {
+      const output = execFileSync(wrapper, args, {
+        encoding: 'utf8',
+        timeout,
+        maxBuffer: 6 * 1024 * 1024,
+        env: { ...process.env, CI: '1' },
+      });
+      console.log(output);
+    } catch (err) {
+      if (err.killed) {
+        console.error(`Guardian timed out after ${timeout}ms`);
+      } else {
+        const stdout = (err.stdout || '').replace(/\x1b\[[0-9;]*m/g, '');
+        const stderr = (err.stderr || '').replace(/\x1b\[[0-9;]*m/g, '');
+        if (stdout) console.log(stdout);
+        if (stderr) console.error(stderr);
+        if (!stdout && !stderr) console.error(`Guardian error: ${err.message}`);
+      }
+      process.exit(err.status || 1);
+    }
+  });
+
 program.parse();
