@@ -268,11 +268,47 @@ import Layout from '../layouts/Layout.astro';
       const el = document.getElementById(id);
       if (el) el.style.width = value;
     }
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[ch]));
+    }
+    function liveUrl(path) {
+      const sep = path.includes('?') ? '&' : '?';
+      return path + sep + '_=' + Date.now();
+    }
+    function liveFetch(path, options) {
+      return fetch(liveUrl(path), {
+        cache: 'no-store',
+        ...(options || {}),
+        headers: {
+          'Cache-Control': 'no-cache',
+          ...((options && options.headers) || {}),
+        },
+      });
+    }
+    let dashboardSeq = 0;
+    let dashboardRefreshTimer = null;
+    function queueDashboardRefresh(delay) {
+      clearTimeout(dashboardRefreshTimer);
+      dashboardRefreshTimer = setTimeout(() => {
+        loadDashboard();
+        loadMemoryStats();
+        loadRecentUsers();
+        loadActivityLog();
+      }, delay || 250);
+    }
     async function loadDashboard() {
+      const seq = ++dashboardSeq;
       try {
-        const res = await fetch('/api/dashboard');
+        const res = await liveFetch('/api/dashboard?live=1&compact=1');
         if (!res.ok) throw new Error('dashboard status ' + res.status);
         const data = await res.json();
+        if (seq !== dashboardSeq) return;
 
         // Top stats
         setText('stat-requests', Number(data.requests?.total || 0).toLocaleString());
@@ -354,7 +390,7 @@ import Layout from '../layouts/Layout.astro';
         document.getElementById('status-badge').className = 'text-xs text-[#00ff88] bg-[#111118] px-2 py-1 rounded-full border border-[#00ff88]/30';
 
         // Check for haksterAi updates
-        fetch('/api/crush-update').then(r => r.json()).then(u => {
+        liveFetch('/api/crush-update').then(r => r.json()).then(u => {
           document.getElementById('crush-version').textContent = u.currentVersion || '—';
           if (u.needsUpdate) {
             const banner = document.getElementById('crush-update-banner');
@@ -381,18 +417,28 @@ import Layout from '../layouts/Layout.astro';
           desc: s.desc || knownDescs[s.port] || (s.process || ''),
         }));
         const seen = new Set();
-        const unique = services.filter(s => { if (seen.has(s.port)) return false; seen.add(s.port); return true; });
+        const unique = services.filter(s => {
+          const key = [s.protocol || 'tcp', s.port, s.pid || s.process || '', s.bind || ''].join(':');
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
         servicesGrid.innerHTML = unique.sort((a,b) => a.port - b.port).map(s => {
           const statusColor = s.status === 'running' ? 'text-[#00ff88]' : 'text-[#ff4444]';
           const statusBg = s.status === 'running' ? 'bg-[#00ff88]/10 border-[#00ff88]/20' : 'bg-[#ff4444]/10 border-[#ff4444]/20';
+          const checked = s.checkedAt ? new Date(s.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'now';
+          const detail = [s.protocol ? s.protocol.toUpperCase() : 'TCP', s.process || '', s.pid ? `pid ${s.pid}` : ''].filter(Boolean).join(' · ');
+          const location = s.cwd || s.command || s.desc || '';
           return `<div class="flex items-center justify-between bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-4 py-3">
-            <div>
-              <div class="text-sm font-medium">${s.name}</div>
-              <div class="text-xs text-[#64748b]">${s.desc || s.process || ''}</div>
+            <div class="min-w-0 pr-3">
+              <div class="text-sm font-medium">${escapeHtml(s.name)}</div>
+              <div class="text-xs text-[#64748b] truncate">${escapeHtml(detail)}</div>
+              <div class="text-[10px] text-[#4b5563] truncate">${escapeHtml(location)}</div>
             </div>
-            <div class="flex items-center gap-3">
-              <span class="font-mono text-xs text-[#ffd700]">:${s.port}</span>
+            <div class="flex flex-col items-end gap-1 shrink-0">
+              <span class="font-mono text-xs text-[#ffd700]">${escapeHtml(s.bind || ':' + s.port)}</span>
               <span class="text-xs px-2 py-0.5 rounded-full border ${statusBg} ${statusColor}">${s.status}</span>
+              <span class="text-[9px] text-[#4b5563]">${checked}</span>
             </div>
           </div>`;
         }).join('');
@@ -445,13 +491,13 @@ import Layout from '../layouts/Layout.astro';
     }
 
     loadDashboard();
-    // Refresh every 15s
-    setInterval(loadDashboard, 15000);
+    // Keep counters live. WebSocket events below trigger immediate refreshes.
+    setInterval(loadDashboard, 5000);
 
     // Memory bank stats
     async function loadMemoryStats() {
       try {
-        const res = await fetch('/api/memory');
+        const res = await liveFetch('/api/memory');
         if (!res.ok) throw new Error('memory status ' + res.status);
         const data = await res.json();
         const entries = data.entries || data.memories || [];
@@ -471,7 +517,7 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     loadMemoryStats();
-    setInterval(loadMemoryStats, 30000);
+    setInterval(loadMemoryStats, 10000);
 
     // Autocompact clock
     let compactNextTime = null;
@@ -498,7 +544,7 @@ import Layout from '../layouts/Layout.astro';
     document.getElementById('compact-now-btn')?.addEventListener('click', async () => {
       try {
         document.getElementById('compact-status').textContent = 'Compacting...';
-        await fetch('/api/memory/compact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        await liveFetch('/api/memory/compact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         document.getElementById('compact-status').textContent = 'Done!';
         compactNextTime = new Date(new Date().getTime() + 15 * 60000);
         loadMemoryStats();
@@ -509,7 +555,7 @@ import Layout from '../layouts/Layout.astro';
     // Security health summary
     async function loadSecuritySummary() {
       try {
-        const res = await fetch('/api/health/security');
+        const res = await liveFetch('/api/health/security');
         if (!res.ok) throw new Error('security status ' + res.status);
         const data = await res.json();
         const counts = data.summary
@@ -535,7 +581,7 @@ import Layout from '../layouts/Layout.astro';
     // Recent users with IP tracking
     async function loadRecentUsers() {
       try {
-        const res = await fetch('/api/users/recent?limit=20');
+        const res = await liveFetch('/api/users/recent?limit=20');
         const data = await res.json();
         const list = document.getElementById('recent-users-list');
         if (!data.users || data.users.length === 0) {
@@ -573,12 +619,12 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     loadRecentUsers();
-    setInterval(loadRecentUsers, 30000);
+    setInterval(loadRecentUsers, 10000);
 
     // Activity log
     async function loadActivityLog() {
       try {
-        const res = await fetch('/api/users/activity?limit=50');
+        const res = await liveFetch('/api/users/activity?limit=50');
         const data = await res.json();
         const list = document.getElementById('activity-log-list');
         if (!data.activity || data.activity.length === 0) {
@@ -615,6 +661,28 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     loadActivityLog();
-    setInterval(loadActivityLog, 15000);
+    setInterval(loadActivityLog, 5000);
+
+    function connectDashboardLiveSocket() {
+      try {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socket = new WebSocket(proto + '//' + location.host + '/ws');
+        socket.addEventListener('open', () => {
+          setText('status-badge', 'live');
+        });
+        socket.addEventListener('message', (event) => {
+          let msg = null;
+          try { msg = JSON.parse(event.data); } catch { return; }
+          if (msg.type === 'notification' || msg.notificationType) queueDashboardRefresh(100);
+        });
+        socket.addEventListener('close', () => {
+          setText('status-badge', 'reconnecting...');
+          setTimeout(connectDashboardLiveSocket, 2000);
+        });
+      } catch {
+        setTimeout(connectDashboardLiveSocket, 5000);
+      }
+    }
+    connectDashboardLiveSocket();
   </script>
 </Layout>

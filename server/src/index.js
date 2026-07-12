@@ -186,10 +186,10 @@ function applyReferralCredit(db, newUser, rawReferralCode) {
 // ── In-memory caches ──────────────────────────────────────────────
 let _skillsCache = null;
 let _skillsCacheTime = 0;
-const SKILLS_CACHE_TTL = 300000; // 5 min
+const SKILLS_CACHE_TTL = 10000; // dashboard counters should stay live
 let _toolsCache = null;
 let _toolsCacheTime = 0;
-const TOOLS_CACHE_TTL = 300000; // 5 min
+const TOOLS_CACHE_TTL = 10000; // dashboard counters should stay live
 
 function walkMarkdownFiles(dir, maxFiles = 5000) {
   const files = [];
@@ -2970,8 +2970,17 @@ app.post('/api/images/analyze', async (req, res) => {
 
 // ── Stats ──────────────────────────────────────────────────────────
 // ── Dashboard stats ────────────────────────────────────────────────
-app.get('/api/dashboard', (_req, res) => {
+app.get('/api/dashboard', (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    if (req.query.live === '1') {
+      _skillsCache = null;
+      _skillsCacheTime = 0;
+      _toolsCache = null;
+      _toolsCacheTime = 0;
+    }
     const db = getDb();
 
     // Request stats
@@ -3000,44 +3009,105 @@ app.get('/api/dashboard', (_req, res) => {
     const freeMem = os.freemem();
     const uptime = os.uptime();
 
-    // Running servers / ports — dynamically detected
-    const runningServices = [];
+    // Running servers / ports — live detected from listeners, not stale hardcoded status.
     const knownServices = {
-      22: { name: 'SSH' },
-      80: { name: 'Apache' },
-      3579: { name: 'haksterAi' },
-      4040: { name: 'ngrok' },
-      8081: { name: 'CineVault' },
-      8888: { name: 'StalkerHEK' },
-      9999: { name: 'StalkerHEK-SSL' },
-      11434: { name: 'Ollama' },
-      20241: { name: 'cloudflared' },
+      22: { name: 'SSH', desc: 'Remote shell' },
+      80: { name: 'Web Server', desc: 'HTTP' },
+      443: { name: 'Web Server', desc: 'HTTPS' },
+      3000: { name: 'Node App', desc: 'Development server' },
+      3579: { name: 'haksterAi', desc: 'Main server' },
+      4000: { name: 'Phantom Server', desc: 'Local agent server' },
+      4040: { name: 'ngrok', desc: 'Tunnel UI' },
+      4321: { name: 'Astro Dev', desc: 'Astro development server' },
+      5173: { name: 'Vite', desc: 'Vite development server' },
+      8080: { name: 'Node App', desc: 'Local web app' },
+      8081: { name: 'CineVault', desc: 'Movie server' },
+      8888: { name: 'StalkerHEK', desc: 'IPTV portal' },
+      9999: { name: 'StalkerHEK-SSL', desc: 'IPTV SSL' },
+      11434: { name: 'Ollama', desc: 'Local LLM' },
+      20241: { name: 'cloudflared', desc: 'Cloudflare tunnel' },
     };
-    const hiddenProcesses = new Set(['systemd', 'systemd-resolve', 'cupsd', 'tor', 'containerd', 'obfs4proxy', 'warpinator', '.cline']);
-    try {
-      const { execFileSync } = require('child_process');
-      const ssOut = execFileSync('ss', ['-tlnp'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] });
-      const portMap = {};
-      for (const line of ssOut.split('\n').slice(1).filter(Boolean)) {
-        const parts = line.trim().split(/\s+/);
-        const address = parts[3] || '';
-        const info = parts.slice(6).join(' ');
-        const m = address.match(/:(\d+)$/);
-        if (m) portMap[m[1]] = info;
-      }
-      for (const [port, info] of Object.entries(portMap)) {
-        const procName = (info.match(/"([^"]+)"/) || [])[1] || info.split(/[\s(]/)[0].replace(/^users:/, '') || 'node';
-        if (hiddenProcesses.has(procName)) continue;
-        const known = knownServices[port];
-        runningServices.push({
-          name: known?.name || procName || 'unknown',
-          port: parseInt(port, 10),
+    const procInfo = (pid) => {
+      if (!pid) return {};
+      try {
+        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ');
+        let cwd = '';
+        try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch {}
+        return { cmd, cwd };
+      } catch { return {}; }
+    };
+    const serviceName = (port, proc, cmd, cwd) => {
+      const hay = `${proc || ''} ${cmd || ''} ${cwd || ''}`.toLowerCase();
+      if (hay.includes('haksterai')) return 'haksterAi';
+      if (hay.includes('cine-vault') || hay.includes('cinevault') || hay.includes('movie-site')) return 'CineVault';
+      if (hay.includes('ollama')) return 'Ollama';
+      if (hay.includes('cloudflared')) return 'cloudflared';
+      if (hay.includes('ngrok')) return 'ngrok';
+      if (hay.includes('astro')) return 'Astro Dev';
+      if (hay.includes('vite')) return 'Vite';
+      if (hay.includes('stalker')) return 'StalkerHEK';
+      return knownServices[port]?.name || proc || 'unknown';
+    };
+    const parseSs = (out, protocol) => {
+      const rows = [];
+      for (const raw of out.split('\n').filter(Boolean)) {
+        const line = raw.trim();
+        if (!line || line.startsWith('State ') || line.startsWith('Netid ')) continue;
+        const parts = line.split(/\s+/);
+        const local = parts.find((p) => /:\d+$/.test(p) || /\]:\d+$/.test(p));
+        if (!local) continue;
+        const portMatch = local.match(/:(\d+)$/);
+        if (!portMatch) continue;
+        const port = parseInt(portMatch[1], 10);
+        const userInfo = line.match(/users:\(\("([^"]+)",pid=(\d+),fd=\d+\)\)/);
+        const processName = userInfo?.[1] || '';
+        const pid = userInfo?.[2] ? parseInt(userInfo[2], 10) : null;
+        const { cmd, cwd } = procInfo(pid);
+        rows.push({
+          name: serviceName(port, processName, cmd, cwd),
+          port,
+          protocol,
+          bind: local,
           status: 'running',
-          process: procName,
+          process: processName || 'unknown',
+          pid,
+          command: cmd || processName || '',
+          cwd,
+          desc: knownServices[port]?.desc || cwd || cmd || processName || '',
+          checkedAt: new Date().toISOString(),
         });
       }
-    } catch {
-      runningServices.push({ name: 'haksterAi', port: PORT, status: 'running' });
+      return rows;
+    };
+    let runningServices = [];
+    try {
+      const { execFileSync } = require('child_process');
+      const tcpOut = execFileSync('ss', ['-H', '-tlnp'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] });
+      const udpOut = execFileSync('ss', ['-H', '-ulnp'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] });
+      const seen = new Set();
+      runningServices = [...parseSs(tcpOut, 'tcp'), ...parseSs(udpOut, 'udp')]
+        .filter((svc) => {
+          const key = `${svc.protocol}:${svc.port}:${svc.pid || svc.process}:${svc.bind}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((a, b) => a.port - b.port || a.protocol.localeCompare(b.protocol));
+    } catch (e) {
+      runningServices = [{
+        name: 'haksterAi',
+        port: PORT,
+        protocol: 'tcp',
+        bind: `:${PORT}`,
+        status: 'running',
+        process: 'node',
+        pid: process.pid,
+        command: process.argv.join(' '),
+        cwd: process.cwd(),
+        desc: 'Main server',
+        checkedAt: new Date().toISOString(),
+        warning: `service scan limited: ${e.message}`,
+      }];
     }
 
     // HaksterAi model config (separate from crush — crush overwrites its own config)
@@ -3051,11 +3121,12 @@ app.get('/api/dashboard', (_req, res) => {
     } catch {}
     let crushModel = haksterModel;
     let crushProvider = haksterProvider;
-    let skillsInventory = { total: 0, categories: {} };
+    const includeSkillList = req.query.compact !== '1';
+    let skillsInventory = { total: 0, categories: {}, skills: [] };
     let toolInventory = [];
     try {
       const inv = getSkillsInventory();
-      skillsInventory = { total: inv.total || 0, categories: inv.categories || {} };
+      skillsInventory = { total: inv.total || 0, categories: inv.categories || {}, skills: includeSkillList ? (inv.skills || []) : [] };
     } catch (e) { console.error('[dashboard] skills inventory error:', e.message); }
     try { toolInventory = getToolInventory(); } catch (e) { console.error('[dashboard] tool inventory error:', e.message); }
 
@@ -4072,9 +4143,10 @@ ptyWss.on('connection', (ws, req) => {
     const url = new URL(req.url || '/pty', 'http://localhost');
     ptyMode = url.searchParams.get('mode') === 'shell' ? 'shell' : 'crush';
   } catch {}
-  const crushBin = process.env.CRUSH_BIN || 'crush';
+  const crushBin = process.env.CRUSH_BIN || (fs.existsSync('/usr/local/bin/crush') ? '/usr/local/bin/crush' : 'crush');
   const shellBin = process.env.TERMINAL_SHELL || process.env.SHELL || '/bin/bash';
-  const workDir = process.env.TERMINAL_CWD || process.env.FS_ROOT || '/home/ghost';
+  const defaultTerminalCwd = fs.existsSync('/home/ghost/haksterAi') ? '/home/ghost/haksterAi' : '/home/ghost';
+  const workDir = process.env.TERMINAL_CWD || process.env.FS_ROOT || defaultTerminalCwd;
 
   // Sync haksterAi model config into crush config before spawning crush
   // so crush always starts with the user's selected model, not cerebras default
@@ -4089,23 +4161,24 @@ ptyWss.on('connection', (ws, req) => {
     if (!crushCfg.models.small) crushCfg.models.small = {};
     if (hakCfg.model) { crushCfg.models.large.model = hakCfg.model; crushCfg.models.small.model = hakCfg.model; }
     if (hakCfg.provider) { crushCfg.models.large.provider = hakCfg.provider; crushCfg.models.small.provider = hakCfg.provider; }
+    fs.mkdirSync(path.dirname(crushDataPath), { recursive: true });
     fs.writeFileSync(crushDataPath, JSON.stringify(crushCfg, null, 2));
     // Update config file (what crush reads on startup)
     const crushConfigPath = path.join(os.homedir(), '.config/crush/crush.json');
-    try {
-      let crushConf = JSON.parse(fs.readFileSync(crushConfigPath, 'utf8'));
-      crushConf.models = crushConf.models || {};
-      crushConf.models.large = crushConf.models.large || {};
-      crushConf.models.small = crushConf.models.small || {};
-      if (hakCfg.model) { crushConf.models.large.model = hakCfg.model; crushConf.models.small.model = hakCfg.model; }
-      if (hakCfg.provider) { crushConf.models.large.provider = hakCfg.provider; crushConf.models.small.provider = hakCfg.provider; }
-      fs.writeFileSync(crushConfigPath, JSON.stringify(crushConf, null, 2));
-    } catch {}
+    let crushConf = {};
+    try { crushConf = JSON.parse(fs.readFileSync(crushConfigPath, 'utf8')); } catch {}
+    crushConf.models = crushConf.models || {};
+    crushConf.models.large = crushConf.models.large || {};
+    crushConf.models.small = crushConf.models.small || {};
+    if (hakCfg.model) { crushConf.models.large.model = hakCfg.model; crushConf.models.small.model = hakCfg.model; }
+    if (hakCfg.provider) { crushConf.models.large.provider = hakCfg.provider; crushConf.models.small.provider = hakCfg.provider; }
+    fs.mkdirSync(path.dirname(crushConfigPath), { recursive: true });
+    fs.writeFileSync(crushConfigPath, JSON.stringify(crushConf, null, 2));
   } catch {}
 
   try {
     const spawnBin = ptyMode === 'shell' ? shellBin : crushBin;
-    const spawnArgs = ptyMode === 'shell' ? ['-l'] : [];
+    const spawnArgs = ptyMode === 'shell' ? ['-l'] : ['--cwd', workDir];
     ptyProcess = pty.spawn(spawnBin, spawnArgs, {
       name: 'xterm-256color',
       cols: 120,
@@ -4132,23 +4205,27 @@ ptyWss.on('connection', (ws, req) => {
     }
   }, 5000);
 
-  // PTY output → browser — short batching keeps noisy commands from flooding the UI.
+  // PTY output -> browser. Batch normal text by roughly 10 lines while still
+  // flushing TUI screen updates quickly enough for Crush to feel live.
   let ptyOutBuffer = '';
   let ptyOutTimer = null;
+  let ptyOutLineCount = 0;
   const flushPtyOutput = () => {
     ptyOutTimer = null;
     if (ws.readyState !== 1 || !ptyOutBuffer) return;
     const out = ptyOutBuffer;
     ptyOutBuffer = '';
+    ptyOutLineCount = 0;
     try { ws.send(Buffer.from(out, 'utf8'), { binary: true }); } catch {}
   };
   ptyProcess.onData((data) => {
     if (ws.readyState !== 1) return;
     ptyOutBuffer += data;
-    if (ptyOutBuffer.length >= 65536) {
+    ptyOutLineCount += (data.match(/\n/g) || []).length;
+    if (ptyOutBuffer.length >= 65536 || ptyOutLineCount >= 10) {
       flushPtyOutput();
     } else if (!ptyOutTimer) {
-      ptyOutTimer = setTimeout(flushPtyOutput, 12);
+      ptyOutTimer = setTimeout(flushPtyOutput, ptyMode === 'crush' ? 16 : 40);
     }
   });
 
