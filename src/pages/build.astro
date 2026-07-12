@@ -507,11 +507,21 @@ import Layout from '../layouts/Layout.astro';
     .output-result { color: #f1f5f9; }
     .output-thinking { color: #38bdf8; opacity: 0.9; }
     /* Message styles moved to Ink & grid section below */
-    .bubble-action { display: inline-flex; align-items: center; justify-content: center; gap: 0.2rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); padding: 0.12rem 0.4rem; font-size: 0.55rem; color: rgba(255,255,255,0.45); transition: all 0.15s; cursor: pointer; }
+    .bubble-action { display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); padding: 0.2rem 0.55rem; font-size: 0.625rem; color: rgba(255,255,255,0.5); transition: all 0.15s; cursor: pointer; }
     .bubble-action:hover { color: #fff; border-color: rgba(124,58,237,0.4); background: rgba(124,58,237,0.12); }
     .bubble-action.copied { color: #34d399; border-color: rgba(52,211,153,0.5); background: rgba(52,211,153,0.1); }
-    .bubble-action svg { width: 9px; height: 9px; flex-shrink: 0; }
-    .bubble-action .copy-label, .bubble-action span { font-size: 0.55rem; }
+    .bubble-action svg { width: 11px; height: 11px; flex-shrink: 0; }
+    .bubble-action .copy-label, .bubble-action span { font-size: 0.625rem; }
+    /* ── Separator between bubble header (label + actions) and body ── */
+    .msg-bubble > div:first-child {
+      padding-bottom: 0.45rem;
+      margin-bottom: 0.55rem;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .msg-bubble > div:first-child .bubble-action { opacity: 0.7; }
+    .msg-bubble > div:first-child:hover .bubble-action { opacity: 1; }
+    /* The message body gets clear top separation from the controls */
+    .msg-bubble .msg-body { padding-top: 0.1rem; }
     .code-block-wrapper { position: relative; }
     .code-block-wrapper .code-copy-btn { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity 0.15s; }
     .code-block-wrapper:hover .code-copy-btn { opacity: 1; }
