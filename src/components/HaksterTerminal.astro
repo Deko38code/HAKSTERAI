@@ -1,7 +1,7 @@
 ---
 /**
- * Reusable haksterAi Terminal component — v2
- * Full-screen, fast, polished.
+ * Reusable haksterAi Terminal component — v3 (based on CrushTerminal)
+ * Full-screen, fast, polished. Supports shell & crush pty modes.
  * Props:
  *   id - unique DOM id (default: 'hakster-terminal')
  *   autoStart - legacy prop
@@ -115,12 +115,10 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
   .crush-term-panel .pane-term .xterm-rows span { background-color: transparent !important; }
   .crush-term-panel .pane-term .xterm-screen canvas { background: transparent !important; background-color: transparent !important; }
   .crush-term-panel .pane-border { background: rgba(30,30,46,0.5) !important; }
-  .crush-term-panel .xterm-viewport { scrollbar-color: #7c3aed transparent; scrollbar-width: thin; }
-  .crush-term-panel .xterm-viewport::-webkit-scrollbar { width: 8px; height: 8px; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar { width: 6px; }
   .crush-term-panel .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
-  .crush-term-panel .xterm-viewport::-webkit-scrollbar-thumb { background: #1e1e2e; border-radius: 999px; }
+  .crush-term-panel .xterm-viewport::-webkit-scrollbar-thumb { background: #1e1e2e; border-radius: 3px; }
   .crush-term-panel .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
-  .crush-term-panel .xterm-viewport::-webkit-scrollbar-corner { background: transparent; }
   .crush-scroll-btn:hover { background: rgba(124,58,237,1) !important; transform: scale(1.1); }
   .crush-theme-btn:hover { opacity: 0.85; transform: scale(1.05); }
   .crush-theme-btn:active { transform: scale(0.95); }
@@ -128,7 +126,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
   .crush-weight-btn:active { transform: scale(0.95); }
   /* Split pane styles — dynamic elements need global scope */
   .crush-term-root .pane-wrapper { position: relative; display: flex; flex-direction: column; overflow: hidden; flex: 1 1 0%; min-width: 0; min-height: 0; }
-  .crush-term-root .pane-term { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; background: transparent; padding: 0 0 0 42px; }
+  .crush-term-root .pane-term { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; background: transparent; padding: 0; }
   .crush-term-root .pane-border { position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: #1e1e2e; transition: background 0.2s; z-index: 5; }
   .crush-term-root .pane-wrapper.active-pane > .pane-border { background: #7c3aed; }
   .crush-term-root .split-container { display: flex; flex: 1 1 0%; min-height: 0; min-width: 0; overflow: hidden; }
@@ -139,76 +137,6 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
   .crush-term-root .split-handle:active { background: #7c3aed; }
   .crush-term-root .split-handle.handle-vertical { width: 4px; cursor: col-resize; }
   .crush-term-root .split-handle.handle-horizontal { height: 4px; cursor: row-resize; }
-  .crush-term-root .pane-term::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: 40px;
-    z-index: 4;
-    pointer-events: none;
-    background: linear-gradient(180deg, rgba(0,255,136,0.08), rgba(124,58,237,0.08));
-    border-right: 1px solid rgba(0,255,136,0.22);
-  }
-  .crush-term-root .pane-wrapper.active-pane > .pane-term::before {
-    border-right-color: rgba(192,132,252,0.55);
-    box-shadow: 0 0 14px rgba(124,58,237,0.22);
-  }
-  .crush-term-root .pane-term .xterm-rows { counter-reset: hk-term-line; }
-  .crush-term-root .pane-term .xterm-rows > div {
-    counter-increment: hk-term-line;
-    position: relative;
-  }
-  .crush-term-root .pane-term .xterm-rows > div::before {
-    content: counter(hk-term-line);
-    position: absolute;
-    left: -40px;
-    width: 32px;
-    padding-right: 6px;
-    text-align: right;
-    color: rgba(125,211,252,0.46);
-    font-size: 0.72em;
-    pointer-events: none;
-    user-select: none;
-  }
-  .crush-term-root .pane-term .xterm-rows > div:nth-child(8n+1)::before { color: rgba(0,255,136,0.58); }
-  .crush-term-root .pane-term .xterm-rows > div:nth-child(8n+3)::before { color: rgba(192,132,252,0.62); }
-  .crush-term-root .pane-term .xterm-rows > div:nth-child(8n+5)::before { color: rgba(251,191,36,0.58); }
-  .crush-term-root .pane-term .xterm-rows > div:nth-child(8n+7)::before { color: rgba(34,211,238,0.58); }
-  .crush-term-root .pane-term .xterm-rows > div:nth-child(12n+1) { box-shadow: inset 3px 0 rgba(0,255,136,0.26); }
-  .crush-term-root .pane-term .xterm-rows > div:nth-child(12n+5) { box-shadow: inset 3px 0 rgba(192,132,252,0.28); }
-  .crush-term-root .pane-term .xterm-rows > div:nth-child(12n+9) { box-shadow: inset 3px 0 rgba(251,191,36,0.22); }
-  .crush-term-panel:fullscreen,
-  .crush-term-panel:-webkit-full-screen {
-    position: fixed !important;
-    inset: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    max-width: 100vw !important;
-    max-height: 100vh !important;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    background: #06090f !important;
-  }
-  .crush-term-panel:fullscreen .crush-term-root,
-  .crush-term-panel:-webkit-full-screen .crush-term-root,
-  .crush-term-panel:fullscreen .pane-wrapper,
-  .crush-term-panel:-webkit-full-screen .pane-wrapper,
-  .crush-term-panel:fullscreen .pane-term,
-  .crush-term-panel:-webkit-full-screen .pane-term,
-  .crush-term-panel:fullscreen .xterm,
-  .crush-term-panel:-webkit-full-screen .xterm,
-  .crush-term-panel:fullscreen .xterm-viewport,
-  .crush-term-panel:-webkit-full-screen .xterm-viewport,
-  .crush-term-panel:fullscreen .xterm-screen,
-  .crush-term-panel:-webkit-full-screen .xterm-screen {
-    min-height: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    max-height: none !important;
-  }
 </style>
 
 <link rel="stylesheet" href="/css/xterm.css" />
@@ -223,131 +151,6 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
   const BORDER_INACTIVE = '#1e1e2e';
   const PREFIX_MS = 1500;
   const PTY_MODE = ptyMode === 'shell' ? 'shell' : 'crush';
-  const TERM_SESSION_KEY = `hakster:terminal-session:${TID}`;
-  const TERM_ALLOW_KEY = `hakster:terminal-allowed:${TID}`;
-  const DANGEROUS_TERMINAL_PATTERNS = [
-    /\brm\s+(-rf?|--force|--recursive)/i,
-    /\brm\s+.*\//i,
-    /\bshutdown\b/i,
-    /\breboot\b/i,
-    /\bhalt\b/i,
-    /\bpoweroff\b/i,
-    /\bfdisk\b/i,
-    /\bmkfs\b/i,
-    /\bdd\s+if=/i,
-    /\bformat\b/i,
-    /\bchmod\s+(-R\s+)?777/i,
-    /\bchown\s+.*root/i,
-    /\bkill\s+-9\s+/i,
-    /\bkillall\b/i,
-    /\bpkill\s+-9/i,
-    /\bfuser\s+-k\b/i,
-    /\bnpm\s+publish/i,
-    /\bgit\s+push\s+.*--force/i,
-    /\bgit\s+reset\s+--hard/i,
-    /\bgit\s+clean\s+-fd/i,
-    /\bdocker\s+(rm|rmi|system\s+prune)/i,
-    /\bsystemctl\s+(stop|disable|restart)\s+(ssh|nginx|apache|mysql|postgres)/i,
-    /\bsystemctl\s+(mask|daemon-reload)\b/i,
-    /\biptables\s+-F/i,
-    /\bcurl.*\|\s*(ba)?sh/i,
-    /\bwget.*\|\s*(ba)?sh/i,
-    /\btruncate\s+-s\s+0\b/i,
-    /\bcrontab\s+-r\b/i,
-    /\bwipefs\b/i,
-    /\bsgdisk\b/i,
-  ];
-
-  function getTerminalSessionId() {
-    let sid = sessionStorage.getItem(TERM_SESSION_KEY);
-    if (!sid) {
-      sid = `term-${TID}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      sessionStorage.setItem(TERM_SESSION_KEY, sid);
-    }
-    return sid;
-  }
-
-  function getAllowedTerminalCommands() {
-    try { return new Set(JSON.parse(sessionStorage.getItem(TERM_ALLOW_KEY) || '[]')); }
-    catch { return new Set(); }
-  }
-
-  function isTerminalCommandAllowed(command) {
-    const cmd = (command || '').trim();
-    if (!cmd) return true;
-    const allowed = getAllowedTerminalCommands();
-    if (allowed.has(cmd)) return true;
-    for (const item of allowed) if (cmd.startsWith(item)) return true;
-    return false;
-  }
-
-  function commandNeedsSessionAllow(command) {
-    const cmd = (command || '').trim();
-    if (!cmd || isTerminalCommandAllowed(cmd) || isPermanentlyAllowed(cmd)) return false;
-    return DANGEROUS_TERMINAL_PATTERNS.some((pat) => pat.test(cmd));
-  }
-
-  function rememberTerminalAllow(command, permanent) {
-    const cmd = (command || '').trim();
-    if (!cmd) return;
-    const storage = permanent ? localStorage : sessionStorage;
-    const key = permanent ? 'hakster:terminal-allowed:always' : TERM_ALLOW_KEY;
-    let items = [];
-    try { items = JSON.parse(storage.getItem(key) || '[]'); } catch {}
-    if (!items.includes(cmd)) items.push(cmd);
-    storage.setItem(key, JSON.stringify(items));
-  }
-
-  function isPermanentlyAllowed(command) {
-    const cmd = (command || '').trim();
-    try {
-      const items = JSON.parse(localStorage.getItem('hakster:terminal-allowed:always') || '[]');
-      return items.some((item) => cmd === item || cmd.startsWith(item));
-    } catch { return false; }
-  }
-
-  function showTerminalAllowPopup(command) {
-    return new Promise((resolve) => {
-      const existing = document.querySelector('.hakster-allow-session-popup');
-      if (existing) existing.remove();
-      const wrap = document.createElement('div');
-      wrap.className = 'hakster-allow-session-popup';
-      wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:18px;';
-      wrap.innerHTML = `
-        <div style="width:min(520px,100%);background:#0b0b12;border:1px solid rgba(239,68,68,.45);border-radius:8px;box-shadow:0 24px 80px rgba(0,0,0,.55);padding:16px;font-family:JetBrains Mono,monospace;color:#e5e7eb;">
-          <div style="font-weight:800;color:#f87171;font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">Confirm command</div>
-          <div style="font-size:12px;color:#cbd5e1;margin-bottom:10px;">This terminal command needs approval before it runs.</div>
-          <pre style="white-space:pre-wrap;word-break:break-word;max-height:170px;overflow:auto;background:#050509;border:1px solid #1f2937;border-radius:6px;padding:10px;color:#f8fafc;font-size:12px;margin:0 0 14px;">${String(command).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</pre>
-          <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
-            <button data-choice="deny" style="background:#111827;color:#fca5a5;border:1px solid #374151;border-radius:6px;padding:8px 10px;font-weight:700;cursor:pointer;">Deny</button>
-            <button data-choice="always" style="background:#1f2937;color:#fde68a;border:1px solid #4b5563;border-radius:6px;padding:8px 10px;font-weight:700;cursor:pointer;">Always</button>
-            <button data-choice="session" style="background:#7c3aed;color:white;border:1px solid #a855f7;border-radius:6px;padding:8px 10px;font-weight:800;cursor:pointer;">Allow this session</button>
-          </div>
-        </div>`;
-      const finish = (choice) => { wrap.remove(); resolve(choice); };
-      wrap.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-choice]');
-        if (btn) finish(btn.dataset.choice);
-        else if (e.target === wrap) finish('deny');
-      });
-      document.body.appendChild(wrap);
-    });
-  }
-
-  async function confirmTerminalCommand(command) {
-    const cmd = (command || '').trim();
-    if (!cmd || isPermanentlyAllowed(cmd) || !commandNeedsSessionAllow(cmd)) return true;
-    const choice = await showTerminalAllowPopup(cmd);
-    if (choice === 'deny') return false;
-    const permanent = choice === 'always';
-    rememberTerminalAllow(cmd, permanent);
-    fetch('/api/agent/allow', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: cmd, permanent, sessionId: getTerminalSessionId() }),
-    }).catch(() => {});
-    return true;
-  }
 
   // ══════════════════════════════════════════════════════════════════
   // ── HAKSTER AI — Visual Decode Effect v2 ─────────────────────────
@@ -361,7 +164,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
   let _decodeShown = false;  // Only show once per connection
   const _SC_CHARS = '▓░▒█⧫⬡アイウ∀∃∂∇◆◈⬢▄▀■▫⯃※✦✧⟐⟑⟒ждлофцшщыъ⬡⬢⬔⬖⬗⬘⬙⬚⟰⟱⟲⟳⟴⟵⟶⟷';
   const _SC_COLORS = ['#7c3aed','#a855f7','#c084fc','#e879f9','#22d3ee','#34d399','#f472b6','#fbbf24','#00ff88','#ff6b6b','#00bfff','#ffd700'];
-  const _DECODE_WORDS = ['HAKSTERAI','CRACKING','CODE','SCRAMBLER','DECODER','CIPHER','DECRYPT','UNLOCK','TRACE','CONNECT','DECODE','EXEC','AGENT','TERMINAL','SHELL','TASK','NEURAL','PROCESS','RUN','LOAD','SYNC','READY','ONLINE','STREAM','DATA','PARSE','SCAN','INIT','BOOT','LINK','NET','BUILD','DEPLOY','COMMIT','PUSH','PATCH','MERGE','TEST','DEBUG','LOG','PIPE','THREAD','DAEMON','KERNEL','STACK','HEAP','CACHE','BLOCK','CHAIN','HASH','ENCRYPT','VERIFY','AUTH','SOCKET','PORT','PROXY','ROUTE','BRIDGE','TUNNEL','PROTOCOL','HANDSHAKE','NEGOTIATE','UPGRADE','TRANSFORM','COMPILE','OPTIMIZE','RENDER','PIPELINE','PARALLEL','ASYNC','AWAIT','PROMISE','RESOLVE','YIELD','GENERATOR','ITERATOR','DISPATCH','REDUCE','MAP','FILTER','SORT','MERGE','SLICE','SPLICE','CONCAT','JOIN','SPLIT','TRIM','REPLACE','SEARCH','MATCH','TEST'];
+  const _DECODE_WORDS = ['HAKSTERAI','CRUSH','CONNECT','DECODE','EXEC','AGENT','TERMINAL','SHELL','TASK','NEURAL','PROCESS','RUN','LOAD','SYNC','READY','ONLINE','STREAM','DATA','PARSE','SCAN','INIT','BOOT','LINK','NET','CODE','BUILD','DEPLOY','COMMIT','PUSH','PATCH','MERGE','TEST','SCAN','DEBUG','TRACE','LOG','PIPE','FORK','THREAD','DAEMON','KERNEL','STACK','HEAP','CACHE','BLOCK','CHAIN','HASH','ENCRYPT','VERIFY','AUTH','SOCKET','PORT','PROXY','ROUTE','BRIDGE','TUNNEL','PROTOCOL','HANDSHAKE','NEGOTIATE','UPGRADE','TRANSFORM','COMPILE','OPTIMIZE','RENDER','PIPELINE','PARALLEL','ASYNC','AWAIT','PROMISE','RESOLVE','REJECT','YIELD','GENERATOR','ITERATOR','OBSERVABLE','SUBSCRIBE','EMIT','DISPATCH','REDUCE','MAP','FILTER','SORT','MERGE','SLICE','SPLICE','CONCAT','JOIN','SPLIT','TRIM','REPLACE','SEARCH','MATCH','TEST','EXEC'];
   function _randomLine(len) {
     let s = '';
     for (let i = 0; i < len; i++) s += _SC_CHARS[Math.floor(Math.random() * _SC_CHARS.length)];
@@ -424,11 +227,11 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     const termWidth = terminalPanel.offsetWidth || 800;
     const charsPerLine = Math.floor((termWidth - 20) / 8);
     const CHUNK_SIZE = 10;
-    const SCRAMBLE_MS = 280;   // pure scramble before lock-in starts
-    const LOCKIN_MS = 500;     // ms for each line to lock in left-to-right
-    const CHUNK_STAGGER = 40;  // ms delay between each 10-line chunk
-    const FADE_START = 200;    // ms after full lock-in to start fading
-    const FADE_DURATION = 400; // ms for the fade-out
+    const SCRAMBLE_MS = 280;
+    const LOCKIN_MS = 500;
+    const CHUNK_STAGGER = 40;
+    const FADE_START = 200;
+    const FADE_DURATION = 400;
 
     const lines = [];
     for (let i = 0; i < numLines; i++) {
@@ -452,7 +255,6 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
 
     function frame(now) {
       const elapsed = now - startTime;
-      // Calculate when the last line finishes locking in
       const lastLockinEnd = SCRAMBLE_MS + (totalChunks - 1) * CHUNK_STAGGER + LOCKIN_MS;
       const fadeOutStart = lastLockinEnd + FADE_START;
       const fadeOutEnd = fadeOutStart + FADE_DURATION;
@@ -464,24 +266,20 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
         return;
       }
 
-      // Fade out phase
       if (elapsed > fadeOutStart) {
         const fadeProgress = (elapsed - fadeOutStart) / FADE_DURATION;
         overlay.style.opacity = String(Math.max(0, 1 - fadeProgress));
       }
 
-      // Update each line
       let allResolved = true;
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lineStartLockin = SCRAMBLE_MS + line.chunkIndex * CHUNK_STAGGER;
 
         if (elapsed < lineStartLockin) {
-          // Pure scramble — rapidly cycle random chars
           line.el.textContent = _randomLine(line.charCount);
           allResolved = false;
         } else {
-          // Lock-in phase — characters resolve left-to-right
           const lockinProgress = Math.min(1, (elapsed - lineStartLockin) / LOCKIN_MS);
           const resolvedCount = Math.floor(line.charCount * lockinProgress);
           if (resolvedCount < line.charCount) allResolved = false;
@@ -494,7 +292,6 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
             line.el.textContent = line.finalText;
           }
 
-          // Reduce glow as lock-in progresses
           if (lockinProgress < 0.3) {
             line.el.style.textShadow = '0 0 12px currentColor, 0 0 24px currentColor';
           } else if (lockinProgress < 0.6) {
@@ -507,7 +304,6 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
         }
       }
 
-      // When all lines resolved, switch to final text and start fade
       if (allResolved && elapsed >= lastLockinEnd) {
         for (let i = 0; i < lines.length; i++) {
           lines[i].el.textContent = lines[i].finalText;
@@ -642,41 +438,11 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     pane._ft = setTimeout(() => {
       try { pane.fit.fit(); } catch {}
       if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'resize', cols: pane.term.cols, rows: pane.term.rows }));
-    }, 16);
+    }, 80);
   }
 
   function refitAll() {
-    setTimeout(() => { panes.forEach(p => { try { p.fit.fit(); } catch {} if (p.ws?.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify({ type: 'resize', cols: p.term.cols, rows: p.term.rows })); }); }, 16);
-  }
-
-  function refitSoon() {
-    refitAll();
-    setTimeout(refitAll, 50);
-  }
-
-  function getFullscreenElement() {
-    return document.fullscreenElement || document.webkitFullscreenElement || null;
-  }
-
-  function updateFullscreenUi() {
-    const isFull = getFullscreenElement() === terminalPanel;
-    if (!fullscreenBtn) return;
-    fullscreenBtn.title = isFull ? 'Exit fullscreen (F11)' : 'Fullscreen (F11)';
-    fullscreenBtn.setAttribute('aria-label', fullscreenBtn.title);
-  }
-
-  function toggleFullscreen() {
-    if (!terminalPanel) return;
-    const fsEl = getFullscreenElement();
-    const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
-    const requestFullscreen = terminalPanel.requestFullscreen || terminalPanel.webkitRequestFullscreen;
-    if (fsEl) {
-      if (exitFullscreen) Promise.resolve(exitFullscreen.call(document)).finally(refitSoon);
-      else refitSoon();
-      return;
-    }
-    if (requestFullscreen) Promise.resolve(requestFullscreen.call(terminalPanel)).finally(refitSoon);
-    else refitSoon();
+    setTimeout(() => { panes.forEach(p => { try { p.fit.fit(); } catch {} if (p.ws?.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify({ type: 'resize', cols: p.term.cols, rows: p.term.rows })); }); }, 100);
   }
 
   // Force xterm's injected style element to use our foreground color.
@@ -723,11 +489,6 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     pane.reconnAttempts = 0;
 
     pane.ws.onopen = () => {
-      if (pane.closedByUser) {
-        pane.intentionalClose = true;
-        try { pane.ws.close(); } catch {}
-        return;
-      }
       pane.intentionalClose = false;
       updateStatus('connected');
       const d = pane.fit.proposeDimensions();
@@ -762,16 +523,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
         }
         const m = JSON.parse(ev.data);
         if (m.type === 'pong') { if (latencyEl) latencyEl.textContent = Math.round(performance.now() - pingSendTime) + 'ms'; return; }
-        if (m.type === 'exit') {
-          pane.intentionalClose = true;
-          pane.closedByUser = true;
-          clearInterval(pane._ping);
-          clearTimeout(pane._rt);
-          updateStatus('disconnected');
-          pane.term.write('\r\n\x1b[90m[Connection closed]\x1b[0m\r\n');
-          try { pane.ws?.close(); } catch {}
-          return;
-        }
+        if (m.type === 'exit') { updateStatus('disconnected'); pane.term.write('\r\n\x1b[90m[Connection closed]\x1b[0m\r\n'); return; }
         if (m.type === 'pty' && pane.term) {
           enqueuePtyWrite(m.data);
         }
@@ -782,7 +534,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
       pane.ws = null;
       if (pane.intentionalClose) return;
       if (pane.reconnAttempts >= 10) { pane.term.writeln('\r\n\x1b[31mReconnect failed.\x1b[0m'); return; }
-      const delay = Math.min(100 * (2 ** pane.reconnAttempts), 2000);
+      const delay = Math.min(1000 * (2 ** pane.reconnAttempts), 15000);
       pane.reconnAttempts++;
       if (active === pane) updateStatus('connecting');
       clearTimeout(pane._rt);
@@ -810,7 +562,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     const term = new Terminal({
       theme: currentTheme, fontFamily: 'JetBrains Mono, monospace', fontSize: parseInt(localStorage.getItem(TID + '-fontSize') || '15'), lineHeight: (parseInt(localStorage.getItem(TID + '-lineHeight') || '12')) / 10,
       fontWeight: localStorage.getItem(TID + '-fontWeight') === 'bold' ? 'bold' : 'normal',
-      letterSpacing: 0, cursorBlink: true, cursorStyle: 'bar', scrollback: 12000,
+      letterSpacing: 0, cursorBlink: true, cursorStyle: 'bar', scrollback: 50000,
       fastScrollModifier: 'alt', fastScrollSensitivity: 10, scrollSensitivity: 1,
       smoothScrollDuration: 0, convertEol: false, rightClickSelectsWord: true,
       macOptionIsMeta: true, allowProposedApi: true, allowTransparency: true, scrollbarWidth: 6, rendererType: 'dom',
@@ -838,8 +590,8 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     // Set initial foreground CSS variable
     terminalPanel?.style.setProperty('--term-fg', currentTheme.foreground || '#00ff88');
     forceXtermForegroundColor();
-    // Run once after xterm finishes rendering (fast debounce)
-    setTimeout(() => { forceXtermTransparency(); forceXtermForegroundColor(); }, 50);
+    // Run once after xterm finishes rendering (300ms debounce)
+    setTimeout(() => { forceXtermTransparency(); forceXtermForegroundColor(); }, 300);
     // Run on resize only (not on every keystroke mutation!)
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(() => { forceXtermTransparency(); forceXtermForegroundColor(); });
@@ -859,8 +611,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
       term, fit, ws: null, el: wrapper, _termDiv: termDiv, _border: border,
       _ft: null, _rt: null, _ping: null, _ro: null,
       _writeBuf: '', _writeRaf: null, _scrollRaf: null,
-      _inputLine: '', _confirmingCommand: false,
-      active: false, autoScroll: true, reconnAttempts: 0, intentionalClose: false, closedByUser: false,
+      active: false, autoScroll: true, reconnAttempts: 0, intentionalClose: false,
     };
     wrapper._paneRef = pane;
 
@@ -870,36 +621,15 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     ro.observe(termDiv);
     pane._ro = ro;
 
-    term.onData(async (data) => {
-      if (pane.ws?.readyState !== WebSocket.OPEN) return;
-      if (data === '\r') {
+    term.onData((data) => {
+      if (pane.ws?.readyState === WebSocket.OPEN) {
         // ── Trigger decode flash on every command typed ──
-        _decodeShown = false;
-        showDecodeFlash(pane.term.rows);
-
-        const command = (pane._inputLine || '').trim();
-        if (command && commandNeedsSessionAllow(command) && !pane._confirmingCommand) {
-          pane._confirmingCommand = true;
-          const allowed = await confirmTerminalCommand(command);
-          pane._confirmingCommand = false;
-          if (allowed) {
-            pane._inputLine = '';
-            pane.ws?.send(JSON.stringify({ type: 'input', data: '\r' }));
-          } else {
-            pane._inputLine = '';
-            pane.ws?.send(JSON.stringify({ type: 'input', data: '\u0015' }));
-          }
-          return;
+        if (data === '\r') {
+          _decodeShown = false;
+          showDecodeFlash(pane.term.rows);
         }
-        pane._inputLine = '';
-      } else if (data === '\u007f') {
-        pane._inputLine = (pane._inputLine || '').slice(0, -1);
-      } else if (data === '\u0015' || data === '\u0003') {
-        pane._inputLine = '';
-      } else if (!/[\x00-\x08\x0b-\x1f\x7f]/.test(data)) {
-        pane._inputLine = ((pane._inputLine || '') + data).slice(-2000);
+        pane.ws.send(JSON.stringify({ type: 'input', data }));
       }
-      pane.ws.send(JSON.stringify({ type: 'input', data }));
     });
     term.onResize(({ cols, rows }) => { if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
     term.onScroll(() => { frameCount++; pane.autoScroll = pane.term.buffer.active.viewportY >= pane.term.buffer.active.baseY + pane.term.rows - 2; });
@@ -908,18 +638,18 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     term.attachCustomKeyEventHandler((arg) => {
       if (arg.type === 'keydown') {
         if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyC') { const sel = term.getSelection(); if (sel) navigator.clipboard.writeText(sel).catch(() => {}); return false; }
-        if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyV') { navigator.clipboard.readText().then(async t => { if (t && pane.ws?.readyState === WebSocket.OPEN) { const firstLine = t.split(/\r?\n/).find(line => commandNeedsSessionAllow(line)); if (!firstLine || await confirmTerminalCommand(firstLine)) pane.ws.send(JSON.stringify({ type: 'input', data: t.replace(/\n/g, '\r') })); } }).catch(() => {}); return false; }
+        if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyV') { navigator.clipboard.readText().then(t => { if (t) pane.ws?.readyState === WebSocket.OPEN && pane.ws.send(JSON.stringify({ type: 'input', data: t.replace(/\n/g, '\r') })); }).catch(() => {}); return false; }
         if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyA') { term.selectAll(); return false; }
         if (arg.ctrlKey && arg.code === 'KeyL' && !arg.shiftKey) { term.clear(); return true; }
       }
       return true;
     });
 
-    termDiv.addEventListener('paste', async (e) => { const text = e.clipboardData?.getData('text/plain') || ''; if (text) { e.preventDefault(); if (pane.ws?.readyState === WebSocket.OPEN) { const firstLine = text.split(/\r?\n/).find(line => commandNeedsSessionAllow(line)); if (!firstLine || await confirmTerminalCommand(firstLine)) pane.ws.send(JSON.stringify({ type: 'input', data: text.replace(/\n/g, '\r') })); } } });
+    termDiv.addEventListener('paste', (e) => { const text = e.clipboardData?.getData('text/plain') || ''; if (text) { e.preventDefault(); if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'input', data: text.replace(/\n/g, '\r') })); } });
     termDiv.addEventListener('copy', (e) => { const sel = term.getSelection(); if (sel) { e.preventDefault(); e.clipboardData?.setData('text/plain', sel); } });
     termDiv.addEventListener('contextmenu', (e) => { const sel = term.getSelection(); if (sel) { e.preventDefault(); navigator.clipboard.writeText(sel).catch(() => {}); } });
 
-    requestAnimationFrame(() => { try { fit.fit(); } catch {} setTimeout(() => { try { fit.fit(); } catch {} }, 16); });
+    requestAnimationFrame(() => { try { fit.fit(); } catch {} setTimeout(() => { try { fit.fit(); } catch {} }, 200); });
 
     term.writeln('\x1b[1;38;5;118m\u26a1 haksterai Terminal\x1b[0m');
     term.writeln('\x1b[2;37mCtrl+B \" \u2192 split horiz \u00b7 Ctrl+B % \u2192 split vert \u00b7 Ctrl+B \u2190\u2191\u2192\u2193 navigate\x1b[0m');
@@ -994,28 +724,14 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     refitAll();
   }
 
-  function stopPane(pane) {
-    if (!pane) return;
-    pane.intentionalClose = true;
-    pane.closedByUser = true;
-    clearInterval(pane._ping);
-    clearTimeout(pane._rt);
-    if (pane.ws) {
-      try { pane.ws.close(); } catch {}
-      pane.ws = null;
-    }
-    updateStatus('disconnected');
-  }
-
   function closePane(pane) {
-    if (panes.length <= 1) {
-      stopPane(pane);
-      pane?.term?.writeln('\r\n\x1b[90m[Terminal closed]\x1b[0m');
-      return;
-    }
+    if (panes.length <= 1) return;
     const idx = panes.indexOf(pane);
     if (idx === -1) return;
-    stopPane(pane);
+    pane.intentionalClose = true;
+    if (pane.ws) pane.ws.close();
+    clearInterval(pane._ping);
+    clearTimeout(pane._rt);
     if (pane._ro) pane._ro.disconnect();
     pane.term.dispose();
     const prev = pane.el.previousElementSibling;
@@ -1076,7 +792,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
         case 'ArrowRight': case 'Right': e.preventDefault(); navigatePane('right'); break;
         case 'ArrowUp': case 'Up': e.preventDefault(); navigatePane('up'); break;
         case 'ArrowDown': case 'Down': e.preventDefault(); navigatePane('down'); break;
-        case 'x': case 'X': e.preventDefault(); closePane(active); break;
+        case 'x': case 'X': e.preventDefault(); if (panes.length > 1) closePane(active); break;
         case 'z': case 'Z': e.preventDefault(); toggleZoom(active); break;
         case 'o': case 'O': e.preventDefault(); navigatePane('next'); break;
       }
@@ -1093,7 +809,11 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
 
   // ── Buttons ──
   clearBtn?.addEventListener('click', () => { if (active) active.term.clear(); });
-  fullscreenBtn?.addEventListener('click', toggleFullscreen);
+  fullscreenBtn?.addEventListener('click', () => {
+    if (!terminalPanel) return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else terminalPanel.requestFullscreen().catch(() => {});
+  });
 
   // ── Settings panel toggle ────────────────────────────────────────
   settingsBtn?.addEventListener('click', () => {
@@ -1128,7 +848,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
       modelBadge.style.color = fg;
     } catch {}
     // Re-strip backgrounds + force foreground after theme change (xterm may re-apply them)
-    setTimeout(() => { forceXtermTransparency(); forceXtermForegroundColor(); }, 16);
+    setTimeout(() => { forceXtermTransparency(); forceXtermForegroundColor(); }, 100);
     try { localStorage.setItem(TID + '-theme', JSON.stringify(theme)); } catch {}
     refitAll();
   }
@@ -1211,7 +931,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     } catch(_) {}
     try { localStorage.setItem(TID + '-theme', JSON.stringify(currentTheme)); } catch {}
     // Force transparency + foreground re-apply after theme change
-    setTimeout(() => { forceXtermTransparency(); forceXtermForegroundColor(); }, 16);
+    setTimeout(() => { forceXtermTransparency(); forceXtermForegroundColor(); }, 50);
   });
   bgColorInput?.addEventListener('input', () => {
     // BG color picker controls the background image opacity/tint, NOT xterm background
@@ -1242,7 +962,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
       } catch(_) {}
     });
     try { localStorage.setItem(TID + '-theme', JSON.stringify(currentTheme)); } catch {}
-    setTimeout(forceXtermTransparency, 16);
+    setTimeout(forceXtermTransparency, 50);
   });
   // Selection highlight color picker
   selectColorInput?.addEventListener('input', () => {
@@ -1258,14 +978,13 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
       } catch(_) {}
     });
     try { localStorage.setItem(TID + '-theme', JSON.stringify(currentTheme)); } catch {}
-    setTimeout(forceXtermTransparency, 16);
+    setTimeout(forceXtermTransparency, 50);
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'F11' && terminalPanel?.contains(document.activeElement)) { e.preventDefault(); toggleFullscreen(); }
+    if (e.key === 'F11' && terminalPanel?.contains(document.activeElement)) { e.preventDefault(); if (document.fullscreenElement) document.exitFullscreen(); else terminalPanel.requestFullscreen().catch(() => {}); }
   });
-  document.addEventListener('fullscreenchange', () => { updateFullscreenUi(); refitSoon(); });
-  document.addEventListener('webkitfullscreenchange', () => { updateFullscreenUi(); refitSoon(); });
+  document.addEventListener('fullscreenchange', () => { setTimeout(refitAll, 100); setTimeout(refitAll, 300); });
 
   window.addEventListener('resize', refitAll);
   window.addEventListener('beforeunload', () => { panes.forEach(p => { p.intentionalClose = true; if (p.ws) p.ws.close(); clearInterval(p._ping); clearTimeout(p._rt); }); });
@@ -1354,7 +1073,6 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     if (!pane) return;
     pane.reconnAttempts = 0;
     pane.intentionalClose = true;
-    pane.closedByUser = false;
     // Clear any pending reconnect timer
     if (pane._rt) { clearTimeout(pane._rt); pane._rt = null; }
     if (pane.ws) {
@@ -1365,7 +1083,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
       pane.intentionalClose = false;
       _decodeShown = false;  // Allow decode flash on reconnect
       connectPane(pane);
-    }, 50);
+    }, 500);
   }
 
   // ── External write API ──────────────────────────────────────────
@@ -1387,6 +1105,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     const p = active || panes[0];
     if (p?.term) { p.term.scrollToBottom(); }
   }
+
   function triggerFastDecoder() {
     _decodeShown = false;
     const p = active || panes[0];
@@ -1410,8 +1129,8 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     showDecodeFlash(p?.term?.rows || 24);
   }
 
-  window.__haksterConfirmTerminalCommand = confirmTerminalCommand;
   window.__crushTerminals = window.__crushTerminals || {};
   window.__crushTerminals[TID] = { panes, get active() { return active; }, split: splitPane, close: closePane, zoom: toggleZoom, reconnect: reconnectPane, write: termWrite, writeln: termWriteln, clear: termClear, scrollToBottom: termScrollToBottom, fastDecoder: triggerFastDecoder, scrambler: triggerScrambler, crackingCode: triggerCrackingCode };
 })();
 </script>
+

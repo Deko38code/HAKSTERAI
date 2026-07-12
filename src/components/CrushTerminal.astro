@@ -1128,4 +1128,5 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
 
   window.__crushTerminals = window.__crushTerminals || {};
   window.__crushTerminals[TID] = { panes, get active() { return active; }, split: splitPane, close: closePane, zoom: toggleZoom, reconnect: reconnectPane, write: termWrite, writeln: termWriteln, clear: termClear, scrollToBottom: termScrollToBottom, fastDecoder: triggerFastDecoder, scrambler: triggerScrambler, crackingCode: triggerCrackingCode };
+})();
 </script>
