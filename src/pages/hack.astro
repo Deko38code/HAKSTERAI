@@ -222,7 +222,6 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       #hack-checkpoint-flash.show { display: flex; }
 
       /* Decode overlay */
-      #hack-decode-overlay { position: absolute; inset: 0; z-index: 50; pointer-events: none; overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.3; padding: 4px 8px; opacity: 0; will-change: opacity; background: rgba(2,2,4,0.25); }
 
       /* ── Sidebar toggle ── */
       #sidebar-toggle-btn {
@@ -605,7 +604,6 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         <!-- Terminal -->
         <div id="term-body">
           <HaksterTerminal id="crush-main" autoStart={true} ptyMode="shell" />
-          <div id="hack-decode-overlay"></div>
           <div id="hack-checkpoint-flash">
             <span>💾</span>
             <span id="hack-checkpoint-flash-text">Checkpoint saved</span>
@@ -1151,157 +1149,6 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           }
         }
 
-        // ── Decode / scrambler effect ─────────────────────────────────
-        const _HK_SC_CHARS = '▓░▒█⧫⬡アイウ∀∃∂∇◆◈⬢▄▀■▫⯃※✦✧⟐⟑⟒ждлофцшщыъ⬡⬢⬔⬖⬗⬘⬙⬚⟰⟱⟲⟳⟴⟵⟶⟷';
-        const _HK_SC_COLORS = ['#c084fc','#7c3aed','#ffd700','#22d3ee','#ff6b6b','#34d399','#f472b6','#fbbf24','#a855f7','#e879f9','#00bfff','#818cf8'];
-        const _HK_DECODE_WORDS = ['HAKSTERAI','CONNECT','DECODE','EXEC','AGENT','TERMINAL','SHELL','TASK','NEURAL','PROCESS','RUN','LOAD','SYNC','READY','ONLINE','STREAM','DATA','PARSE','SCAN','INIT','BOOT','LINK','NET','CODE','BUILD','DEPLOY','COMMIT','PUSH','PATCH','MERGE','TEST','DEBUG','TRACE','LOG','PIPE','FORK','THREAD','DAEMON','KERNEL','STACK','HEAP','CACHE','BLOCK','CHAIN','HASH','ENCRYPT','VERIFY','AUTH','SOCKET','PORT','PROXY','ROUTE','BRIDGE','TUNNEL','PROTOCOL','HANDSHAKE','NEGOTIATE','UPGRADE','TRANSFORM','COMPILE','OPTIMIZE','RENDER','PIPELINE','PARALLEL','ASYNC','AWAIT','PROMISE','RESOLVE','REJECT','YIELD','GENERATOR','ITERATOR','OBSERVABLE','SUBSCRIBE','REDUCE','DISCOVER','CHECK','REPORT','AUDIT'];
-        let _hackActiveRaf = null;
-        let _hackActiveOverlay = null;
-
-        function _hkRandomLine(len) {
-          let s = '';
-          for (let i = 0; i < len; i++) s += _HK_SC_CHARS[Math.floor(Math.random() * _HK_SC_CHARS.length)];
-          return s;
-        }
-        function _hkDecodeLine(len) {
-          const words = [];
-          let pos = 0;
-          while (pos < len) {
-            if (Math.random() < 0.35 && len - pos > 8) {
-              const word = _HK_DECODE_WORDS[Math.floor(Math.random() * _HK_DECODE_WORDS.length)];
-              words.push(word);
-              pos += word.length + 1;
-            } else {
-              const chunk = 2 + Math.floor(Math.random() * 6);
-              words.push(_hkRandomLine(Math.min(chunk, len - pos)));
-              pos += chunk + 1;
-            }
-          }
-          return words.join(' ').substring(0, len);
-        }
-        function _decodePass(text, pass, total) {
-          const progress = pass / total;
-          const chaos = 0.55 * Math.pow(1 - progress, 2);
-          const waveFront = Math.floor(text.length * progress * 1.1);
-          let out = '';
-          for (let i = 0; i < text.length; i++) {
-            const c = text[i];
-            if (c === ' ') { out += c; continue; }
-            if (i < waveFront * 0.75) out += c;
-            else if (Math.random() < chaos) out += _HK_SC_CHARS[Math.floor(Math.random() * _HK_SC_CHARS.length)];
-            else out += c;
-          }
-          return out;
-        }
-
-        // ── NMS-style decode flash ──────────────────────────────────────
-        // Characters rapidly cycle through random symbols, then "lock in"
-        // left-to-right like the no-more-secrets (nms) command. 10-line
-        // chunks cascade with stagger. Total ~1.6s.
-        function showHackDecodeFlash() {
-          const termBody = document.getElementById('term-body');
-          if (!termBody) return;
-          const old = document.getElementById('hack-decode-overlay');
-          if (old) old.remove();
-          if (_hackActiveRaf) { cancelAnimationFrame(_hackActiveRaf); _hackActiveRaf = null; }
-
-          const overlay = document.createElement('div');
-          overlay.id = 'hack-decode-overlay';
-          overlay.style.cssText = 'position:absolute;inset:0;z-index:50;pointer-events:none;overflow:hidden;font-family:JetBrains Mono,monospace;font-size:13px;line-height:1.35;padding:6px 10px;opacity:0;background:rgba(0,0,0,0.92);';
-          const panelHeight = termBody.offsetHeight || 500;
-          const numLines = Math.max(Math.floor(panelHeight / 18) - 2, 20);
-          const termWidth = termBody.offsetWidth || 800;
-          const charsPerLine = Math.floor((termWidth - 20) / 8);
-          const CHUNK_SIZE = 10;
-          const SCRAMBLE_MS = 280;
-          const LOCKIN_MS = 500;
-          const CHUNK_STAGGER = 40;
-          const FADE_START = 200;
-          const FADE_DURATION = 400;
-
-          const lines = [];
-          for (let i = 0; i < numLines; i++) {
-            const lineEl = document.createElement('div');
-            const charCount = Math.max(charsPerLine - 4, 40) + Math.floor(Math.random() * 12) - 6;
-            const finalText = _hkDecodeLine(charCount);
-            lineEl.textContent = _hkRandomLine(charCount);
-            lineEl.style.color = _HK_SC_COLORS[Math.floor(Math.random() * _HK_SC_COLORS.length)];
-            lineEl.style.whiteSpace = 'nowrap';
-            lineEl.style.overflow = 'hidden';
-            lineEl.style.textShadow = '0 0 8px currentColor';
-            overlay.appendChild(lineEl);
-            lines.push({ el: lineEl, finalText, charCount, chunkIndex: Math.floor(i / CHUNK_SIZE) });
-          }
-          termBody.appendChild(overlay);
-          _hackActiveOverlay = overlay;
-          requestAnimationFrame(() => { overlay.style.opacity = '1'; });
-
-          const totalChunks = Math.ceil(numLines / CHUNK_SIZE);
-          const startTime = performance.now();
-
-          function frame(now) {
-            const elapsed = now - startTime;
-            const lastLockinEnd = SCRAMBLE_MS + (totalChunks - 1) * CHUNK_STAGGER + LOCKIN_MS;
-            const fadeOutStart = lastLockinEnd + FADE_START;
-            const fadeOutEnd = fadeOutStart + FADE_DURATION;
-
-            if (elapsed > fadeOutEnd + 100) {
-              overlay.remove();
-              _hackActiveOverlay = null;
-              _hackActiveRaf = null;
-              return;
-            }
-
-            if (elapsed > fadeOutStart) {
-              const fadeProgress = (elapsed - fadeOutStart) / FADE_DURATION;
-              overlay.style.opacity = String(Math.max(0, 1 - fadeProgress));
-            }
-
-            let allResolved = true;
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i];
-              const lineStartLockin = SCRAMBLE_MS + line.chunkIndex * CHUNK_STAGGER;
-
-              if (elapsed < lineStartLockin) {
-                line.el.textContent = _hkRandomLine(line.charCount);
-                allResolved = false;
-              } else {
-                const lockinProgress = Math.min(1, (elapsed - lineStartLockin) / LOCKIN_MS);
-                const resolvedCount = Math.floor(line.charCount * lockinProgress);
-                if (resolvedCount < line.charCount) allResolved = false;
-
-                const resolved = line.finalText.slice(0, resolvedCount);
-                const remaining = line.charCount - resolvedCount;
-                if (remaining > 0) {
-                  line.el.textContent = resolved + _hkRandomLine(remaining);
-                } else {
-                  line.el.textContent = line.finalText;
-                }
-
-                if (lockinProgress < 0.3) {
-                  line.el.style.textShadow = '0 0 12px currentColor, 0 0 24px currentColor';
-                } else if (lockinProgress < 0.6) {
-                  line.el.style.textShadow = '0 0 6px currentColor';
-                } else if (lockinProgress < 0.9) {
-                  line.el.style.textShadow = '0 0 2px currentColor';
-                } else {
-                  line.el.style.textShadow = 'none';
-                }
-              }
-            }
-
-            if (allResolved && elapsed >= lastLockinEnd) {
-              for (let i = 0; i < lines.length; i++) {
-                lines[i].el.textContent = lines[i].finalText;
-                lines[i].el.style.textShadow = 'none';
-              }
-            }
-
-            _hackActiveRaf = requestAnimationFrame(frame);
-          }
-          _hackActiveRaf = requestAnimationFrame(frame);
-        }
-
         // ── Client Device Detection ──────────────────────────────────
         async function sendClientContext(sid) {
           try {
@@ -1347,7 +1194,8 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
             return;
           }
           busy = true;
-          showHackDecodeFlash();
+          const terminal = getTerm();
+          if (terminal && typeof terminal.fastDecoder === 'function') terminal.fastDecoder();
           addLine('\n[' + PHASE_LABELS[currentPhase] + '] ▶ ' + (options.label || 'Agent task'), PHASE_COLORS[currentPhase]);
           try {
             await ensureSession();
@@ -1499,12 +1347,10 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         window.haksterHackScrambler = function() {
           const terminal = getTerm();
           if (terminal && typeof terminal.scrambler === 'function') terminal.scrambler();
-          showHackDecodeFlash();
         };
         window.haksterHackCrackingCode = function() {
           const terminal = getTerm();
           if (terminal && typeof terminal.crackingCode === 'function') terminal.crackingCode();
-          showHackDecodeFlash();
         };
 
         window.haksterRunAutoChecks = async function() {
@@ -1537,7 +1383,8 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           const commands = selected.map(btn => (btn.dataset.command || '').replace(/\$\{TARGET\}/g, currentTarget || '')).filter(Boolean);
           const finalCmd = commands.map((cmd, idx) => `echo "\n[AUTO ${idx + 1}/${commands.length}] ${getToolLabel(selected[idx])}" ; ${cmd}`).join(' ; ');
           addLine('\n[AUTO] Running ' + commands.length + ' verified checks for ' + currentTarget, '#34d399');
-          showHackDecodeFlash();
+          const terminal = getTerm();
+          if (terminal && typeof terminal.fastDecoder === 'function') terminal.fastDecoder();
           await runShellCommand(finalCmd);
         };
 
@@ -1555,7 +1402,8 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
               return;
             }
           }
-          showHackDecodeFlash();
+          const terminal = getTerm();
+          if (terminal && typeof terminal.fastDecoder === 'function') terminal.fastDecoder();
           addLine('\n[TERMINAL] $ ' + finalCmd, '#34d399');
           sendToTerminal(finalCmd, true);
         }

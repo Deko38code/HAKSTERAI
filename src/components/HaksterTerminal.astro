@@ -873,6 +873,10 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     term.onData(async (data) => {
       if (pane.ws?.readyState !== WebSocket.OPEN) return;
       if (data === '\r') {
+        // ── Trigger decode flash on every command typed ──
+        _decodeShown = false;
+        showDecodeFlash(pane.term.rows);
+
         const command = (pane._inputLine || '').trim();
         if (command && commandNeedsSessionAllow(command) && !pane._confirmingCommand) {
           pane._confirmingCommand = true;
@@ -918,12 +922,7 @@ const { id = 'hakster-terminal', autoStart = true, compact = false, ptyMode = 'c
     requestAnimationFrame(() => { try { fit.fit(); } catch {} setTimeout(() => { try { fit.fit(); } catch {} }, 16); });
 
     term.writeln('\x1b[1;38;5;118m\u26a1 haksterai Terminal\x1b[0m');
-    term.writeln('\x1b[1;38;5;141m[DECODER]\x1b[0m \x1b[38;5;45mcracking code scrambler online\x1b[0m');
     term.writeln('\x1b[2;37mCtrl+B \" \u2192 split horiz \u00b7 Ctrl+B % \u2192 split vert \u00b7 Ctrl+B \u2190\u2191\u2192\u2193 navigate\x1b[0m');
-    setTimeout(() => {
-      _decodeShown = false;
-      showDecodeFlash(term.rows);
-    }, 80);
 
     connectPane(pane);
     panes.push(pane);

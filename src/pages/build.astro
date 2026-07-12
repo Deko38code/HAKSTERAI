@@ -1522,6 +1522,10 @@ import Layout from '../layouts/Layout.astro';
       chatTerm.onData(async (data: string) => {
         if (!chatTermWs || chatTermWs.readyState !== WebSocket.OPEN) return;
         if (data === '\r') {
+          // ── Trigger decode flash on every command typed ──
+          _chatDecodeShown = false;
+          showChatDecodeFlash();
+
           const command = chatTermInputLine.trim();
           if (command && buildTerminalNeedsAllow(command) && !chatTermConfirming) {
             chatTermConfirming = true;

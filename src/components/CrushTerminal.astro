@@ -618,7 +618,16 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
     ro.observe(termDiv);
     pane._ro = ro;
 
-    term.onData((data) => { if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'input', data })); });
+    term.onData((data) => {
+      if (pane.ws?.readyState === WebSocket.OPEN) {
+        // ── Trigger decode flash on every command typed ──
+        if (data === '\r') {
+          _decodeShown = false;
+          showDecodeFlash(pane.term.rows);
+        }
+        pane.ws.send(JSON.stringify({ type: 'input', data }));
+      }
+    });
     term.onResize(({ cols, rows }) => { if (pane.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
     term.onScroll(() => { frameCount++; pane.autoScroll = pane.term.buffer.active.viewportY >= pane.term.buffer.active.baseY + pane.term.rows - 2; });
 
