@@ -157,163 +157,6 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
   // through multiple passes when AI connects or data starts flowing.
   // ══════════════════════════════════════════════════════════════════
 
-  let _activeRaf = null;
-  let _activeOverlay = null;
-  let _decodeShown = false;  // Only show once per connection
-  const _SC_CHARS = '▓░▒█⧫⬡アイウ∀∃∂∇◆◈⬢▄▀■▫⯃※✦✧⟐⟑⟒ждлофцшщыъ⬡⬢⬔⬖⬗⬘⬙⬚⟰⟱⟲⟳⟴⟵⟶⟷';
-  const _SC_COLORS = ['#7c3aed','#a855f7','#c084fc','#e879f9','#22d3ee','#34d399','#f472b6','#fbbf24','#00ff88','#ff6b6b','#00bfff','#ffd700'];
-  const _DECODE_WORDS = ['HAKSTERAI','CRUSH','CONNECT','DECODE','EXEC','AGENT','TERMINAL','SHELL','TASK','NEURAL','PROCESS','RUN','LOAD','SYNC','READY','ONLINE','STREAM','DATA','PARSE','SCAN','INIT','BOOT','LINK','NET','CODE','BUILD','DEPLOY','COMMIT','PUSH','PATCH','MERGE','TEST','SCAN','DEBUG','TRACE','LOG','PIPE','FORK','THREAD','DAEMON','KERNEL','STACK','HEAP','CACHE','BLOCK','CHAIN','HASH','ENCRYPT','VERIFY','AUTH','SOCKET','PORT','PROXY','ROUTE','BRIDGE','TUNNEL','PROTOCOL','HANDSHAKE','NEGOTIATE','UPGRADE','TRANSFORM','COMPILE','OPTIMIZE','RENDER','PIPELINE','PARALLEL','ASYNC','AWAIT','PROMISE','RESOLVE','REJECT','YIELD','GENERATOR','ITERATOR','OBSERVABLE','SUBSCRIBE','EMIT','DISPATCH','REDUCE','MAP','FILTER','SORT','MERGE','SLICE','SPLICE','CONCAT','JOIN','SPLIT','TRIM','REPLACE','SEARCH','MATCH','TEST','EXEC'];
-  function _randomLine(len) {
-    let s = '';
-    for (let i = 0; i < len; i++) s += _SC_CHARS[Math.floor(Math.random() * _SC_CHARS.length)];
-    return s;
-  }
-  function _decodePass(text, pass, total) {
-    const progress = pass / total;
-    const chaos = 0.55 * Math.pow(1 - progress, 2);
-    const waveFront = Math.floor(text.length * progress * 1.1);
-    let out = '';
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (c === ' ' || c === '\n' || c === '\r' || c === '\t') { out += c; continue; }
-      if (i < waveFront * 0.75) {
-        out += c;
-      } else if (Math.random() < chaos) {
-        out += _SC_CHARS[Math.floor(Math.random() * _SC_CHARS.length)];
-      } else {
-        out += c;
-      }
-    }
-    return out;
-  }
-  function _decodeLine(len) {
-    // Generate a line that looks like real terminal output with decode words
-    const words = [];
-    let pos = 0;
-    while (pos < len) {
-      if (Math.random() < 0.35 && len - pos > 8) {
-        // Insert a real decode word for dramatic effect
-        const word = _DECODE_WORDS[Math.floor(Math.random() * _DECODE_WORDS.length)];
-        words.push(word);
-        pos += word.length + 1;
-      } else {
-        // Scramble chars
-        const chunk = 2 + Math.floor(Math.random() * 6);
-        words.push(_randomLine(Math.min(chunk, len - pos)));
-        pos += chunk + 1;
-      }
-    }
-    return words.join(' ').substring(0, len);
-  }
-
-  // ── NMS-style decode flash ──────────────────────────────────────
-  // Characters rapidly cycle through random symbols, then "lock in"
-  // left-to-right like the no-more-secrets (nms) command. 10-line
-  // chunks cascade with stagger. Total ~1.6s.
-  function showDecodeFlash(rows) {
-    if (!terminalPanel || _decodeShown) return;
-    _decodeShown = true;
-    const old = document.getElementById(TID + '-decode-overlay');
-    if (old) old.remove();
-    if (_activeRaf) { cancelAnimationFrame(_activeRaf); _activeRaf = null; }
-
-    const overlay = document.createElement('div');
-    overlay.id = TID + '-decode-overlay';
-    overlay.style.cssText = 'position:absolute;inset:0;z-index:50;pointer-events:none;overflow:hidden;font-family:JetBrains Mono,monospace;font-size:13px;line-height:1.35;padding:6px 10px;opacity:0;background:rgba(0,0,0,0.92);';
-    const panelHeight = terminalPanel.offsetHeight || 500;
-    const numLines = Math.max(Math.floor(panelHeight / 18) - 2, 20);
-    const termWidth = terminalPanel.offsetWidth || 800;
-    const charsPerLine = Math.floor((termWidth - 20) / 8);
-    const CHUNK_SIZE = 10;
-    const SCRAMBLE_MS = 280;
-    const LOCKIN_MS = 500;
-    const CHUNK_STAGGER = 40;
-    const FADE_START = 200;
-    const FADE_DURATION = 400;
-
-    const lines = [];
-    for (let i = 0; i < numLines; i++) {
-      const lineEl = document.createElement('div');
-      const charCount = Math.max(charsPerLine - 4, 40) + Math.floor(Math.random() * 12) - 6;
-      const finalText = _decodeLine(charCount);
-      lineEl.textContent = _randomLine(charCount);
-      lineEl.style.color = _SC_COLORS[Math.floor(Math.random() * _SC_COLORS.length)];
-      lineEl.style.whiteSpace = 'nowrap';
-      lineEl.style.overflow = 'hidden';
-      lineEl.style.textShadow = '0 0 8px currentColor';
-      overlay.appendChild(lineEl);
-      lines.push({ el: lineEl, finalText, charCount, chunkIndex: Math.floor(i / CHUNK_SIZE) });
-    }
-    terminalPanel.appendChild(overlay);
-    _activeOverlay = overlay;
-    requestAnimationFrame(() => { overlay.style.opacity = '1'; });
-
-    const totalChunks = Math.ceil(numLines / CHUNK_SIZE);
-    const startTime = performance.now();
-
-    function frame(now) {
-      const elapsed = now - startTime;
-      const lastLockinEnd = SCRAMBLE_MS + (totalChunks - 1) * CHUNK_STAGGER + LOCKIN_MS;
-      const fadeOutStart = lastLockinEnd + FADE_START;
-      const fadeOutEnd = fadeOutStart + FADE_DURATION;
-
-      if (elapsed > fadeOutEnd + 100) {
-        overlay.remove();
-        _activeOverlay = null;
-        _activeRaf = null;
-        return;
-      }
-
-      if (elapsed > fadeOutStart) {
-        const fadeProgress = (elapsed - fadeOutStart) / FADE_DURATION;
-        overlay.style.opacity = String(Math.max(0, 1 - fadeProgress));
-      }
-
-      let allResolved = true;
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineStartLockin = SCRAMBLE_MS + line.chunkIndex * CHUNK_STAGGER;
-
-        if (elapsed < lineStartLockin) {
-          line.el.textContent = _randomLine(line.charCount);
-          allResolved = false;
-        } else {
-          const lockinProgress = Math.min(1, (elapsed - lineStartLockin) / LOCKIN_MS);
-          const resolvedCount = Math.floor(line.charCount * lockinProgress);
-          if (resolvedCount < line.charCount) allResolved = false;
-
-          const resolved = line.finalText.slice(0, resolvedCount);
-          const remaining = line.charCount - resolvedCount;
-          if (remaining > 0) {
-            line.el.textContent = resolved + _randomLine(remaining);
-          } else {
-            line.el.textContent = line.finalText;
-          }
-
-          if (lockinProgress < 0.3) {
-            line.el.style.textShadow = '0 0 12px currentColor, 0 0 24px currentColor';
-          } else if (lockinProgress < 0.6) {
-            line.el.style.textShadow = '0 0 6px currentColor';
-          } else if (lockinProgress < 0.9) {
-            line.el.style.textShadow = '0 0 2px currentColor';
-          } else {
-            line.el.style.textShadow = 'none';
-          }
-        }
-      }
-
-      if (allResolved && elapsed >= lastLockinEnd) {
-        for (let i = 0; i < lines.length; i++) {
-          lines[i].el.textContent = lines[i].finalText;
-          lines[i].el.style.textShadow = 'none';
-        }
-      }
-
-      _activeRaf = requestAnimationFrame(frame);
-    }
-    _activeRaf = requestAnimationFrame(frame);
-  }
-
   // ── Globals ──
   const root = document.getElementById(TID + '-root');
   const terminalPanel = document.getElementById(TID + '-panel');
@@ -503,7 +346,6 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
 
     const enqueuePtyWrite = (data) => {
       if (!pane.term || !data) return;
-      if (!_decodeShown) showDecodeFlash(pane.term.rows);
       pane._writeBuf += data;
       if (!pane._writeRaf) pane._writeRaf = requestAnimationFrame(flushPtyWrite);
     };
@@ -620,11 +462,6 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
 
     term.onData((data) => {
       if (pane.ws?.readyState === WebSocket.OPEN) {
-        // ── Trigger decode flash on every command typed ──
-        if (data === '\r') {
-          _decodeShown = false;
-          showDecodeFlash(pane.term.rows);
-        }
         pane.ws.send(JSON.stringify({ type: 'input', data }));
       }
     });
@@ -1078,7 +915,6 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
     // Reconnect after short delay to allow close to complete
     setTimeout(() => {
       pane.intentionalClose = false;
-      _decodeShown = false;  // Allow decode flash on reconnect
       connectPane(pane);
     }, 500);
   }
@@ -1102,31 +938,36 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
     const p = active || panes[0];
     if (p?.term) { p.term.scrollToBottom(); }
   }
+  function termSend(text, execute) {
+    const p = active || panes[0];
+    const data = String(text || '') + (execute === false ? '' : '\r');
+    if (p?.ws?.readyState === WebSocket.OPEN) {
+      p.ws.send(JSON.stringify({ type: 'input', data }));
+      return true;
+    }
+    if (p?.term) p.term.writeln(String(text || ''));
+    return false;
+  }
 
   function triggerFastDecoder() {
-    _decodeShown = false;
     const p = active || panes[0];
-    showDecodeFlash(p?.term?.rows || 24);
+    if (p?.term) p.term.writeln('[DECODER] ready');
   }
   function triggerScrambler() {
-    _decodeShown = false;
     const p = active || panes[0];
     if (p?.term) {
-      p.term.writeln('\x1b[1;38;5;141m[SCRAMBLER]\x1b[0m \x1b[38;5;45mcracking code decoder armed\x1b[0m');
-      p.term.writeln('\x1b[38;5;99m[SCRAMBLER]\x1b[0m \x1b[38;5;220m▓▒░ cipher stream rolling hard ░▒▓\x1b[0m');
+      p.term.writeln('[SCRAMBLER] decoder armed');
+      p.term.writeln('[SCRAMBLER] cipher stream ready');
     }
-    showDecodeFlash(p?.term?.rows || 24);
   }
   function triggerCrackingCode() {
-    _decodeShown = false;
     const p = active || panes[0];
     if (p?.term) {
-      p.term.writeln('\x1b[1;38;5;118m[CRACKING CODE]\x1b[0m \x1b[38;5;213mscramble \u2192 decode \u2192 unlock\x1b[0m');
+      p.term.writeln('[CRACKING CODE] scramble -> decode -> unlock');
     }
-    showDecodeFlash(p?.term?.rows || 24);
   }
 
   window.__crushTerminals = window.__crushTerminals || {};
-  window.__crushTerminals[TID] = { panes, get active() { return active; }, split: splitPane, close: closePane, zoom: toggleZoom, reconnect: reconnectPane, write: termWrite, writeln: termWriteln, clear: termClear, scrollToBottom: termScrollToBottom, fastDecoder: triggerFastDecoder, scrambler: triggerScrambler, crackingCode: triggerCrackingCode };
+  window.__crushTerminals[TID] = { panes, get active() { return active; }, split: splitPane, close: closePane, zoom: toggleZoom, reconnect: reconnectPane, write: termWrite, writeln: termWriteln, send: termSend, clear: termClear, scrollToBottom: termScrollToBottom, fastDecoder: triggerFastDecoder, scrambler: triggerScrambler, crackingCode: triggerCrackingCode };
 })();
 </script>
