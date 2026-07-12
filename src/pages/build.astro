@@ -561,10 +561,10 @@ import Layout from '../layouts/Layout.astro';
       overflow: auto;
       background:
         linear-gradient(90deg, rgba(8,13,25,0.96) 0 3.1rem, rgba(56,189,248,0.14) 3.1rem 3.16rem, transparent 3.16rem),
-        repeating-linear-gradient(to bottom, rgba(255,255,255,0.045) 0 1px, transparent 1px 1.5em);
+        repeating-linear-gradient(to bottom, transparent 0 1.5em, rgba(255,255,255,0.045) 1.5em 3em);
     }
     .tui-code-body pre { margin: 0; padding: 0.75rem 0.9rem 0.85rem 0; font-size: 0.8rem; line-height: 1.5; font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace; white-space: pre; color: #edf2f7; text-shadow: 0 0 8px rgba(56,189,248,0.08); }
-    .tui-code-body pre .ln { display: inline-block; width: 2.7rem; color: rgba(125,211,252,0.58); text-align: right; padding-right: 0.7rem; user-select: none; margin-right: 0.65rem; }
+    .tui-code-body pre .ln { display: inline-block; width: 2.7rem; color: rgba(125,211,252,0.7); text-align: right; padding-right: 0.7rem; user-select: none; margin-right: 0.65rem; border-right: 1px solid rgba(56,189,248,0.12); }
     .tui-code-body pre code { color: #edf2f7; }
     /* Inline code */
     .msg-body code:not(pre code) { background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.2); border-radius: 0.25rem; padding: 0.1rem 0.35rem; font-size: 0.85em; font-family: 'JetBrains Mono', 'Fira Code', monospace; color: #d8b4fe; }
@@ -573,8 +573,12 @@ import Layout from '../layouts/Layout.astro';
     .msg-body ul, .msg-body ol { margin: 0.25rem 0; padding-left: 1.25rem; }
     .msg-body li { margin: 0.1rem 0; }
     .msg-body strong { color: #fff; font-weight: 600; }
-    .msg-body a { color: #60a5fa; text-decoration: none; }
-    .msg-body a:hover { text-decoration: underline; }
+    .msg-body a { color: #60a5fa; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgba(96,165,250,0.4); transition: text-decoration-color 0.15s, color 0.15s; }
+    .msg-body a:hover { color: #93c5fd; text-decoration-color: #60a5fa; }
+    /* Web search result links — more prominent so users can see what the agent found */
+    .msg-search a { color: #fbbf24; text-decoration: underline; text-decoration-color: rgba(251,191,36,0.5); font-weight: 500; }
+    .msg-search a:hover { color: #fcd34d; text-decoration-color: #fbbf24; }
+    .msg-search .search-url { color: #fbbf24; text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
     .attachment-chip img { height: 2.25rem; width: 2.25rem; object-fit: cover; border-radius: 0.5rem; }
     .attachment-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; color: rgba(255,255,255,0.7); }
     .attachment-chip button { flex: 0 0 auto; color: rgba(255,255,255,0.35); transition: color 0.15s; }
@@ -2099,6 +2103,8 @@ import Layout from '../layouts/Layout.astro';
       html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
       // Links [text](url)
       html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      // Bare URLs — auto-link them so users can click what the agent found
+      html = html.replace(/(^|[\s(])(https?:\/\/[^\s<)>]+)/g, '$1<a href="$2" target="_blank" rel="noopener" class="search-url">$2</a>');
       // Line breaks — preserve paragraph spacing
       html = html.replace(/\n\n+/g, '</p><p>');
       html = `<p>${html}</p>`;
@@ -2161,7 +2167,7 @@ import Layout from '../layouts/Layout.astro';
         const isAssistant = msg.role === 'assistant';
         const isScript = msg.role === 'script';
         const isConfirmation = msg.role === 'confirmation';
-        const bodyClass = isScript ? '' : msg.role === 'search' ? 'text-xs leading-relaxed whitespace-pre-wrap' : 'msg-body text-sm leading-relaxed';
+        const bodyClass = isScript ? '' : msg.role === 'search' ? 'msg-body text-xs leading-relaxed' : 'msg-body text-sm leading-relaxed';
         const copyIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>`;
         const pasteIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`;
         const checkIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
@@ -2180,6 +2186,8 @@ import Layout from '../layouts/Layout.astro';
         } else if (isConfirmation) {
           const commandPreview = msg.command ? `<div class="mt-2 rounded-lg bg-[#1a1a1a] border border-[#333] px-3 py-2 text-xs font-mono text-red-300/90 overflow-x-auto">${escapeHtml(msg.command)}</div>` : '';
           bodyHtml = `<div class="text-sm text-white/80">${escapeHtml(msg.content)}</div>${commandPreview}`;
+        } else if (msg.role === 'search') {
+          bodyHtml = escapeHtmlWithInline(msg.content);
         } else {
           bodyHtml = escapeHtml(msg.content);
         }
