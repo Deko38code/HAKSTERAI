@@ -17,10 +17,95 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys } = require('./providers');
+const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys } = require('./providers');
+const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
+// ── Autoflow: 6-phase loop + autolearn + approval modules ──
+const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName } = require('./agent/loop');
+const autolearn = require('./agent/autolearn');
+
+// ── MCP Integration — merge MCP tools into the agent tool list ────────────
+let ALL_TOOLS = AGENT_TOOLS; // starts as built-in only; expanded after MCP loads
+let _mcpLoaded = false;
+
+const FAST_CHAT_TOOL_NAMES = new Set([
+  'read_file',
+  'list_dir',
+  'search_files',
+  'glob_search',
+  'exec_shell',
+  'write_file',
+  'edit_file',
+  'replace_in_file',
+  'apply_patch',
+  'browser_detect',
+  'browser_navigate',
+  'browser_snapshot',
+  'browser_screenshot',
+  'web_search',
+  'firecrawl_scrape',
+  'generate_image',
+  'recall_memory',
+  'save_memory',
+]);
+
+function getFastChatTools() {
+  return ALL_TOOLS.filter((tool) => FAST_CHAT_TOOL_NAMES.has(tool.function?.name));
+}
+
+async function initWebMcp() {
+  if (_mcpLoaded) return;
+  _mcpLoaded = true;
+  mcpSetLogFn((msg) => console.log(msg));
+  try {
+    // Use the same root discovery as the CLI agent
+    const roots = Array.from(new Set([
+      path.join(process.env.HOME || '/home/ghost', '.hakster'),
+      '/home/ghost/.hakster',
+      path.join(process.cwd(), '.hakster'),
+      path.join(__dirname, '..', '..', '.hakster'),
+      '/home/ghost/.agents',
+      '/home/ghost/skills',
+      '/home/ghost/.hermes/hermes-agent',
+      '/home/ghost/.hermes',
+      '/home/ghost/haksterAi/pentest-agents',
+    ]));
+    const { tools: mcpToolDefs, servers } = await loadMcpServers(roots);
+    if (mcpToolDefs.length > 0) {
+      // Compress MCP tool schemas to save context (same logic as CLI agent)
+      const compressed = mcpToolDefs.map(t => {
+        const desc = t.function.description || '';
+        const shortDesc = desc.split('.')[0] + (desc.includes('.') ? '.' : '');
+        let params = { type: 'object', properties: {}, required: t.function.parameters?.required || [] };
+        if (t.function.parameters?.properties) {
+          for (const [key, schema] of Object.entries(t.function.parameters.properties)) {
+            const compressedProp = { type: schema.type || 'string' };
+            if (schema.enum) compressedProp.enum = schema.enum;
+            if (schema.description && schema.description.length < 60) {
+              compressedProp.description = schema.description;
+            }
+            params.properties[key] = compressedProp;
+          }
+        }
+        return {
+          type: 'function',
+          function: { name: t.function.name, description: shortDesc, parameters: params },
+          _mcpServer: t._mcpServer,
+          _mcpToolName: t._mcpToolName,
+        };
+      });
+      ALL_TOOLS = [...AGENT_TOOLS, ...compressed];
+      console.log(`[MCP] Loaded ${mcpToolDefs.length} MCP tools from ${servers.length} servers: ${servers.join(', ')}`);
+    } else {
+      console.log('[MCP] No MCP servers connected (mcp.json may be missing or servers failed to start)');
+    }
+  } catch (err) {
+    console.warn(`[MCP] Init warning: ${err.message}`);
+  }
+}
 const { saveMemory, getMemory, searchMemories, listMemories, deleteMemory, getMemoryContext, getMemoryStats, compactMemories, CATEGORIES: MEMORY_CATEGORIES } = require('./memory');
 const { runSecurityAudit, startSecurityScanner, getSecurityNotifications, acknowledgeSecurityNotification, acknowledgeAllSecurityNotifications, SEVERITY: SECURITY_SEVERITY } = require('./security');
 const compression = require('compression');
+const telegramBots = require('./telegramBots');
 
 // ── Config ────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || '3579', 10);
@@ -33,6 +118,62 @@ const FREE_USAGE_LIMIT = 10;
 const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
 const REFERRAL_REWARD_TOKENS = parseInt(process.env.REFERRAL_REWARD_TOKENS || '10000', 10);
 const REFERRAL_SIGNUP_TOKENS = parseInt(process.env.REFERRAL_SIGNUP_TOKENS || '2500', 10);
+
+const AGENT_PROJECT_CWDS = [
+  {
+    cwd: '/home/ghost/cine-vault-live',
+    patterns: [
+      /\bcine\s*-?\s*vault\b/i,
+      /\bcinevault\b/i,
+      /\blive channels?\b/i,
+      /\bside panel\b/i,
+      /\bstalker\b/i,
+      /\biptv\b/i,
+      /\bmovie server\b/i,
+    ],
+  },
+  {
+    cwd: '/home/ghost/haksterAi',
+    patterns: [
+      /\bhakster\s*ai\b/i,
+      /\bhaksterai\b/i,
+      /\btool loop\b/i,
+      /\bcli tools?\b/i,
+      /\bagent loop\b/i,
+      /\bsearch_files\b/i,
+      /\bglob_search\b/i,
+      /\bpatching tool\b/i,
+    ],
+  },
+];
+
+function inferAgentWorkDir(messages) {
+  const text = (messages || [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'system'))
+    .map((m) => String(m.content || ''))
+    .join('\n');
+  for (const project of AGENT_PROJECT_CWDS) {
+    if (project.patterns.some((rx) => rx.test(text)) && fs.existsSync(project.cwd)) {
+      return project.cwd;
+    }
+  }
+  return null;
+}
+
+function resolveAgentWorkDir({ cwd, messages, sessionId }) {
+  if (cwd && typeof cwd === 'string') {
+    return { workDir: path.resolve(cwd), isolated: false, reason: 'request cwd' };
+  }
+  const inferred = inferAgentWorkDir(messages);
+  if (inferred) return { workDir: inferred, isolated: false, reason: 'inferred project cwd' };
+
+  const root = process.env.FS_ROOT || path.join(__dirname, '..', 'data');
+  return {
+    workDir: path.join(root, 'workspaces', sessionId || 'default'),
+    isolated: true,
+    reason: 'isolated workspace',
+  };
+}
 
 const PRICING_CATALOG = [
   {
@@ -295,10 +436,10 @@ function getSkillsInventory() {
 function getToolInventory() {
   const now = Date.now();
   if (_toolsCache && (now - _toolsCacheTime) < TOOLS_CACHE_TTL) return _toolsCache;
-  const tools = AGENT_TOOLS.map((tool) => ({
+  const tools = ALL_TOOLS.map((tool) => ({
     name: tool.function?.name || 'unknown',
     description: tool.function?.description || '',
-    source: 'web-agent',
+    source: tool._mcpServer ? `mcp:${tool._mcpServer}` : 'web-agent',
   }));
   try {
     const agentFile = path.join(__dirname, 'agent', 'index.js');
@@ -346,6 +487,41 @@ function getHaksterModelConfig() {
     if (cfg.model && !isCerebrasValue(cfg.model)) model = cfg.model;
   } catch {}
   return { provider, model };
+}
+
+function estimateUsageTokens(value) {
+  let text = '';
+  try {
+    text = typeof value === 'string' ? value : JSON.stringify(value || '');
+  } catch {
+    text = String(value || '');
+  }
+  return Math.max(0, Math.ceil(text.length / 4));
+}
+
+function recordUserTokenUsage(user, usage) {
+  if (!user?.id) return;
+  try {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO user_token_usage
+       (user_id, google_id, session_id, endpoint, provider, model, input_tokens, output_tokens, tool_calls, fast_mode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      user.id,
+      user.google_id || null,
+      usage.sessionId || null,
+      usage.endpoint || '/api/agent/run',
+      usage.provider || null,
+      usage.model || null,
+      Math.max(0, Math.round(usage.inputTokens || 0)),
+      Math.max(0, Math.round(usage.outputTokens || 0)),
+      Math.max(0, Math.round(usage.toolCalls || 0)),
+      usage.fastMode ? 1 : 0,
+    );
+  } catch (err) {
+    console.warn('[usage] token ledger write failed:', err.message);
+  }
 }
 
 async function openAICompatStreamFetch(baseURL, payload, signal) {
@@ -475,10 +651,25 @@ app.get('/api/agent/capabilities', (_req, res) => {
     },
     defaultAgent,
     subAgents,
-    tools: AGENT_TOOLS.map((tool) => tool.function?.name).filter(Boolean),
+    tools: ALL_TOOLS.map((tool) => tool.function?.name).filter(Boolean),
     localTools,
     os: osInfo,
   });
+});
+
+// ── MCP Status endpoint ──────────────────────────────────────────────────
+app.get('/api/agent/mcp-status', (_req, res) => {
+  try {
+    const status = mcpStatus();
+    res.json({
+      servers: status,
+      totalMcpTools: status.reduce((sum, s) => sum + s.toolCount, 0),
+      totalTools: ALL_TOOLS.length,
+      builtinTools: AGENT_TOOLS.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Machine Context API (live OS/hardware/folders for agents & TUI) ──
@@ -1343,6 +1534,103 @@ const AnthropicClient = require('@anthropic-ai/sdk').default;
 
 // ── Per-session allowlist for dangerous commands ──────────────────
 const sessionAllowedCommands = new Map(); // sessionId -> Set of allowed command strings
+const PHANTOM_EXPLORATION_TOOLS = new Set(['list_dir', 'search_files', 'glob_search', 'read_file', 'codebase_map']);
+const PHANTOM_ACTION_TOOLS = new Set(['write_file', 'edit_file', 'replace_in_file', 'apply_patch']);
+const PHANTOM_SEARCH_SHELL_RE = /\b(rg|grep|egrep|fgrep|ag|ack|ripgrep|find|fd|locate)\b/i;
+const PHANTOM_CLARIFY_RE = /\b(can you|could you|please provide|tell me|let me know|which file|what would you like|do you want|should i|would you like|please clarify|need more|can we|which of these)\b/i;
+
+function normalizeAgentPathForLoop(p, base = '/home/ghost') {
+  try {
+    return path.resolve(base, p || '.').replace(/\/+$/, '').toLowerCase();
+  } catch {
+    return String(p || '.').replace(/\/+$/, '').toLowerCase();
+  }
+}
+
+function isClarifyingLoopText(text) {
+  const s = String(text || '').trim();
+  return s.endsWith('?') && PHANTOM_CLARIFY_RE.test(s);
+}
+
+function toolLoopClass(toolName, toolArgs) {
+  if (toolName === 'exec_shell' || toolName === 'shell_bg') {
+    const command = String(toolArgs?.command || '');
+    return PHANTOM_SEARCH_SHELL_RE.test(command) ? 'explore' : 'action';
+  }
+  if (PHANTOM_ACTION_TOOLS.has(toolName)) return 'action';
+  if (PHANTOM_EXPLORATION_TOOLS.has(toolName)) return 'explore';
+  return 'other';
+}
+
+function toolLoopTarget(toolName, toolArgs, base) {
+  if (toolName === 'exec_shell' || toolName === 'shell_bg') return String(toolArgs?.command || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  return normalizeAgentPathForLoop(toolArgs?.path || toolArgs?.cwd || toolArgs?.focus || '.', base);
+}
+
+function detectPhantomLoopNudge(loopDetect, assistantContent, toolCalls, workDir) {
+  const text = String(assistantContent || '');
+  const hasAction = toolCalls.some((tc) => toolLoopClass(tc.name, safeJsonParse(tc.arguments || '{}')) === 'action');
+  const hasExplore = toolCalls.some((tc) => toolLoopClass(tc.name, safeJsonParse(tc.arguments || '{}')) === 'explore');
+
+  if (isClarifyingLoopText(text)) {
+    loopDetect.clarifyingCount = (loopDetect.clarifyingCount || 0) + 1;
+  } else if (text.trim().length > 30) {
+    loopDetect.clarifyingCount = 0;
+  }
+
+  if (hasAction) {
+    loopDetect.explorationCalls = [];
+    loopDetect.searchOnlyCount = 0;
+    return null;
+  }
+
+  if (hasExplore) {
+    for (const tc of toolCalls) {
+      const args = safeJsonParse(tc.arguments || '{}');
+      if (toolLoopClass(tc.name, args) !== 'explore') continue;
+      const target = toolLoopTarget(tc.name, args, workDir);
+      loopDetect.explorationCalls.push({ tool: tc.name, target });
+    }
+    loopDetect.explorationCalls = loopDetect.explorationCalls.slice(-8);
+    loopDetect.searchOnlyCount = (loopDetect.searchOnlyCount || 0) + 1;
+  }
+
+  const recentTargets = loopDetect.explorationCalls.map((c) => c.target);
+  const uniqueTargets = new Set(recentTargets).size;
+  const sameSubtreeCount = recentTargets.length >= 5 && uniqueTargets <= 2;
+  const searchLoop = (loopDetect.searchOnlyCount || 0) >= 5;
+  const clarifyLoop = (loopDetect.clarifyingCount || 0) >= 2;
+
+  if (clarifyLoop) {
+    loopDetect.clarifyingCount = 0;
+    return {
+      reason: 'clarification_loop',
+      message: 'Repeated clarification detected. Proceed with best judgment and take a concrete action.',
+      nudge: 'PHANTOM LOOP BREAK: Stop asking clarifying questions. Use the project cwd and facts already available. Take one concrete action now: run a bounded shell command, apply a patch, or give the direct answer.',
+    };
+  }
+  if (sameSubtreeCount) {
+    loopDetect.explorationCalls = [];
+    return {
+      reason: 'filesystem_wandering',
+      message: 'Filesystem wandering detected. Stop re-listing/searching the same paths and act.',
+      nudge: 'PHANTOM WANDERING BREAK: You are browsing the same files/dirs repeatedly. Stop list_dir/search_files/glob_search/read_file. Use what you found and run a fix, apply_patch, or answer now.',
+    };
+  }
+  if (searchLoop) {
+    loopDetect.searchOnlyCount = 0;
+    return {
+      reason: 'search_loop',
+      message: 'Repeated search-only turns detected. Stop searching and act.',
+      nudge: 'PHANTOM SEARCH BREAK: Too many search commands without progress. Do not search again. Patch the file, run a verification command, or answer with the current evidence.',
+    };
+  }
+  return null;
+}
+
+function safeJsonParse(text) {
+  try { return JSON.parse(text || '{}'); } catch { return {}; }
+}
 // Hydrate allowlist from DB on startup
 {
   try {
@@ -1395,8 +1683,16 @@ app.delete('/api/agent/allowlist/:id', (req, res) => {
 });
 
 app.post('/api/agent/run', async (req, res) => {
-  const { provider = 'ollama', model, messages, sessionId, cwd, thinking: thinkingParam } = req.body;
-  const thinking = thinkingParam !== false;
+  const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false } = req.body;
+  const savedAgent = getHaksterModelConfig();
+  const requestedProvider = req.body.provider || savedAgent.provider || 'ollama';
+  const requestedModel = req.body.model || savedAgent.model;
+  const provider = fastMode ? (savedAgent.provider || requestedProvider || 'ollama') : requestedProvider;
+  const model = fastMode && (!req.body.model || req.body.model === 'gpt-oss:120b-cloud')
+    ? (savedAgent.model || requestedModel)
+    : requestedModel;
+  const thinking = fastMode ? thinkingParam === true : thinkingParam !== false;
+  const effectiveApprovalMode = approvalMode || (fastMode ? 'full-auto' : undefined);
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -1413,17 +1709,25 @@ app.post('/api/agent/run', async (req, res) => {
   const cfg = PROVIDERS[provider];
   if (!cfg) return res.status(400).json({ error: `Unknown provider: ${provider}` });
 
-  // Per-session workspace: if no cwd provided, create an isolated workspace
-  // under data/workspaces/<sessionId>. This gives each chat session its own
-  // sandboxed directory for file operations.
-  const FS_ROOT = process.env.FS_ROOT || path.join(__dirname, '..', 'data');
-  const workDir = cwd || path.join(FS_ROOT, 'workspaces', sessionId || 'default');
+  // Prefer real project roots when the request names one. Fall back to the
+  // isolated per-session workspace only for generic scratch work.
+  const { workDir, isolated: usingIsolatedWorkDir, reason: workDirReason } = resolveAgentWorkDir({ cwd, messages, sessionId });
   // Ensure workspace directory exists
-  if (!cwd) {
+  if (usingIsolatedWorkDir) {
     fs.mkdirSync(workDir, { recursive: true });
   }
-  const maxTurns = Math.max(25, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '80', 10) || 80);
+  const configuredMaxTurns = parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || (fastMode ? '18' : '80'), 10) || (fastMode ? 18 : 80);
+  const maxTurns = fastMode
+    ? Math.min(Math.max(8, configuredMaxTurns), 24)
+    : Math.max(25, configuredMaxTurns);
   const agentModel = model || cfg.defaultModel;
+
+  // ── Session-start activity logging ───────────────────
+  try {
+    const db = getDb();
+    db.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)')
+      .run(user?.id || null, 'agent_session_start', sessionId, JSON.stringify({ provider, model: agentModel, cwd: workDir, cwdReason: workDirReason }));
+  } catch (actErr) { console.error('[activity] session_start log failed:', actErr.message); }
 
   // ── Loop detection (per-request, not module-level) ────────────
   let loopDetect = {
@@ -1433,13 +1737,24 @@ app.post('/api/agent/run', async (req, res) => {
     consecutiveToolErrors: [],      // [{name, count}] — same tool erroring repeatedly
     recentToolCalls: [],            // [{name, args}] — last N tool calls for duplicate detection
     totalToolCalls: 0,              // Running total of tool calls made
+    explorationCalls: [],           // Phantom-style filesystem wandering detection
+    searchOnlyCount: 0,             // Consecutive explore/search-only turns
+    clarifyingCount: 0,             // Consecutive clarification loops
   };
-  const NO_PROGRESS_LIMIT = 8;       // Let long jobs keep driving before declaring no-progress
-  const SEMANTIC_LOOP_WINDOW = 3;    // How many recent prefixes to check
-  const SEMANTIC_LOOP_THRESHOLD = 2;  // How many similar prefixes → loop
+  const NO_PROGRESS_LIMIT = 15;      // Let long jobs keep driving before declaring no-progress (was 8)
+  const SEMANTIC_LOOP_WINDOW = 5;    // How many recent prefixes to check (was 3)
+  const SEMANTIC_LOOP_THRESHOLD = 3;  // How many similar prefixes → loop (was 2)
+  const SEMANTIC_SIMILARITY_RATIO = 0.4; // Word overlap ratio to count as similar
   const TOOL_ERROR_LOOP_LIMIT = 3;   // Same tool erroring this many times → break
-  const DUPE_CALL_WINDOW = 4;        // How many recent tool calls to check for dupes
-  const DUPE_CALL_LIMIT = 3;         // Same tool+args repeating this many times → loop
+  const DUPE_CALL_WINDOW = 6;        // How many recent tool calls to check for dupes (was 4)
+  const DUPE_CALL_LIMIT = 4;         // Same tool+args repeating this many times → loop (was 3)
+
+  // ── 6-Phase Loop State (THINK→PLAN→ACT→OBSERVE→REFLECT→CONSOLIDATE) ──
+  let currentPhase = AgentLoopPhase.THINK;
+  let thinkPlanStreak = 0;
+  let rawMemoryCount = 0;
+  let lastConsolidationTurn = -Infinity;
+  trustEscalation.reset(); // reset trust for new session
 
   // Abort tracking — client disconnect support (use res, not req)
   let aborted = false;
@@ -1454,12 +1769,21 @@ app.post('/api/agent/run', async (req, res) => {
       try { res.write(`:heartbeat\n\n`); } catch {}
     }
   }, 5000);
+  // Enable TCP keepalive on the underlying socket — detects dead connections
+  // faster and prevents the OS from closing idle sockets during long tool calls
+  if (res.socket) {
+    res.socket.setKeepAlive(true, 10000); // probe every 10s after idle
+    res.socket.setTimeout(0); // no socket timeout — SSE stays open
+  }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
   res.flushHeaders();
+
+  // Emit initial phase event AFTER headers are set
+  res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn: 0 })}\n\n`);
 
   // Build the OpenAI-compatible client for the chosen provider
   let client;
@@ -1562,7 +1886,7 @@ app.post('/api/agent/run', async (req, res) => {
       max_tokens: payload.max_tokens,
       system: payload.messages.find(m => m.role === 'system')?.content || systemContent,
       messages: anthropicMessagesFromAgentMessages(payload.messages),
-      tools: anthropicToolsFromAgentTools(AGENT_TOOLS),
+      tools: anthropicToolsFromAgentTools(ALL_TOOLS),
       ...(payload.thinking ? { thinking: { type: 'enabled', budget_tokens: budgetTokens } } : {}),
     };
     const stream = await client.messages.stream(streamPayload, { signal });
@@ -1655,7 +1979,24 @@ ${dirListing}
   // ── Preserve client-supplied system prompt (e.g. hack page pentest prompts) ──
   const clientSystemMsg = messages.find(m => m.role === 'system');
   const clientSystemContent = clientSystemMsg ? clientSystemMsg.content : '';
-  const systemContent = AGENT_SYSTEM_PROMPT
+  // ── Build dynamic system prompt with AGENTS.md + autolearn injection ──
+  const agentCwd = cwd || process.cwd();
+  const contextTags = (lastUserMsg?.content || '').split(/\s+/).filter(w => w.length > 3).slice(0, 10);
+  const dynamicPrompt = fastMode
+    ? [
+        'You are haksterAI in fast Chat tab agent mode.',
+        'Be direct and act quickly. Use tools instead of saying you cannot access files.',
+        `Active cwd: ${workDir}`,
+        'You may inspect user folders under /home/ghost with list_dir, read_file, search_files, glob_search, and exec_shell.',
+        'For command requests, call exec_shell with bounded commands and timeout_ms. Avoid foreground servers and broad recursive scans.',
+        'For end-user machine diagnosis, call browser_detect first when browser context matters. If you cannot directly access the user machine, create a downloadable diagnostic or fix script with write_file, then tell the user to run it and paste the output.',
+        'When creating downloads, write clear scripts/reports into the active cwd with descriptive names like diagnose-linux.sh, fix-network.sh, or machine-report.md.',
+        'Dangerous/destructive commands still require confirmation; otherwise run safe read/status/test commands immediately.',
+        'Do not repeat failed tool calls. If a command times out, switch to a smaller diagnostic.',
+        'After tools finish, always end with a short rundown checklist: What was done, what was verified, and any follow-up or blocker. Keep it concise.',
+      ].join('\n')
+    : buildAgentSystemPrompt(agentCwd, contextTags);
+  const systemContent = dynamicPrompt
     + (clientSystemContent ? '\n\n=== CLIENT DIRECTIVE ===\n' + clientSystemContent : '')
     + '\n\n' + machineContext
     + (memoryContext ? '\n\n' + memoryContext : '');
@@ -1674,6 +2015,11 @@ ${dirListing}
   const clientCtxStr = getClientContextString(sessionId);
   if (clientCtxStr) {
     agentMessages[0].content += clientCtxStr;
+  }
+
+  if (user) {
+    const safeName = user.username || (user.email ? String(user.email).split('@')[0] : 'user');
+    agentMessages[0].content += `\n\n## Authenticated User\n- Name: ${safeName}\n- Email: ${user.email || 'unknown'}\n- Google ID linked: ${user.google_id ? 'yes' : 'no'}\n- Role: ${user.role || 'user'}\n- Plan: ${user.plan || 'free'}\nUse the user's name naturally when helpful. Never reveal API keys, auth tokens, or hidden account fields.`;
   }
 
   // ── Inject pentester fingerprint (stable device identity) ──
@@ -1736,11 +2082,11 @@ ${dirListing}
   }
 
   // ── Hard context ceiling — progressive truncation, no message dropping ──
-  const CONTEXT_LIMIT = 131072; // matches gpt-oss:120b-cloud actual context window
-  const MAX_OUTPUT_TOKENS = 16384; // reserved for model output
+  const CONTEXT_LIMIT = fastMode ? 32768 : 131072; // fast chat keeps owner token burn low
+  const MAX_OUTPUT_TOKENS = fastMode ? 4096 : 16384; // reserved for model output
   const INPUT_TOKEN_BUDGET = CONTEXT_LIMIT - MAX_OUTPUT_TOKENS; // ~114k tokens available for input
-  const MAX_CONTEXT_CHARS = 100000; // hard ceiling in chars — very aggressive to prevent token overflow
-  const MAX_MSG_CHARS = 1000; // max chars per message in context (except system prompt)
+  const MAX_CONTEXT_CHARS = fastMode ? 24000 : 100000; // hard ceiling in chars
+  const MAX_MSG_CHARS = fastMode ? 700 : 1000; // max chars per message in context (except system prompt)
 
   function estimateTokens(msgs) {
     let chars = 0;
@@ -1854,6 +2200,25 @@ ${dirListing}
     }
   }
 
+  const requestInputTokens = estimateUsageTokens(agentMessages);
+  let responseOutputTokens = 0;
+  let requestToolCalls = 0;
+  let usageRecorded = false;
+  const recordThisAgentUsage = () => {
+    if (usageRecorded) return;
+    usageRecorded = true;
+    recordUserTokenUsage(user, {
+      sessionId,
+      endpoint: '/api/agent/run',
+      provider,
+      model: agentModel,
+      inputTokens: requestInputTokens,
+      outputTokens: responseOutputTokens,
+      toolCalls: requestToolCalls,
+      fastMode,
+    });
+  };
+
   let lastHadToolCalls = false;
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
@@ -1866,6 +2231,7 @@ ${dirListing}
       }
 
       // ── Enforce context ceiling before every model call ──
+      // Skip if no new messages were added since last enforcement (saves O(n) scan)
       {
         const tokensBefore = estimateTokens(agentMessages);
         const enforced = enforceContextCeiling(agentMessages);
@@ -1878,10 +2244,12 @@ ${dirListing}
             res.write(`data: ${JSON.stringify({ type: 'compact', message: `[context ceiling] ${tokensBefore} → ${tokensAfter} tokens (budget: ${INPUT_TOKEN_BUDGET})`, tokensBefore, tokensAfter })}\n\n`);
           }
         }
-        // Debug: log actual message sizes being sent to model
-        const totalChars = agentMessages.reduce((s, m) => s + (m.content || '').length + 
-          (m.tool_calls ? m.tool_calls.reduce((acc, tc) => acc + (tc.function?.arguments || '').length, 0) : 0), 0);
-        console.log(`[agent] Sending turn ${turn}: ${agentMessages.length} msgs, ${totalChars.toLocaleString()} chars, est ${estimateTokens(agentMessages).toLocaleString()} tokens (budget: ${INPUT_TOKEN_BUDGET})`);
+        // Debug: log actual message sizes being sent to model (throttled — only log when size changes)
+        if (process.env.HAKSTER_DEBUG) {
+          const totalChars = agentMessages.reduce((s, m) => s + (m.content || '').length +
+            (m.tool_calls ? m.tool_calls.reduce((acc, tc) => acc + (tc.function?.arguments || '').length, 0) : 0), 0);
+          console.log(`[agent] Sending turn ${turn}: ${agentMessages.length} msgs, ${totalChars.toLocaleString()} chars, est ${estimateTokens(agentMessages).toLocaleString()} tokens (budget: ${INPUT_TOKEN_BUDGET})`);
+        }
       }
 
       // Hard safety: if still over budget after all enforcement, refuse the call
@@ -1898,8 +2266,8 @@ ${dirListing}
       const streamAbort = new AbortController();
       const streamTimeout = setTimeout(() => {
         streamAbort.abort();
-        console.warn('[agent] Stream timed out after 300s, aborting');
-      }, 300000);
+        console.warn('[agent] Stream timed out after 600s, aborting');
+      }, 600000);
 
       let stream;
       try {
@@ -1907,7 +2275,7 @@ ${dirListing}
         const streamPayload = {
           model: agentModel,
           messages: sanitizeMessagesForProvider(agentMessages, provider),
-          tools: AGENT_TOOLS,
+          tools: fastMode ? getFastChatTools() : ALL_TOOLS,
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
           ...(thinking ? { thinking: true } : {}),
@@ -1954,6 +2322,7 @@ ${dirListing}
         // Text content
         if (delta.content) {
           assistantContent += delta.content;
+          responseOutputTokens += estimateUsageTokens(delta.content);
           res.write(`data: ${JSON.stringify({ type: 'delta', content: delta.content })}\n\n`);
         }
 
@@ -2008,10 +2377,46 @@ ${dirListing}
       if (toolCalls.length === 0) {
         lastHadToolCalls = false;
         loopDetect.noProgressCount = 0;
+        // Phase: ACT→OBSERVE→CONSOLIDATE (session end)
+        if (currentPhase === AgentLoopPhase.ACT) {
+          currentPhase = AgentLoopPhase.OBSERVE;
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+        }
+        if (shouldConsolidate({ turn, rawMemoryCount, lastConsolidationTurn, isSessionEnd: true })) {
+          currentPhase = AgentLoopPhase.CONSOLIDATE;
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+          // Autolearn: record session-end consolidation
+          try {
+            autolearn.initMemory(workDir);
+            autolearn.consolidateMemories(workDir);
+          } catch(_e) {}
+          lastConsolidationTurn = turn;
+        }
         clearInterval(heartbeat);
+        recordThisAgentUsage();
         res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
         res.end();
         return;
+      }
+
+      // ── Phase: THINK→PLAN (model responded, about to act) ──
+      if (currentPhase === AgentLoopPhase.THINK) {
+        const transition = validatePhaseTransition(currentPhase, AgentLoopPhase.PLAN, { thinkPlanStreak });
+        if (transition.allowed) {
+          currentPhase = AgentLoopPhase.PLAN;
+          thinkPlanStreak++;
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+        }
+      }
+
+      // ── Phase: PLAN→ACT (tool calls present, executing) ──
+      if (currentPhase === AgentLoopPhase.PLAN) {
+        const transition = validatePhaseTransition(currentPhase, AgentLoopPhase.ACT, { thinkPlanStreak });
+        if (transition.allowed) {
+          currentPhase = AgentLoopPhase.ACT;
+          thinkPlanStreak = 0; // reset streak once we actually act
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+        }
       }
 
       // ── Loop detection checks (before executing tools) ──────────
@@ -2022,6 +2427,7 @@ ${dirListing}
         console.warn(`[agent] Loop detected: exact repeat response (turn ${turn})`);
         clearInterval(heartbeat);
         res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'exact_repeat', message: 'Model is repeating the same response. Stopping to avoid infinite loop.' })}\n\n`);
+        recordThisAgentUsage();
         res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
         res.end();
         return;
@@ -2045,6 +2451,7 @@ ${dirListing}
             console.warn(`[agent] Loop detected: semantic repeat (turn ${turn}, ${similarCount + 1} similar)`);
             clearInterval(heartbeat);
             res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'semantic_repeat', message: 'Model is repeating similar responses. Stopping to avoid infinite loop.' })}\n\n`);
+            recordThisAgentUsage();
             res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
             res.end();
             return;
@@ -2059,6 +2466,7 @@ ${dirListing}
           console.warn(`[agent] Loop detected: ${loopDetect.noProgressCount} turns without meaningful content (turn ${turn})`);
           clearInterval(heartbeat);
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'no_progress', message: 'Model is making tool calls without producing content. Stopping to avoid infinite loop.' })}\n\n`);
+          recordThisAgentUsage();
           res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
           res.end();
           return;
@@ -2080,6 +2488,7 @@ ${dirListing}
           console.warn(`[agent] Loop detected: duplicate tool call ${tc.name} (turn ${turn}, ${dupes}x)`);
           clearInterval(heartbeat);
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'duplicate_tool_call', message: `Tool ${tc.name} called ${dupes}x with same arguments. Stopping to avoid infinite loop.` })}\n\n`);
+          recordThisAgentUsage();
           res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
           res.end();
           return;
@@ -2087,11 +2496,152 @@ ${dirListing}
         loopDetect.totalToolCalls++;
       }
 
+      const phantomNudge = detectPhantomLoopNudge(loopDetect, assistantContent, toolCalls, workDir);
+      if (phantomNudge) {
+        console.warn(`[agent] Phantom loop nudge: ${phantomNudge.reason} (turn ${turn})`);
+        agentMessages.push({ role: 'system', content: phantomNudge.nudge });
+        res.write(`data: ${JSON.stringify({ type: 'loop_nudge', reason: phantomNudge.reason, message: phantomNudge.message, nudge: phantomNudge.nudge })}\n\n`);
+      }
+
       // Tool calls in progress — mark so next turn skips compact
       lastHadToolCalls = true;
       loopDetect.lastAssistantContent = assistantContent || '';
 
-      // Execute tool calls
+      // Execute tool calls — run independent (non-shell) tools in parallel
+      const toolResults = [];
+      const _tc_abort = () => {
+        clearInterval(heartbeat);
+        res.write(`data: ${JSON.stringify({ type: 'aborted' })}\n\n`);
+        res.end();
+        return null;
+      };
+
+      // Phase 1: identify which tools can run in parallel (no shell, no browser)
+      const parallelizable = toolCalls.every(tc => !['exec_shell', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_screenshot', 'spawn_agent'].includes(tc.name));
+      const PARALLEL_BATCH = parallelizable && toolCalls.length > 1;
+
+      if (PARALLEL_BATCH) {
+        // Run all non-shell tools concurrently
+        const promises = toolCalls.map(async (tc) => {
+          if (aborted) return { tc, result: null, aborted: true };
+          const toolName = tc.name;
+          requestToolCalls++;
+          let toolArgs = {};
+          try { toolArgs = JSON.parse(tc.arguments || '{}'); } catch { /* leave empty */ }
+
+          res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_call_id: tc.id, tool_name: toolName, tool_args: toolArgs })}\n\n`);
+
+          const sessionSet = sessionAllowedCommands.get(sessionId || 'default');
+          const globalSet = sessionAllowedCommands.get('default');
+          const allowedCommands = new Set([...(sessionSet || []), ...(globalSet || [])]);
+          const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, undefined, allowedCommands, effectiveApprovalMode);
+          try { const _db = getDb(); _db.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae) {}
+          return { tc, result, toolName, toolArgs };
+        });
+        const settled = await Promise.all(promises);
+
+        // Process results sequentially (preserve order, emit SSE events, check loop detections)
+        for (const { tc, result, toolName, toolArgs, aborted: wasAborted } of settled) {
+          if (wasAborted) return _tc_abort();
+
+          let needsConfirmation = null;
+          if (effectiveApprovalMode !== 'full-auto') {
+            try {
+              const parsed = JSON.parse(result);
+              if (parsed && parsed.__needs_confirmation) needsConfirmation = parsed;
+            } catch (_) { /* not JSON */ }
+            if (needsConfirmation) {
+              res.write(`data: ${JSON.stringify({
+                type: 'needs_confirmation',
+                tool_call_id: tc.id,
+                tool_name: needsConfirmation.tool || toolName,
+                reason: needsConfirmation.reason,
+                command: needsConfirmation.args?.command || '',
+                args: needsConfirmation.args,
+              })}\n\n`);
+            }
+          }
+
+          const SHELL_DISPLAY_LIMIT = 4000;
+          const SHELL_CONTEXT_LIMIT = 2500;
+
+          if (needsConfirmation) {
+            const confirmContextResult = `This command requires user confirmation before execution. Waiting for the user to approve or deny the command: ${needsConfirmation.args?.command || '(unknown)'}. Do not retry — explain to the user that they need to approve the command.`;
+            agentMessages.push({ role: 'tool', tool_call_id: tc.id, content: confirmContextResult });
+            continue;
+          }
+
+          let imageUrls = null;
+          let displayResult = result;
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed && parsed.__image_urls) {
+              imageUrls = parsed.__image_urls;
+              displayResult = parsed.text || result;
+            }
+          } catch (_) { /* not JSON, use raw result */ }
+
+          const truncatedResult = displayResult.length > SHELL_DISPLAY_LIMIT ? displayResult.slice(0, SHELL_DISPLAY_LIMIT) + '\n... (truncated)' : displayResult;
+          const contextResult = displayResult.length > SHELL_CONTEXT_LIMIT ? displayResult.slice(0, SHELL_CONTEXT_LIMIT) + '\n[trimmed]' : displayResult;
+          responseOutputTokens += estimateUsageTokens(contextResult);
+
+          res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
+
+          if (['write_file', 'edit_file', 'patch_file', 'multi_patch'].includes(toolName) && toolArgs.path) {
+            const isErr = /^Error[:\n]/i.test(String(result).trim()) || /^\u274c/i.test(String(result).trim());
+            const fullPath = path.resolve(workDir, toolArgs.path);
+            if (!isErr && fs.existsSync(fullPath)) {
+              res.write(`data: ${JSON.stringify({ type: 'file_created', path: fullPath, tool: toolName })}\n\n`);
+            }
+          }
+          if (['write_file', 'edit_file'].includes(toolName) && toolArgs.path) {
+            notifyWorkspaceChange(sessionId, toolArgs.path);
+          }
+          if (imageUrls && imageUrls.length > 0) {
+            for (const imgUrl of imageUrls) {
+              res.write(`data: ${JSON.stringify({ type: 'image', url: imgUrl, prompt: toolArgs.prompt || '' })}\n\n`);
+            }
+          }
+
+          agentMessages.push({ role: 'tool', tool_call_id: tc.id, content: contextResult });
+
+          // ── Autolearn: record raw memory from tool call ──
+          try {
+            const _isErr = /^(error|❌)/i.test(String(result).trim());
+            autolearn.addRawMemory({
+              observation: `${toolName}(${JSON.stringify(toolArgs).slice(0, 200)}) → ${contextResult.slice(0, 200)}`,
+              type: _isErr ? 'error' : 'pattern',
+              tags: [toolName],
+              confidence: _isErr ? 0.3 : 0.8,
+              timestamp: Date.now()
+            }, workDir);
+          } catch(_amErr) { /* autolearn best-effort */ }
+
+          // Tool-error loop detection
+          const resultLower = result.toLowerCase();
+          const isError = /^(error|❌)/.test(result.trim()) || resultLower.startsWith('error:') || resultLower.startsWith('failed:') || resultLower.startsWith('exception:');
+          if (isError) {
+            const existing = loopDetect.consecutiveToolErrors.find(e => e.name === toolName);
+            if (existing) {
+              existing.count++;
+              if (existing.count >= TOOL_ERROR_LOOP_LIMIT) {
+                console.warn(`[agent] Loop detected: tool ${toolName} errored ${existing.count}x in a row (turn ${turn})`);
+                clearInterval(heartbeat);
+                res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'tool_error', message: `Tool ${toolName} has failed ${existing.count} times in a row. Stopping to avoid retry loop.` })}\n\n`);
+                recordThisAgentUsage();
+                res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
+                res.end();
+                return;
+              }
+            } else {
+              loopDetect.consecutiveToolErrors = [{ name: toolName, count: 1 }];
+            }
+          } else {
+            loopDetect.consecutiveToolErrors = [];
+          }
+        }
+      } else {
+      // Sequential execution (shell/browser tools need ordering for streaming)
       for (const tc of toolCalls) {
         // Check abort before each tool execution
         if (aborted) {
@@ -2102,6 +2652,7 @@ ${dirListing}
         }
 
         const toolName = tc.name;
+        requestToolCalls++;
         let toolArgs = {};
         try {
           toolArgs = JSON.parse(tc.arguments || '{}');
@@ -2127,23 +2678,26 @@ ${dirListing}
         const sessionSet = sessionAllowedCommands.get(sessionId || 'default');
         const globalSet = sessionAllowedCommands.get('default');
         const allowedCommands = new Set([...(sessionSet || []), ...(globalSet || [])]);
-        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, allowedCommands);
+        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, allowedCommands, effectiveApprovalMode);
+        try { const _db2 = getDb(); _db2.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae2) {}
 
         // ── Detect __needs_confirmation and emit special SSE event ──
         let needsConfirmation = null;
-        try {
-          const parsed = JSON.parse(result);
-          if (parsed && parsed.__needs_confirmation) needsConfirmation = parsed;
-        } catch (_) { /* not JSON */ }
-        if (needsConfirmation) {
-          res.write(`data: ${JSON.stringify({
-            type: 'needs_confirmation',
-            tool_call_id: tc.id,
-            tool_name: needsConfirmation.tool || toolName,
-            reason: needsConfirmation.reason,
-            command: needsConfirmation.args?.command || '',
-            args: needsConfirmation.args,
-          })}\n\n`);
+        if (effectiveApprovalMode !== 'full-auto') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed && parsed.__needs_confirmation) needsConfirmation = parsed;
+          } catch (_) { /* not JSON */ }
+          if (needsConfirmation) {
+            res.write(`data: ${JSON.stringify({
+              type: 'needs_confirmation',
+              tool_call_id: tc.id,
+              tool_name: needsConfirmation.tool || toolName,
+              reason: needsConfirmation.reason,
+              command: needsConfirmation.args?.command || '',
+              args: needsConfirmation.args,
+            })}\n\n`);
+          }
         }
 
         // Truncate tool results: display gets 4k, model context gets 2500 chars
@@ -2171,6 +2725,7 @@ ${dirListing}
 
         const truncatedResult = displayResult.length > SHELL_DISPLAY_LIMIT ? displayResult.slice(0, SHELL_DISPLAY_LIMIT) + '\n... (truncated)' : displayResult;
         const contextResult = displayResult.length > SHELL_CONTEXT_LIMIT ? displayResult.slice(0, SHELL_CONTEXT_LIMIT) + '\n[trimmed]' : displayResult;
+        responseOutputTokens += estimateUsageTokens(contextResult);
 
         // Notify frontend: tool call result
         res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
@@ -2205,6 +2760,18 @@ ${dirListing}
           content: contextResult,
         });
 
+        // ── Autolearn: record raw memory from tool call (sequential path) ──
+        try {
+          const _isErr = /^(error|❌)/i.test(String(result).trim());
+          autolearn.addRawMemory({
+            observation: `${toolName}(${JSON.stringify(toolArgs).slice(0, 200)}) → ${contextResult.slice(0, 200)}`,
+            type: _isErr ? 'error' : 'pattern',
+            tags: [toolName],
+            confidence: _isErr ? 0.3 : 0.8,
+            timestamp: Date.now()
+          }, workDir);
+        } catch(_amErr2) { /* autolearn best-effort */ }
+
         // ── Tool-error loop detection ──
         // Track consecutive errors from the same tool — if a tool errors 3x in a row, break the loop
         // Only match actual error lines (starting with "Error:" or "❌"), not file paths containing "error"
@@ -2218,6 +2785,7 @@ ${dirListing}
               console.warn(`[agent] Loop detected: tool ${toolName} errored ${existing.count}x in a row (turn ${turn})`);
               clearInterval(heartbeat);
               res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'tool_error', message: `Tool ${toolName} has failed ${existing.count} times in a row. Stopping to avoid retry loop.` })}\n\n`);
+              recordThisAgentUsage();
               res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
               res.end();
               return;
@@ -2230,6 +2798,82 @@ ${dirListing}
           loopDetect.consecutiveToolErrors = [];
         }
       }
+      } // close else (sequential execution)
+
+      // ── Phase: ACT→OBSERVE (tools finished, observe results) ──
+      if (currentPhase === AgentLoopPhase.ACT) {
+        currentPhase = AgentLoopPhase.OBSERVE;
+        res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+      }
+
+      // ── Phase: OBSERVE→REFLECT (check if reflection needed) ──
+      const reflectState = {
+        noProgressCount: loopDetect.noProgressCount,
+        semanticLoopDetected: false, // already handled above — if we got here, no loop
+        sameToolErrorCount: loopDetect.consecutiveToolErrors.reduce((max, e) => Math.max(max, e.count), 0),
+        isClarifyingQuestion: false,
+        isFilesystemWandering: false,
+      };
+      if (currentPhase === AgentLoopPhase.OBSERVE && shouldReflect(reflectState)) {
+        currentPhase = AgentLoopPhase.REFLECT;
+        res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn, reason: 'loop_signal' })}\n\n`);
+        // Inject reflection prompt to guide model
+        agentMessages.push({
+          role: 'system',
+          content: `[REFLECT] You've had ${loopDetect.noProgressCount} no-progress turns or ${reflectState.sameToolErrorCount} tool errors. Pause and reconsider your approach. Try a different tool or strategy.`
+        });
+        // Reset counters after reflection injection
+        loopDetect.noProgressCount = 0;
+        loopDetect.consecutiveToolErrors = [];
+      }
+
+      // ── Phase: REFLECT→CONSOLIDATE (check if consolidation needed) ──
+      if (currentPhase === AgentLoopPhase.REFLECT || currentPhase === AgentLoopPhase.OBSERVE) {
+        if (shouldConsolidate({ turn, rawMemoryCount, lastConsolidationTurn })) {
+          currentPhase = AgentLoopPhase.CONSOLIDATE;
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+          // Autolearn: run consolidation — extract lessons from recent activity
+          try {
+            autolearn.initMemory(workDir);
+            const consolidationResult = autolearn.consolidateMemories(workDir);
+            if (consolidationResult && consolidationResult.consolidated > 0) {
+              rawMemoryCount = 0; // reset after consolidation
+              lastConsolidationTurn = turn;
+              const lessons = autolearn.loadLearnedLessons(workDir, []);
+              // Inject consolidated lessons into context
+              agentMessages.push({
+                role: 'system',
+                content: `[CONSOLIDATE] Lessons learned so far:\n${lessons || 'Consolidation complete.'}`
+              });
+            }
+          } catch(_consolidateErr) {
+            console.warn('[agent] Consolidation failed:', _consolidateErr.message);
+          }
+        }
+      }
+
+      // ── Phase: →THINK (always cycle back to THINK for next turn) ──
+      if (currentPhase !== AgentLoopPhase.THINK) {
+        currentPhase = AgentLoopPhase.THINK;
+        res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+      }
+
+      // Trust escalation: record activity based on tool types used
+      for (const tc of toolCalls) {
+        if (['read_file', 'glob_search', 'codebase_map', 'diff_preview'].includes(tc.name)) {
+          trustEscalation.recordActivity('read', turn);
+        } else if (['write_file', 'edit_file', 'replace_in_file', 'patch_file', 'multi_patch'].includes(tc.name)) {
+          trustEscalation.recordActivity('edit', turn);
+        } else if (tc.name === 'exec_shell') {
+          const _cmd = (() => { try { return JSON.parse(tc.arguments || '{}').command || ''; } catch { return ''; } })();
+          if (/test|spec/i.test(_cmd)) trustEscalation.recordActivity('test', turn);
+          else if (/build|make|compile/i.test(_cmd)) trustEscalation.recordActivity('build', turn);
+        }
+      }
+      trustEscalation.decay(turn);
+
+      // Track raw memory for consolidation threshold
+      rawMemoryCount += toolCalls.length;
 
       // Turn marker
       res.write(`data: ${JSON.stringify({ type: 'turn_end', turn })}\n\n`);
@@ -2238,11 +2882,13 @@ ${dirListing}
     // Hit max turns
     clearInterval(heartbeat);
     res.write(`data: ${JSON.stringify({ type: 'max_turns', maxTurns })}\n\n`);
+    recordThisAgentUsage();
     incrementUsage(user);
     res.end();
   } catch (err) {
     clearInterval(heartbeat);
     console.error('[agent] error:', err);
+    recordThisAgentUsage();
     res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`);
     res.end();
   }
@@ -2600,9 +3246,9 @@ app.post('/api/generate', async (req, res) => {
     recentToolCalls: [],
     totalToolCalls: 0,
   };
-  const NO_PROGRESS_LIMIT = 4;
-  const DUPE_CALL_WINDOW = 4;
-  const DUPE_CALL_LIMIT = 3;
+  const NO_PROGRESS_LIMIT = 15;      // was 4 — too aggressive for complex prompts
+  const DUPE_CALL_WINDOW = 6;        // was 4
+  const DUPE_CALL_LIMIT = 4;         // was 3
   const MAX_OUTPUT_TOKENS = 16384;
 
   try {
@@ -2626,7 +3272,7 @@ app.post('/api/generate', async (req, res) => {
         stream = await client.chat.completions.create({
           model: agentModel,
           messages: sanitizeMessagesForProvider(messages, provider),
-          tools: AGENT_TOOLS,
+          tools: ALL_TOOLS,
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
         }, { signal: streamAbort.signal });
@@ -2756,7 +3402,8 @@ app.post('/api/generate', async (req, res) => {
           })}\n\n`);
         };
 
-        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream);
+        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, undefined, approvalMode);
+        try { const _db3 = getDb(); _db3.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae3) {}
 
         // Check for image URLs in result
         let imageUrls = null;
@@ -2820,6 +3467,10 @@ app.post('/api/generate', async (req, res) => {
         `INSERT INTO requests (id, session_id, type, provider, model, input_tokens, output_tokens, latency_ms, cost, status)
          VALUES (?, ?, 'generate', ?, ?, ?, ?, ?, ?, 'ok')`
       ).run(reqId, sessionId, provider, finalMeta.model, finalMeta.inputTokens, finalMeta.outputTokens, finalMeta.latency, finalMeta.cost);
+      try {
+        db.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)')
+          .run(user?.id || null, 'agent_session_end', sessionId, JSON.stringify({ inputTokens: finalMeta.inputTokens, outputTokens: finalMeta.outputTokens, cost: finalMeta.cost, model: finalMeta.model }));
+      } catch (actEndErr) { console.error('[activity] session_end log failed:', actEndErr.message); }
     }
 
     res.write(`data: ${JSON.stringify({ type: 'done', ...(finalMeta || { model: agentModel, provider }) })}\n\n`);
@@ -2985,10 +3636,30 @@ app.get('/api/dashboard', (req, res) => {
 
     // Request stats
     const totalRequests = db.prepare(`SELECT COUNT(*) as count FROM requests`).get().count;
-    const totalTokens = db.prepare(`SELECT SUM(input_tokens + output_tokens) as total FROM requests`).get().total || 0;
+    const ledgerTotals = db.prepare(`SELECT COUNT(*) as requests, SUM(input_tokens + output_tokens) as tokens, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens FROM user_token_usage`).get() || {};
+    const totalTokens = (db.prepare(`SELECT SUM(input_tokens + output_tokens) as total FROM requests`).get().total || 0) + (ledgerTotals.tokens || 0);
     const totalCost = db.prepare(`SELECT SUM(cost) as total FROM requests`).get().total || 0;
     const byProvider = db.prepare(
       `SELECT provider, COUNT(*) as requests, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(cost) as cost FROM requests GROUP BY provider`
+    ).all();
+    const byUser = db.prepare(
+      `SELECT
+         u.id as userId,
+         u.username,
+         u.email,
+         u.google_id as googleId,
+         u.role,
+         u.plan,
+         COUNT(utu.id) as requests,
+         SUM(utu.input_tokens) as inputTokens,
+         SUM(utu.output_tokens) as outputTokens,
+         SUM(utu.tool_calls) as toolCalls,
+         MAX(utu.created_at) as lastUsedAt
+       FROM user_token_usage utu
+       LEFT JOIN users u ON u.id = utu.user_id
+       GROUP BY utu.user_id, utu.google_id
+       ORDER BY (SUM(utu.input_tokens) + SUM(utu.output_tokens)) DESC
+       LIMIT 20`
     ).all();
     const toolCallRows = db.prepare(
       `SELECT SUM(output_tokens) as total FROM requests WHERE status = 'ok'`
@@ -3134,7 +3805,7 @@ app.get('/api/dashboard', (req, res) => {
     let crushStats = { sessions: 0, messages: 0, promptTokens: 0, completionTokens: 0, toolCalls: 0, uniqueTools: 0, toolBreakdown: {}, reasoningSteps: 0, files: 0 };
     const crushDbPaths = [
       path.join('/home/ghost', '.crush', 'crush.db'),
-      path.join(os.homedir(), '.crush', 'crush.db'),
+      path.join(process.env.HOME || '/home/ghost', '.crush', 'crush.db'),
     ];
     for (const crushDbPath of crushDbPaths) {
       try {
@@ -3202,7 +3873,7 @@ app.get('/api/dashboard', (req, res) => {
     const crushVersion = 'local';
 
     res.json({
-      requests: { total: totalRequests, totalTokens, totalCost, byProvider, outputTokens: totalToolCalls },
+      requests: { total: totalRequests + (ledgerTotals.requests || 0), totalTokens, totalCost, byProvider, byUser, inputTokens: ledgerTotals.inputTokens || 0, outputTokens: (ledgerTotals.outputTokens || 0) + totalToolCalls },
       sessions: { total: sessionCount, active: activeSessions, messages: messageCount, artifacts: artifactCount },
       system: { cpus, totalMem, freeMem, uptime, hostname: os.hostname(), platform: os.platform(), arch: os.arch() },
       services: runningServices,
@@ -3229,8 +3900,10 @@ app.post('/api/crush/config', express.json(), (req, res) => {
     // Save to haksterAi's own config (crush can't overwrite this)
     const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');
     fs.writeFileSync(haksterConfigPath, JSON.stringify({ provider, model }, null, 2));
-    // Update crush DATA file (runtime)
-    const crushDataPath = path.join(os.homedir(), '.local/share/crush/crush.json');
+    // Update crush DATA file (runtime). Keep this best-effort: Chat tab model
+    // selection must still work even when the server inherited HOME=/root.
+    const userHome = process.env.HAKSTER_HOME || (process.env.HOME && process.env.HOME !== '/root' ? process.env.HOME : '/home/ghost');
+    const crushDataPath = path.join(userHome, '.local/share/crush/crush.json');
     let crushCfg = {};
     try {
       crushCfg = JSON.parse(fs.readFileSync(crushDataPath, 'utf8'));
@@ -3250,9 +3923,12 @@ app.post('/api/crush/config', express.json(), (req, res) => {
         }
       }
     }
-    fs.writeFileSync(crushDataPath, JSON.stringify(crushCfg, null, 2));
+    try {
+      fs.mkdirSync(path.dirname(crushDataPath), { recursive: true });
+      fs.writeFileSync(crushDataPath, JSON.stringify(crushCfg, null, 2));
+    } catch (e) { console.error('[crush] data update error:', e.message); }
     // Update crush CONFIG file (what crush reads on startup)
-    const crushConfigDir = path.join(os.homedir(), '.config/crush/crush.json');
+    const crushConfigDir = path.join(userHome, '.config/crush/crush.json');
     try {
       let crushConf = JSON.parse(fs.readFileSync(crushConfigDir, 'utf8'));
       crushConf.models = crushConf.models || {};
@@ -3559,8 +4235,27 @@ app.get('/api/pricing', (_req, res) => {
 });
 
 // ── Google OAuth ──────────────────────────────────────────────────
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+let GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+let GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+
+// Auto-load from downloaded client JSON if env vars are missing
+if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+  try {
+    const clientJsonPath = process.env.GOOGLE_OAUTH_CLIENT_JSON
+      ? path.resolve(__dirname, '..', process.env.GOOGLE_OAUTH_CLIENT_JSON)
+      : path.join(__dirname, '..', 'google-oauth-client.json');
+    const raw = fs.readFileSync(clientJsonPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const cfg = parsed.web || parsed.installed;
+    if (cfg && cfg.client_id && cfg.client_secret) {
+      GOOGLE_CLIENT_ID = cfg.client_id;
+      GOOGLE_CLIENT_SECRET = cfg.client_secret;
+      console.log('[oauth] loaded google client from', clientJsonPath);
+    }
+  } catch (e) {
+    // ignore — env vars are the explicit source of truth
+  }
+}
 
 app.get('/api/auth/google/client-id', (_req, res) => {
   res.json({ clientId: GOOGLE_CLIENT_ID, configured: !!GOOGLE_CLIENT_ID });
@@ -3777,12 +4472,30 @@ app.get('/api/usage', (req, res) => {
   if (!user) return res.status(401).json({ error: 'Invalid or missing API key' });
   const db = getDb();
   const referralCode = ensureReferralCode(db, user);
+  const tokenUsage = db.prepare(
+    `SELECT
+       COUNT(*) as requests,
+       COALESCE(SUM(input_tokens), 0) as inputTokens,
+       COALESCE(SUM(output_tokens), 0) as outputTokens,
+       COALESCE(SUM(tool_calls), 0) as toolCalls,
+       MAX(created_at) as lastUsedAt
+     FROM user_token_usage
+     WHERE user_id = ?`
+  ).get(user.id) || {};
   res.json({
     plan: user.plan,
     used: user.usage_count || 0,
     limit: user.plan === 'free' ? FREE_USAGE_LIMIT : -1, // -1 = unlimited
     remaining: user.plan === 'free' ? Math.max(0, FREE_USAGE_LIMIT - (user.usage_count || 0)) : -1,
     tokenBalance: user.token_balance || 0,
+    tokenUsage: {
+      requests: tokenUsage.requests || 0,
+      inputTokens: tokenUsage.inputTokens || 0,
+      outputTokens: tokenUsage.outputTokens || 0,
+      totalTokens: (tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0),
+      toolCalls: tokenUsage.toolCalls || 0,
+      lastUsedAt: tokenUsage.lastUsedAt || null,
+    },
     referralCode,
     limitEnabled: USAGE_LIMIT_ENABLED,
     resetAt: user.usage_reset_at || null,
@@ -4134,6 +4847,9 @@ const pty = require('node-pty');
 
 const ptyWss = new WebSocketServer({ noServer: true, maxReceivedFrameSize: 16 * 1024 * 1024, maxReceivedMessageSize: 32 * 1024 * 1024 });
 
+// Track active crush PTY processes to prevent duplicate DB locks
+let activeCrushPty = null;
+
 ptyWss.on('connection', (ws, req) => {
   let ptyProcess = null;
   let closed = false;
@@ -4143,6 +4859,55 @@ ptyWss.on('connection', (ws, req) => {
     const url = new URL(req.url || '/pty', 'http://localhost');
     ptyMode = url.searchParams.get('mode') === 'shell' ? 'shell' : 'crush';
   } catch {}
+
+  // Identify logged-in user from API key passed as query param
+  let userName = 'Ghost';
+  let userEmail = '';
+  let userHandle = '';
+  try {
+    const url = new URL(req.url || '/pty', 'http://localhost');
+    const apiKey = url.searchParams.get('key');
+    if (apiKey) {
+      const db = getDb();
+      const u = db.prepare('SELECT username, email FROM users WHERE api_key = ?').get(apiKey);
+      if (u) {
+        userName = u.username || 'Ghost';
+        userEmail = u.email || '';
+        userHandle = '@' + userName;
+        console.log(`[pty] identified user: ${userName} (${userEmail})`);
+      }
+    }
+  } catch (e) { console.log('[pty] user lookup error:', e.message); }
+
+  // Kill any existing crush process before spawning a new one
+  // to prevent "read only database" errors from concurrent SQLite access
+  if (activeCrushPty && ptyMode === 'crush') {
+    try {
+      console.log('[pty] killing previous crush process before spawning new one');
+      activeCrushPty.kill('SIGTERM');
+      setTimeout(() => { try { activeCrushPty.kill('SIGKILL'); } catch {} }, 100);
+    } catch {}
+    activeCrushPty = null;
+  }
+
+  // Detect client OS/browser from WebSocket request headers
+  const clientUA = req.headers['user-agent'] || '';
+  const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress || '';
+  let clientOS = 'Unknown';
+  let clientBrowser = 'Unknown';
+  let clientDevice = 'desktop';
+  if (clientUA) {
+    if (/Windows NT 10/i.test(clientUA)) clientOS = 'Windows 10/11';
+    else if (/Windows NT/i.test(clientUA)) clientOS = 'Windows';
+    else if (/Android/i.test(clientUA)) { clientOS = 'Android ' + (clientUA.match(/Android ([0-9.]+)/)?.[1] || ''); clientDevice = 'mobile'; }
+    else if (/iPhone|iPad|iPod/i.test(clientUA)) { clientOS = 'iOS ' + (clientUA.match(/OS ([0-9_]+)/)?.[1]?.replace(/_/g, '.') || ''); clientDevice = /iPad/.test(clientUA) ? 'tablet' : 'mobile'; }
+    else if (/Mac OS X/i.test(clientUA)) clientOS = 'macOS ' + (clientUA.match(/Mac OS X ([0-9_.]+)/)?.[1] || '').replace(/_/g, '.');
+    else if (/Linux/i.test(clientUA)) clientOS = 'Linux';
+    if (/Edg\//i.test(clientUA)) clientBrowser = 'Edge ' + (clientUA.match(/Edg\/([0-9.]+)/)?.[1] || '');
+    else if (/Chrome/i.test(clientUA)) clientBrowser = 'Chrome ' + (clientUA.match(/Chrome\/([0-9.]+)/)?.[1] || '');
+    else if (/Firefox/i.test(clientUA)) clientBrowser = 'Firefox ' + (clientUA.match(/Firefox\/([0-9.]+)/)?.[1] || '');
+    else if (/Safari/i.test(clientUA)) clientBrowser = 'Safari ' + (clientUA.match(/Version\/([0-9.]+)/)?.[1] || '');
+  }
   const crushBin = process.env.CRUSH_BIN || (fs.existsSync('/usr/local/bin/crush') ? '/usr/local/bin/crush' : 'crush');
   const shellBin = process.env.TERMINAL_SHELL || process.env.SHELL || '/bin/bash';
   const defaultTerminalCwd = fs.existsSync('/home/ghost/haksterAi') ? '/home/ghost/haksterAi' : '/home/ghost';
@@ -4153,7 +4918,8 @@ ptyWss.on('connection', (ws, req) => {
   try {
     const hakCfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'hakster-config.json'), 'utf8'));
     // Update data file
-    const crushDataPath = path.join(os.homedir(), '.local/share/crush/crush.json');
+    const crushHome = '/home/ghost'; // crush always runs as ghost — never use process.env.HOME (may be /root under PM2)
+    const crushDataPath = path.join(crushHome, '.local/share/crush/crush.json');
     let crushCfg = {};
     try { crushCfg = JSON.parse(fs.readFileSync(crushDataPath, 'utf8')); } catch {}
     if (!crushCfg.models) crushCfg.models = {};
@@ -4161,10 +4927,24 @@ ptyWss.on('connection', (ws, req) => {
     if (!crushCfg.models.small) crushCfg.models.small = {};
     if (hakCfg.model) { crushCfg.models.large.model = hakCfg.model; crushCfg.models.small.model = hakCfg.model; }
     if (hakCfg.provider) { crushCfg.models.large.provider = hakCfg.provider; crushCfg.models.small.provider = hakCfg.provider; }
+    // Only give crush playwright + filesystem MCP to keep it fast on 4-core machine
+    // haksterAi's agent API already has all 6 — crush doesn't need to duplicate them
+    try {
+      const mcpPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
+      const mcpCfg = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+      if (mcpCfg.mcpServers) {
+        crushCfg.mcp_servers = {};
+        if (mcpCfg.mcpServers.playwright) crushCfg.mcp_servers.playwright = mcpCfg.mcpServers.playwright;
+        if (mcpCfg.mcpServers.filesystem) crushCfg.mcp_servers.filesystem = mcpCfg.mcpServers.filesystem;
+      }
+    } catch (e) { console.log('[pty] MCP sync error:', e.message); }
+    // Tell crush to read CRUSH.md as context
+    crushCfg.context_paths = ['CRUSH.md', 'AGENTS.md'];
+    crushCfg.global_context_paths = ['~/.config/crush/CRUSH.md'];
     fs.mkdirSync(path.dirname(crushDataPath), { recursive: true });
     fs.writeFileSync(crushDataPath, JSON.stringify(crushCfg, null, 2));
     // Update config file (what crush reads on startup)
-    const crushConfigPath = path.join(os.homedir(), '.config/crush/crush.json');
+    const crushConfigPath = path.join(crushHome, '.config/crush/crush.json');
     let crushConf = {};
     try { crushConf = JSON.parse(fs.readFileSync(crushConfigPath, 'utf8')); } catch {}
     crushConf.models = crushConf.models || {};
@@ -4172,9 +4952,74 @@ ptyWss.on('connection', (ws, req) => {
     crushConf.models.small = crushConf.models.small || {};
     if (hakCfg.model) { crushConf.models.large.model = hakCfg.model; crushConf.models.small.model = hakCfg.model; }
     if (hakCfg.provider) { crushConf.models.large.provider = hakCfg.provider; crushConf.models.small.provider = hakCfg.provider; }
+    // Only playwright + filesystem for crush
+    try {
+      const mcpPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
+      const mcpCfg = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+      if (mcpCfg.mcpServers) {
+        crushConf.mcp_servers = {};
+        if (mcpCfg.mcpServers.playwright) crushConf.mcp_servers.playwright = mcpCfg.mcpServers.playwright;
+        if (mcpCfg.mcpServers.filesystem) crushConf.mcp_servers.filesystem = mcpCfg.mcpServers.filesystem;
+      }
+    } catch (e) { console.log('[pty] MCP config sync error:', e.message); }
+    // Tell crush to read CRUSH.md as context
+    crushConf.context_paths = ['CRUSH.md', 'AGENTS.md'];
+    crushConf.global_context_paths = ['~/.config/crush/CRUSH.md'];
     fs.mkdirSync(path.dirname(crushConfigPath), { recursive: true });
     fs.writeFileSync(crushConfigPath, JSON.stringify(crushConf, null, 2));
-  } catch {}
+
+    // Write CRUSH.md context file so crush knows who the user is and what machine they're on
+    try {
+      const crushMdPath = path.join(workDir, 'CRUSH.md');
+      const crushMd = [
+        '# haksterAi CrushTerminal Context',
+        '',
+        '## Current User (auto-detected from login)',
+        `- Username: ${userName}`,
+        `- Handle: ${userHandle || '@' + userName}`,
+        userEmail ? `- Email: ${userEmail}` : '',
+        '- Identity: pentester under haksterAi',
+        '',
+        '## Client Machine (auto-detected)',
+        `- OS: ${clientOS}`,
+        `- Browser: ${clientBrowser}`,
+        `- Device: ${clientDevice}`,
+        `- IP: ${clientIP}`,
+        '',
+        '## Server Machine',
+        '- OS: Linux (Ubuntu, AMD A12-9720P, 4 cores, ~7GB RAM)',
+        '- Working directory: /home/ghost/haksterAi',
+        '- Projects: CineVault, haksterAi, PhantomIDE, bug bounties',
+        '',
+        '## Available MCP Tools (crush)',
+        '- playwright: Browser automation — USE THIS to check web pages, test UI, interact with browsers',
+        '- filesystem: File operations on /home/ghost',
+        '',
+        '## Additional MCP Tools (via haksterAi agent API)',
+        '- nmap: Network scanning and port detection',
+        '- sqlite: SQLite database queries on /home/ghost/haksterAi/data/mcp.db',
+        '- memory: Persistent memory across sessions',
+        '- sequential-thinking: Step-by-step reasoning for complex problems',
+        '',
+        '## Instructions',
+        '- When asked to "check the browser" or "check web pages", USE the playwright MCP tool — do NOT just say you can\'t access it',
+        '- When asked about the machine, refer to the Client Machine and Server Machine sections above',
+        '- The user is ' + userName + ' — greet them by name when they say "yo" or greet you',
+        '- The user connects from different devices — always check the Client Machine section for current device info',
+        '- Brand stays "haksterAi" — never rename',
+        '- When the user says "yo" or greets you, acknowledge them by name',
+        '',
+      ].filter(Boolean).join('\n');
+      fs.writeFileSync(crushMdPath, crushMd);
+      // Ensure ghost owns the file (server may run as root in some configs)
+      try { require('child_process').execSync('chown ghost:ghost ' + crushMdPath); } catch {}
+      console.log(`[pty] wrote CRUSH.md context (user=${userName}, OS=${clientOS}, Browser=${clientBrowser}, IP=${clientIP})`);
+    } catch (e) {
+      console.log('[pty] failed to write CRUSH.md:', e.message);
+    }
+  } catch (e) {
+    console.log('[pty] crush config sync error:', e.message);
+  }
 
   try {
     const spawnBin = ptyMode === 'shell' ? shellBin : crushBin;
@@ -4188,10 +5033,11 @@ ptyWss.on('connection', (ws, req) => {
         ...process.env,
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
-        HOME: process.env.HOME || '/home/ghost',
+        HOME: '/home/ghost', // crush always runs as ghost — never inherit PM2's /root
       }
     });
     console.log(`[pty] spawned ${ptyMode}: ${spawnBin} (pid=${ptyProcess.pid})`);
+    if (ptyMode === 'crush') activeCrushPty = ptyProcess;
   } catch (err) {
     console.error('[pty] failed to spawn:', err);
     ws.send(JSON.stringify({ type: 'error', error: `Failed to spawn terminal: ${err.message}` }));
@@ -4231,6 +5077,7 @@ ptyWss.on('connection', (ws, req) => {
 
   ptyProcess.onExit(({ exitCode }) => {
     console.log(`[pty] ${ptyMode} exited (code=${exitCode})`);
+    if (ptyMode === 'crush' && activeCrushPty === ptyProcess) activeCrushPty = null;
     if (ptyOutTimer) { clearTimeout(ptyOutTimer); ptyOutTimer = null; }
     flushPtyOutput();
     if (ws.readyState === 1) {
@@ -4295,6 +5142,9 @@ getSkillsInventory();
 getToolInventory();
 getMachineContext();
 
+// Initialize MCP servers (async, non-blocking)
+initWebMcp();
+
 server.listen(PORT, () => {
   console.log(`\n  ╔══════════════════════════════════════════╗`);
   console.log(`  ║  haksterAi server v1.0                   ║`);
@@ -4307,4 +5157,8 @@ server.listen(PORT, () => {
   // Start background security scanner (5-min interval, notifies on persistent risks)
   startSecurityScanner(path.join(__dirname, '..'), CORS_ORIGINS, notifPush);
   console.log('  ✓ Security scanner started (5-min interval, persistent risk notifications)');
+
+  // Start Telegram bot fleet
+  telegramBots.initBots();
+  telegramBots.sendDeployStatus('haksterAi server started');
 });

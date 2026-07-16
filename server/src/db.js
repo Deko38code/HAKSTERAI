@@ -236,6 +236,25 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_user_activity_ip ON user_activity(ip_address);
     CREATE INDEX IF NOT EXISTS idx_user_activity_created ON user_activity(created_at);
 
+    -- Per-user token ledger — tracks live token burn by Google-backed user.
+    CREATE TABLE IF NOT EXISTS user_token_usage (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id       TEXT REFERENCES users(id) ON DELETE SET NULL,
+      google_id     TEXT,
+      session_id    TEXT,
+      endpoint      TEXT NOT NULL DEFAULT '/api/agent/run',
+      provider      TEXT,
+      model         TEXT,
+      input_tokens  INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      tool_calls    INTEGER NOT NULL DEFAULT 0,
+      fast_mode     INTEGER NOT NULL DEFAULT 0,
+      created_at    INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_token_usage_user ON user_token_usage(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_token_usage_google ON user_token_usage(google_id);
+    CREATE INDEX IF NOT EXISTS idx_user_token_usage_created ON user_token_usage(created_at);
+
     -- Payments / receipts — tracks every payment transaction
     CREATE TABLE IF NOT EXISTS payments (
       id              TEXT PRIMARY KEY,          -- internal receipt ID (e.g. rcpt_xxx)
@@ -336,6 +355,24 @@ function initSchema(db) {
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code_unique ON users(referral_code) WHERE referral_code IS NOT NULL").run();
     db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)").run();
     db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by)").run();
+  } catch (e) { /* table may not exist yet */ }
+
+  // ── Migrate sessions: add user_id column ──
+  try {
+    const sessCols = db.prepare("PRAGMA table_info(sessions)").all().map(c => c.name);
+    if (!sessCols.includes('user_id')) {
+      db.prepare("ALTER TABLE sessions ADD COLUMN user_id TEXT REFERENCES users(id)").run();
+      console.log('  [migration] Added user_id column to sessions');
+    }
+    if (!sessCols.includes('workspace')) {
+      db.prepare("ALTER TABLE sessions ADD COLUMN workspace TEXT").run();
+      console.log('  [migration] Added workspace column to sessions');
+    }
+    if (!sessCols.includes('metadata')) {
+      db.prepare("ALTER TABLE sessions ADD COLUMN metadata TEXT").run();
+      console.log('  [migration] Added metadata column to sessions');
+    }
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)").run();
   } catch (e) { /* table may not exist yet */ }
 
   // ── Migrate client_contexts: add enhanced detection columns ──

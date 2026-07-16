@@ -161,6 +161,8 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
   let resizeObserver = null;
   let pingTimer = null;
   let fitRaf = 0;
+  let scrollRaf = 0;
+  let scrollBurstUntil = 0;
   let autoScrollEnabled = true;
   const decoder = new TextDecoder('utf-8');
 
@@ -214,6 +216,24 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
     hideScrollArrow();
   }
 
+  function scheduleSteadyScroll(durationMs = 220) {
+    if (!autoScrollEnabled || !term) return;
+    scrollBurstUntil = Math.max(scrollBurstUntil, Date.now() + durationMs);
+    if (scrollRaf) return;
+    const tick = () => {
+      scrollRaf = 0;
+      if (!autoScrollEnabled || !term) return;
+      term.scrollToBottom();
+      const viewport = term.element?.querySelector('.xterm-viewport');
+      if (viewport) viewport.scrollTop = viewport.scrollHeight;
+      hideScrollArrow();
+      if (Date.now() < scrollBurstUntil) {
+        scrollRaf = requestAnimationFrame(tick);
+      }
+    };
+    scrollRaf = requestAnimationFrame(tick);
+  }
+
   function writeBanner() {
     if (!term) return;
     term.write('\x1b[38;2;124;58;237m');
@@ -241,12 +261,17 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
         setTimeout(() => sendInput(AUTO_COMMAND.replace(/\n?$/, '\n')), 200);
       }
     };
-    function writePtyOutput(data) {
+  function writePtyOutput(data) {
       if (!term || !data) return;
+      try {
+        window.dispatchEvent(new CustomEvent('hakster:pty-output', {
+          detail: { id: TID, mode: PTY_MODE, data: String(data) }
+        }));
+      } catch {}
       term.write(data);
       if (autoScrollEnabled) {
         term.scrollToBottom();
-        requestAnimationFrame(() => { if (isAtBottom()) hideScrollArrow(); });
+        scheduleSteadyScroll();
       }
     }
 
@@ -327,8 +352,8 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
         brightWhite: '#f8fafc',
       },
       fontFamily: 'JetBrains Mono, monospace',
-      fontSize: 16,
-      lineHeight: 1.28,
+      fontSize: PTY_MODE === 'crush' ? 14 : 16,
+      lineHeight: PTY_MODE === 'crush' ? 1.22 : 1.28,
       letterSpacing: 0,
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -396,6 +421,8 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
       }
       return true;
     });
+
+    scrollArrowBtn?.addEventListener('click', scrollToBottom);
 
     container.addEventListener('paste', (e) => {
       const text = e.clipboardData?.getData('text/plain') || '';

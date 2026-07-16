@@ -7,6 +7,21 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
+// Approval mode — bypass confirmation prompts in FULL_AUTO / AUTO_EDIT
+const { FULL_AUTO, shouldConfirm: shouldConfirmApproval } = require('./agent/approval');
+
+// MCP integration — lazy-loaded to avoid circular require
+let _isMcpTool, _callMcpTool;
+function getMcp() {
+  if (!_isMcpTool) {
+    const mcp = require('./agent/mcp');
+    _isMcpTool = mcp.isMcpTool;
+    _callMcpTool = mcp.callMcpTool;
+  }
+}
+function isMcpTool(name) { getMcp(); return _isMcpTool(name); }
+function callMcpTool(name, args) { getMcp(); return _callMcpTool(name, args); }
+
 const Anthropic = require('@anthropic-ai/sdk');
 const { OpenAI } = require('openai');
 
@@ -57,7 +72,7 @@ const PROVIDERS = {
   ollama: {
     name: 'Ollama',
     baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    defaultModel: process.env.DEFAULT_MODEL || 'gpt-oss:120b-cloud',
+    defaultModel: process.env.DEFAULT_MODEL || 'glm-5.2:cloud',
     type: 'openai-compat',
   },
   anthropic: {
@@ -961,6 +976,19 @@ const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'browser_detect',
+      description: 'Detect browser/device context. Returns the current headless browser page state plus the latest saved user browser/device context when available. Use when debugging browser issues, responsive UI, xterm, or user device-specific behavior.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sessionId: { type: 'string', description: 'Optional session id to fetch a specific saved client context' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'generate_image',
       description: 'Generate an image from a text prompt using DALL-E. Returns the local file path and a URL for inline display.',
       parameters: {
@@ -1077,6 +1105,196 @@ const AGENT_TOOLS = [
       },
     },
   },
+  // ── Autoflow: 7 new top-tier agent tools (from agent/index.js) ──────────────
+  {
+    type: 'function',
+    function: {
+      name: 'glob_search',
+      description: 'Find files matching a glob pattern under the working directory. Returns matched file paths sorted by modification time. Use for file discovery, pattern-based search, and project navigation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Glob pattern to match (e.g. "src/**/*.js", "**/*.test.ts", "docs/*.md")' },
+          maxResults: { type: 'number', description: 'Maximum results to return (default: 100)' },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_file',
+      description: 'Edit a file by applying a list of line-based changes. Each change specifies start/end line numbers and replacement text. Returns a summary of changes made. Safer than write_file for targeted edits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path to edit (relative to working directory)' },
+          changes: {
+            type: 'array',
+            description: 'Array of {start, end, text} objects. start/end are 1-based line numbers. text is the replacement content.',
+            items: {
+              type: 'object',
+              properties: {
+                start: { type: 'number', description: 'Start line (1-based)' },
+                end: { type: 'number', description: 'End line (1-based, inclusive)' },
+                text: { type: 'string', description: 'Replacement text for the line range' },
+              },
+              required: ['start', 'end', 'text'],
+            },
+          },
+          createIfMissing: { type: 'boolean', description: 'Create the file if it does not exist (default: false)' },
+        },
+        required: ['path', 'changes'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'replace_in_file',
+      description: 'Replace exact string matches in a file. Each replacement specifies old text and new text. Fails if old text is not found. Returns count of replacements made.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path (relative to working directory)' },
+          replacements: {
+            type: 'array',
+            description: 'Array of {old, new} replacement pairs. old must match exactly.',
+            items: {
+              type: 'object',
+              properties: {
+                old: { type: 'string', description: 'Exact text to find' },
+                new: { type: 'string', description: 'Replacement text' },
+              },
+              required: ['old', 'new'],
+            },
+          },
+          createIfMissing: { type: 'boolean', description: 'Create the file if it does not exist (default: false)' },
+        },
+        required: ['path', 'replacements'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'shell_bg',
+      description: 'Run a long-running shell command in the background. Returns a process ID immediately for non-blocking execution. Use for servers, watchers, daemons, and long builds. Check output with run_background, kill with kill_process.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to run in the background' },
+          label: { type: 'string', description: 'Optional label for the background process (e.g. "dev-server", "test-watch")' },
+          cwd: { type: 'string', description: 'Working directory for the command (default: project root)' },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'diff_preview',
+      description: 'Preview the unified diff of proposed changes to a file without writing them. Shows what would change if you apply the given replacements. Use before edit_file or replace_in_file to verify changes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path to preview changes for (relative to working directory)' },
+          replacements: {
+            type: 'array',
+            description: 'Array of {old, new} replacement pairs to preview',
+            items: {
+              type: 'object',
+              properties: {
+                old: { type: 'string', description: 'Existing text' },
+                new: { type: 'string', description: 'Proposed replacement text' },
+              },
+              required: ['old', 'new'],
+            },
+          },
+        },
+        required: ['path', 'replacements'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'codebase_map',
+      description: 'Generate a structured overview of the project directory tree. Shows files, directories, line counts, and key files. Use to orient yourself in a new codebase or find relevant files quickly.',
+      parameters: {
+        type: 'object',
+        properties: {
+          maxDepth: { type: 'number', description: 'Maximum directory depth to show (default: 4)' },
+          maxFiles: { type: 'number', description: 'Maximum files to list (default: 200)' },
+          includeHidden: { type: 'boolean', description: 'Include hidden files/dirs like .git (default: false)' },
+          focus: { type: 'string', description: 'Focus on a subdirectory (e.g. "src", "server/src")' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'context_compaction',
+      description: 'Summarize and compress conversation history to stay within token limits. Returns a condensed version of recent context. Use when approaching context window limits to preserve the most important context.',
+      parameters: {
+        type: 'object',
+        properties: {
+          strategy: { type: 'string', enum: ['summarize', 'truncate_old', 'keep_recent', 'key_facts'], description: 'Compaction strategy: summarize=all, truncate_old=drop oldest, keep_recent=keep last N, key_facts=extract key facts only' },
+          maxTokens: { type: 'number', description: 'Target maximum token count for compacted context (default: 8000)' },
+          keepLastN: { type: 'number', description: 'For keep_recent strategy, how many recent turns to keep (default: 10)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_files',
+      description: 'Search for a regex pattern inside files or find filenames by glob. Uses ripgrep with bounded output. Prefer this or exec_shell with rg for code search; do not run broad recursive grep.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Directory or file to search in (absolute or relative to working dir)' },
+          pattern: { type: 'string', description: 'Regex pattern to search for' },
+          query: { type: 'string', description: 'Alias for pattern, accepted for compatibility' },
+          mode: { type: 'string', enum: ['content', 'grep', 'files'], description: 'content/grep searches inside files; files searches filenames by glob' },
+          maxResults: { type: 'number', description: 'Maximum results to return (default: 50)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'apply_patch',
+      description: 'Apply a unified diff patch in one shot from the current project root. Use this for precise multi-line or multi-file code edits instead of repeated edit_file loops. The patch must be a standard git/unified diff.',
+      parameters: {
+        type: 'object',
+        properties: {
+          patch: { type: 'string', description: 'Unified diff text, for example output beginning with diff --git or ---/+++' },
+          cwd: { type: 'string', description: 'Optional working directory; defaults to the active project root' },
+        },
+        required: ['patch'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_fetch',
+      description: 'Fetch content from a URL and return it as text. Use for reading API responses, documentation pages, config files, or any web-accessible resource.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to fetch' },
+        },
+        required: ['url'],
+      },
+    },
+  },
 ];
 
 let agentBrowser = null;
@@ -1099,7 +1317,91 @@ async function getAgentPage() {
   return agentPage;
 }
 
-const AGENT_SYSTEM_PROMPT = `You are haksterAI, a senior agentic coding and IPTV/cloud engineering assistant with file, shell, and sub-agent tools. Be direct, structured, and execution-focused.
+const { injectAgentsMd, injectLearnedLessons } = require('./agent/loop');
+const autolearn = require('./agent/autolearn');
+
+// ── Known project locations on this server ──────────────────────────────
+const KNOWN_PROJECTS = [
+  { name: 'CineVault', path: '/home/ghost/cine-vault-live/', desc: 'IPTV/movie streaming platform, Astro+Express, PM2 process "cinevault"' },
+  { name: 'haksterAi', path: '/home/ghost/haksterAi/', desc: 'AI agent platform with CLI, web API on port 3579, PM2 process "haksterAi"' },
+  { name: 'PhantomIDE', path: '/home/ghost/phantom-ide/', desc: 'Phantom IDE project' },
+  { name: 'movie-server', path: '/home/ghost/movie-server/', desc: 'Movie server / source resolver' },
+  { name: 'kiro-gateway', path: '/home/ghost/kiro-gateway/', desc: 'Kiro gateway, Python FastAPI on port 8000' },
+  { name: 'bugbounty', path: '/home/ghost/bugbounty/', desc: 'Bug bounty hunting tools and reports' },
+];
+
+// ── Dynamic system prompt builder (replaces static AGENT_SYSTEM_PROMPT) ──
+// Injects AGENTS.md steering + autolearned lessons + MEMORY.md + project map
+function buildAgentSystemPrompt(cwd, contextTags) {
+  let prompt = AGENT_SYSTEM_PROMPT_BASE;
+
+  // Inject known project locations so the agent knows where everything lives
+  const projectList = KNOWN_PROJECTS.map(p =>
+    `- ${p.name}: ${p.path} — ${p.desc}`
+  ).join('\n');
+  prompt += `\n\n═══ KNOWN PROJECTS ON THIS SERVER ═══\n${projectList}\nWhen the user asks about a project by name, use the path above as the working directory for file and shell operations. Use absolute paths when calling read_file, list_dir, search_files, exec_shell, etc.\n═══ END PROJECTS ═══`;
+
+  // Inject AGENTS.md (walks up from cwd)
+  try {
+    const agentsMd = injectAgentsMd(cwd || process.cwd());
+    if (agentsMd) {
+      prompt += `\n\n═══ PROJECT STEERING (AGENTS.md) ═══\n${agentsMd}\n═══ END STEERING ═══`;
+    }
+  } catch (e) { /* AGENTS.md injection is best-effort */ }
+
+  // Inject MEMORY.md from the project's .hakster/ directory
+  try {
+    const fs2 = require('fs');
+    const path2 = require('path');
+    const projectDir = cwd || process.cwd();
+    const memoryMdPath = path2.join(projectDir, '.hakster', 'MEMORY.md');
+    if (fs2.existsSync(memoryMdPath)) {
+      const memoryContent = fs2.readFileSync(memoryMdPath, 'utf8').trim();
+      if (memoryContent) {
+        prompt += `\n\n═══ PROJECT MEMORY (MEMORY.md) ═══\n${memoryContent}\n═══ END MEMORY ═══`;
+      }
+    }
+    // Also check global haksterAi memory
+    const globalMemoryPath = path2.join('/home/ghost/haksterAi', '.hakster', 'MEMORY.md');
+    if (fs2.existsSync(globalMemoryPath) && globalMemoryPath !== memoryMdPath) {
+      const globalMemory = fs2.readFileSync(globalMemoryPath, 'utf8').trim();
+      if (globalMemory) {
+        prompt += `\n\n═══ GLOBAL MEMORY (haksterAi MEMORY.md) ═══\n${globalMemory}\n═══ END GLOBAL MEMORY ═══`;
+      }
+    }
+  } catch (e) { /* MEMORY.md injection is best-effort */ }
+
+  // Inject learned lessons from autolearn memory
+  try {
+    const lessons = injectLearnedLessons(cwd || process.cwd(), contextTags || []);
+    if (lessons) {
+      prompt += `\n\n═══ LEARNED LESSONS (auto-memory) ═══\n${lessons}\n═══ END LESSONS ═══`;
+    }
+  } catch (e) { /* lessons injection is best-effort */ }
+
+  // NOTE: autolearn.autoInit() also reads AGENTS.md — skip it here to avoid
+  // duplicating 6.5K chars of steering content. injectAgentsMd above already
+  // handles AGENTS.md injection. autoInit is still called by the CLI for
+  // interactive steering display, just not in the system prompt.
+
+  // 6-Phase Loop awareness
+  prompt += `
+
+═══ AGENT LOOP PHASES ═══
+You operate in a 6-phase loop: THINK → PLAN → ACT → OBSERVE → REFLECT → CONSOLIDATE.
+- THINK: Analyze the request and current state. Reason about what needs to be done.
+- PLAN: Decide which tools to call and in what order. Every tool call should move you closer to completion.
+- ACT: Execute tool calls (write_file, exec_shell, read_file, etc.).
+- OBSERVE: Review tool results. Did they succeed? What did you learn?
+- REFLECT: If stuck (errors, no progress), pause and reconsider your approach. Try a different strategy.
+- CONSOLIDATE: Periodically, lessons learned are consolidated into memory for future sessions.
+The server tracks these phases and will inject [REFLECT] and [CONSOLIDATE] system messages when needed.
+═══ END PHASES ═══`;
+
+  return prompt;
+}
+
+const AGENT_SYSTEM_PROMPT_BASE = `You are haksterAI, a senior agentic coding and IPTV/cloud engineering assistant with file, shell, and sub-agent tools. Be direct, structured, and execution-focused.
 
 Identity:
 - You are haksterAI.
@@ -1209,9 +1511,12 @@ Tool Use:
 Shell Guidance:
 - Prefer fast targeted commands: rg, npm scripts, node -c, curl health endpoints, pm2 status/logs.
 - Exclude heavy folders by default: node_modules, dist, build, .git, cache, coverage, logs, media.
-- Chain closely related quick checks when useful.
+- Chain closely related quick checks when useful, but every shell command must be bounded by timeout/output limits. Use pm2 logs with --nostream, tail/head, rg --max-count, and find -maxdepth. Never start long-running foreground servers.
 - Avoid interactive or long-lived foreground commands in exec_shell. Use PM2, nohup, timeout wrappers, or the browser terminal for long-running services.
 - Do not run destructive commands, database wipes, credential dumps, or broad filesystem deletes without explicit confirmation.
+- For multi-line or multi-file edits, prefer apply_patch with one unified diff over repeated edit_file calls.
+- For browser/device debugging, call browser_detect first, then browser_navigate/browser_snapshot/browser_screenshot as needed.
+- Dangerous shell commands and file writes may produce an approval prompt. If approval is needed, do not retry the same command; explain that the user must approve it.
 
 Pentest Mode:
 - Use the guardian tool for security assessments, vulnerability scanning, and penetration testing tasks.
@@ -1312,7 +1617,7 @@ const READ_ONLY_SHELL_PREFIXES = [
   'journalctl', 'dmesg',
   'lsblk', 'lscpu', 'lsmem', 'lsmod', 'lspci', 'lsusb', 'lsscsi', 'hwinfo', 'sensors',
   'blkid', 'findmnt',
-  'jq', 'node', 'python3', 'python', 'bash',
+  'jq',
 ];
 
 function getDangerReason(command) {
@@ -1327,7 +1632,7 @@ function getDangerReason(command) {
   return null;
 }
 
-async function executeAgentTool(name, args, cwd, provider, model, onStream, allowedCommands) {
+async function executeAgentTool(name, args, cwd, provider, model, onStream, allowedCommands, approvalMode) {
   const fs = require('fs');
   const path = require('path');
   const { execFileSync, spawn } = require('child_process');
@@ -1337,18 +1642,27 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
   }
 
   // Surface dangerous shell commands before execution so the UI can confirm them
-  if (name === 'exec_shell' && args.command) {
-    const reason = getDangerReason(args.command);
-    if (reason) {
-      // Check if this exact command (or a prefix) has been allowed by the user
-      const cmd = args.command.trim();
-      const isAllowed = allowedCommands && (
-        allowedCommands.has(cmd) ||
-        [...allowedCommands].some(allowed => cmd.startsWith(allowed) || cmd === allowed)
-      );
-      if (!isAllowed) {
-        return JSON.stringify({ __needs_confirmation: true, reason, tool: name, args });
+  // In FULL_AUTO / AUTO_EDIT mode, skip confirmation for allowed tool types
+  // Approval gate covers shell commands and file writes. Do not treat bash/node/python
+  // wrappers as read-only; nested dangerous commands still need confirmation.
+  const FILE_WRITE_TOOLS = new Set(['write_file', 'edit_file', 'replace_in_file', 'apply_patch']);
+  const SHELL_EXEC_TOOLS = new Set(['exec_shell', 'shell_bg']);
+  if (shouldConfirmApproval(approvalMode, name, args, SHELL_EXEC_TOOLS.has(name) ? getDangerReason(args.command) : (FILE_WRITE_TOOLS.has(name) ? 'file modification' : null))) {
+    if (SHELL_EXEC_TOOLS.has(name) && args.command) {
+      const reason = getDangerReason(args.command);
+      if (reason) {
+        const cmd = args.command.trim();
+        const isAllowed = allowedCommands && (
+          allowedCommands.has(cmd) ||
+          [...allowedCommands].some(allowed => cmd.startsWith(allowed) || cmd === allowed)
+        );
+        if (!isAllowed) {
+          return JSON.stringify({ __needs_confirmation: true, reason, tool: name, args });
+        }
       }
+    } else if (FILE_WRITE_TOOLS.has(name)) {
+      // In SUGGEST mode, file writes need confirmation
+      return JSON.stringify({ __needs_confirmation: true, reason: `${name} requires confirmation in suggest mode`, tool: name, args });
     }
   }
 
@@ -1383,6 +1697,74 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
         const full = resolveSafe(args.path || '.');
         const entries = fs.readdirSync(full, { withFileTypes: true });
         return entries.map(e => `${e.isDirectory() ? 'd' : '-'} ${e.name}`).join('\n');
+      }
+      case 'search_files': {
+        const dirPath = resolveSafe(args.path || '.');
+        const { execFileSync } = require('child_process');
+        const maxResults = args.maxResults || 50;
+        const pattern = args.pattern || args.query || '';
+        if (!pattern) return 'Error: pattern or query is required';
+        const looksLikeGlob = /[*?\[\]{}]/.test(pattern);
+        const mode = args.mode || (looksLikeGlob ? 'files' : 'content');
+        if (mode === 'content' || mode === 'grep') {
+          try {
+            const out = execFileSync('rg', ['--line-number', '--color', 'never', '--hidden', '-g', '!node_modules/**', '-g', '!.git/**', '-g', '!dist/**', '-g', '!build/**', '-g', '!coverage/**', '--max-count', '50', '--max-filesize', '1M', '--', pattern, dirPath], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 });
+            const lines = out.split('\n').slice(0, maxResults);
+            return lines.join('\n') || '(no matches found)';
+          } catch (e) {
+            return e.stdout ? String(e.stdout).split('\n').slice(0, maxResults).join('\n') : '(no matches found)';
+          }
+        } else {
+          // files mode — find by name pattern
+          try {
+            const out = execFileSync('rg', ['--files', '--hidden', '-g', pattern, '-g', '!node_modules/**', '-g', '!.git/**', '-g', '!dist/**', '-g', '!build/**', '-g', '!coverage/**', dirPath], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 });
+            const lines = out.split('\n').filter(Boolean).slice(0, maxResults);
+            return lines.join('\n') || '(no files found)';
+          } catch (e) {
+            return e.stdout ? String(e.stdout).split('\n').filter(Boolean).slice(0, maxResults).join('\n') : '(no files found)';
+          }
+        }
+      }
+      case 'apply_patch': {
+        if (!args.patch || typeof args.patch !== 'string') return 'Error: patch is required';
+        const patchCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+        try {
+          execFileSync('git', ['-c', `safe.directory=${patchCwd}`, 'apply', '--check', '--whitespace=nowarn', '-'], {
+            cwd: patchCwd,
+            input: args.patch,
+            encoding: 'utf8',
+            timeout: 10000,
+            maxBuffer: 1024 * 1024,
+          });
+          execFileSync('git', ['-c', `safe.directory=${patchCwd}`, 'apply', '--whitespace=nowarn', '-'], {
+            cwd: patchCwd,
+            input: args.patch,
+            encoding: 'utf8',
+            timeout: 10000,
+            maxBuffer: 1024 * 1024,
+          });
+          return `Applied patch in ${patchCwd}`;
+        } catch (e) {
+          const msg = [e.message, e.stdout, e.stderr].filter(Boolean).join('\n').trim();
+          return `apply_patch failed in ${patchCwd}:\n${msg}`;
+        }
+      }
+      case 'web_fetch': {
+        const url = args.url;
+        if (!url) return '❌ url is required';
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), Math.min(args.timeout || 15, 60) * 1000);
+        try {
+          const resp = await fetch(url, { headers: { 'User-Agent': 'haksterAI/1.0', ...(args.headers || {}) }, signal: controller.signal });
+          clearTimeout(timeout);
+          const text = await resp.text();
+          const truncated = text.length > 10000 ? text.substring(0, 10000) + '\n... (truncated)' : text;
+          return `${resp.status} ${resp.statusText}\n${truncated}`;
+        } catch (err) {
+          clearTimeout(timeout);
+          if (err.name === 'AbortError') return `Error: Request timed out after ${args.timeout || 15}s`;
+          return `Error: ${err.message}`;
+        }
       }
       case 'exec_shell': {
         const requestedTimeout = Number(args.timeout_ms || 15000);
@@ -1458,6 +1840,7 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
               cwd,
               env: {
                 ...process.env,
+                HOME: process.env.HOME || '/home/ghost',
                 CI: process.env.CI || '1',
                 NO_COLOR: process.env.NO_COLOR || '1',
                 TERM: process.env.TERM || 'xterm-256color',
@@ -1538,6 +1921,7 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
             encoding: 'utf8',
             env: {
               ...process.env,
+              HOME: process.env.HOME || '/home/ghost',
               CI: process.env.CI || '1',
               NO_COLOR: process.env.NO_COLOR || '1',
             },
@@ -1662,6 +2046,58 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
         }
         const sizeKb = (fs.statSync(filepath).size / 1024).toFixed(1);
         return `Screenshot saved: ${filepath} (${sizeKb} KB)`;
+      }
+      case 'browser_detect': {
+        const lines = ['Browser detection'];
+        try {
+          const page = await getAgentPage();
+          const state = await page.evaluate(() => ({
+            url: location.href,
+            title: document.title,
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            language: navigator.language,
+            languages: Array.from(navigator.languages || []),
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            screen: { width: window.screen?.width || null, height: window.screen?.height || null },
+            devicePixelRatio: window.devicePixelRatio || 1,
+            online: navigator.onLine,
+            touchPoints: navigator.maxTouchPoints || 0,
+          }));
+          lines.push('', 'Headless browser:', JSON.stringify(state, null, 2));
+        } catch (e) {
+          lines.push('', `Headless browser: unavailable (${e.message})`);
+        }
+
+        try {
+          const { getDb } = require('./db');
+          const db = getDb();
+          const row = args.sessionId
+            ? db.prepare('SELECT * FROM client_contexts WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1').get(args.sessionId)
+            : db.prepare('SELECT * FROM client_contexts ORDER BY updated_at DESC LIMIT 1').get();
+          if (row) {
+            const client = {
+              session_id: row.session_id,
+              browser: [row.browser, row.browser_version].filter(Boolean).join(' '),
+              os: [row.os_name, row.os_version].filter(Boolean).join(' '),
+              device_type: row.device_type,
+              device_model: row.device_model,
+              viewport: row.viewport_width && row.viewport_height ? `${row.viewport_width}x${row.viewport_height}` : null,
+              screen: row.screen_width && row.screen_height ? `${row.screen_width}x${row.screen_height}` : null,
+              dpr: row.device_pixel_ratio,
+              language: row.language,
+              timezone: row.timezone,
+              online: Boolean(row.online),
+              updated_at: row.updated_at,
+            };
+            lines.push('', 'Latest user browser context:', JSON.stringify(client, null, 2));
+          } else {
+            lines.push('', 'Latest user browser context: none saved yet');
+          }
+        } catch (e) {
+          lines.push('', `Latest user browser context: unavailable (${e.message})`);
+        }
+        return lines.join('\n');
       }
       case 'generate_image': {
         const crypto = require('crypto');
@@ -1914,12 +2350,248 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
         if (!content) return `Skill "${args.name}" not found. Use list_skills to see available skills.`;
         return content;
       }
-      default:
+      // ── Autoflow: 7 new tool executors (from agent/index.js) ──────────────
+      case 'glob_search': {
+        try {
+          if (!args.pattern) return '❌ pattern is required';
+          const searchCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const { globSync } = require('glob');
+          const files = globSync(args.pattern, { cwd: searchCwd, nodir: true, absolute: true, ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/coverage/**'] });
+          const maxResults = args.maxResults || 100;
+          const sorted = files.slice(0, maxResults);
+          if (sorted.length === 0) return `📂 No files matching "${args.pattern}"`;
+          const total = files.length;
+          const lines = sorted.map(f => {
+            const rel = require('path').relative(searchCwd, f);
+            try {
+              const stat = require('fs').statSync(f);
+              return `  ${rel} (${(stat.size / 1024).toFixed(1)} KB)`;
+            } catch (_) {
+              return `  ${rel}`;
+            }
+          });
+          let out = `📂 Found ${total} file${total !== 1 ? 's' : ''} matching "${args.pattern}"\n`;
+          out += lines.join('\n');
+          if (total > maxResults) out += `\n  ... and ${total - maxResults} more`;
+          return out;
+        } catch (err) {
+          return `❌ glob_search error: ${err.message}`;
+        }
+      }
+      case 'edit_file': {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          if (!args.path) return '❌ path is required';
+          if (!args.changes || !Array.isArray(args.changes)) return '❌ changes array is required';
+          const baseCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const resolved = path.resolve(baseCwd, args.path);
+          if (!fs.existsSync(resolved)) {
+            if (!args.createIfMissing) return `❌ File not found: ${resolved}`;
+            const dir = path.dirname(resolved);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(resolved, '', 'utf-8');
+          }
+          let content = fs.readFileSync(resolved, 'utf-8');
+          const lines = content.split('\n');
+          let applied = 0;
+          for (const change of args.changes) {
+            if (change.start == null || change.end == null) continue;
+            const start = Math.max(0, change.start - 1);
+            const end = Math.min(lines.length, change.end);
+            const newText = (change.text || '').split('\n');
+            lines.splice(start, end - start, ...newText);
+            applied++;
+          }
+          fs.writeFileSync(resolved, lines.join('\n'), 'utf-8');
+          return `✏️ Edited ${resolved}: ${applied} change${applied !== 1 ? 's' : ''} applied`;
+        } catch (err) {
+          return `❌ edit_file error: ${err.message}`;
+        }
+      }
+      case 'replace_in_file': {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          if (!args.path) return '❌ path is required';
+          if (!args.replacements || !Array.isArray(args.replacements)) return '❌ replacements array is required';
+          const baseCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const resolved = path.resolve(baseCwd, args.path);
+          if (!fs.existsSync(resolved)) {
+            if (!args.createIfMissing) return `❌ File not found: ${resolved}`;
+            const newContent = args.replacements.map(r => r.new || '').join('\n');
+            const dir = path.dirname(resolved);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(resolved, newContent, 'utf-8');
+            return `✨ Created ${resolved} with ${args.replacements.length} replacement block${args.replacements.length !== 1 ? 's' : ''}`;
+          }
+          let content = fs.readFileSync(resolved, 'utf-8');
+          let applied = 0;
+          for (const rep of args.replacements) {
+            if (!rep.old) continue;
+            const count = (content.match(new RegExp(rep.old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+            content = content.split(rep.old).join(rep.new || '');
+            if (count > 0) applied++;
+          }
+          fs.writeFileSync(resolved, content, 'utf-8');
+          return `🔄 Replaced in ${resolved}: ${applied} replacement${applied !== 1 ? 's' : ''} applied`;
+        } catch (err) {
+          return `❌ replace_in_file error: ${err.message}`;
+        }
+      }
+      case 'shell_bg': {
+        try {
+          if (!args.command) return '❌ command is required';
+          const { spawn } = require('child_process');
+          const path = require('path');
+          const id = `bg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const procCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const child = spawn('/bin/bash', ['-c', args.command], {
+            cwd: procCwd,
+            env: { ...process.env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: false,
+          });
+          let stdout = '', stderr = '';
+          child.stdout.on('data', d => { stdout += d.toString(); if (stdout.length > 50000) stdout = stdout.slice(-50000); });
+          child.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 50000) stderr = stderr.slice(-50000); });
+          // Store in a module-level registry
+          if (!global._bgProcesses) global._bgProcesses = new Map();
+          global._bgProcesses.set(id, { process: child, label: args.label || args.command.slice(0, 60), command: args.command, cwd: procCwd, startedAt: Date.now(), stdout, stderr });
+          child.stdout.on('data', d => { const entry = global._bgProcesses.get(id); if (entry) entry.stdout = (entry.stdout || '') + d.toString(); });
+          child.stderr.on('data', d => { const entry = global._bgProcesses.get(id); if (entry) entry.stderr = (entry.stderr || '') + d.toString(); });
+          child.on('exit', code => { const entry = global._bgProcesses.get(id); if (entry) { entry.exitCode = code; entry.endedAt = Date.now(); } });
+          return `🚀 Background process started\n  ID: ${id}\n  Label: ${args.label || args.command.slice(0, 60)}\n  PID: ${child.pid}\n  CWD: ${procCwd}\n  Use run_background or kill_process to manage`;
+        } catch (err) {
+          return `❌ shell_bg error: ${err.message}`;
+        }
+      }
+      case 'diff_preview': {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          if (!args.path) return '❌ path is required';
+          if (!args.replacements || !Array.isArray(args.replacements)) return '❌ replacements array is required';
+          const baseCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const resolved = path.resolve(baseCwd, args.path);
+          if (!fs.existsSync(resolved)) return `❌ File not found: ${resolved}`;
+          const original = fs.readFileSync(resolved, 'utf-8');
+          let modified = original;
+          for (const rep of args.replacements) {
+            if (!rep.old) continue;
+            modified = modified.split(rep.old).join(rep.new || '');
+          }
+          if (original === modified) return 'ℹ️ No changes would be applied';
+          const origLines = original.split('\n');
+          const modLines = modified.split('\n');
+          let diff = '';
+          let changeCount = 0;
+          const maxDiffLines = 200;
+          const cs = Math.max(origLines.length, modLines.length);
+          for (let i = 0; i < cs && diff.split('\n').length < maxDiffLines; i++) {
+            const oLine = i < origLines.length ? origLines[i] : undefined;
+            const mLine = i < modLines.length ? modLines[i] : undefined;
+            if (oLine !== mLine) {
+              changeCount++;
+              if (oLine !== undefined) diff += `- ${i + 1}: ${oLine}\n`;
+              if (mLine !== undefined) diff += `+ ${i + 1}: ${mLine}\n`;
+            }
+          }
+          let out = `📝 Diff preview for ${path.relative(baseCwd, resolved)}\n`;
+          out += `  ${changeCount} line${changeCount !== 1 ? 's' : ''} changed\n\n`;
+          out += diff;
+          if (diff.split('\n').length >= maxDiffLines) out += '\n  ... (truncated, use edit_file or replace_in_file to apply)';
+          return out;
+        } catch (err) {
+          return `❌ diff_preview error: ${err.message}`;
+        }
+      }
+      case 'codebase_map': {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const maxDepth = args.maxDepth || 4;
+          const maxFiles = args.maxFiles || 200;
+          const includeHidden = args.includeHidden || false;
+          const baseCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const root = args.focus ? path.resolve(baseCwd, args.focus) : baseCwd;
+          if (!fs.existsSync(root)) return `❌ Directory not found: ${root}`;
+          const skipDirs = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.cache', 'vendor', 'bun.lock']);
+          const skipExts = new Set(['.map', '.lock', '.wasm']);
+          let fileCount = 0;
+          let totalLines = 0;
+          const result = [];
+          function walk(dir, depth, prefix) {
+            if (depth > maxDepth || fileCount >= maxFiles) return;
+            let entries;
+            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+            entries.sort((a, b) => {
+              if (a.isDirectory() && !b.isDirectory()) return -1;
+              if (!a.isDirectory() && b.isDirectory()) return 1;
+              return a.name.localeCompare(b.name);
+            });
+            for (const entry of entries) {
+              if (fileCount >= maxFiles) break;
+              if (!includeHidden && entry.name.startsWith('.')) continue;
+              if (entry.isDirectory() && skipDirs.has(entry.name)) continue;
+              const fullPath = path.join(dir, entry.name);
+              const relPath = path.relative(root, fullPath);
+              if (entry.isDirectory()) {
+                result.push(`${prefix}📁 ${entry.name}/`);
+                walk(fullPath, depth + 1, prefix + '  ');
+              } else {
+                if (skipExts.has(path.extname(entry.name))) continue;
+                try {
+                  const stat = fs.statSync(fullPath);
+                  fileCount++;
+                  totalLines += Math.round(stat.size / 40);
+                  result.push(`${prefix}📄 ${entry.name} (${(stat.size / 1024).toFixed(1)} KB)`);
+                } catch (_) {
+                  result.push(`${prefix}📄 ${entry.name}`);
+                }
+              }
+            }
+          }
+          walk(root, 0, '');
+          let out = `🗺️ Codebase map: ${path.relative(baseCwd, root) || '.'}\n`;
+          out += `  Files: ${fileCount} | Est. lines: ${totalLines.toLocaleString()}\n\n`;
+          out += result.join('\n');
+          if (fileCount >= maxFiles) out += `\n\n  ⚠️ Truncated at ${maxFiles} files. Increase maxFiles for more.`;
+          return out;
+        } catch (err) {
+          return `❌ codebase_map error: ${err.message}`;
+        }
+      }
+      case 'context_compaction': {
+        try {
+          const strategy = args.strategy || 'summarize';
+          const maxTokens = args.maxTokens || 8000;
+          const keepLastN = args.keepLastN || 10;
+          // For the web API, we return guidance — the actual compaction happens in the loop
+          return `📋 Context compaction (${strategy})\n  Strategy: ${strategy}\n  Max tokens: ${maxTokens}\n  Keep last N: ${keepLastN}\n  Use this to signal the agent loop to compact context. The loop will handle the actual message truncation.`;
+        } catch (err) {
+          return `❌ context_compaction error: ${err.message}`;
+        }
+      }
+      default: {
+        // MCP tool routing — any tool name starting with mcp__ goes to the MCP client
+        if (isMcpTool(name)) {
+          try {
+            const result = await callMcpTool(name, args);
+            if (typeof onStream === 'function') {
+              onStream({ type: 'mcp_result', tool: name, data: result });
+            }
+            return result;
+          } catch (err) {
+            return `Error: MCP tool "${name}" failed: ${err.message}`;
+          }
+        }
         return `Unknown tool: ${name}`;
+      }
     }
   } catch (err) {
     return `Error: ${err.message}`;
   }
 }
 
-module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch };
+module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch };

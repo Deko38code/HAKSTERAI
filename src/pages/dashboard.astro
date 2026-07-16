@@ -230,6 +230,14 @@ import Layout from '../layouts/Layout.astro';
       </div>
     </div>
 
+    <!-- Token Usage by Google User -->
+    <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
+      <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+        🔢 Token Usage by Google User
+      </h2>
+      <div id="user-token-breakdown" class="space-y-3"></div>
+    </div>
+
     <!-- Recent Users & Activity Log -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
       <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
@@ -481,6 +489,39 @@ import Layout from '../layouts/Layout.astro';
           }).join('');
         } else {
           breakdown.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No requests yet — start a chat or run an agent</div>';
+        }
+
+        // Token usage by Google user
+        const userBreakdown = document.getElementById('user-token-breakdown');
+        if (userBreakdown) {
+          const rows = data.requests?.byUser || [];
+          if (rows.length > 0) {
+            const maxTokens = Math.max(...rows.map(u => (u.inputTokens || 0) + (u.outputTokens || 0)), 1);
+            userBreakdown.innerHTML = rows.map(u => {
+              const total = (u.inputTokens || 0) + (u.outputTokens || 0);
+              const pct = Math.max(2, Math.min(100, (total / maxTokens) * 100));
+              const label = u.email || u.username || u.googleId || 'unknown user';
+              const sub = [u.role || 'user', u.plan || 'free', u.googleId ? 'Google linked' : 'no Google ID'].join(' · ');
+              const last = u.lastUsedAt ? new Date(u.lastUsedAt * 1000).toLocaleString() : 'never';
+              return `<div>
+                <div class="flex justify-between gap-3 text-sm mb-1">
+                  <div class="min-w-0">
+                    <div class="font-medium truncate">${escapeHtml(label)}</div>
+                    <div class="text-[10px] text-[#64748b] truncate">${escapeHtml(sub)} · ${u.requests || 0} runs · ${u.toolCalls || 0} tools · ${escapeHtml(last)}</div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="text-[#ffd700] font-mono">${fmtNum(total)}</div>
+                    <div class="text-[10px] text-[#64748b]">${fmtNum(u.inputTokens || 0)} in / ${fmtNum(u.outputTokens || 0)} out</div>
+                  </div>
+                </div>
+                <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-[#ffd700] to-[#7c3aed] rounded-full transition-all duration-500" style="width:${pct}%"></div>
+                </div>
+              </div>`;
+            }).join('');
+          } else {
+            userBreakdown.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No Google-linked token usage yet.</div>';
+          }
         }
 
       } catch (err) {

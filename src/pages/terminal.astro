@@ -48,7 +48,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
       /* ── Sidebar ── */
       #term-sidebar {
-        width: 220px; min-width: 220px; background: #0d0d14; border-right: 1px solid #1e1e2e;
+        width: 188px; min-width: 188px; background: #0d0d14; border-right: 1px solid #1e1e2e;
         display: flex; flex-direction: column; overflow: auto; transition: width 0.2s, min-width 0.2s;
         font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e2e8f0; z-index: 50;
       }
@@ -84,12 +84,12 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
       /* ── Right sidebar (commands/info) ── */
       #crush-sidebar {
-        width: 240px; min-width: 240px; background: #0d0d14; border-left: 1px solid #1e1e2e;
+        width: 218px; min-width: 218px; background: #0d0d14; border-left: 1px solid #1e1e2e;
         display: flex; flex-direction: column; overflow: auto; transition: width 0.2s, min-width 0.2s;
         font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e2e8f0; z-index: 50;
       }
       #crush-sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; border-left: none; }
-      #crush-sidebar .cs-section { padding: 10px 12px; border-bottom: 1px solid #1e1e2e; }
+      #crush-sidebar .cs-section { padding: 8px 10px; border-bottom: 1px solid #1e1e2e; }
       #crush-sidebar .cs-title { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 8px; }
       #crush-sidebar .cs-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
       #crush-sidebar .cs-label { color: #64748b; }
@@ -98,14 +98,19 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       #crush-sidebar .cs-value.green { color: #00ff88; }
       #crush-sidebar .cs-value.gold { color: #fbbf24; }
       #crush-sidebar .cs-value.red { color: #e50914; }
+      #crush-sidebar .cs-value.ice { color: #67e8f9; text-shadow: 0 0 10px rgba(103,232,249,0.25); }
+      #crush-sidebar .cs-live-pill { display: inline-flex; align-items: center; gap: 5px; color: #67e8f9; font-weight: 700; }
+      #crush-sidebar .cs-live-dot { width: 7px; height: 7px; border-radius: 999px; background: #67e8f9; box-shadow: 0 0 10px rgba(103,232,249,0.8); animation: csIcePulse 1.1s ease-in-out infinite; }
+      #crush-sidebar .cs-live-detail { margin-top: 6px; color: #94a3b8; font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+      @keyframes csIcePulse { 0%,100% { opacity: .55; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.15); } }
       #crush-sidebar .cs-bar { height: 4px; background: #1e1e2e; border-radius: 2px; margin-top: 4px; overflow: hidden; }
       #crush-sidebar .cs-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
       #crush-sidebar .cs-tool-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
       #crush-sidebar .cs-tool-icon { width: 14px; text-align: center; font-size: 12px; }
       #crush-sidebar .cs-tool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
       #crush-sidebar .cs-tool-count { color: #7c3aed; font-weight: 600; min-width: 24px; text-align: right; }
-      #crush-sidebar .cs-list { max-height: 190px; overflow: auto; padding-right: 2px; }
-      #crush-sidebar .cs-list.tall { max-height: 260px; }
+      #crush-sidebar .cs-list { max-height: 150px; overflow: auto; padding-right: 2px; }
+      #crush-sidebar .cs-list.tall { max-height: 190px; }
       #crush-sidebar .cs-chip-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; min-width: 0; }
       #crush-sidebar .cs-chip-main { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; }
       #crush-sidebar .cs-chip-meta { color: #4b5563; font-size: 9px; white-space: nowrap; }
@@ -226,14 +231,22 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
         <!-- Terminal -->
         <div id="term-body">
-          <HaksterTerminal id="crush-main" autoStart={true} ptyMode="shell" />
+          <HaksterTerminal id="crush-main" autoStart={true} ptyMode="crush" />
         </div>
 
         <!-- Right sidebar: commands & info -->
         <button id="crush-sidebar-toggle" class="cs-toggle-btn" title="Toggle commands panel">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
         </button>
-        <aside id="crush-sidebar">
+        <aside id="crush-sidebar" class="collapsed">
+          <div class="cs-section">
+            <div class="cs-title">❄️ Live Agent</div>
+            <div class="cs-row"><span class="cs-label">Status</span><span class="cs-live-pill"><span class="cs-live-dot"></span><span id="cs-agent-status">waiting</span></span></div>
+            <div class="cs-row"><span class="cs-label">Phase</span><span class="cs-value ice" id="cs-agent-phase">IDLE</span></div>
+            <div class="cs-row"><span class="cs-label">Tool</span><span class="cs-value" id="cs-agent-tool">—</span></div>
+            <div class="cs-row"><span class="cs-label">Turns</span><span class="cs-value" id="cs-agent-turns">0</span></div>
+            <div class="cs-live-detail" id="cs-agent-detail">Crush terminal output will sync here.</div>
+          </div>
           <div class="cs-section">
             <div class="cs-title">🤖 Model</div>
             <div class="cs-row"><span class="cs-label">Provider</span><span class="cs-value purple" id="cs-provider">—</span></div>
@@ -496,7 +509,8 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       // ── Right sidebar toggle ──────────────────────────────────────
       const crushSidebar = document.getElementById('crush-sidebar');
       const crushToggle = document.getElementById('crush-sidebar-toggle');
-      let crushOpen = true;
+      let crushOpen = false;
+      crushToggle?.classList.toggle('open', crushOpen);
 
       crushToggle.addEventListener('click', () => {
         crushOpen = !crushOpen;
@@ -531,6 +545,122 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[ch]));
       }
+
+      const crushLiveState = {
+        status: 'waiting',
+        phase: 'IDLE',
+        tool: '—',
+        turns: 0,
+        totalTools: 0,
+        completedTools: 0,
+        detail: 'Crush terminal output will sync here.',
+        toolCounts: {}
+      };
+
+      function stripAnsi(value) {
+        return String(value || '').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+      }
+
+      function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(value);
+      }
+
+      function renderCrushLiveState() {
+        setText('cs-agent-status', crushLiveState.status);
+        setText('cs-agent-phase', crushLiveState.phase);
+        setText('cs-agent-tool', crushLiveState.tool);
+        setText('cs-agent-turns', crushLiveState.turns);
+        setText('cs-agent-detail', crushLiveState.detail);
+        setText('cs-tool-calls', crushLiveState.totalTools || document.getElementById('cs-tool-calls')?.textContent || 0);
+        setText('cs-unique-tools', Object.keys(crushLiveState.toolCounts).length || document.getElementById('cs-unique-tools')?.textContent || 0);
+        const toolsList = document.getElementById('cs-tools-list');
+        if (toolsList && Object.keys(crushLiveState.toolCounts).length > 0) {
+          const tools = Object.entries(crushLiveState.toolCounts).sort((a, b) => b[1] - a[1]);
+          toolsList.innerHTML = tools.slice(0, 20).map(([name, count]) => {
+            const icon = name.includes('file') || name.includes('write') || name.includes('read') ? '📄'
+              : name.includes('bash') || name.includes('shell') || name.includes('exec') ? '⌨️'
+              : name.includes('browser') || name.includes('web') ? '🌐'
+              : name.includes('search') ? '🔍'
+              : name.includes('think') || name.includes('reason') ? '🧠'
+              : name.includes('edit') || name.includes('patch') ? '✏️' : '🔧';
+            return '<div class="cs-tool-row"><span class="cs-tool-icon">' + icon + '</span><span class="cs-tool-name">' + escapeHtml(name) + '</span><span class="cs-tool-count">' + count + '</span></div>';
+          }).join('');
+        }
+      }
+
+      function updateCrushLiveFromText(raw) {
+        const text = stripAnsi(raw).replace(/\r/g, '\n');
+        if (!text.trim()) return;
+        const phaseMatch = text.match(/\b(THINK|PLAN|ACT|OBSERVE|REFLECT|CONSOLIDATE|COMPLETE)\b(?:\s+\[turn\s+(\d+)\])?/);
+        if (phaseMatch) {
+          crushLiveState.phase = phaseMatch[1];
+          crushLiveState.status = phaseMatch[1] === 'COMPLETE' ? 'complete' : 'active';
+          if (phaseMatch[2]) crushLiveState.turns = Math.max(crushLiveState.turns, Number(phaseMatch[2]) + 1);
+          const phaseDetail = {
+            THINK: 'Reasoning about the request.',
+            PLAN: 'Choosing the next concrete action.',
+            ACT: 'Running a command or tool.',
+            OBSERVE: 'Reading output and checking results.',
+            REFLECT: 'Adjusting after a problem or loop signal.',
+            CONSOLIDATE: 'Summarizing the result.',
+            COMPLETE: 'Task completed.'
+          };
+          crushLiveState.detail = phaseDetail[crushLiveState.phase] || 'Agent working.';
+        }
+        const toolMatch = text.match(/(?:↳\s*)?(?:\[tool\s+(\d+)\]|\[tool\s+(\d+):)\s+([A-Za-z0-9_.:-]+)/);
+        if (toolMatch) {
+          const toolName = toolMatch[3] || 'tool';
+          crushLiveState.status = 'running tool';
+          crushLiveState.phase = 'ACT';
+          crushLiveState.tool = toolName;
+          const idx = Number(toolMatch[1] || toolMatch[2] || 0);
+          crushLiveState.totalTools = Math.max(crushLiveState.totalTools, idx || crushLiveState.totalTools + 1);
+          crushLiveState.toolCounts[toolName] = (crushLiveState.toolCounts[toolName] || 0) + 1;
+          crushLiveState.detail = 'Running ' + toolName + '.';
+        }
+        if (/↳\s*✓|\[result:/i.test(text)) {
+          crushLiveState.status = 'observing';
+          crushLiveState.phase = 'OBSERVE';
+          crushLiveState.completedTools = Math.max(crushLiveState.completedTools + 1, crushLiveState.completedTools);
+          crushLiveState.detail = 'Tool returned output; checking what changed.';
+        }
+        const doneMatch = text.match(/done\s+\((\d+)\s+tools?,\s+(\d+)\s+turns?/i);
+        if (doneMatch) {
+          crushLiveState.status = 'complete';
+          crushLiveState.phase = 'COMPLETE';
+          crushLiveState.totalTools = Math.max(crushLiveState.totalTools, Number(doneMatch[1]));
+          crushLiveState.turns = Math.max(crushLiveState.turns, Number(doneMatch[2]));
+          crushLiveState.detail = 'Agent finished this run.';
+        } else if (/── done|\bCOMPLETE\b/i.test(text)) {
+          crushLiveState.status = 'complete';
+          crushLiveState.phase = 'COMPLETE';
+          crushLiveState.detail = 'Agent finished this run.';
+        }
+        if (/loop detected|loop guard|Loop nudge|stuck-loop|Filesystem-wandering/i.test(text)) {
+          crushLiveState.status = 'pushing through';
+          crushLiveState.phase = 'REFLECT';
+          crushLiveState.tool = 'loop guard';
+          crushLiveState.detail = text.split('\n').map(s => s.trim()).filter(Boolean).slice(-1)[0]?.slice(0, 160) || 'Loop guard nudged the agent forward.';
+        }
+        if (/Approval needed|DANGEROUS|requires user confirmation/i.test(text)) {
+          crushLiveState.status = 'needs approval';
+          crushLiveState.tool = 'approval';
+          crushLiveState.detail = 'Waiting for approval before a risky action.';
+        }
+        if (/Stream error|Connection lost|disconnected|session ended/i.test(text)) {
+          crushLiveState.status = 'disconnected';
+          crushLiveState.detail = text.split('\n').map(s => s.trim()).filter(Boolean).slice(-1)[0]?.slice(0, 160) || 'Terminal stream disconnected.';
+        }
+        renderCrushLiveState();
+      }
+
+      window.addEventListener('hakster:pty-output', (event) => {
+        if (event.detail?.mode !== 'crush') return;
+        updateCrushLiveFromText(event.detail.data || '');
+      });
+
+      renderCrushLiveState();
 
       function refreshCrushSidebar() {
         fetch('/api/dashboard').then(r => r.json()).then(d => {
