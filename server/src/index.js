@@ -17,10 +17,211 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys } = require('./providers');
+const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys } = require('./providers');
+const { formatProjectInventory } = require('./projectInventory');
+const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
+// ── Autoflow: 6-phase loop + autolearn + approval modules ──
+const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName } = require('./agent/loop');
+const autolearn = require('./agent/autolearn');
+
+// ── MCP Integration — merge MCP tools into the agent tool list ────────────
+let ALL_TOOLS = AGENT_TOOLS; // starts as built-in only; expanded after MCP loads
+let _mcpLoaded = false;
+
+const FAST_CHAT_TOOL_NAMES = new Set([
+  'read_file',
+  'list_dir',
+  'search_files',
+  'glob_search',
+  'codebase_index',
+  'codebase_map',
+  'exec_shell',
+  'shell_bg',
+  'write_file',
+  'edit_file',
+  'replace_in_file',
+  'apply_patch',
+  'browser_detect',
+  'browser_navigate',
+  'browser_snapshot',
+  'browser_screenshot',
+  'web_search',
+  'firecrawl_scrape',
+  'generate_image',
+  'recall_memory',
+  'save_memory',
+]);
+
+function getFastChatTools() {
+  return ALL_TOOLS.filter((tool) => FAST_CHAT_TOOL_NAMES.has(tool.function?.name) || tool._mcpServer);
+}
+
+async function initWebMcp() {
+  if (_mcpLoaded) return;
+  _mcpLoaded = true;
+  mcpSetLogFn((msg) => console.log(msg));
+  try {
+    // Use the same root discovery as the CLI agent
+    const roots = Array.from(new Set([
+      path.join(process.env.HOME || '/home/ghost', '.hakster'),
+      '/home/ghost/.hakster',
+      path.join(process.cwd(), '.hakster'),
+      path.join(__dirname, '..', '..', '.hakster'),
+      '/home/ghost/.agents',
+      '/home/ghost/skills',
+      '/home/ghost/.hermes/hermes-agent',
+      '/home/ghost/.hermes',
+      '/home/ghost/haksterAi/pentest-agents',
+    ]));
+    const { tools: mcpToolDefs, servers } = await loadMcpServers(roots);
+    if (mcpToolDefs.length > 0) {
+      // Compress MCP tool schemas to save context (same logic as CLI agent)
+      const compressed = mcpToolDefs.map(t => {
+        const desc = t.function.description || '';
+        const shortDesc = desc.split('.')[0] + (desc.includes('.') ? '.' : '');
+        let params = { type: 'object', properties: {}, required: t.function.parameters?.required || [] };
+        if (t.function.parameters?.properties) {
+          for (const [key, schema] of Object.entries(t.function.parameters.properties)) {
+            const compressedProp = { type: schema.type || 'string' };
+            if (schema.enum) compressedProp.enum = schema.enum;
+            if (schema.description && schema.description.length < 60) {
+              compressedProp.description = schema.description;
+            }
+            params.properties[key] = compressedProp;
+          }
+        }
+        return {
+          type: 'function',
+          function: { name: t.function.name, description: shortDesc, parameters: params },
+          _mcpServer: t._mcpServer,
+          _mcpToolName: t._mcpToolName,
+        };
+      });
+      ALL_TOOLS = [...AGENT_TOOLS, ...compressed];
+      console.log(`[MCP] Loaded ${mcpToolDefs.length} MCP tools from ${servers.length} servers: ${servers.join(', ')}`);
+    } else {
+      console.log('[MCP] No MCP servers connected (mcp.json may be missing or servers failed to start)');
+    }
+  } catch (err) {
+    console.warn(`[MCP] Init warning: ${err.message}`);
+  }
+}
 const { saveMemory, getMemory, searchMemories, listMemories, deleteMemory, getMemoryContext, getMemoryStats, compactMemories, CATEGORIES: MEMORY_CATEGORIES } = require('./memory');
 const { runSecurityAudit, startSecurityScanner, getSecurityNotifications, acknowledgeSecurityNotification, acknowledgeAllSecurityNotifications, SEVERITY: SECURITY_SEVERITY } = require('./security');
 const compression = require('compression');
+const telegramBots = require('./telegramBots');
+
+function seedPersistentProjectMemory() {
+  try {
+    const value = formatProjectInventory({ maxProjects: 10 });
+    saveMemory({
+      category: 'context',
+      key: 'server_project_inventory_line_map',
+      value,
+      source: 'projectInventory',
+      confidence: 0.95,
+    });
+  } catch (err) {
+    console.warn(`[memory] project inventory seed skipped: ${err.message}`);
+  }
+}
+
+function cleanGoogleDisplayName(name, email) {
+  const raw = String(name || '').trim();
+  if (raw && raw !== 'google_user') return raw.slice(0, 120);
+  const fallback = String(email || '').split('@')[0] || 'User';
+  return fallback.slice(0, 120);
+}
+
+function rememberGoogleUserIdentity(user, { name, email, googleId, picture } = {}) {
+  if (!user?.id) return;
+  const displayName = cleanGoogleDisplayName(name, email || user.email);
+  const userEmail = email || user.email || '';
+  const memories = [
+    {
+      key: `user:${user.id}:display_name`,
+      value: displayName,
+    },
+    {
+      key: `user:${user.id}:identity`,
+      value: `Google user ${displayName}${userEmail ? ` <${userEmail}>` : ''}; username slug ${user.username || 'unknown'}; role ${user.role || 'user'}; plan ${user.plan || 'free'}.`,
+    },
+  ];
+  if (googleId) {
+    memories.push({
+      key: `google:${googleId}:display_name`,
+      value: displayName,
+    }, {
+      key: `user:${user.id}:google_id`,
+      value: googleId,
+    });
+  }
+  if (picture) {
+    memories.push({
+      key: `user:${user.id}:google_picture_available`,
+      value: 'Google profile picture is available for this signed-in user.',
+    });
+  }
+  for (const m of memories) {
+    try {
+      saveMemory({
+        category: 'relationship',
+        key: m.key,
+        value: m.value,
+        source: 'google-auth',
+        sessionId: null,
+        confidence: 1.0,
+      });
+    } catch (err) {
+      console.warn(`[memory] google identity memory skipped for ${m.key}: ${err.message}`);
+    }
+  }
+  return displayName;
+}
+
+function seedGoogleIdentityMemoriesFromDb() {
+  try {
+    const db = getDb();
+    const users = db.prepare(`
+      SELECT id, username, email, google_id, role, plan
+      FROM users
+      WHERE google_id IS NOT NULL OR email IS NOT NULL
+      ORDER BY updated_at DESC
+      LIMIT 500
+    `).all();
+    const latestActivity = db.prepare(`
+      SELECT metadata
+      FROM user_activity
+      WHERE user_id = ? AND endpoint IN ('/api/auth/google', '/auth/google/callback')
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    for (const user of users) {
+      let meta = {};
+      try { meta = JSON.parse(latestActivity.get(user.id)?.metadata || '{}'); } catch (_) {}
+      rememberGoogleUserIdentity(user, {
+        name: meta.name || user.username,
+        email: meta.email || user.email,
+        googleId: user.google_id,
+        picture: meta.picture,
+      });
+    }
+  } catch (err) {
+    console.warn(`[memory] google identity backfill skipped: ${err.message}`);
+  }
+}
+
+function promoteOwnerAccountsFromDb() {
+  try {
+    const db = getDb();
+    const stmt = db.prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE lower(email) = ?');
+    for (const email of OWNER_EMAILS) {
+      stmt.run('admin', 'enterprise', email);
+    }
+  } catch (err) {
+    console.warn(`[auth] owner promotion skipped: ${err.message}`);
+  }
+}
 
 // ── Config ────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || '3579', 10);
@@ -33,6 +234,91 @@ const FREE_USAGE_LIMIT = 10;
 const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
 const REFERRAL_REWARD_TOKENS = parseInt(process.env.REFERRAL_REWARD_TOKENS || '10000', 10);
 const REFERRAL_SIGNUP_TOKENS = parseInt(process.env.REFERRAL_SIGNUP_TOKENS || '2500', 10);
+
+const BUILTIN_OWNER_EMAILS = [
+  'dekekenneth840@gmail.com',
+  'dekoneed@gmail.com',
+  'dekeneed@yahoo.com',
+  'savannahscott899@gmail.com',
+];
+const OWNER_EMAILS = Array.from(new Set([
+  ...BUILTIN_OWNER_EMAILS,
+  ...(process.env.OWNER_EMAILS || '').split(','),
+].map((email) => String(email || '').toLowerCase().trim()).filter(Boolean)));
+const OWNER_IDS = {
+  'dekekenneth840@gmail.com': '1234',
+  'dekoneed@gmail.com': '1235',
+  'dekeneed@yahoo.com': '1236',
+  'savannahscott899@gmail.com': '1237',
+};
+
+function normalizeEmail(email) {
+  return String(email || '').toLowerCase().trim();
+}
+
+function isOwnerEmail(email) {
+  return OWNER_EMAILS.includes(normalizeEmail(email));
+}
+
+function ownerIdForEmail(email) {
+  return OWNER_IDS[normalizeEmail(email)] || uuidv4();
+}
+
+const AGENT_PROJECT_CWDS = [
+  {
+    cwd: '/home/ghost/cine-vault-live',
+    patterns: [
+      /\bcine\s*-?\s*vault\b/i,
+      /\bcinevault\b/i,
+      /\blive channels?\b/i,
+      /\bside panel\b/i,
+      /\bstalker\b/i,
+      /\biptv\b/i,
+      /\bmovie server\b/i,
+    ],
+  },
+  {
+    cwd: '/home/ghost/haksterAi',
+    patterns: [
+      /\bhakster\s*ai\b/i,
+      /\bhaksterai\b/i,
+      /\btool loop\b/i,
+      /\bcli tools?\b/i,
+      /\bagent loop\b/i,
+      /\bsearch_files\b/i,
+      /\bglob_search\b/i,
+      /\bpatching tool\b/i,
+    ],
+  },
+];
+
+function inferAgentWorkDir(messages) {
+  const text = (messages || [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'system'))
+    .map((m) => String(m.content || ''))
+    .join('\n');
+  for (const project of AGENT_PROJECT_CWDS) {
+    if (project.patterns.some((rx) => rx.test(text)) && fs.existsSync(project.cwd)) {
+      return project.cwd;
+    }
+  }
+  return null;
+}
+
+function resolveAgentWorkDir({ cwd, messages, sessionId }) {
+  if (cwd && typeof cwd === 'string') {
+    return { workDir: path.resolve(cwd), isolated: false, reason: 'request cwd' };
+  }
+  const inferred = inferAgentWorkDir(messages);
+  if (inferred) return { workDir: inferred, isolated: false, reason: 'inferred project cwd' };
+
+  const root = process.env.FS_ROOT || path.join(__dirname, '..', 'data');
+  return {
+    workDir: path.join(root, 'workspaces', sessionId || 'default'),
+    isolated: true,
+    reason: 'isolated workspace',
+  };
+}
 
 const PRICING_CATALOG = [
   {
@@ -295,10 +581,10 @@ function getSkillsInventory() {
 function getToolInventory() {
   const now = Date.now();
   if (_toolsCache && (now - _toolsCacheTime) < TOOLS_CACHE_TTL) return _toolsCache;
-  const tools = AGENT_TOOLS.map((tool) => ({
+  const tools = ALL_TOOLS.map((tool) => ({
     name: tool.function?.name || 'unknown',
     description: tool.function?.description || '',
-    source: 'web-agent',
+    source: tool._mcpServer ? `mcp:${tool._mcpServer}` : 'web-agent',
   }));
   try {
     const agentFile = path.join(__dirname, 'agent', 'index.js');
@@ -326,7 +612,17 @@ function getToolInventory() {
 const app = express();
 app.use(compression());
 app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '50mb' }));
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({
+      error: 'Request too large. Attach fewer/smaller images or start a fresh chat.',
+      code: 'PAYLOAD_TOO_LARGE',
+    });
+  }
+  return next(err);
+});
 
 function isCerebrasValue(value) {
   return String(value || '').toLowerCase().includes('cerebras');
@@ -346,6 +642,82 @@ function getHaksterModelConfig() {
     if (cfg.model && !isCerebrasValue(cfg.model)) model = cfg.model;
   } catch {}
   return { provider, model };
+}
+
+function requireAdmin(req, res, next) {
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  if (user.role !== 'admin' && !isOwnerEmail(user.email)) return res.status(403).json({ error: 'Admin access required' });
+  if (user.role !== 'admin' && isOwnerEmail(user.email)) {
+    try {
+      getDb().prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE id = ?').run('admin', 'enterprise', user.id);
+      user.role = 'admin';
+      user.plan = 'enterprise';
+    } catch {}
+  }
+  req.user = user;
+  return next();
+}
+
+function stableUserLabel(row) {
+  const seed = row?.userId || row?.googleId || row?.email || row?.username || 'anonymous';
+  const digest = crypto.createHash('sha256').update(String(seed)).digest('hex').slice(0, 8).toUpperCase();
+  return `User ${digest}`;
+}
+
+function publicDashboardTool(tool) {
+  return {
+    name: String(tool?.name || 'unknown').slice(0, 120),
+    source: String(tool?.source || 'web-agent').slice(0, 120),
+  };
+}
+
+function publicDashboardSkill(skill) {
+  return {
+    name: String(skill?.name || 'unknown').slice(0, 120),
+    category: String(skill?.category || 'general').slice(0, 120),
+  };
+}
+
+function publicToolBreakdownName(name) {
+  const raw = String(name || '').trim();
+  if (/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(raw)) return raw;
+  return 'other';
+}
+
+function estimateUsageTokens(value) {
+  let text = '';
+  try {
+    text = typeof value === 'string' ? value : JSON.stringify(value || '');
+  } catch {
+    text = String(value || '');
+  }
+  return Math.max(0, Math.ceil(text.length / 4));
+}
+
+function recordUserTokenUsage(user, usage) {
+  if (!user?.id) return;
+  try {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO user_token_usage
+       (user_id, google_id, session_id, endpoint, provider, model, input_tokens, output_tokens, tool_calls, fast_mode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      user.id,
+      user.google_id || null,
+      usage.sessionId || null,
+      usage.endpoint || '/api/agent/run',
+      usage.provider || null,
+      usage.model || null,
+      Math.max(0, Math.round(usage.inputTokens || 0)),
+      Math.max(0, Math.round(usage.outputTokens || 0)),
+      Math.max(0, Math.round(usage.toolCalls || 0)),
+      usage.fastMode ? 1 : 0,
+    );
+  } catch (err) {
+    console.warn('[usage] token ledger write failed:', err.message);
+  }
 }
 
 async function openAICompatStreamFetch(baseURL, payload, signal) {
@@ -475,10 +847,25 @@ app.get('/api/agent/capabilities', (_req, res) => {
     },
     defaultAgent,
     subAgents,
-    tools: AGENT_TOOLS.map((tool) => tool.function?.name).filter(Boolean),
+    tools: ALL_TOOLS.map((tool) => tool.function?.name).filter(Boolean),
     localTools,
     os: osInfo,
   });
+});
+
+// ── MCP Status endpoint ──────────────────────────────────────────────────
+app.get('/api/agent/mcp-status', (_req, res) => {
+  try {
+    const status = mcpStatus();
+    res.json({
+      servers: status,
+      totalMcpTools: status.reduce((sum, s) => sum + s.toolCount, 0),
+      totalTools: ALL_TOOLS.length,
+      builtinTools: AGENT_TOOLS.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Machine Context API (live OS/hardware/folders for agents & TUI) ──
@@ -956,12 +1343,19 @@ app.post('/api/client-context', (req, res) => {
     ctx.timezone || '', ctx.language || '', ctx.gpu || '', ctx.device_pixel_ratio || '',
   ].join('|')).digest('hex').slice(0, 32);
 
-  // Check if a logged-in user matches this request (via API key header)
-  const apiKey = req.headers['x-api-key'];
+  // Check if a logged-in user matches this request (via API key header or google token)
+  const apiKey = req.headers['x-api-key'] || req.body.google_token;
   let trackedUserId = null;
   if (apiKey) {
     const u = db.prepare('SELECT id FROM users WHERE api_key = ?').get(apiKey);
     if (u) trackedUserId = u.id;
+  }
+
+  // Link session to user_id so getClientContextString can find them without API key
+  if (trackedUserId && ctx.session_id) {
+    try {
+      db.prepare(`UPDATE sessions SET user_id = ? WHERE id = ? AND (user_id IS NULL OR user_id = ?)`).run(trackedUserId, ctx.session_id, trackedUserId);
+    } catch (_) { /* best-effort */ }
   }
 
   if (trackedUserId) {
@@ -1018,6 +1412,38 @@ function getClientContextString(sessionId) {
     if (cc.webdriver) lines.push(`  ⚠ Automated browser (WebDriver)`);
     if (cc.dark_mode !== null && cc.dark_mode !== undefined) lines.push(`  Dark mode: ${cc.dark_mode ? 'on' : 'off'}`);
     if (cc.ip_address) lines.push(`  IP: ${cc.ip_address}`);
+
+    // ── Pull user identity linked to this session (works even without API key auth) ──
+    try {
+      const sess = db.prepare(`SELECT user_id FROM sessions WHERE id = ?`).get(sessionId);
+      if (sess && sess.user_id) {
+        const u = db.prepare(`SELECT id, username, email, google_id, role, plan FROM users WHERE id = ?`).get(sess.user_id);
+        if (u) {
+          lines.push(`\n  Authenticated user linked to this session:`);
+          if (u.username) lines.push(`    Username: ${u.username}`);
+          if (u.email) lines.push(`    Email: ${u.email}`);
+          if (u.google_id) lines.push(`    Google account: linked (${u.google_id})`);
+          lines.push(`    Role: ${u.role || 'user'}`);
+          lines.push(`    Plan: ${u.plan || 'free'}`);
+        }
+      } else if (cc.ip_address) {
+        // Fallback: try to find the most recent user who logged in from same IP
+        const recentUser = db.prepare(
+          `SELECT u.id, u.username, u.email, u.google_id, u.role, u.plan
+           FROM users u
+           WHERE u.last_login_ip = ? AND u.status = 'active'
+           ORDER BY u.last_login_at DESC LIMIT 1`
+        ).get(cc.ip_address);
+        if (recentUser) {
+          lines.push(`\n  Most recent user from this IP (${cc.ip_address}):`);
+          if (recentUser.username) lines.push(`    Username: ${recentUser.username}`);
+          if (recentUser.email) lines.push(`    Email: ${recentUser.email}`);
+          if (recentUser.google_id) lines.push(`    Google account: linked`);
+          lines.push(`    Role: ${recentUser.role || 'user'}`);
+        }
+      }
+    } catch (_) { /* identity lookup is best-effort */ }
+
     lines.push('=== END CLIENT DEVICE CONTEXT ===\n');
     return lines.join('\n');
   } catch (_) { return ''; }
@@ -1093,7 +1519,28 @@ app.get('/api/integrations', (_req, res) => {
 app.get('/api/memory', (req, res) => {
   const { category, limit, offset } = req.query;
   const memories = listMemories({ category: category || null, limit: parseInt(limit) || 100, offset: parseInt(offset) || 0 });
-  res.json({ memories });
+  const stats = getMemoryStats();
+  const contextBudgetChars = parseInt(process.env.MEMORY_CONTEXT_CHARS || '3000', 10);
+  res.json({
+    memories,
+    stats: {
+      ...stats,
+      contextBudgetChars,
+      contextUsagePct: Math.min(100, Math.round((stats.total / 40) * 100)),
+      injectedMemoriesMax: 15,
+    },
+  });
+});
+
+app.get('/api/agent/memory', (req, res) => {
+  const { q, query, category, limit } = req.query;
+  const needle = q || query;
+  if (needle) {
+    const results = searchMemories(needle, { category: category || null, limit: parseInt(limit) || 20 });
+    return res.json({ memories: results, results });
+  }
+  const memories = listMemories({ category: category || null, limit: parseInt(limit) || 100 });
+  res.json({ memories, results: memories });
 });
 
 app.get('/memory/stats', (_req, res) => {
@@ -1114,6 +1561,25 @@ app.post('/api/memory', (req, res) => {
     res.status(201).json(mem);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/agent/memory', (req, res) => {
+  try {
+    const { category, key, value, source, sessionId, confidence, expiresAt } = req.body;
+    if (!key || !value) return res.status(400).json({ ok: false, error: 'key and value are required' });
+    const mem = saveMemory({
+      category: category || 'general',
+      key,
+      value,
+      source: source || 'agent',
+      sessionId: sessionId || null,
+      confidence: confidence || 1.0,
+      expiresAt: expiresAt || null,
+    });
+    res.status(201).json({ ok: true, memory: mem, ...mem });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
   }
 });
 
@@ -1343,6 +1809,111 @@ const AnthropicClient = require('@anthropic-ai/sdk').default;
 
 // ── Per-session allowlist for dangerous commands ──────────────────
 const sessionAllowedCommands = new Map(); // sessionId -> Set of allowed command strings
+// ── Pending interactive confirmations (needs_confirmation → await user y/N) ──
+// Key: `${sessionId}:${toolCallId}` → { resolve, timer }
+const pendingConfirmations = new Map();
+const CONFIRM_TIMEOUT_MS = 300000; // auto-deny after 5 minutes
+const PHANTOM_EXPLORATION_TOOLS = new Set(['list_dir', 'search_files', 'glob_search', 'read_file', 'codebase_map']);
+const PHANTOM_ACTION_TOOLS = new Set(['write_file', 'edit_file', 'replace_in_file', 'apply_patch']);
+const PHANTOM_SEARCH_SHELL_RE = /\b(rg|grep|egrep|fgrep|ag|ack|ripgrep|find|fd|locate)\b/i;
+const PHANTOM_CLARIFY_RE = /\b(can you|could you|please provide|tell me|let me know|which file|what would you like|do you want|should i|would you like|please clarify|need more|can we|which of these)\b/i;
+
+function normalizeAgentPathForLoop(p, base = '/home/ghost') {
+  try {
+    return path.resolve(base, p || '.').replace(/\/+$/, '').toLowerCase();
+  } catch {
+    return String(p || '.').replace(/\/+$/, '').toLowerCase();
+  }
+}
+
+function isClarifyingLoopText(text) {
+  const s = String(text || '').trim();
+  return s.endsWith('?') && PHANTOM_CLARIFY_RE.test(s);
+}
+
+function toolLoopClass(toolName, toolArgs) {
+  if (toolName === 'exec_shell' || toolName === 'shell_bg') {
+    const command = String(toolArgs?.command || '');
+    return PHANTOM_SEARCH_SHELL_RE.test(command) ? 'explore' : 'action';
+  }
+  if (PHANTOM_ACTION_TOOLS.has(toolName)) return 'action';
+  if (PHANTOM_EXPLORATION_TOOLS.has(toolName)) return 'explore';
+  return 'other';
+}
+
+function toolLoopTarget(toolName, toolArgs, base) {
+  if (toolName === 'exec_shell' || toolName === 'shell_bg') return String(toolArgs?.command || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  return normalizeAgentPathForLoop(toolArgs?.path || toolArgs?.cwd || toolArgs?.focus || '.', base);
+}
+
+function detectPhantomLoopNudge(loopDetect, assistantContent, toolCalls, workDir) {
+  const text = String(assistantContent || '');
+  const hasAction = toolCalls.some((tc) => toolLoopClass(tc.name, safeJsonParse(tc.arguments || '{}')) === 'action');
+  const hasExplore = toolCalls.some((tc) => toolLoopClass(tc.name, safeJsonParse(tc.arguments || '{}')) === 'explore');
+
+  if (isClarifyingLoopText(text)) {
+    loopDetect.clarifyingCount = (loopDetect.clarifyingCount || 0) + 1;
+  } else if (text.trim().length > 30) {
+    loopDetect.clarifyingCount = 0;
+  }
+
+  if (hasAction) {
+    loopDetect.explorationCalls = [];
+    loopDetect.searchOnlyCount = 0;
+    return null;
+  }
+
+  if (hasExplore) {
+    for (const tc of toolCalls) {
+      const args = safeJsonParse(tc.arguments || '{}');
+      if (toolLoopClass(tc.name, args) !== 'explore') continue;
+      const target = toolLoopTarget(tc.name, args, workDir);
+      loopDetect.explorationCalls.push({ tool: tc.name, target });
+    }
+    loopDetect.explorationCalls = loopDetect.explorationCalls.slice(-8);
+    loopDetect.searchOnlyCount = (loopDetect.searchOnlyCount || 0) + 1;
+  }
+
+  const recentTargets = loopDetect.explorationCalls.map((c) => c.target);
+  const uniqueTargets = new Set(recentTargets).size;
+  const sameSubtreeCount = recentTargets.length >= 4 && uniqueTargets <= 2;
+  // BUG FIX: Was >= 2, letting the model search twice before nudging.
+  // Now >= 1 — the FIRST search-only turn triggers the nudge so the model
+  // acts immediately instead of wandering for 2-3 turns.
+  const searchLoop = (loopDetect.searchOnlyCount || 0) >= 1;
+  const clarifyLoop = (loopDetect.clarifyingCount || 0) >= 1;
+
+  if (clarifyLoop) {
+    loopDetect.clarifyingCount = 0;
+    return {
+      reason: 'clarification_loop',
+      message: 'Repeated clarification detected. Proceed with best judgment and take a concrete action.',
+      nudge: 'STOP ASKING QUESTIONS. You have enough information. Take ONE concrete action NOW: run a shell command, apply a patch, or give the direct answer. Do NOT ask another clarifying question.',
+    };
+  }
+  if (sameSubtreeCount) {
+    loopDetect.explorationCalls = [];
+    loopDetect.searchOnlyCount = 0;
+    return {
+      reason: 'filesystem_wandering',
+      message: 'Filesystem wandering detected. Stop re-listing/searching the same paths and act.',
+      nudge: 'STOP BROWSING. You are re-reading the same files/dirs. You already have the information. Take ONE action NOW: apply_patch, run a shell command, or answer. Do NOT call list_dir, search_files, glob_search, or read_file again.',
+    };
+  }
+  if (searchLoop) {
+    loopDetect.searchOnlyCount = 0;
+    return {
+      reason: 'search_loop',
+      message: 'Repeated search-only turns detected. Stop searching and act.',
+      nudge: 'STOP SEARCHING. You have enough context from your previous searches. Take ONE action NOW: apply_patch, run a shell command, or give the direct answer. Do NOT call any search/list/read tool again this turn.',
+    };
+  }
+  return null;
+}
+
+function safeJsonParse(text) {
+  try { return JSON.parse(text || '{}'); } catch { return {}; }
+}
 // Hydrate allowlist from DB on startup
 {
   try {
@@ -1379,6 +1950,58 @@ app.post('/api/agent/allow', (req, res) => {
   res.json({ ok: true, command: cmd, permanent: permanent !== false });
 });
 
+// ── Interactive confirmation: client POSTs the user's y/N answer here ──
+app.post('/api/agent/confirm', (req, res) => {
+  const { sessionId, toolCallId, approved, command, permanent } = req.body || {};
+  const sid = sessionId || 'default';
+  const key = `${sid}:${toolCallId}`;
+  const pending = pendingConfirmations.get(key);
+  if (!pending) return res.status(404).json({ error: 'no pending confirmation for that tool_call_id' });
+  clearTimeout(pending.timer);
+  pendingConfirmations.delete(key);
+  // On approval, allowlist the command so the agent's re-issue skips confirmation
+  if (approved) {
+    const cmd = (command || '').trim();
+    if (cmd) {
+      if (!sessionAllowedCommands.has(sid)) sessionAllowedCommands.set(sid, new Set());
+      sessionAllowedCommands.get(sid).add(cmd);
+      if (permanent !== false) {
+        try {
+          const db = getDb();
+          db.prepare('INSERT OR IGNORE INTO command_allowlist (command, source, session_id) VALUES (?, ?, ?)').run(cmd, 'user', permanent === true ? 'default' : sid);
+        } catch (_) {}
+      }
+    }
+  }
+  pending.resolve(approved === true);
+  res.json({ ok: true, approved: approved === true });
+});
+
+// Emit a needs_confirmation SSE event and block until the client POSTs /api/agent/confirm
+// (or CONFIRM_TIMEOUT_MS elapses, which auto-denies). Returns true (approved) | false (denied/timeout).
+async function awaitUserConfirmation(sessionId, toolCallId, needsConfirmation, res) {
+  const sid = sessionId || 'default';
+  const key = `${sid}:${toolCallId}`;
+  // Cancel any stale pending entry for the same key (shouldn't happen, but be safe)
+  const stale = pendingConfirmations.get(key);
+  if (stale) { clearTimeout(stale.timer); pendingConfirmations.delete(key); }
+  res.write(`data: ${JSON.stringify({
+    type: 'needs_confirmation',
+    tool_call_id: toolCallId,
+    tool_name: needsConfirmation.tool || '',
+    reason: needsConfirmation.reason || 'Approval needed',
+    command: needsConfirmation.args?.command || '',
+    args: needsConfirmation.args,
+  })}\n\n`);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (pendingConfirmations.has(key)) { pendingConfirmations.delete(key); }
+      resolve(false); // auto-deny on timeout
+    }, CONFIRM_TIMEOUT_MS);
+    pendingConfirmations.set(key, { resolve, timer });
+  });
+}
+
 app.delete('/api/agent/allowlist/:id', (req, res) => {
   const db = getDb();
   const result = db.prepare('DELETE FROM command_allowlist WHERE id = ?').run(req.params.id);
@@ -1395,8 +2018,16 @@ app.delete('/api/agent/allowlist/:id', (req, res) => {
 });
 
 app.post('/api/agent/run', async (req, res) => {
-  const { provider = 'ollama', model, messages, sessionId, cwd, thinking: thinkingParam } = req.body;
-  const thinking = thinkingParam !== false;
+  const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false } = req.body;
+  const savedAgent = getHaksterModelConfig();
+  const requestedProvider = req.body.provider || savedAgent.provider || 'ollama';
+  const requestedModel = req.body.model || savedAgent.model;
+  const provider = fastMode ? (savedAgent.provider || requestedProvider || 'ollama') : requestedProvider;
+  const model = fastMode && (!req.body.model || req.body.model === 'gpt-oss:120b-cloud')
+    ? (savedAgent.model || requestedModel)
+    : requestedModel;
+  const thinking = fastMode ? thinkingParam === true : thinkingParam !== false;
+  const effectiveApprovalMode = approvalMode || (fastMode ? 'full-auto' : undefined);
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -1413,17 +2044,27 @@ app.post('/api/agent/run', async (req, res) => {
   const cfg = PROVIDERS[provider];
   if (!cfg) return res.status(400).json({ error: `Unknown provider: ${provider}` });
 
-  // Per-session workspace: if no cwd provided, create an isolated workspace
-  // under data/workspaces/<sessionId>. This gives each chat session its own
-  // sandboxed directory for file operations.
-  const FS_ROOT = process.env.FS_ROOT || path.join(__dirname, '..', 'data');
-  const workDir = cwd || path.join(FS_ROOT, 'workspaces', sessionId || 'default');
+  // Prefer real project roots when the request names one. Fall back to the
+  // isolated per-session workspace only for generic scratch work.
+  const { workDir, isolated: usingIsolatedWorkDir, reason: workDirReason } = resolveAgentWorkDir({ cwd, messages, sessionId });
   // Ensure workspace directory exists
-  if (!cwd) {
+  if (usingIsolatedWorkDir) {
     fs.mkdirSync(workDir, { recursive: true });
   }
-  const maxTurns = Math.max(25, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '80', 10) || 80);
+  const configuredMaxTurns = parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || (lowToken ? '12' : fastMode ? '18' : '80'), 10) || (lowToken ? 12 : fastMode ? 18 : 80);
+  const maxTurns = lowToken
+    ? Math.min(Math.max(6, configuredMaxTurns), 16)
+    : fastMode
+    ? Math.min(Math.max(8, configuredMaxTurns), 24)
+    : Math.max(25, configuredMaxTurns);
   const agentModel = model || cfg.defaultModel;
+
+  // ── Session-start activity logging ───────────────────
+  try {
+    const db = getDb();
+    db.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)')
+      .run(user?.id || null, 'agent_session_start', sessionId, JSON.stringify({ provider, model: agentModel, cwd: workDir, cwdReason: workDirReason }));
+  } catch (actErr) { console.error('[activity] session_start log failed:', actErr.message); }
 
   // ── Loop detection (per-request, not module-level) ────────────
   let loopDetect = {
@@ -1431,15 +2072,27 @@ app.post('/api/agent/run', async (req, res) => {
     noProgressCount: 0,             // Consecutive turns without real tool calls
     recentPrefixes: [],             // Last N response prefixes for semantic loop detection
     consecutiveToolErrors: [],      // [{name, count}] — same tool erroring repeatedly
-    recentToolCalls: [],            // [{name, args}] — last N tool calls for duplicate detection
-    totalToolCalls: 0,              // Running total of tool calls made
+      recentToolCalls: [],            // [{name, args}] — last N tool calls for duplicate detection
+      totalToolCalls: 0,              // Running total of tool calls made
+      explorationCalls: [],           // Phantom-style filesystem wandering detection
+      searchOnlyCount: 0,             // Consecutive explore/search-only turns
+      clarifyingCount: 0,             // Consecutive clarification loops
+      loopBreaks: {},                 // reason -> count; used to hard-stop repeated tool loops
   };
-  const NO_PROGRESS_LIMIT = 8;       // Let long jobs keep driving before declaring no-progress
-  const SEMANTIC_LOOP_WINDOW = 3;    // How many recent prefixes to check
-  const SEMANTIC_LOOP_THRESHOLD = 2;  // How many similar prefixes → loop
+  const NO_PROGRESS_LIMIT = 15;      // Let long jobs keep driving before declaring no-progress (was 8)
+  const SEMANTIC_LOOP_WINDOW = 5;    // How many recent prefixes to check (was 3)
+  const SEMANTIC_LOOP_THRESHOLD = 3;  // How many similar prefixes → loop (was 2)
+  const SEMANTIC_SIMILARITY_RATIO = 0.4; // Word overlap ratio to count as similar
   const TOOL_ERROR_LOOP_LIMIT = 3;   // Same tool erroring this many times → break
-  const DUPE_CALL_WINDOW = 4;        // How many recent tool calls to check for dupes
-  const DUPE_CALL_LIMIT = 3;         // Same tool+args repeating this many times → loop
+  const DUPE_CALL_WINDOW = 6;        // How many recent tool calls to check for dupes (was 4)
+  const DUPE_CALL_LIMIT = 4;         // Same tool+args repeating this many times → loop (was 3)
+
+  // ── 6-Phase Loop State (THINK→PLAN→ACT→OBSERVE→REFLECT→CONSOLIDATE) ──
+  let currentPhase = AgentLoopPhase.THINK;
+  let thinkPlanStreak = 0;
+  let rawMemoryCount = 0;
+  let lastConsolidationTurn = -Infinity;
+  trustEscalation.reset(); // reset trust for new session
 
   // Abort tracking — client disconnect support (use res, not req)
   let aborted = false;
@@ -1454,12 +2107,117 @@ app.post('/api/agent/run', async (req, res) => {
       try { res.write(`:heartbeat\n\n`); } catch {}
     }
   }, 5000);
+  // Enable TCP keepalive on the underlying socket — detects dead connections
+  // faster and prevents the OS from closing idle sockets during long tool calls
+  if (res.socket) {
+    res.socket.setKeepAlive(true, 10000); // probe every 10s after idle
+    res.socket.setTimeout(0); // no socket timeout — SSE stays open
+  }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
   res.flushHeaders();
+
+  // Emit initial phase event AFTER headers are set
+  res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn: 0 })}\n\n`);
+
+  function getMessageText(content) {
+    if (Array.isArray(content)) {
+      return content
+        .filter(p => p?.type === 'text')
+        .map(p => p.text || '')
+        .join('\n');
+    }
+    return String(content || '');
+  }
+
+  function getLastUserText() {
+    const last = [...messages].reverse().find(m => m.role === 'user');
+    return last ? getMessageText(last.content).trim() : '';
+  }
+
+  function getFactualLookupQuery() {
+    const text = getLastUserText();
+    if (!text || text.length > 220) return '';
+    const lower = text.toLowerCase();
+    if (/\b(code|edit|fix|build|run|deploy|install|restart|delete|remove|generate image|logo|draw)\b/.test(lower)) return '';
+    const factual = /^(who|what|when|where)\s+(is|was|are|were)\b/i.test(text)
+      || /^(tell me about|look up|search for|find info on)\b/i.test(text)
+      || /\b(who is|who was|what is|what was)\b/i.test(text);
+    if (!factual) return '';
+    return text.replace(/[?!.]+$/g, '').trim();
+  }
+
+  function getLastUserImageIntent() {
+    const last = [...messages].reverse().find(m => m.role === 'user');
+    if (!last) return null;
+    const text = getMessageText(last.content).trim();
+    const lower = text.toLowerCase();
+    const isImageIntent = /\b(generate|create|make|draw|design|logo|image|picture|photo|avatar|icon|banner|cover|illustration|graphic|mockup|edit|enhance|upscale|restyle|improve)\b/.test(lower)
+      && /\b(image|logo|picture|photo|avatar|icon|banner|cover|illustration|graphic|mockup|visual|art|design|draw|enhance|upscale|restyle)\b/.test(lower);
+    if (!isImageIntent) return null;
+    const blocks = Array.isArray(last.content) ? last.content.filter(p => p?.type === 'image_url') : [];
+    const operation = /\b(enhance|upscale|improve|sharpen|restore)\b/.test(lower)
+      ? 'enhance'
+      : /\b(edit|restyle|change|modify|remove|replace)\b/.test(lower)
+        ? 'edit'
+        : /\blogo\b/.test(lower)
+          ? 'logo'
+          : 'generate';
+    return { text: text || 'Create a top-grade HD image.', imageBlocks: blocks, operation };
+  }
+
+  async function runDirectImageIntent(intent) {
+    const crypto = require('crypto');
+    res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_name: 'generate_image', tool_args: { provider: 'pollinations', model: 'zimage', size: '1024x1024', quality: 'hd', operation: intent.operation } })}\n\n`);
+    const imgDir = path.join(workDir, 'outputs', 'images');
+    fs.mkdirSync(imgDir, { recursive: true });
+    let imageUrl = null;
+    if (intent.imageBlocks.length > 0) {
+      imageUrl = intent.imageBlocks[0].image_url?.url || intent.imageBlocks[0].url || null;
+    }
+    const result = await generateImage({
+      provider: 'pollinations',
+      model: 'zimage',
+      prompt: intent.text || 'Create a top-grade HD image.',
+      size: '1024x1024',
+      quality: 'hd',
+      n: 1,
+      imageUrl,
+      operation: intent.operation,
+      enhance: intent.operation === 'enhance',
+    });
+    const urls = [];
+    for (const img of result.images || []) {
+      const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const filePath = path.join(imgDir, `${id}.png`);
+      fs.writeFileSync(filePath, Buffer.from(img.b64_json, 'base64'));
+      const url = `/outputs/images/${id}.png`;
+      urls.push(url);
+      res.write(`data: ${JSON.stringify({ type: 'image', url, prompt: intent.text })}\n\n`);
+    }
+    const summary = `Generated ${urls.length} HD image${urls.length === 1 ? '' : 's'} with ${result.provider}/${result.model}.`;
+    res.write(`data: ${JSON.stringify({ type: 'tool_result', tool_name: 'generate_image', result: summary })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'delta', content: summary })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+  }
+
+  const directImageIntent = getLastUserImageIntent();
+  if (directImageIntent) {
+    try {
+      await runDirectImageIntent(directImageIntent);
+      incrementUsage(user);
+    } catch (err) {
+      const msg = err.message || String(err);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: msg })}\n\n`);
+    } finally {
+      clearInterval(heartbeat);
+      res.end();
+    }
+    return;
+  }
 
   // Build the OpenAI-compatible client for the chosen provider
   let client;
@@ -1562,7 +2320,7 @@ app.post('/api/agent/run', async (req, res) => {
       max_tokens: payload.max_tokens,
       system: payload.messages.find(m => m.role === 'system')?.content || systemContent,
       messages: anthropicMessagesFromAgentMessages(payload.messages),
-      tools: anthropicToolsFromAgentTools(AGENT_TOOLS),
+      tools: anthropicToolsFromAgentTools(ALL_TOOLS),
       ...(payload.thinking ? { thinking: { type: 'enabled', budget_tokens: budgetTokens } } : {}),
     };
     const stream = await client.messages.stream(streamPayload, { signal });
@@ -1655,8 +2413,33 @@ ${dirListing}
   // ── Preserve client-supplied system prompt (e.g. hack page pentest prompts) ──
   const clientSystemMsg = messages.find(m => m.role === 'system');
   const clientSystemContent = clientSystemMsg ? clientSystemMsg.content : '';
-  const systemContent = AGENT_SYSTEM_PROMPT
+  // ── Build dynamic system prompt with AGENTS.md + autolearn injection ──
+  const agentCwd = cwd || process.cwd();
+  const contextTags = (lastUserMsg?.content || '').split(/\s+/).filter(w => w.length > 3).slice(0, 10);
+  const dynamicPrompt = fastMode
+    ? [
+        'You are haksterAI in fast Chat tab agent mode.',
+        'Be direct and act quickly. Use tools instead of saying you cannot access files.',
+        `Active cwd: ${workDir}`,
+        'You may inspect user folders under /home/ghost with list_dir, read_file, search_files, glob_search, and exec_shell.',
+        'For command requests, call exec_shell with bounded commands and timeout_ms. Avoid foreground servers and broad recursive scans.',
+        'For dev servers, watchers, tunnels, previews, and long-running jobs, use shell_bg instead of foreground exec_shell. After starting one, inspect output or health with a short exec_shell command and report the local URL, PID/process id, and log/output location.',
+        'For end-user machine diagnosis, call browser_detect first when browser context matters. If you cannot directly access the user machine, create a downloadable diagnostic or fix script with write_file, then tell the user to run it and paste the output.',
+        'When creating downloads, write clear scripts/reports into the active cwd with descriptive names like diagnose-linux.sh, fix-network.sh, or machine-report.md.',
+        'Do not only paste scripts when you can help run them. For safe diagnostics and checks, run the command or script with tools and report the result. For destructive, admin, network install, or privacy-sensitive actions, ask for confirmation first and then run it if approved.',
+        'For image, logo, edit, and enhance requests, call generate_image. If the user attached an image, use the attached image file path provided in the message with operation="edit" or operation="enhance". Prefer hd/top-grade output unless the user asks for fast/cheap.',
+        'Dangerous/destructive commands still require confirmation; otherwise run safe read/status/test commands immediately.',
+        'Do not repeat failed tool calls. If a command times out, switch to a smaller diagnostic.',
+        'After tools finish, always end with a short rundown checklist: What was done, what was verified, and any follow-up or blocker. Keep it concise.',
+      ].join('\n')
+    : buildAgentSystemPrompt(agentCwd, contextTags);
+  let projectInventoryContext = '';
+  try {
+    projectInventoryContext = '\n\n=== PROJECT INVENTORY AND LINE MAP ===\n' + formatProjectInventory({ maxProjects: 10 }) + '\nUse codebase_index for exact file:line anchors before code edits.\n=== END PROJECT INVENTORY ===';
+  } catch (_) {}
+  const systemContent = dynamicPrompt
     + (clientSystemContent ? '\n\n=== CLIENT DIRECTIVE ===\n' + clientSystemContent : '')
+    + projectInventoryContext
     + '\n\n' + machineContext
     + (memoryContext ? '\n\n' + memoryContext : '');
 
@@ -1664,6 +2447,11 @@ ${dirListing}
     { role: 'system', content: systemContent },
     ...messages.filter(m => m.role !== 'system'),
   ];
+
+  // ── Full-auto directive: instruct model to act autonomously without asking ──
+  if (effectiveApprovalMode === 'full-auto') {
+    agentMessages[0].content += `\n\n=== AUTONOMOUS MODE (FULL-AUTO) ===\nYou are running in full-auto mode. No human approval is required for any action.\n- Do NOT ask the user for confirmation before running tools, commands, or making changes.\n- Do NOT ask "should I..." or "would you like me to..." — just DO it.\n- Immediately start executing: inspect files, run commands, make edits, verify results.\n- Keep looping through tools until the task is fully complete.\n- Only stop when the task is done or you hit a real blocker (missing credentials, unreachable service, etc.).\n- Never wait for user input mid-task. Act, verify, iterate.\n- For the first user message, immediately start working — do not greet, ask what to do, or say "let me check". CALL A TOOL immediately (list_dir, read_file, exec_shell, etc.).\n- EVERY response MUST include at least one tool call. NEVER respond with only text. If you want to inspect something, call a tool — do not narrate.\n- If the user's request is vague, make a reasonable assumption about what they want and start working. Do not ask for clarification.`;
+  }
 
   // When "thinking aloud" is enabled for non-Anthropic providers, ask the model to expose reasoning.
   if (thinking && !isAnthropicAgentProvider) {
@@ -1676,11 +2464,31 @@ ${dirListing}
     agentMessages[0].content += clientCtxStr;
   }
 
+  if (user) {
+    const rememberedName = getMemory(`user:${user.id}:display_name`)?.value || '';
+    const safeName = rememberedName && !rememberedName.includes('signed-in user')
+      ? rememberedName
+      : (user.username || (user.email ? String(user.email).split('@')[0] : 'user'));
+    agentMessages[0].content += `\n\n## Authenticated User\n- Account ID: ${user.id}\n- Name: ${safeName}\n- Username: ${user.username || 'unknown'}\n- Email: ${user.email || 'unknown'}\n- Google ID linked: ${user.google_id ? 'yes' : 'no'}\n- Google ID for internal matching: ${user.google_id || 'none'}\n- Role: ${user.role || 'user'}\n- Plan: ${user.plan || 'free'}\nBefore using account-specific context or memories, match by Account ID first, then Google ID, then email/name. Use the user's Google display name naturally when helpful. Never reveal API keys or auth tokens. Only mention internal IDs when the user asks for account diagnostics or identity matching.`;
+  }
+
   // ── Inject pentester fingerprint (stable device identity) ──
   const { fingerprint: getServerFingerprint } = require('./fingerprint');
   const serverFp = getServerFingerprint();
   agentMessages[0].content += `\n\n## 🔐 Pentester Device Identity\n- Device UID: ${serverFp.device_uid.device_id}\n- Session UID: ${serverFp.session_uid}\n- Hostname: ${serverFp.hostname}\n- MAC Hash: ${serverFp.mac_hash || 'N/A'}\n- OS: ${serverFp.os.name} ${serverFp.os.release}\nThis is your stable device identity for session tracking, audit logs, and receipts.`;
   // (Client Awareness and File Delivery instructions are already in AGENT_SYSTEM_PROMPT)
+
+  const factualLookupQuery = getFactualLookupQuery();
+  if (factualLookupQuery) {
+    try {
+      res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_name: 'web_search', tool_args: { query: factualLookupQuery, count: 5 } })}\n\n`);
+      const lookupResult = await executeAgentTool('web_search', { query: factualLookupQuery, count: 5 }, workDir, provider, agentModel, null, null, effectiveApprovalMode);
+      res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_name: 'web_search', tool_result: String(lookupResult).slice(0, 1200) })}\n\n`);
+      agentMessages[0].content += `\n\n## Automatic Web Lookup Context\nThe user asked a factual lookup question. Use these search results to answer directly. If the query contains a likely misspelling, infer the best-known matching entity and mention the correction briefly.\n\n${String(lookupResult).slice(0, 5000)}\n\nDo not say you do not know if the lookup contains enough information.`;
+    } catch (lookupErr) {
+      agentMessages[0].content += `\n\n## Automatic Web Lookup Context\nA web lookup was attempted for "${factualLookupQuery}" but failed: ${lookupErr.message}. If this is common knowledge, answer from available knowledge and mention uncertainty only if necessary.`;
+    }
+  }
 
   // ── Pre-process multimodal messages: convert images to text for non-vision models ──
   const VISION_CAPABLE_PATTERNS = [
@@ -1694,6 +2502,44 @@ ${dirListing}
   function isVisionCapable(modelName) {
     if (!modelName) return false;
     return VISION_CAPABLE_PATTERNS.some(p => p.test(modelName));
+  }
+
+  function saveAgentInputImage(imageUrl, index) {
+    const raw = String(imageUrl || '');
+    const dataMatch = raw.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (!dataMatch) return { ref: raw, saved: false };
+    const extMap = { jpeg: 'jpg', 'svg+xml': 'svg' };
+    const ext = extMap[dataMatch[1].toLowerCase()] || dataMatch[1].toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    const dir = path.join(workDir, 'outputs', 'input-images');
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `input-${Date.now()}-${index}-${crypto.randomUUID ? crypto.randomUUID() : uuidv4()}.${ext}`);
+    fs.writeFileSync(filePath, Buffer.from(dataMatch[2], 'base64'));
+    return { ref: filePath, saved: true };
+  }
+
+  for (let i = 0; i < agentMessages.length; i++) {
+    const msg = agentMessages[i];
+    if (!Array.isArray(msg.content)) continue;
+    const imageBlocks = msg.content.filter(b => b.type === 'image_url');
+    if (imageBlocks.length === 0) continue;
+    const refs = [];
+    imageBlocks.forEach((block, idx) => {
+      try {
+        const imageUrl = block.image_url?.url || block.url;
+        const saved = saveAgentInputImage(imageUrl, idx + 1);
+        if (saved.ref) refs.push(saved);
+      } catch (err) {
+        refs.push({ ref: `unavailable (${err.message || String(err)})`, saved: false });
+      }
+    });
+    if (refs.length > 0) {
+      msg.content.push({
+        type: 'text',
+        text: '\n\n[Attached image files for tools]\n' + refs.map((r, idx) =>
+          `Image ${idx + 1}: ${r.ref}${r.saved ? ' (saved local file)' : ' (source URL)'}`
+        ).join('\n') + '\nUse generate_image with operation="edit" or operation="enhance" and image_path for saved local files when the user asks to modify, enhance, upscale, restyle, or make a logo/asset from the attachment.',
+      });
+    }
   }
 
   if (!isVisionCapable(agentModel)) {
@@ -1736,11 +2582,14 @@ ${dirListing}
   }
 
   // ── Hard context ceiling — progressive truncation, no message dropping ──
-  const CONTEXT_LIMIT = 131072; // matches gpt-oss:120b-cloud actual context window
-  const MAX_OUTPUT_TOKENS = 16384; // reserved for model output
-  const INPUT_TOKEN_BUDGET = CONTEXT_LIMIT - MAX_OUTPUT_TOKENS; // ~114k tokens available for input
-  const MAX_CONTEXT_CHARS = 100000; // hard ceiling in chars — very aggressive to prevent token overflow
-  const MAX_MSG_CHARS = 1000; // max chars per message in context (except system prompt)
+  // lowToken: aggressive limits to minimize token burn
+  // fastMode: moderate limits for chat tab
+  // normal: full context for deep agent work
+  const CONTEXT_LIMIT = lowToken ? 16384 : fastMode ? 32768 : 131072;
+  const MAX_OUTPUT_TOKENS = lowToken ? 2048 : fastMode ? 4096 : 16384;
+  const INPUT_TOKEN_BUDGET = CONTEXT_LIMIT - MAX_OUTPUT_TOKENS;
+  const MAX_CONTEXT_CHARS = lowToken ? 12000 : fastMode ? 24000 : 100000;
+  const MAX_MSG_CHARS = lowToken ? 400 : fastMode ? 700 : 1000;
 
   function estimateTokens(msgs) {
     let chars = 0;
@@ -1770,32 +2619,26 @@ ${dirListing}
   // Hard-truncate a single message's content fields
   function truncateMessage(m, maxLen) {
     if (m.role === 'system') return m; // never truncate system prompt
+    // Tool results get 5x the limit — they're critical for the agent to see full output
+    const effectiveMax = m.role === 'tool' ? maxLen * 5 : maxLen;
     if (Array.isArray(m.content)) {
       return {
         ...m,
         content: m.content.map(part => (
-          part.type === 'text' && (part.text || '').length > maxLen
-            ? { ...part, text: part.text.substring(0, maxLen) + '\n[trimmed]' }
+          part.type === 'text' && (part.text || '').length > effectiveMax
+            ? { ...part, text: part.text.substring(0, effectiveMax) + '\n[trimmed]' }
             : part
         )),
       };
     }
-    const content = (m.content || '').length > maxLen
-      ? m.content.substring(0, maxLen) + '\n[trimmed]'
+    const content = (m.content || '').length > effectiveMax
+      ? m.content.substring(0, effectiveMax) + '\n[trimmed]'
       : m.content;
-    let tool_calls = m.tool_calls;
-    if (tool_calls) {
-      tool_calls = tool_calls.map(tc => ({
-        ...tc,
-        function: {
-          ...tc.function,
-          arguments: (tc.function?.arguments || '').length > maxLen
-            ? tc.function.arguments.substring(0, maxLen) + '...'
-            : tc.function?.arguments,
-        }
-      }));
-    }
-    return { ...m, content, tool_calls };
+    // BUG FIX: Do NOT truncate tool_calls arguments. Truncating mid-JSON
+    // produces malformed argument strings that confuse the model and cause
+    // "invalid tool call arguments" 400 errors on the next turn. Tool call
+    // arguments are small and critical — truncate tool RESULTS instead.
+    return { ...m, content };
   }
 
   // Enforce hard ceiling on total context before sending to model
@@ -1854,6 +2697,25 @@ ${dirListing}
     }
   }
 
+  const requestInputTokens = estimateUsageTokens(agentMessages);
+  let responseOutputTokens = 0;
+  let requestToolCalls = 0;
+  let usageRecorded = false;
+  const recordThisAgentUsage = () => {
+    if (usageRecorded) return;
+    usageRecorded = true;
+    recordUserTokenUsage(user, {
+      sessionId,
+      endpoint: '/api/agent/run',
+      provider,
+      model: agentModel,
+      inputTokens: requestInputTokens,
+      outputTokens: responseOutputTokens,
+      toolCalls: requestToolCalls,
+      fastMode,
+    });
+  };
+
   let lastHadToolCalls = false;
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
@@ -1866,6 +2728,7 @@ ${dirListing}
       }
 
       // ── Enforce context ceiling before every model call ──
+      // Skip if no new messages were added since last enforcement (saves O(n) scan)
       {
         const tokensBefore = estimateTokens(agentMessages);
         const enforced = enforceContextCeiling(agentMessages);
@@ -1878,10 +2741,12 @@ ${dirListing}
             res.write(`data: ${JSON.stringify({ type: 'compact', message: `[context ceiling] ${tokensBefore} → ${tokensAfter} tokens (budget: ${INPUT_TOKEN_BUDGET})`, tokensBefore, tokensAfter })}\n\n`);
           }
         }
-        // Debug: log actual message sizes being sent to model
-        const totalChars = agentMessages.reduce((s, m) => s + (m.content || '').length + 
-          (m.tool_calls ? m.tool_calls.reduce((acc, tc) => acc + (tc.function?.arguments || '').length, 0) : 0), 0);
-        console.log(`[agent] Sending turn ${turn}: ${agentMessages.length} msgs, ${totalChars.toLocaleString()} chars, est ${estimateTokens(agentMessages).toLocaleString()} tokens (budget: ${INPUT_TOKEN_BUDGET})`);
+        // Debug: log actual message sizes being sent to model (throttled — only log when size changes)
+        if (process.env.HAKSTER_DEBUG) {
+          const totalChars = agentMessages.reduce((s, m) => s + (m.content || '').length +
+            (m.tool_calls ? m.tool_calls.reduce((acc, tc) => acc + (tc.function?.arguments || '').length, 0) : 0), 0);
+          console.log(`[agent] Sending turn ${turn}: ${agentMessages.length} msgs, ${totalChars.toLocaleString()} chars, est ${estimateTokens(agentMessages).toLocaleString()} tokens (budget: ${INPUT_TOKEN_BUDGET})`);
+        }
       }
 
       // Hard safety: if still over budget after all enforcement, refuse the call
@@ -1898,8 +2763,8 @@ ${dirListing}
       const streamAbort = new AbortController();
       const streamTimeout = setTimeout(() => {
         streamAbort.abort();
-        console.warn('[agent] Stream timed out after 300s, aborting');
-      }, 300000);
+        console.warn('[agent] Stream timed out after 600s, aborting');
+      }, 600000);
 
       let stream;
       try {
@@ -1907,7 +2772,7 @@ ${dirListing}
         const streamPayload = {
           model: agentModel,
           messages: sanitizeMessagesForProvider(agentMessages, provider),
-          tools: AGENT_TOOLS,
+          tools: fastMode ? getFastChatTools() : ALL_TOOLS,
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
           ...(thinking ? { thinking: true } : {}),
@@ -1954,6 +2819,7 @@ ${dirListing}
         // Text content
         if (delta.content) {
           assistantContent += delta.content;
+          responseOutputTokens += estimateUsageTokens(delta.content);
           res.write(`data: ${JSON.stringify({ type: 'delta', content: delta.content })}\n\n`);
         }
 
@@ -2004,31 +2870,99 @@ ${dirListing}
       }
       agentMessages.push(assistantMsg);
 
-      // No tool calls — we're done
+      // No tool calls — we're done (unless turn 0 in full-auto, then nudge)
       if (toolCalls.length === 0) {
         lastHadToolCalls = false;
         loopDetect.noProgressCount = 0;
+
+        // ── Full-auto nudge: if model replies with text only before using any tools, push it to act ──
+        if (effectiveApprovalMode === 'full-auto' && requestToolCalls === 0 && turn < 3 && assistantContent.trim().length > 0) {
+          agentMessages.push({ role: 'user', content: 'You responded with text only and did not use any tools. In full-auto mode, you MUST use tools to make progress. Do not explain what you plan to do — DO it now. Call list_dir, read_file, exec_shell, or whatever tool is appropriate to start working on the task immediately.' });
+          res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\n\n`);
+          continue;
+        }
+
+        // Phase: ACT→OBSERVE→CONSOLIDATE (session end)
+        if (currentPhase === AgentLoopPhase.ACT) {
+          currentPhase = AgentLoopPhase.OBSERVE;
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+        }
+        if (shouldConsolidate({ turn, rawMemoryCount, lastConsolidationTurn, isSessionEnd: true })) {
+          currentPhase = AgentLoopPhase.CONSOLIDATE;
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+          // Autolearn: record session-end consolidation
+          try {
+            autolearn.initMemory(workDir);
+            autolearn.consolidateMemories(workDir);
+          } catch(_e) {}
+          lastConsolidationTurn = turn;
+        }
         clearInterval(heartbeat);
+        recordThisAgentUsage();
         res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
         res.end();
         return;
+      }
+
+      // ── Phase: THINK→PLAN (model responded, about to act) ──
+      if (currentPhase === AgentLoopPhase.THINK) {
+        const transition = validatePhaseTransition(currentPhase, AgentLoopPhase.PLAN, { thinkPlanStreak });
+        if (transition.allowed) {
+          currentPhase = AgentLoopPhase.PLAN;
+          thinkPlanStreak++;
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+        }
+      }
+
+      // ── Phase: PLAN→ACT (tool calls present, executing) ──
+      if (currentPhase === AgentLoopPhase.PLAN) {
+        const transition = validatePhaseTransition(currentPhase, AgentLoopPhase.ACT, { thinkPlanStreak });
+        if (transition.allowed) {
+          currentPhase = AgentLoopPhase.ACT;
+          thinkPlanStreak = 0; // reset streak once we actually act
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+        }
       }
 
       // ── Loop detection checks (before executing tools) ──────────
       const responsePrefix = (assistantContent || '').substring(0, 80).toLowerCase().trim();
 
-      // 1. Exact repeat — model said the same thing twice in a row
-      if (responsePrefix && responsePrefix === loopDetect.lastAssistantContent.substring(0, 80).toLowerCase().trim()) {
-        console.warn(`[agent] Loop detected: exact repeat response (turn ${turn})`);
-        clearInterval(heartbeat);
-        res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'exact_repeat', message: 'Model is repeating the same response. Stopping to avoid infinite loop.' })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
-        res.end();
-        return;
+      // 1. Exact repeat — model said the same thing twice in a row.
+      // Only interrupt repeats that are about to call tools. A final no-tool
+      // answer may naturally share wording with prior progress text.
+      if (toolCalls.length > 0 && responsePrefix && responsePrefix === loopDetect.lastAssistantContent.substring(0, 80).toLowerCase().trim()) {
+        loopDetect.loopBreaks.exact_repeat = (loopDetect.loopBreaks.exact_repeat || 0) + 1;
+        const breakCount = loopDetect.loopBreaks.exact_repeat;
+        console.warn(`[agent] Exact repeat nudge (turn ${turn}, count ${breakCount})`);
+        if (agentMessages[agentMessages.length - 1] === assistantMsg) {
+          agentMessages.pop();
+        }
+        res.write(`data: ${JSON.stringify({
+          type: breakCount >= 3 ? 'loop_detected' : 'loop_nudge',
+          reason: 'exact_repeat',
+          message: breakCount >= 3
+            ? 'Model repeated the same tool-planning response after multiple nudges. Stopping to avoid infinite loop.'
+            : 'Model repeated the same tool-planning response. Skipping those tool calls and forcing one act/answer turn.',
+        })}\n\n`);
+        if (breakCount >= 3) {
+          clearInterval(heartbeat);
+          recordThisAgentUsage();
+          res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
+          res.end();
+          return;
+        }
+        loopDetect.recentPrefixes = [];
+        agentMessages.push({
+          role: 'system',
+          content: 'LOOP NUDGE: You repeated the same planning/search response. Do not call more discovery/search/list/read tools. Use the evidence already gathered and either make the concrete change now or provide the direct final answer.',
+        });
+        lastHadToolCalls = false;
+        res.write(`data: ${JSON.stringify({ type: 'turn_end', turn, reason: 'exact_repeat' })}\n\n`);
+        continue;
       }
 
       // 2. Semantic loop — similar prefixes repeating
-      if (responsePrefix) {
+      if (toolCalls.length > 0 && responsePrefix) {
         loopDetect.recentPrefixes.push(responsePrefix);
         if (loopDetect.recentPrefixes.length > SEMANTIC_LOOP_WINDOW) {
           loopDetect.recentPrefixes.shift();
@@ -2042,12 +2976,34 @@ ${dirListing}
             if (smaller > 0 && overlap.length / smaller >= 0.4) similarCount++;
           }
           if (similarCount >= SEMANTIC_LOOP_THRESHOLD - 1) {
-            console.warn(`[agent] Loop detected: semantic repeat (turn ${turn}, ${similarCount + 1} similar)`);
-            clearInterval(heartbeat);
-            res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'semantic_repeat', message: 'Model is repeating similar responses. Stopping to avoid infinite loop.' })}\n\n`);
-            res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
-            res.end();
-            return;
+            loopDetect.loopBreaks.semantic_repeat = (loopDetect.loopBreaks.semantic_repeat || 0) + 1;
+            const breakCount = loopDetect.loopBreaks.semantic_repeat;
+            console.warn(`[agent] Semantic repeat nudge (turn ${turn}, ${similarCount + 1} similar, count ${breakCount})`);
+            if (agentMessages[agentMessages.length - 1] === assistantMsg) {
+              agentMessages.pop();
+            }
+            res.write(`data: ${JSON.stringify({
+              type: breakCount >= 3 ? 'loop_detected' : 'loop_nudge',
+              reason: 'semantic_repeat',
+              message: breakCount >= 3
+                ? 'Model repeated similar tool-planning responses after multiple nudges. Stopping to avoid infinite loop.'
+                : 'Model is repeating similar tool-planning responses. Skipping those tool calls and forcing one act/answer turn.',
+            })}\n\n`);
+            if (breakCount >= 3) {
+              clearInterval(heartbeat);
+              recordThisAgentUsage();
+              res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
+              res.end();
+              return;
+            }
+            loopDetect.recentPrefixes = [];
+            agentMessages.push({
+              role: 'system',
+              content: 'LOOP NUDGE: You are repeating similar planning/search text. Do not inspect more files or source providers. Use the evidence already gathered and either apply the concrete fix now or give the direct final answer.',
+            });
+            lastHadToolCalls = false;
+            res.write(`data: ${JSON.stringify({ type: 'turn_end', turn, reason: 'semantic_repeat' })}\n\n`);
+            continue;
           }
         }
       }
@@ -2059,6 +3015,7 @@ ${dirListing}
           console.warn(`[agent] Loop detected: ${loopDetect.noProgressCount} turns without meaningful content (turn ${turn})`);
           clearInterval(heartbeat);
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'no_progress', message: 'Model is making tool calls without producing content. Stopping to avoid infinite loop.' })}\n\n`);
+          recordThisAgentUsage();
           res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
           res.end();
           return;
@@ -2080,6 +3037,7 @@ ${dirListing}
           console.warn(`[agent] Loop detected: duplicate tool call ${tc.name} (turn ${turn}, ${dupes}x)`);
           clearInterval(heartbeat);
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'duplicate_tool_call', message: `Tool ${tc.name} called ${dupes}x with same arguments. Stopping to avoid infinite loop.` })}\n\n`);
+          recordThisAgentUsage();
           res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
           res.end();
           return;
@@ -2087,11 +3045,177 @@ ${dirListing}
         loopDetect.totalToolCalls++;
       }
 
+      const phantomNudge = detectPhantomLoopNudge(loopDetect, assistantContent, toolCalls, workDir);
+      if (phantomNudge) {
+        loopDetect.loopBreaks[phantomNudge.reason] = (loopDetect.loopBreaks[phantomNudge.reason] || 0) + 1;
+        const breakCount = loopDetect.loopBreaks[phantomNudge.reason];
+        console.warn(`[agent] Phantom loop nudge: ${phantomNudge.reason} (turn ${turn}, count ${breakCount})`);
+        if (agentMessages[agentMessages.length - 1] === assistantMsg) {
+          agentMessages.pop();
+        }
+        res.write(`data: ${JSON.stringify({
+          type: breakCount >= 3 ? 'loop_detected' : 'loop_nudge',
+          reason: phantomNudge.reason,
+          message: breakCount >= 3
+            ? `${phantomNudge.message} Stopped after repeated failed nudges.`
+            : `${phantomNudge.message} Skipping more exploration and giving the model one final act/answer turn.`,
+          nudge: phantomNudge.nudge,
+        })}\n\n`);
+        if (breakCount >= 3) {
+          clearInterval(heartbeat);
+          recordThisAgentUsage();
+          res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
+          res.end();
+          return;
+        }
+        agentMessages.push({
+          role: 'system',
+          content: `${phantomNudge.nudge}\n\nYou must now continue without more discovery/search/list/read commands. If you have enough information, make the edit or give the direct answer. If you truly cannot edit safely, explain the exact missing fact in one sentence.`,
+        });
+        lastHadToolCalls = false;
+        res.write(`data: ${JSON.stringify({ type: 'turn_end', turn, reason: phantomNudge.reason })}\n\n`);
+        continue;
+      }
+
       // Tool calls in progress — mark so next turn skips compact
       lastHadToolCalls = true;
       loopDetect.lastAssistantContent = assistantContent || '';
 
-      // Execute tool calls
+      // Execute tool calls — run independent (non-shell) tools in parallel
+      const toolResults = [];
+      const _tc_abort = () => {
+        clearInterval(heartbeat);
+        res.write(`data: ${JSON.stringify({ type: 'aborted' })}\n\n`);
+        res.end();
+        return null;
+      };
+
+      // Phase 1: identify which tools can run in parallel (no shell, no browser)
+      const parallelizable = toolCalls.every(tc => !['exec_shell', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_screenshot', 'spawn_agent'].includes(tc.name));
+      const PARALLEL_BATCH = parallelizable && toolCalls.length > 1;
+
+      if (PARALLEL_BATCH) {
+        // Run all non-shell tools concurrently
+        const promises = toolCalls.map(async (tc) => {
+          if (aborted) return { tc, result: null, aborted: true };
+          const toolName = tc.name;
+          requestToolCalls++;
+          let toolArgs = {};
+          try { toolArgs = JSON.parse(tc.arguments || '{}'); } catch { /* leave empty */ }
+
+          res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_call_id: tc.id, tool_name: toolName, tool_args: toolArgs })}\n\n`);
+
+          const sessionSet = sessionAllowedCommands.get(sessionId || 'default');
+          const globalSet = sessionAllowedCommands.get('default');
+          const allowedCommands = new Set([...(sessionSet || []), ...(globalSet || [])]);
+          const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, undefined, allowedCommands, effectiveApprovalMode);
+          try { const _db = getDb(); _db.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae) {}
+          return { tc, result, toolName, toolArgs };
+        });
+        const settled = await Promise.all(promises);
+
+        // Process results sequentially (preserve order, emit SSE events, check loop detections)
+        for (const { tc, result, toolName, toolArgs, aborted: wasAborted } of settled) {
+          if (wasAborted) return _tc_abort();
+
+          let needsConfirmation = null;
+          if (effectiveApprovalMode !== 'full-auto') {
+            try {
+              const parsed = JSON.parse(result);
+              if (parsed && parsed.__needs_confirmation) needsConfirmation = parsed;
+            } catch (_) { /* not JSON */ }
+          }
+
+          const SHELL_DISPLAY_LIMIT = lowToken ? 1200 : 4000;
+          const SHELL_CONTEXT_LIMIT = lowToken ? 800 : 2500;
+
+          if (needsConfirmation) {
+            const approved = await awaitUserConfirmation(sessionId, tc.id, needsConfirmation, res);
+            const cmd = needsConfirmation.args?.command || '(unknown)';
+            agentMessages.push({ role: 'tool', tool_call_id: tc.id, content: approved
+              ? `✅ User APPROVED running: ${cmd}. It is now on the session allowlist — re-run the command now.`
+              : `🚫 User DENIED running: ${cmd}. Do not retry; choose another approach.` });
+            continue;
+          }
+
+          let imageUrls = null;
+          let displayResult = result;
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed && parsed.__image_urls) {
+              imageUrls = parsed.__image_urls;
+              displayResult = parsed.text || result;
+            }
+          } catch (_) { /* not JSON, use raw result */ }
+
+          const truncatedResult = displayResult.length > SHELL_DISPLAY_LIMIT ? displayResult.slice(0, SHELL_DISPLAY_LIMIT) + '\n... (truncated)' : displayResult;
+          const contextResult = displayResult.length > SHELL_CONTEXT_LIMIT ? displayResult.slice(0, SHELL_CONTEXT_LIMIT) + '\n[trimmed]' : displayResult;
+          responseOutputTokens += estimateUsageTokens(contextResult);
+
+          res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
+
+          if (['write_file', 'edit_file', 'patch_file', 'multi_patch'].includes(toolName) && toolArgs.path) {
+            const isErr = /^Error[:\n]/i.test(String(result).trim()) || /^\u274c/i.test(String(result).trim());
+            const fullPath = path.resolve(workDir, toolArgs.path);
+            if (!isErr && fs.existsSync(fullPath)) {
+              res.write(`data: ${JSON.stringify({ type: 'file_created', path: fullPath, tool: toolName })}\n\n`);
+            }
+          }
+          if (['write_file', 'edit_file'].includes(toolName) && toolArgs.path) {
+            notifyWorkspaceChange(sessionId, toolArgs.path);
+          }
+          if (imageUrls && imageUrls.length > 0) {
+            for (const imgUrl of imageUrls) {
+              res.write(`data: ${JSON.stringify({ type: 'image', url: imgUrl, prompt: toolArgs.prompt || '' })}\n\n`);
+            }
+          }
+
+          agentMessages.push({ role: 'tool', tool_call_id: tc.id, content: contextResult });
+
+          // ── Autolearn: record raw memory from tool call ──
+          try {
+            const _isErr = /^(error|❌)/i.test(String(result).trim());
+            autolearn.addRawMemory({
+              observation: `${toolName}(${JSON.stringify(toolArgs).slice(0, 200)}) → ${contextResult.slice(0, 200)}`,
+              type: _isErr ? 'error' : 'pattern',
+              tags: [toolName],
+              confidence: _isErr ? 0.3 : 0.8,
+              timestamp: Date.now()
+            }, workDir);
+          } catch(_amErr) { /* autolearn best-effort */ }
+
+          // Tool-error loop detection
+          const resultLower = result.toLowerCase();
+          const isError = /^(error|❌)/.test(result.trim()) || resultLower.startsWith('error:') || resultLower.startsWith('failed:') || resultLower.startsWith('exception:');
+          if (isError) {
+            // BUG FIX: Track per-tool error counts independently, not a single slot.
+            // The old code used find()/replace which reset the count whenever a
+            // DIFFERENT tool errored, letting a truly failing tool loop indefinitely
+            // with intermittent other-tool errors.
+            let existing = loopDetect.consecutiveToolErrors.find(e => e.name === toolName);
+            if (!existing) {
+              loopDetect.consecutiveToolErrors.push({ name: toolName, count: 0 });
+              existing = loopDetect.consecutiveToolErrors[loopDetect.consecutiveToolErrors.length - 1];
+              // Keep the list bounded — drop oldest entries beyond 8
+              if (loopDetect.consecutiveToolErrors.length > 8) loopDetect.consecutiveToolErrors.shift();
+            }
+            existing.count++;
+            if (existing.count >= TOOL_ERROR_LOOP_LIMIT) {
+              console.warn(`[agent] Loop detected: tool ${toolName} errored ${existing.count}x in a row (turn ${turn})`);
+              clearInterval(heartbeat);
+              res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'tool_error', message: `Tool ${toolName} has failed ${existing.count} times in a row. Stopping to avoid retry loop.` })}\n\n`);
+              recordThisAgentUsage();
+              res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
+              res.end();
+              return;
+            }
+          } else {
+            // Clear only this tool's error count on success; leave other tools' counts intact
+            loopDetect.consecutiveToolErrors = loopDetect.consecutiveToolErrors.filter(e => e.name !== toolName);
+          }
+        }
+      } else {
+      // Sequential execution (shell/browser tools need ordering for streaming)
       for (const tc of toolCalls) {
         // Check abort before each tool execution
         if (aborted) {
@@ -2102,6 +3226,7 @@ ${dirListing}
         }
 
         const toolName = tc.name;
+        requestToolCalls++;
         let toolArgs = {};
         try {
           toolArgs = JSON.parse(tc.arguments || '{}');
@@ -2127,34 +3252,28 @@ ${dirListing}
         const sessionSet = sessionAllowedCommands.get(sessionId || 'default');
         const globalSet = sessionAllowedCommands.get('default');
         const allowedCommands = new Set([...(sessionSet || []), ...(globalSet || [])]);
-        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, allowedCommands);
+        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, allowedCommands, effectiveApprovalMode);
+        try { const _db2 = getDb(); _db2.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae2) {}
 
         // ── Detect __needs_confirmation and emit special SSE event ──
         let needsConfirmation = null;
-        try {
-          const parsed = JSON.parse(result);
-          if (parsed && parsed.__needs_confirmation) needsConfirmation = parsed;
-        } catch (_) { /* not JSON */ }
-        if (needsConfirmation) {
-          res.write(`data: ${JSON.stringify({
-            type: 'needs_confirmation',
-            tool_call_id: tc.id,
-            tool_name: needsConfirmation.tool || toolName,
-            reason: needsConfirmation.reason,
-            command: needsConfirmation.args?.command || '',
-            args: needsConfirmation.args,
-          })}\n\n`);
+        if (effectiveApprovalMode !== 'full-auto') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed && parsed.__needs_confirmation) needsConfirmation = parsed;
+          } catch (_) { /* not JSON */ }
         }
 
-        // Truncate tool results: display gets 4k, model context gets 2500 chars
-        // (800 was too aggressive — caused the model to re-query because results were trimmed to uselessness)
-        const SHELL_DISPLAY_LIMIT = 4000;
-        const SHELL_CONTEXT_LIMIT = 2500;
+        const SHELL_DISPLAY_LIMIT = lowToken ? 1200 : 4000;
+        const SHELL_CONTEXT_LIMIT = lowToken ? 800 : 2500;
 
-        // If this was a needs_confirmation result, don't send raw JSON to frontend or model — tell the model to wait
+        // If this was a needs_confirmation result, block on user y/N (client POSTs /api/agent/confirm)
         if (needsConfirmation) {
-          const confirmContextResult = `This command requires user confirmation before execution. Waiting for the user to approve or deny the command: ${needsConfirmation.args?.command || '(unknown)'}. Do not retry — explain to the user that they need to approve the command.`;
-          agentMessages.push({ role: 'tool', tool_call_id: tc.id, content: confirmContextResult });
+          const approved = await awaitUserConfirmation(sessionId, tc.id, needsConfirmation, res);
+          const cmd = needsConfirmation.args?.command || '(unknown)';
+          agentMessages.push({ role: 'tool', tool_call_id: tc.id, content: approved
+            ? `✅ User APPROVED running: ${cmd}. It is now on the session allowlist — re-run the command now.`
+            : `🚫 User DENIED running: ${cmd}. Do not retry; choose another approach.` });
           continue;
         }
 
@@ -2171,6 +3290,7 @@ ${dirListing}
 
         const truncatedResult = displayResult.length > SHELL_DISPLAY_LIMIT ? displayResult.slice(0, SHELL_DISPLAY_LIMIT) + '\n... (truncated)' : displayResult;
         const contextResult = displayResult.length > SHELL_CONTEXT_LIMIT ? displayResult.slice(0, SHELL_CONTEXT_LIMIT) + '\n[trimmed]' : displayResult;
+        responseOutputTokens += estimateUsageTokens(contextResult);
 
         // Notify frontend: tool call result
         res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
@@ -2205,6 +3325,18 @@ ${dirListing}
           content: contextResult,
         });
 
+        // ── Autolearn: record raw memory from tool call (sequential path) ──
+        try {
+          const _isErr = /^(error|❌)/i.test(String(result).trim());
+          autolearn.addRawMemory({
+            observation: `${toolName}(${JSON.stringify(toolArgs).slice(0, 200)}) → ${contextResult.slice(0, 200)}`,
+            type: _isErr ? 'error' : 'pattern',
+            tags: [toolName],
+            confidence: _isErr ? 0.3 : 0.8,
+            timestamp: Date.now()
+          }, workDir);
+        } catch(_amErr2) { /* autolearn best-effort */ }
+
         // ── Tool-error loop detection ──
         // Track consecutive errors from the same tool — if a tool errors 3x in a row, break the loop
         // Only match actual error lines (starting with "Error:" or "❌"), not file paths containing "error"
@@ -2218,6 +3350,7 @@ ${dirListing}
               console.warn(`[agent] Loop detected: tool ${toolName} errored ${existing.count}x in a row (turn ${turn})`);
               clearInterval(heartbeat);
               res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'tool_error', message: `Tool ${toolName} has failed ${existing.count} times in a row. Stopping to avoid retry loop.` })}\n\n`);
+              recordThisAgentUsage();
               res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
               res.end();
               return;
@@ -2230,6 +3363,82 @@ ${dirListing}
           loopDetect.consecutiveToolErrors = [];
         }
       }
+      } // close else (sequential execution)
+
+      // ── Phase: ACT→OBSERVE (tools finished, observe results) ──
+      if (currentPhase === AgentLoopPhase.ACT) {
+        currentPhase = AgentLoopPhase.OBSERVE;
+        res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+      }
+
+      // ── Phase: OBSERVE→REFLECT (check if reflection needed) ──
+      const reflectState = {
+        noProgressCount: loopDetect.noProgressCount,
+        semanticLoopDetected: false, // already handled above — if we got here, no loop
+        sameToolErrorCount: loopDetect.consecutiveToolErrors.reduce((max, e) => Math.max(max, e.count), 0),
+        isClarifyingQuestion: false,
+        isFilesystemWandering: false,
+      };
+      if (currentPhase === AgentLoopPhase.OBSERVE && shouldReflect(reflectState)) {
+        currentPhase = AgentLoopPhase.REFLECT;
+        res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn, reason: 'loop_signal' })}\n\n`);
+        // Inject reflection prompt to guide model
+        agentMessages.push({
+          role: 'system',
+          content: `[REFLECT] You've had ${loopDetect.noProgressCount} no-progress turns or ${reflectState.sameToolErrorCount} tool errors. Pause and reconsider your approach. Try a different tool or strategy.`
+        });
+        // Reset counters after reflection injection
+        loopDetect.noProgressCount = 0;
+        loopDetect.consecutiveToolErrors = [];
+      }
+
+      // ── Phase: REFLECT→CONSOLIDATE (check if consolidation needed) ──
+      if (currentPhase === AgentLoopPhase.REFLECT || currentPhase === AgentLoopPhase.OBSERVE) {
+        if (shouldConsolidate({ turn, rawMemoryCount, lastConsolidationTurn })) {
+          currentPhase = AgentLoopPhase.CONSOLIDATE;
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+          // Autolearn: run consolidation — extract lessons from recent activity
+          try {
+            autolearn.initMemory(workDir);
+            const consolidationResult = autolearn.consolidateMemories(workDir);
+            if (consolidationResult && consolidationResult.consolidated > 0) {
+              rawMemoryCount = 0; // reset after consolidation
+              lastConsolidationTurn = turn;
+              const lessons = autolearn.loadLearnedLessons(workDir, []);
+              // Inject consolidated lessons into context
+              agentMessages.push({
+                role: 'system',
+                content: `[CONSOLIDATE] Lessons learned so far:\n${lessons || 'Consolidation complete.'}`
+              });
+            }
+          } catch(_consolidateErr) {
+            console.warn('[agent] Consolidation failed:', _consolidateErr.message);
+          }
+        }
+      }
+
+      // ── Phase: →THINK (always cycle back to THINK for next turn) ──
+      if (currentPhase !== AgentLoopPhase.THINK) {
+        currentPhase = AgentLoopPhase.THINK;
+        res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn })}\n\n`);
+      }
+
+      // Trust escalation: record activity based on tool types used
+      for (const tc of toolCalls) {
+        if (['read_file', 'glob_search', 'codebase_map', 'diff_preview'].includes(tc.name)) {
+          trustEscalation.recordActivity('read', turn);
+        } else if (['write_file', 'edit_file', 'replace_in_file', 'patch_file', 'multi_patch'].includes(tc.name)) {
+          trustEscalation.recordActivity('edit', turn);
+        } else if (tc.name === 'exec_shell') {
+          const _cmd = (() => { try { return JSON.parse(tc.arguments || '{}').command || ''; } catch { return ''; } })();
+          if (/test|spec/i.test(_cmd)) trustEscalation.recordActivity('test', turn);
+          else if (/build|make|compile/i.test(_cmd)) trustEscalation.recordActivity('build', turn);
+        }
+      }
+      trustEscalation.decay(turn);
+
+      // Track raw memory for consolidation threshold
+      rawMemoryCount += toolCalls.length;
 
       // Turn marker
       res.write(`data: ${JSON.stringify({ type: 'turn_end', turn })}\n\n`);
@@ -2238,11 +3447,13 @@ ${dirListing}
     // Hit max turns
     clearInterval(heartbeat);
     res.write(`data: ${JSON.stringify({ type: 'max_turns', maxTurns })}\n\n`);
+    recordThisAgentUsage();
     incrementUsage(user);
     res.end();
   } catch (err) {
     clearInterval(heartbeat);
     console.error('[agent] error:', err);
+    recordThisAgentUsage();
     res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`);
     res.end();
   }
@@ -2600,9 +3811,9 @@ app.post('/api/generate', async (req, res) => {
     recentToolCalls: [],
     totalToolCalls: 0,
   };
-  const NO_PROGRESS_LIMIT = 4;
-  const DUPE_CALL_WINDOW = 4;
-  const DUPE_CALL_LIMIT = 3;
+  const NO_PROGRESS_LIMIT = 15;      // was 4 — too aggressive for complex prompts
+  const DUPE_CALL_WINDOW = 6;        // was 4
+  const DUPE_CALL_LIMIT = 4;         // was 3
   const MAX_OUTPUT_TOKENS = 16384;
 
   try {
@@ -2618,15 +3829,17 @@ app.post('/api/generate', async (req, res) => {
       }
 
       // Stream model response with tool support
+      // BUG FIX: 60s is too short for cloud models (glm-5.2:cloud can take 2-3 min on
+      // complex prompts). Match the main agent loop's 600s timeout.
       const streamAbort = new AbortController();
-      const streamTimeout = setTimeout(() => { streamAbort.abort(); }, 60000);
+      const streamTimeout = setTimeout(() => { streamAbort.abort(); }, 600000);
 
       let stream;
       try {
         stream = await client.chat.completions.create({
           model: agentModel,
           messages: sanitizeMessagesForProvider(messages, provider),
-          tools: AGENT_TOOLS,
+          tools: ALL_TOOLS,
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
         }, { signal: streamAbort.signal });
@@ -2703,9 +3916,57 @@ app.post('/api/generate', async (req, res) => {
       // No tool calls — we're done
       if (toolCalls.length === 0) {
         loopDetect.noProgressCount = 0;
+        loopDetect.recentPrefixes = [];   // BUG FIX: reset semantic tracking too
         finalMeta = { model: agentModel, provider, inputTokens: 0, outputTokens: 0, latency: 0, cost: 0 };
         break;
       }
+
+      // ── BUG FIX: Exact-repeat + semantic loop detection (was missing) ──
+      // The /api/generate loop only had no-progress + duplicate-tool-call
+      // detection. Without exact-repeat and semantic detection, the model could
+      // repeat similar planning text with different tool args indefinitely.
+      const genResponsePrefix = (assistantContent || '').substring(0, 80).toLowerCase().trim();
+      if (genResponsePrefix && genResponsePrefix === (loopDetect.lastAssistantContent || '').substring(0, 80).toLowerCase().trim()) {
+        loopDetect.loopBreaks = loopDetect.loopBreaks || {};
+        loopDetect.loopBreaks.exact_repeat = (loopDetect.loopBreaks.exact_repeat || 0) + 1;
+        const breakCount = loopDetect.loopBreaks.exact_repeat;
+        if (breakCount >= 3) {
+          res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'exact_repeat', message: 'Model repeated the same response after multiple nudges. Stopping to avoid infinite loop.' })}\n\n`);
+          break;
+        }
+        // Nudge and skip tool calls this turn
+        if (messages[messages.length - 1] === assistantMsg) messages.pop();
+        messages.push({ role: 'system', content: 'LOOP NUDGE: You repeated the same response. Do not call more discovery tools. Use evidence already gathered and make the concrete change or give the direct final answer.' });
+        loopDetect.recentPrefixes = [];
+        continue;
+      }
+      if (genResponsePrefix && genResponsePrefix.length >= 10) {
+        loopDetect.recentPrefixes = loopDetect.recentPrefixes || [];
+        loopDetect.recentPrefixes.push(genResponsePrefix);
+        if (loopDetect.recentPrefixes.length > 5) loopDetect.recentPrefixes.shift();
+        if (loopDetect.recentPrefixes.length >= 3) {
+          const prefixWords = loopDetect.recentPrefixes.map(p => new Set(p.split(/\s+/)));
+          let similarCount = 0;
+          for (let i = 0; i < prefixWords.length - 1; i++) {
+            const overlap = [...prefixWords[i]].filter(w => prefixWords[i + 1].has(w));
+            const smaller = Math.min(prefixWords[i].size, prefixWords[i + 1].size);
+            if (smaller > 0 && overlap.length / smaller >= 0.4) similarCount++;
+          }
+          if (similarCount >= 2) {
+            loopDetect.loopBreaks = loopDetect.loopBreaks || {};
+            loopDetect.loopBreaks.semantic_repeat = (loopDetect.loopBreaks.semantic_repeat || 0) + 1;
+            if (loopDetect.loopBreaks.semantic_repeat >= 3) {
+              res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'semantic_repeat', message: 'Model repeated similar responses after multiple nudges. Stopping to avoid infinite loop.' })}\n\n`);
+              break;
+            }
+            if (messages[messages.length - 1] === assistantMsg) messages.pop();
+            messages.push({ role: 'system', content: 'LOOP NUDGE: You are repeating similar planning text. Do not inspect more files. Use evidence already gathered and apply the concrete fix or give the direct final answer.' });
+            loopDetect.recentPrefixes = [];
+            continue;
+          }
+        }
+      }
+      loopDetect.lastAssistantContent = assistantContent || '';
 
       // Loop detection: no-progress
       if (!assistantContent || assistantContent.trim().length < 10) {
@@ -2719,6 +3980,7 @@ app.post('/api/generate', async (req, res) => {
       }
 
       // Loop detection: duplicate tool calls
+      let duplicateToolLoop = false;
       for (const tc of toolCalls) {
         const callSig = `${tc.name}:${(tc.arguments || '').substring(0, 100)}`;
         loopDetect.recentToolCalls.push(callSig);
@@ -2726,10 +3988,12 @@ app.post('/api/generate', async (req, res) => {
         const dupes = loopDetect.recentToolCalls.filter(c => c === callSig).length;
         if (dupes >= DUPE_CALL_LIMIT) {
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'duplicate_tool_call', message: `Tool ${tc.name} called ${dupes}x with same args. Stopping.` })}\n\n`);
+          duplicateToolLoop = true;
           break;
         }
         loopDetect.totalToolCalls++;
       }
+      if (duplicateToolLoop) break;
 
       loopDetect.lastAssistantContent = assistantContent || '';
 
@@ -2756,7 +4020,8 @@ app.post('/api/generate', async (req, res) => {
           })}\n\n`);
         };
 
-        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream);
+        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, undefined, approvalMode);
+        try { const _db3 = getDb(); _db3.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae3) {}
 
         // Check for image URLs in result
         let imageUrls = null;
@@ -2769,8 +4034,8 @@ app.post('/api/generate', async (req, res) => {
           }
         } catch {}
 
-        const SHELL_DISPLAY_LIMIT = 4000;
-        const SHELL_CONTEXT_LIMIT = 2500;
+        const SHELL_DISPLAY_LIMIT = lowToken ? 1200 : 4000;
+        const SHELL_CONTEXT_LIMIT = lowToken ? 800 : 2500;
         const truncatedResult = displayResult.length > SHELL_DISPLAY_LIMIT ? displayResult.slice(0, SHELL_DISPLAY_LIMIT) + '\n... (truncated)' : displayResult;
         const contextResult = displayResult.length > SHELL_CONTEXT_LIMIT ? displayResult.slice(0, SHELL_CONTEXT_LIMIT) + '\n[trimmed]' : displayResult;
 
@@ -2784,6 +4049,26 @@ app.post('/api/generate', async (req, res) => {
         }
 
         messages.push({ role: 'tool', tool_call_id: tc.id, content: contextResult });
+
+        // ── BUG FIX: Tool-error loop detection (was missing on /api/generate) ──
+        const _genResultLower = result.toLowerCase();
+        const _genIsError = /^(error|❌)/.test(result.trim()) || _genResultLower.startsWith('error:') || _genResultLower.startsWith('failed:') || _genResultLower.startsWith('exception:');
+        loopDetect.consecutiveToolErrors = loopDetect.consecutiveToolErrors || [];
+        if (_genIsError) {
+          let _e = loopDetect.consecutiveToolErrors.find(e => e.name === toolName);
+          if (!_e) {
+            loopDetect.consecutiveToolErrors.push({ name: toolName, count: 0 });
+            _e = loopDetect.consecutiveToolErrors[loopDetect.consecutiveToolErrors.length - 1];
+            if (loopDetect.consecutiveToolErrors.length > 8) loopDetect.consecutiveToolErrors.shift();
+          }
+          _e.count++;
+          if (_e.count >= 3) {
+            res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'tool_error', message: `Tool ${toolName} has failed ${_e.count} times in a row. Stopping to avoid retry loop.` })}\n\n`);
+            break;
+          }
+        } else {
+          loopDetect.consecutiveToolErrors = loopDetect.consecutiveToolErrors.filter(e => e.name !== toolName);
+        }
       }
     }
 
@@ -2820,6 +4105,10 @@ app.post('/api/generate', async (req, res) => {
         `INSERT INTO requests (id, session_id, type, provider, model, input_tokens, output_tokens, latency_ms, cost, status)
          VALUES (?, ?, 'generate', ?, ?, ?, ?, ?, ?, 'ok')`
       ).run(reqId, sessionId, provider, finalMeta.model, finalMeta.inputTokens, finalMeta.outputTokens, finalMeta.latency, finalMeta.cost);
+      try {
+        db.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)')
+          .run(user?.id || null, 'agent_session_end', sessionId, JSON.stringify({ inputTokens: finalMeta.inputTokens, outputTokens: finalMeta.outputTokens, cost: finalMeta.cost, model: finalMeta.model }));
+      } catch (actEndErr) { console.error('[activity] session_end log failed:', actEndErr.message); }
     }
 
     res.write(`data: ${JSON.stringify({ type: 'done', ...(finalMeta || { model: agentModel, provider }) })}\n\n`);
@@ -2934,7 +4223,7 @@ app.get('/preview/:id', (req, res) => {
 
 // ── Image Generation ────────────────────────────────────────────────
 app.post('/api/images/generate', async (req, res) => {
-  const { provider = 'openai', model = 'dall-e-3', prompt, size = '1024x1024', quality = 'standard' } = req.body;
+  const { provider = 'pollinations', model, prompt, size = '1024x1024', quality = 'hd', operation = 'generate', imageUrl, enhance = false } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
   // Usage check
   const user = getUserByApiKey(req);
@@ -2944,12 +4233,15 @@ app.post('/api/images/generate', async (req, res) => {
   }
 
   try {
-    const result = await generateImage({ provider, model, prompt, size, quality });
+    const imageModel = model || (provider === 'pollinations' ? 'zimage' : 'dall-e-3');
+    const result = await generateImage({ provider, model: imageModel, prompt, size, quality, operation, imageUrl, enhance });
     res.json(result);
     incrementUsage(user);
   } catch (err) {
     console.error('[image-gen] error:', err);
-    res.status(500).json({ error: err.message });
+    const msg = err.message || String(err);
+    const status = /timeout|timed out|aborted/i.test(msg) ? 504 : 500;
+    res.status(status).json({ error: msg });
   }
 });
 
@@ -2972,6 +4264,18 @@ app.post('/api/images/analyze', async (req, res) => {
 // ── Dashboard stats ────────────────────────────────────────────────
 app.get('/api/dashboard', (req, res) => {
   try {
+    const db = getDb();
+    const dashboardUser = getUserByApiKey(req);
+    const isDashboardAdmin = dashboardUser && (dashboardUser.role === 'admin' || isOwnerEmail(dashboardUser.email));
+    const isPublicDashboard = req.query.public === '1';
+    if (!isPublicDashboard && !isDashboardAdmin) {
+      return res.status(dashboardUser ? 403 : 401).json({ error: dashboardUser ? 'Admin access required' : 'Authentication required', redirect: dashboardUser ? '/portal' : '/' });
+    }
+    if (dashboardUser && dashboardUser.role !== 'admin' && isOwnerEmail(dashboardUser.email)) {
+      try {
+        db.prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE id = ?').run('admin', 'enterprise', dashboardUser.id);
+      } catch {}
+    }
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
@@ -2981,15 +4285,42 @@ app.get('/api/dashboard', (req, res) => {
       _toolsCache = null;
       _toolsCacheTime = 0;
     }
-    const db = getDb();
-
     // Request stats
     const totalRequests = db.prepare(`SELECT COUNT(*) as count FROM requests`).get().count;
-    const totalTokens = db.prepare(`SELECT SUM(input_tokens + output_tokens) as total FROM requests`).get().total || 0;
+    const ledgerTotals = db.prepare(`SELECT COUNT(*) as requests, SUM(input_tokens + output_tokens) as tokens, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens FROM user_token_usage`).get() || {};
+    const totalTokens = (db.prepare(`SELECT SUM(input_tokens + output_tokens) as total FROM requests`).get().total || 0) + (ledgerTotals.tokens || 0);
     const totalCost = db.prepare(`SELECT SUM(cost) as total FROM requests`).get().total || 0;
     const byProvider = db.prepare(
       `SELECT provider, COUNT(*) as requests, SUM(input_tokens) as inputTokens, SUM(output_tokens) as outputTokens, SUM(cost) as cost FROM requests GROUP BY provider`
     ).all();
+    const byUser = db.prepare(
+      `SELECT
+         u.id as userId,
+         u.username,
+         u.email,
+         u.google_id as googleId,
+         u.role,
+         u.plan,
+         COUNT(utu.id) as requests,
+         SUM(utu.input_tokens) as inputTokens,
+         SUM(utu.output_tokens) as outputTokens,
+         SUM(utu.tool_calls) as toolCalls,
+         MAX(utu.created_at) as lastUsedAt
+       FROM user_token_usage utu
+       LEFT JOIN users u ON u.id = utu.user_id
+       GROUP BY utu.user_id, utu.google_id
+       ORDER BY (SUM(utu.input_tokens) + SUM(utu.output_tokens)) DESC
+       LIMIT 20`
+    ).all().map((row) => ({
+      label: stableUserLabel(row),
+      role: row.role || 'user',
+      plan: row.plan || 'free',
+      requests: row.requests || 0,
+      inputTokens: row.inputTokens || 0,
+      outputTokens: row.outputTokens || 0,
+      toolCalls: row.toolCalls || 0,
+      lastUsedAt: row.lastUsedAt || null,
+    }));
     const toolCallRows = db.prepare(
       `SELECT SUM(output_tokens) as total FROM requests WHERE status = 'ok'`
     ).get();
@@ -3071,9 +4402,7 @@ app.get('/api/dashboard', (req, res) => {
           status: 'running',
           process: processName || 'unknown',
           pid,
-          command: cmd || processName || '',
-          cwd,
-          desc: knownServices[port]?.desc || cwd || cmd || processName || '',
+          desc: knownServices[port]?.desc || 'Listening service',
           checkedAt: new Date().toISOString(),
         });
       }
@@ -3102,8 +4431,6 @@ app.get('/api/dashboard', (req, res) => {
         status: 'running',
         process: 'node',
         pid: process.pid,
-        command: process.argv.join(' '),
-        cwd: process.cwd(),
         desc: 'Main server',
         checkedAt: new Date().toISOString(),
         warning: `service scan limited: ${e.message}`,
@@ -3126,7 +4453,7 @@ app.get('/api/dashboard', (req, res) => {
     let toolInventory = [];
     try {
       const inv = getSkillsInventory();
-      skillsInventory = { total: inv.total || 0, categories: inv.categories || {}, skills: includeSkillList ? (inv.skills || []) : [] };
+      skillsInventory = { total: inv.total || 0, categories: inv.categories || {}, skills: includeSkillList ? (inv.skills || []).map(publicDashboardSkill) : [] };
     } catch (e) { console.error('[dashboard] skills inventory error:', e.message); }
     try { toolInventory = getToolInventory(); } catch (e) { console.error('[dashboard] tool inventory error:', e.message); }
 
@@ -3134,7 +4461,7 @@ app.get('/api/dashboard', (req, res) => {
     let crushStats = { sessions: 0, messages: 0, promptTokens: 0, completionTokens: 0, toolCalls: 0, uniqueTools: 0, toolBreakdown: {}, reasoningSteps: 0, files: 0 };
     const crushDbPaths = [
       path.join('/home/ghost', '.crush', 'crush.db'),
-      path.join(os.homedir(), '.crush', 'crush.db'),
+      path.join(process.env.HOME || '/home/ghost', '.crush', 'crush.db'),
     ];
     for (const crushDbPath of crushDbPaths) {
       try {
@@ -3161,7 +4488,8 @@ app.get('/api/dashboard', (req, res) => {
               const parts = JSON.parse(m.parts);
               for (const p of parts) {
                 if (p.type === 'tool_call' && p.data?.name) {
-                  toolCount[p.data.name] = (toolCount[p.data.name] || 0) + 1;
+                  const publicName = publicToolBreakdownName(p.data.name);
+                  toolCount[publicName] = (toolCount[publicName] || 0) + 1;
                   // Track browser-related actions
                   const n = p.data.name.toLowerCase();
                   if (n.includes('browser') || n.includes('click') || n.includes('navigate') || n.includes('screenshot') || n.includes('snapshot') || n === 'web') {
@@ -3186,6 +4514,7 @@ app.get('/api/dashboard', (req, res) => {
             } catch {}
           }
           crushStats.toolCalls = Object.values(toolCount).reduce((a, b) => a + b, 0);
+          delete toolCount.other;
           crushStats.uniqueTools = Object.keys(toolCount).length;
           crushStats.toolBreakdown = toolCount;
           crushStats.reasoningSteps = reasoningSteps;
@@ -3202,12 +4531,12 @@ app.get('/api/dashboard', (req, res) => {
     const crushVersion = 'local';
 
     res.json({
-      requests: { total: totalRequests, totalTokens, totalCost, byProvider, outputTokens: totalToolCalls },
+      requests: { total: totalRequests + (ledgerTotals.requests || 0), totalTokens, totalCost, byProvider, byUser, inputTokens: ledgerTotals.inputTokens || 0, outputTokens: (ledgerTotals.outputTokens || 0) + totalToolCalls },
       sessions: { total: sessionCount, active: activeSessions, messages: messageCount, artifacts: artifactCount },
       system: { cpus, totalMem, freeMem, uptime, hostname: os.hostname(), platform: os.platform(), arch: os.arch() },
       services: runningServices,
       crush: { model: crushModel, provider: crushProvider, version: crushVersion, stats: crushStats },
-      agent: { tools: toolInventory, skills: skillsInventory },
+      agent: { tools: toolInventory.map(publicDashboardTool), skills: skillsInventory },
       providers: Object.entries(PROVIDERS)
         .filter(([key, cfg]) => !isCerebrasValue(key) && !isCerebrasValue(cfg.name) && !isCerebrasValue(cfg.defaultModel))
         .map(([key, cfg]) => ({ id: key, name: cfg.name, type: cfg.type, defaultModel: cfg.defaultModel })),
@@ -3217,6 +4546,22 @@ app.get('/api/dashboard', (req, res) => {
     res.status(500).json({ error: 'dashboard stats failed', detail: err.message });
   }
 });
+
+function applyCrushGuardConfig(cfg) {
+  cfg.models = cfg.models || {};
+  cfg.models.large = cfg.models.large || {};
+  cfg.models.small = cfg.models.small || {};
+  cfg.models.large.max_tokens = 16000;
+  cfg.models.small.max_tokens = 8000;
+  cfg.models.large.reasoning_effort = cfg.models.large.reasoning_effort || 'medium';
+  cfg.models.small.reasoning_effort = cfg.models.small.reasoning_effort || 'low';
+  cfg.options = cfg.options || {};
+  cfg.options.disable_provider_auto_update = true;
+  cfg.options.skills_paths = ['/home/ghost/.agents/skills-ericdahl/skills'];
+  cfg.context_paths = ['CRUSH.md', 'AGENTS.md'];
+  cfg.global_context_paths = ['~/.config/crush/CRUSH.md'];
+  return cfg;
+}
 
 // ── Crush config update (model/provider switch) ──────────────────
 app.post('/api/crush/config', express.json(), (req, res) => {
@@ -3229,8 +4574,10 @@ app.post('/api/crush/config', express.json(), (req, res) => {
     // Save to haksterAi's own config (crush can't overwrite this)
     const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');
     fs.writeFileSync(haksterConfigPath, JSON.stringify({ provider, model }, null, 2));
-    // Update crush DATA file (runtime)
-    const crushDataPath = path.join(os.homedir(), '.local/share/crush/crush.json');
+    // Update crush DATA file (runtime). Keep this best-effort: Chat tab model
+    // selection must still work even when the server inherited HOME=/root.
+    const userHome = process.env.HAKSTER_HOME || (process.env.HOME && process.env.HOME !== '/root' ? process.env.HOME : '/home/ghost');
+    const crushDataPath = path.join(userHome, '.local/share/crush/crush.json');
     let crushCfg = {};
     try {
       crushCfg = JSON.parse(fs.readFileSync(crushDataPath, 'utf8'));
@@ -3242,6 +4589,7 @@ app.post('/api/crush/config', express.json(), (req, res) => {
     crushCfg.models.large.provider = provider;
     crushCfg.models.small.model = model;
     crushCfg.models.small.provider = provider;
+    applyCrushGuardConfig(crushCfg);
     // Purge cerebras from recent_models — not a valid haksterAi provider
     if (crushCfg.recent_models) {
       for (const size of ['large', 'small']) {
@@ -3250,9 +4598,12 @@ app.post('/api/crush/config', express.json(), (req, res) => {
         }
       }
     }
-    fs.writeFileSync(crushDataPath, JSON.stringify(crushCfg, null, 2));
+    try {
+      fs.mkdirSync(path.dirname(crushDataPath), { recursive: true });
+      fs.writeFileSync(crushDataPath, JSON.stringify(crushCfg, null, 2));
+    } catch (e) { console.error('[crush] data update error:', e.message); }
     // Update crush CONFIG file (what crush reads on startup)
-    const crushConfigDir = path.join(os.homedir(), '.config/crush/crush.json');
+    const crushConfigDir = path.join(userHome, '.config/crush/crush.json');
     try {
       let crushConf = JSON.parse(fs.readFileSync(crushConfigDir, 'utf8'));
       crushConf.models = crushConf.models || {};
@@ -3262,6 +4613,7 @@ app.post('/api/crush/config', express.json(), (req, res) => {
       crushConf.models.large.provider = provider;
       crushConf.models.small.model = model;
       crushConf.models.small.provider = provider;
+      applyCrushGuardConfig(crushConf);
       fs.writeFileSync(crushConfigDir, JSON.stringify(crushConf, null, 2));
     } catch (e) { console.error('[crush] config dir update error:', e.message); }
     console.log(`[crush] config updated: provider=${provider}, model=${model}`);
@@ -3316,7 +4668,7 @@ app.get('/api/stats', (_req, res) => {
 });
 
 // ── Users, Logs & Audit API ────────────────────────────────────────
-app.get('/api/users', (_req, res) => {
+app.get('/api/users', requireAdmin, (_req, res) => {
   const db = getDb();
   const users = db.prepare(`SELECT id, username, email, role, plan, status, created_at, updated_at, last_login_at, last_login_ip FROM users ORDER BY created_at DESC`).all();
   const stats = {
@@ -3334,7 +4686,7 @@ app.get('/api/users', (_req, res) => {
 });
 
 // ── User activity & tracking ──────────────────────────────────────
-app.get('/api/users/activity', (req, res) => {
+app.get('/api/users/activity', requireAdmin, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const action = req.query.action;
@@ -3348,7 +4700,7 @@ app.get('/api/users/activity', (req, res) => {
   res.json({ activity, count: activity.length });
 });
 
-app.get('/api/users/recent', (req, res) => {
+app.get('/api/users/recent', requireAdmin, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 20, 100);
   const users = db.prepare(
@@ -3383,7 +4735,7 @@ app.post('/api/users/track', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/users/:id', (req, res) => {
+app.get('/api/users/:id', requireAdmin, (req, res) => {
   const db = getDb();
   const user = db.prepare(`SELECT id, username, email, role, plan, status, created_at, updated_at, last_login_at, last_login_ip FROM users WHERE id = ?`).get(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
@@ -3559,8 +4911,27 @@ app.get('/api/pricing', (_req, res) => {
 });
 
 // ── Google OAuth ──────────────────────────────────────────────────
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+let GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+let GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+
+// Auto-load from downloaded client JSON if env vars are missing
+if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+  try {
+    const clientJsonPath = process.env.GOOGLE_OAUTH_CLIENT_JSON
+      ? path.resolve(__dirname, '..', process.env.GOOGLE_OAUTH_CLIENT_JSON)
+      : path.join(__dirname, '..', 'google-oauth-client.json');
+    const raw = fs.readFileSync(clientJsonPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const cfg = parsed.web || parsed.installed;
+    if (cfg && cfg.client_id && cfg.client_secret) {
+      GOOGLE_CLIENT_ID = cfg.client_id;
+      GOOGLE_CLIENT_SECRET = cfg.client_secret;
+      console.log('[oauth] loaded google client from', clientJsonPath);
+    }
+  } catch (e) {
+    // ignore — env vars are the explicit source of truth
+  }
+}
 
 app.get('/api/auth/google/client-id', (_req, res) => {
   res.json({ clientId: GOOGLE_CLIENT_ID, configured: !!GOOGLE_CLIENT_ID });
@@ -3583,6 +4954,21 @@ app.get('/api/auth/me', (req, res) => {
       tokenBalance: user.token_balance || 0,
     },
   });
+});
+
+app.get('/api/auth/authorize-page', (req, res) => {
+  const page = String(req.query.page || '').replace(/^\/+/, '').replace(/\/+$/, '');
+  if (page === 'dashboard') {
+    const user = getUserByApiKey(req);
+    if (!user) return res.status(401).json({ ok: false, redirect: '/' });
+    if (user.role !== 'admin' && !isOwnerEmail(user.email)) return res.status(403).json({ ok: false, redirect: '/portal' });
+    if (user.role !== 'admin' && isOwnerEmail(user.email)) {
+      try {
+        getDb().prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE id = ?').run('admin', 'enterprise', user.id);
+      } catch {}
+    }
+  }
+  return res.json({ ok: true });
 });
 
 // Redirect to Google OAuth consent screen
@@ -3674,18 +5060,11 @@ app.get('/api/auth/google/callback', async (req, res) => {
     }
 
     // Owner accounts always get admin role + enterprise plan on login
-    const OWNER_EMAILS = ['dekekenneth840@gmail.com', 'dekoneed@gmail.com', 'dekeneed@yahoo.com', 'savannahscott899@gmail.com'];
-    const OWNER_IDS = {
-      'dekekenneth840@gmail.com': '1234',
-      'dekoneed@gmail.com': '1235',
-      'dekeneed@yahoo.com': '1236',
-      'savannahscott899@gmail.com': '1237'
-    };
-    const isOwner = email && OWNER_EMAILS.includes(email.toLowerCase().trim());
+    const isOwner = isOwnerEmail(email);
 
     if (!user) {
       wasSignup = true;
-      const id = isOwner ? OWNER_IDS[email.toLowerCase().trim()] : uuidv4();
+      const id = isOwner ? ownerIdForEmail(email) : uuidv4();
       const apiKey = 'hkai_' + require('crypto').randomBytes(24).toString('hex');
       const username = name.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30) || ('g_' + googleId.slice(0, 8));
       db.prepare(
@@ -3700,6 +5079,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
       ensureReferralCode(db, user);
     }
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    const displayName = rememberGoogleUserIdentity(user, { name, email, googleId, picture }) || user.username;
 
     // Log to access_logs
     db.prepare('INSERT INTO access_logs (user_id, ip_address, user_agent, endpoint, method, status_code) VALUES (?, ?, ?, ?, ?, ?)')
@@ -3723,7 +5103,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
     const userData = encodeURIComponent(JSON.stringify({
       ok: true,
       isNewUser: wasSignup,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
+      user: { id: user.id, username: user.username, displayName, name: displayName, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
       apiKey: user.api_key,
     }));
     res.redirect(`/build?google_auth=${userData}`);
@@ -3777,12 +5157,30 @@ app.get('/api/usage', (req, res) => {
   if (!user) return res.status(401).json({ error: 'Invalid or missing API key' });
   const db = getDb();
   const referralCode = ensureReferralCode(db, user);
+  const tokenUsage = db.prepare(
+    `SELECT
+       COUNT(*) as requests,
+       COALESCE(SUM(input_tokens), 0) as inputTokens,
+       COALESCE(SUM(output_tokens), 0) as outputTokens,
+       COALESCE(SUM(tool_calls), 0) as toolCalls,
+       MAX(created_at) as lastUsedAt
+     FROM user_token_usage
+     WHERE user_id = ?`
+  ).get(user.id) || {};
   res.json({
     plan: user.plan,
     used: user.usage_count || 0,
     limit: user.plan === 'free' ? FREE_USAGE_LIMIT : -1, // -1 = unlimited
     remaining: user.plan === 'free' ? Math.max(0, FREE_USAGE_LIMIT - (user.usage_count || 0)) : -1,
     tokenBalance: user.token_balance || 0,
+    tokenUsage: {
+      requests: tokenUsage.requests || 0,
+      inputTokens: tokenUsage.inputTokens || 0,
+      outputTokens: tokenUsage.outputTokens || 0,
+      totalTokens: (tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0),
+      toolCalls: tokenUsage.toolCalls || 0,
+      lastUsedAt: tokenUsage.lastUsedAt || null,
+    },
     referralCode,
     limitEnabled: USAGE_LIMIT_ENABLED,
     resetAt: user.usage_reset_at || null,
@@ -3856,14 +5254,7 @@ app.post('/api/auth/google', async (req, res) => {
     const userAgent = req.get('User-Agent') || '';
     const db = getDb();
 
-    const OWNER_EMAILS = ['dekekenneth840@gmail.com', 'dekoneed@gmail.com', 'dekeneed@yahoo.com', 'savannahscott899@gmail.com'];
-    const OWNER_IDS = {
-      'dekekenneth840@gmail.com': '1234',
-      'dekoneed@gmail.com': '1235',
-      'dekeneed@yahoo.com': '1236',
-      'savannahscott899@gmail.com': '1237'
-    };
-    const isOwner = email && OWNER_EMAILS.includes(email.toLowerCase().trim());
+    const isOwner = isOwnerEmail(email);
 
     const isNewUser = !db.prepare('SELECT 1 FROM users WHERE google_id = ? OR (email = ? AND email != "")').get(googleId, email);
 
@@ -3883,7 +5274,7 @@ app.post('/api/auth/google', async (req, res) => {
     if (!user) {
       // Create new user
       wasSignup = true;
-      const id = isOwner ? OWNER_IDS[email.toLowerCase().trim()] : uuidv4();
+      const id = isOwner ? ownerIdForEmail(email) : uuidv4();
       const apiKey = 'hkai_' + require('crypto').randomBytes(24).toString('hex');
       const username = name.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30) || ('g_' + googleId.slice(0, 8));
       db.prepare(
@@ -3899,6 +5290,7 @@ app.post('/api/auth/google', async (req, res) => {
       ensureReferralCode(db, user);
     }
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    const displayName = rememberGoogleUserIdentity(user, { name, email, googleId, picture }) || user.username;
 
     // Log to access_logs
     db.prepare('INSERT INTO access_logs (user_id, ip_address, user_agent, endpoint, method, status_code) VALUES (?, ?, ?, ?, ?, ?)')
@@ -3936,7 +5328,7 @@ app.post('/api/auth/google', async (req, res) => {
     res.json({
       ok: true,
       isNewUser: wasSignup,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role, plan: user.plan, picture, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
+      user: { id: user.id, username: user.username, displayName, name: displayName, email: user.email, role: user.role, plan: user.plan, picture, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
       apiKey: user.api_key,
     });
   } catch (err) {
@@ -3944,7 +5336,7 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-app.get('/api/access-logs', (req, res) => {
+app.get('/api/access-logs', requireAdmin, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
   const offset = parseInt(req.query.offset) || 0;
@@ -3963,7 +5355,7 @@ app.get('/api/access-logs', (req, res) => {
   res.json({ logs, total, limit, offset });
 });
 
-app.get('/api/api-key-audit', (req, res) => {
+app.get('/api/api-key-audit', requireAdmin, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
   const offset = parseInt(req.query.offset) || 0;
@@ -4014,6 +5406,33 @@ app.get('/api/messages', (req, res) => {
 
 // ── Serve generated images ────────────────────────────────────────
 const outputsPath = path.join(__dirname, '../../outputs');
+app.get('/outputs/images/:file', (req, res, next) => {
+  const file = path.basename(String(req.params.file || ''));
+  if (!/^[a-zA-Z0-9_.-]+\.(png|jpg|jpeg|webp|gif)$/i.test(file)) {
+    return res.status(400).json({ error: 'Invalid image filename' });
+  }
+  const candidates = [
+    path.join(outputsPath, 'images', file),
+  ];
+  const workspaceRoot = path.join(__dirname, '../data/workspaces');
+  try {
+    for (const workspaceId of fs.readdirSync(workspaceRoot)) {
+      candidates.push(path.join(workspaceRoot, workspaceId, 'outputs', 'images', file));
+    }
+  } catch (_) { /* workspace output directory is optional */ }
+  const found = candidates.find(p => {
+    try {
+      const real = fs.realpathSync(p);
+      return fs.statSync(real).isFile()
+        && (real.startsWith(path.resolve(outputsPath) + path.sep) || real.startsWith(path.resolve(workspaceRoot) + path.sep));
+    } catch (_) {
+      return false;
+    }
+  });
+  if (!found) return next();
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.sendFile(found);
+});
 app.use('/outputs', express.static(outputsPath));
 
 app.get(['/chat', '/chat/'], (req, res) => {
@@ -4134,6 +5553,9 @@ const pty = require('node-pty');
 
 const ptyWss = new WebSocketServer({ noServer: true, maxReceivedFrameSize: 16 * 1024 * 1024, maxReceivedMessageSize: 32 * 1024 * 1024 });
 
+// Track active crush PTY processes to prevent duplicate DB locks
+let activeCrushPty = null;
+
 ptyWss.on('connection', (ws, req) => {
   let ptyProcess = null;
   let closed = false;
@@ -4143,6 +5565,55 @@ ptyWss.on('connection', (ws, req) => {
     const url = new URL(req.url || '/pty', 'http://localhost');
     ptyMode = url.searchParams.get('mode') === 'shell' ? 'shell' : 'crush';
   } catch {}
+
+  // Identify logged-in user from API key passed as query param
+  let userName = 'Ghost';
+  let userEmail = '';
+  let userHandle = '';
+  try {
+    const url = new URL(req.url || '/pty', 'http://localhost');
+    const apiKey = url.searchParams.get('key');
+    if (apiKey) {
+      const db = getDb();
+      const u = db.prepare('SELECT username, email FROM users WHERE api_key = ?').get(apiKey);
+      if (u) {
+        userName = u.username || 'Ghost';
+        userEmail = u.email || '';
+        userHandle = '@' + userName;
+        console.log(`[pty] identified user: ${userName} (${userEmail})`);
+      }
+    }
+  } catch (e) { console.log('[pty] user lookup error:', e.message); }
+
+  // Kill any existing crush process before spawning a new one
+  // to prevent "read only database" errors from concurrent SQLite access
+  if (activeCrushPty && ptyMode === 'crush') {
+    try {
+      console.log('[pty] killing previous crush process before spawning new one');
+      activeCrushPty.kill('SIGTERM');
+      setTimeout(() => { try { activeCrushPty.kill('SIGKILL'); } catch {} }, 100);
+    } catch {}
+    activeCrushPty = null;
+  }
+
+  // Detect client OS/browser from WebSocket request headers
+  const clientUA = req.headers['user-agent'] || '';
+  const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress || '';
+  let clientOS = 'Unknown';
+  let clientBrowser = 'Unknown';
+  let clientDevice = 'desktop';
+  if (clientUA) {
+    if (/Windows NT 10/i.test(clientUA)) clientOS = 'Windows 10/11';
+    else if (/Windows NT/i.test(clientUA)) clientOS = 'Windows';
+    else if (/Android/i.test(clientUA)) { clientOS = 'Android ' + (clientUA.match(/Android ([0-9.]+)/)?.[1] || ''); clientDevice = 'mobile'; }
+    else if (/iPhone|iPad|iPod/i.test(clientUA)) { clientOS = 'iOS ' + (clientUA.match(/OS ([0-9_]+)/)?.[1]?.replace(/_/g, '.') || ''); clientDevice = /iPad/.test(clientUA) ? 'tablet' : 'mobile'; }
+    else if (/Mac OS X/i.test(clientUA)) clientOS = 'macOS ' + (clientUA.match(/Mac OS X ([0-9_.]+)/)?.[1] || '').replace(/_/g, '.');
+    else if (/Linux/i.test(clientUA)) clientOS = 'Linux';
+    if (/Edg\//i.test(clientUA)) clientBrowser = 'Edge ' + (clientUA.match(/Edg\/([0-9.]+)/)?.[1] || '');
+    else if (/Chrome/i.test(clientUA)) clientBrowser = 'Chrome ' + (clientUA.match(/Chrome\/([0-9.]+)/)?.[1] || '');
+    else if (/Firefox/i.test(clientUA)) clientBrowser = 'Firefox ' + (clientUA.match(/Firefox\/([0-9.]+)/)?.[1] || '');
+    else if (/Safari/i.test(clientUA)) clientBrowser = 'Safari ' + (clientUA.match(/Version\/([0-9.]+)/)?.[1] || '');
+  }
   const crushBin = process.env.CRUSH_BIN || (fs.existsSync('/usr/local/bin/crush') ? '/usr/local/bin/crush' : 'crush');
   const shellBin = process.env.TERMINAL_SHELL || process.env.SHELL || '/bin/bash';
   const defaultTerminalCwd = fs.existsSync('/home/ghost/haksterAi') ? '/home/ghost/haksterAi' : '/home/ghost';
@@ -4153,7 +5624,8 @@ ptyWss.on('connection', (ws, req) => {
   try {
     const hakCfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'hakster-config.json'), 'utf8'));
     // Update data file
-    const crushDataPath = path.join(os.homedir(), '.local/share/crush/crush.json');
+    const crushHome = '/home/ghost'; // crush always runs as ghost — never use process.env.HOME (may be /root under PM2)
+    const crushDataPath = path.join(crushHome, '.local/share/crush/crush.json');
     let crushCfg = {};
     try { crushCfg = JSON.parse(fs.readFileSync(crushDataPath, 'utf8')); } catch {}
     if (!crushCfg.models) crushCfg.models = {};
@@ -4161,10 +5633,22 @@ ptyWss.on('connection', (ws, req) => {
     if (!crushCfg.models.small) crushCfg.models.small = {};
     if (hakCfg.model) { crushCfg.models.large.model = hakCfg.model; crushCfg.models.small.model = hakCfg.model; }
     if (hakCfg.provider) { crushCfg.models.large.provider = hakCfg.provider; crushCfg.models.small.provider = hakCfg.provider; }
+    applyCrushGuardConfig(crushCfg);
+    // Only give crush playwright + filesystem MCP to keep it fast on 4-core machine
+    // haksterAi's agent API already has all 6 — crush doesn't need to duplicate them
+    try {
+      const mcpPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
+      const mcpCfg = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+      if (mcpCfg.mcpServers) {
+        crushCfg.mcp_servers = {};
+        if (mcpCfg.mcpServers.playwright) crushCfg.mcp_servers.playwright = mcpCfg.mcpServers.playwright;
+        if (mcpCfg.mcpServers.filesystem) crushCfg.mcp_servers.filesystem = mcpCfg.mcpServers.filesystem;
+      }
+    } catch (e) { console.log('[pty] MCP sync error:', e.message); }
     fs.mkdirSync(path.dirname(crushDataPath), { recursive: true });
     fs.writeFileSync(crushDataPath, JSON.stringify(crushCfg, null, 2));
     // Update config file (what crush reads on startup)
-    const crushConfigPath = path.join(os.homedir(), '.config/crush/crush.json');
+    const crushConfigPath = path.join(crushHome, '.config/crush/crush.json');
     let crushConf = {};
     try { crushConf = JSON.parse(fs.readFileSync(crushConfigPath, 'utf8')); } catch {}
     crushConf.models = crushConf.models || {};
@@ -4172,26 +5656,105 @@ ptyWss.on('connection', (ws, req) => {
     crushConf.models.small = crushConf.models.small || {};
     if (hakCfg.model) { crushConf.models.large.model = hakCfg.model; crushConf.models.small.model = hakCfg.model; }
     if (hakCfg.provider) { crushConf.models.large.provider = hakCfg.provider; crushConf.models.small.provider = hakCfg.provider; }
+    applyCrushGuardConfig(crushConf);
+    // Only playwright + filesystem for crush
+    try {
+      const mcpPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
+      const mcpCfg = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+      if (mcpCfg.mcpServers) {
+        crushConf.mcp_servers = {};
+        if (mcpCfg.mcpServers.playwright) crushConf.mcp_servers.playwright = mcpCfg.mcpServers.playwright;
+        if (mcpCfg.mcpServers.filesystem) crushConf.mcp_servers.filesystem = mcpCfg.mcpServers.filesystem;
+      }
+    } catch (e) { console.log('[pty] MCP config sync error:', e.message); }
     fs.mkdirSync(path.dirname(crushConfigPath), { recursive: true });
     fs.writeFileSync(crushConfigPath, JSON.stringify(crushConf, null, 2));
-  } catch {}
+
+    // Write CRUSH.md context file so crush knows who the user is and what machine they're on
+    try {
+      const crushMdPath = path.join(workDir, 'CRUSH.md');
+      const crushMd = [
+        '# haksterAi CrushTerminal Context',
+        '',
+        '## Current User (auto-detected from login)',
+        `- Username: ${userName}`,
+        `- Handle: ${userHandle || '@' + userName}`,
+        userEmail ? `- Email: ${userEmail}` : '',
+        '- Identity: pentester under haksterAi',
+        '',
+        '## Client Machine (auto-detected)',
+        `- OS: ${clientOS}`,
+        `- Browser: ${clientBrowser}`,
+        `- Device: ${clientDevice}`,
+        `- IP: ${clientIP}`,
+        '',
+        '## Server Machine',
+        '- OS: Linux (Ubuntu, AMD A12-9720P, 4 cores, ~7GB RAM)',
+        '- Working directory: /home/ghost/haksterAi',
+        '- Projects: CineVault, haksterAi, PhantomIDE, bug bounties',
+        '',
+        '## Available MCP Tools (crush)',
+        '- playwright: Browser automation — USE THIS to check web pages, test UI, interact with browsers',
+        '- filesystem: File operations on /home/ghost',
+        '',
+        '## Additional MCP Tools (via haksterAi agent API)',
+        '- nmap: Network scanning and port detection',
+        '- sqlite: SQLite database queries on /home/ghost/haksterAi/data/mcp.db',
+        '- memory: Persistent memory across sessions',
+        '- sequential-thinking: Step-by-step reasoning for complex problems',
+        '',
+        '## Instructions',
+        '- When asked to "check the browser" or "check web pages", USE the playwright MCP tool — do NOT just say you can\'t access it',
+        '- When asked about the machine, refer to the Client Machine and Server Machine sections above',
+        '- The user is ' + userName + ' — greet them by name when they say "yo" or greet you',
+        '- The user connects from different devices — always check the Client Machine section for current device info',
+        '- Brand stays "haksterAi" — never rename',
+        '- When the user says "yo" or greets you, acknowledge them by name',
+        '',
+        '## Tool Loop Guard',
+        '- Never run more than two consecutive discovery/search/read/list tool rounds.',
+        '- After two tool rounds, stop calling tools and either act with the evidence already gathered or give the direct answer.',
+        '- Do not re-run the same list/search/read command with tiny path or wording changes.',
+        '- If output is too large or trimmed, summarize what is known instead of repeatedly listing more files.',
+        '- For "list skills", "list by number", or any numbered inventory request, HARD LIMIT the answer to 120 rows maximum.',
+        '- Never claim to print "all" items when the list is longer than the hard limit; print the first useful chunk and offer "continue from N".',
+        '- Prefer category summaries over huge tables when there are more than 120 items.',
+        '',
+      ].filter(Boolean).join('\n');
+      fs.writeFileSync(crushMdPath, crushMd);
+      // Ensure ghost owns the file (server may run as root in some configs)
+      try { require('child_process').execSync('chown ghost:ghost ' + crushMdPath); } catch {}
+      console.log(`[pty] wrote CRUSH.md context (user=${userName}, OS=${clientOS}, Browser=${clientBrowser}, IP=${clientIP})`);
+    } catch (e) {
+      console.log('[pty] failed to write CRUSH.md:', e.message);
+    }
+  } catch (e) {
+    console.log('[pty] crush config sync error:', e.message);
+  }
 
   try {
     const spawnBin = ptyMode === 'shell' ? shellBin : crushBin;
     const spawnArgs = ptyMode === 'shell' ? ['-l'] : ['--cwd', workDir];
+    const ptyEnv = {
+      ...process.env,
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      FORCE_COLOR: '1',
+      CLICOLOR: '1',
+      CLICOLOR_FORCE: '1',
+      HOME: '/home/ghost', // crush always runs as ghost — never inherit PM2's /root
+    };
+    delete ptyEnv.NO_COLOR;
+
     ptyProcess = pty.spawn(spawnBin, spawnArgs, {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
       cwd: workDir,
-      env: {
-        ...process.env,
-        TERM: 'xterm-256color',
-        COLORTERM: 'truecolor',
-        HOME: process.env.HOME || '/home/ghost',
-      }
+      env: ptyEnv
     });
     console.log(`[pty] spawned ${ptyMode}: ${spawnBin} (pid=${ptyProcess.pid})`);
+    if (ptyMode === 'crush') activeCrushPty = ptyProcess;
   } catch (err) {
     console.error('[pty] failed to spawn:', err);
     ws.send(JSON.stringify({ type: 'error', error: `Failed to spawn terminal: ${err.message}` }));
@@ -4231,6 +5794,7 @@ ptyWss.on('connection', (ws, req) => {
 
   ptyProcess.onExit(({ exitCode }) => {
     console.log(`[pty] ${ptyMode} exited (code=${exitCode})`);
+    if (ptyMode === 'crush' && activeCrushPty === ptyProcess) activeCrushPty = null;
     if (ptyOutTimer) { clearTimeout(ptyOutTimer); ptyOutTimer = null; }
     flushPtyOutput();
     if (ws.readyState === 1) {
@@ -4295,16 +5859,40 @@ getSkillsInventory();
 getToolInventory();
 getMachineContext();
 
-server.listen(PORT, () => {
-  console.log(`\n  ╔══════════════════════════════════════════╗`);
-  console.log(`  ║  haksterAi server v1.0                   ║`);
-  console.log(`  ║  http://localhost:${String(PORT).padEnd(5)}                ║`);
-  console.log(`  ║  WS:   ws://localhost:${String(PORT).padEnd(5)}/ws           ║`);
-  console.log(`  ║  Providers: ${Object.keys(PROVIDERS).join(', ').padEnd(26)}║`);
-  console.log(`  ║  FS Root: ${FS_ROOT.substring(0, 30).padEnd(34)}║`);
-  console.log(`  ╚══════════════════════════════════════════╝\n`);
+// Initialize MCP servers (async, non-blocking)
+seedPersistentProjectMemory();
+seedGoogleIdentityMemoriesFromDb();
+promoteOwnerAccountsFromDb();
+initWebMcp();
 
-  // Start background security scanner (5-min interval, notifies on persistent risks)
-  startSecurityScanner(path.join(__dirname, '..'), CORS_ORIGINS, notifPush);
-  console.log('  ✓ Security scanner started (5-min interval, persistent risk notifications)');
-});
+// Graceful port handling — infinite retry with capped backoff (prevents PM2 crash loops)
+function startServer(delay = 2000) {
+  const MAX_DELAY = 30000; // cap at 30s between retries
+  server.listen(PORT, () => {
+    console.log(`\n  ╔══════════════════════════════════════════╗`);
+    console.log(`  ║  haksterAi server v1.0                   ║`);
+    console.log(`  ║  http://localhost:${String(PORT).padEnd(5)}                ║`);
+    console.log(`  ║  WS:   ws://localhost:${String(PORT).padEnd(5)}/ws           ║`);
+    console.log(`  ║  Providers: ${Object.keys(PROVIDERS).join(', ').padEnd(26)}║`);
+    console.log(`  ║  FS Root: ${FS_ROOT.substring(0, 30).padEnd(34)}║`);
+    console.log(`  ╚══════════════════════════════════════════╝\n`);
+
+    // Start background security scanner (5-min interval, notifies on persistent risks)
+    startSecurityScanner(path.join(__dirname, '..'), CORS_ORIGINS, notifPush);
+    console.log('  ✓ Security scanner started (5-min interval, persistent risk notifications)');
+
+    // Start Telegram bot fleet
+    telegramBots.initBots();
+    telegramBots.sendDeployStatus('haksterAi server started');
+  }).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`  ⚠ Port ${PORT} in use, retrying in ${Math.min(delay, MAX_DELAY) / 1000}s... (infinite retry, no crash)`);
+      setTimeout(() => startServer(Math.min(delay * 2, MAX_DELAY)), delay);
+    } else {
+      console.error(`  ✗ Failed to listen on port ${PORT}:`, err.message);
+      process.exit(1);
+    }
+  });
+}
+
+startServer();

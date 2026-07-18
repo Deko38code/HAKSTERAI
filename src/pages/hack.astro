@@ -308,7 +308,8 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         </div>
         <div class="links">
           <a href="/">🏠 Home</a>
-          <a href="/hack">⚡ Hack Lab</a>
+          <a href="/terminal">⌨️ Terminal</a>
+          <a class="active" href="/hack">⚡ Hack Lab</a>
           <a href="/build">💬 Chat</a>
           <a href="/labs">🧪 Labs</a>
           <a href="/dashboard">📊 Dashboard</a>
@@ -603,7 +604,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
         <!-- Terminal -->
         <div id="term-body">
-          <HaksterTerminal id="crush-main" autoStart={true} ptyMode="shell" />
+          <HaksterTerminal id="hack-main" autoStart={true} ptyMode="shell" />
           <div id="hack-checkpoint-flash">
             <span>💾</span>
             <span id="hack-checkpoint-flash-text">Checkpoint saved</span>
@@ -687,7 +688,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         toggleBtn.classList.toggle('open', sidebarOpen);
         setTimeout(() => {
           window.dispatchEvent(new Event('resize'));
-          const t = window.__crushTerminals && window.__crushTerminals['crush-main'];
+          const t = window.__crushTerminals && window.__crushTerminals['hack-main'];
           if (t) {
             t.panes.forEach(p => {
               try { p.fit.fit(); } catch {}
@@ -722,7 +723,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         crushToggle.classList.toggle('open', crushOpen);
         setTimeout(() => {
           window.dispatchEvent(new Event('resize'));
-          const t = window.__crushTerminals && window.__crushTerminals['crush-main'];
+          const t = window.__crushTerminals && window.__crushTerminals['hack-main'];
           if (t) {
             t.panes.forEach(p => {
               try { p.fit.fit(); } catch {}
@@ -832,7 +833,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         if (!model) return;
         if (modelInfo) modelInfo.innerHTML = 'Model: <span style="color:#7c3aed">' + (model.length > 25 ? model.substring(0,23) + '…' : model) + '</span>';
         if (statusEl) statusEl.innerHTML = '<span style="color:#ffd700">●</span> <span>Switching...</span>';
-        const modelBadge = document.getElementById('crush-main-model-badge');
+        const modelBadge = document.getElementById('hack-main-model-badge');
         if (modelBadge) modelBadge.textContent = model.length > 20 ? model.substring(0, 18) + '…' : model;
         fetch('/api/crush/config', {
           method: 'POST',
@@ -841,8 +842,8 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         }).then(r => r.json()).then(d => {
           if (d.ok) {
             const t = window.__crushTerminals;
-            if (t && t['crush-main']) {
-              const term = t['crush-main'];
+            if (t && t['hack-main']) {
+              const term = t['hack-main'];
               const pane = term.active || (term.panes && term.panes[0]);
               if (pane && typeof term.reconnect === 'function') {
                 term.reconnect(pane);
@@ -1023,7 +1024,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         function termBold(text) { return '\x1b[1m' + text + '\x1b[0m'; }
 
         function getTerm() {
-          return window.__crushTerminals && window.__crushTerminals['crush-main'];
+          return window.__crushTerminals && window.__crushTerminals['hack-main'];
         }
 
         function getActivePane() {
@@ -1034,14 +1035,14 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
         function sendToTerminal(text, execute) {
           if (execute === undefined) execute = true;
-          const pane = getActivePane();
-          if (!pane) return;
-          if (pane.ws?.readyState === WebSocket.OPEN) {
-            pane.ws.send(JSON.stringify({ type: 'input', data: text + (execute ? '\r' : '') }));
-          } else {
-            const t = getTerm();
-            if (t) t.writeln(text);
+          const t = getTerm();
+          if (t && typeof t.send === 'function') {
+            t.send(text, execute);
+            return;
           }
+          const pane = getActivePane();
+          if (pane?.ws?.readyState === WebSocket.OPEN) pane.ws.send(JSON.stringify({ type: 'input', data: text + (execute ? '\r' : '') }));
+          else if (t) t.writeln(text);
         }
 
         function termPrint(text) {
@@ -1194,8 +1195,6 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
             return;
           }
           busy = true;
-          const terminal = getTerm();
-          if (terminal && typeof terminal.fastDecoder === 'function') terminal.fastDecoder();
           addLine('\n[' + PHASE_LABELS[currentPhase] + '] ▶ ' + (options.label || 'Agent task'), PHASE_COLORS[currentPhase]);
           try {
             await ensureSession();
@@ -1383,8 +1382,6 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           const commands = selected.map(btn => (btn.dataset.command || '').replace(/\$\{TARGET\}/g, currentTarget || '')).filter(Boolean);
           const finalCmd = commands.map((cmd, idx) => `echo "\n[AUTO ${idx + 1}/${commands.length}] ${getToolLabel(selected[idx])}" ; ${cmd}`).join(' ; ');
           addLine('\n[AUTO] Running ' + commands.length + ' verified checks for ' + currentTarget, '#34d399');
-          const terminal = getTerm();
-          if (terminal && typeof terminal.fastDecoder === 'function') terminal.fastDecoder();
           await runShellCommand(finalCmd);
         };
 
@@ -1402,8 +1399,6 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
               return;
             }
           }
-          const terminal = getTerm();
-          if (terminal && typeof terminal.fastDecoder === 'function') terminal.fastDecoder();
           addLine('\n[TERMINAL] $ ' + finalCmd, '#34d399');
           sendToTerminal(finalCmd, true);
         }
@@ -1542,7 +1537,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         // Wait for terminal to register, then boot
         function waitForTerminal(cb, attempts) {
           attempts = attempts || 0;
-          if (window.__crushTerminals && window.__crushTerminals['crush-main']) {
+          if (window.__crushTerminals && window.__crushTerminals['hack-main']) {
             cb();
           } else if (attempts < 60) {
             setTimeout(() => waitForTerminal(cb, attempts + 1), 50);

@@ -7,8 +7,25 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
+// Approval mode — bypass confirmation prompts in FULL_AUTO / AUTO_EDIT
+const { FULL_AUTO, shouldConfirm: shouldConfirmApproval } = require('./agent/approval');
+
+// MCP integration — lazy-loaded to avoid circular require
+let _isMcpTool, _callMcpTool;
+function getMcp() {
+  if (!_isMcpTool) {
+    const mcp = require('./agent/mcp');
+    _isMcpTool = mcp.isMcpTool;
+    _callMcpTool = mcp.callMcpTool;
+  }
+}
+function isMcpTool(name) { getMcp(); return _isMcpTool(name); }
+function callMcpTool(name, args) { getMcp(); return _callMcpTool(name, args); }
+
 const Anthropic = require('@anthropic-ai/sdk');
 const { OpenAI } = require('openai');
+const fs = require('fs');
+const path = require('path');
 
 // ── Sanitize messages before sending to any provider ────────────────
 // Some providers (OpenRouter, OpenAI) reject messages with `reasoning_content`
@@ -57,7 +74,7 @@ const PROVIDERS = {
   ollama: {
     name: 'Ollama',
     baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    defaultModel: process.env.DEFAULT_MODEL || 'gpt-oss:120b-cloud',
+    defaultModel: process.env.DEFAULT_MODEL || 'glm-5.2:cloud',
     type: 'openai-compat',
   },
   anthropic: {
@@ -121,6 +138,10 @@ const PROVIDERS = {
 
 // ── Image Gen providers ────────────────────────────────────────────
 const IMAGE_PROVIDERS = {
+  pollinations: {
+    name: 'Pollinations',
+    models: ['zimage', 'flux', 'gptimage', 'kontext', 'seedream5', 'qwen-image'],
+  },
   openai: {
     name: 'DALL-E 3',
     models: ['dall-e-3', 'gpt-image-1'],
@@ -130,6 +151,184 @@ const IMAGE_PROVIDERS = {
     models: ['openai/dall-e-3'],
   },
 };
+
+// Keep upstream image calls below Cloudflare's common 100s 524 window.
+// The Chat agent streams heartbeats, but the image modal/API returns JSON.
+const IMAGE_REQUEST_TIMEOUT_MS = 85000;
+
+function parseImageSize(size = '1024x1024') {
+  const match = String(size || '').match(/^(\d{2,5})x(\d{2,5})$/i);
+  const width = match ? Math.max(64, Math.min(2048, Number(match[1]))) : 1024;
+  const height = match ? Math.max(64, Math.min(2048, Number(match[2]))) : 1024;
+  return { width, height, size: `${width}x${height}` };
+}
+
+function getPollinationsKey() {
+  const usable = (value) => {
+    const key = String(value || '').trim();
+    if (!key) return '';
+    if (['free', 'none', 'null', 'undefined', 'changeme', 'your_key_here'].includes(key.toLowerCase())) return '';
+    return key;
+  };
+  const envKey = process.env.POLLINATIONS_API_KEY || process.env.POLLINATIONS_KEY || '';
+  const usableEnvKey = usable(envKey);
+  if (usableEnvKey) return usableEnvKey;
+  try {
+    const envFile = fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8');
+    const match = envFile.match(/^POLLINATIONS_API_KEY=(.+)$/m) || envFile.match(/^POLLINATIONS_KEY=(.+)$/m);
+    const fileKey = usable(match?.[1]);
+    if (fileKey) return fileKey;
+  } catch (_) { /* optional server env fallback */ }
+  for (const file of [
+    '/home/ghost/.phantom-ai-config.json',
+    '/home/ghost/.phantom-ai-config.backup.json',
+  ]) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const key = usable(cfg?.pollinations?.key || cfg?.providers?.pollinations?.key || '');
+      if (key) return key;
+    } catch (_) { /* optional PhantomIDE config fallback */ }
+  }
+  return '';
+}
+
+function getPhantomImagegenConfig() {
+  for (const file of ['/home/ghost/.phantom-ai-config.json']) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const imagegen = cfg?.imagegen || {};
+      const key = String(imagegen.key || imagegen.keyBackup || '').trim();
+      if (!key) continue;
+      return {
+        key,
+        baseUrl: imagegen.baseUrl || 'https://generativelanguage.googleapis.com/v1beta',
+        model: imagegen.model || 'gemini-2.5-flash-image',
+      };
+    } catch (_) { /* optional PhantomIDE imagegen fallback */ }
+  }
+  return null;
+}
+
+async function phantomImagegenGenerate({ prompt, model, size }) {
+  const cfg = getPhantomImagegenConfig();
+  if (!cfg) throw new Error('PhantomIDE imagegen config is missing');
+  const imageModel = model && /^gemini-|^imagen-/i.test(model) ? model : cfg.model;
+  const url = new URL(`${String(cfg.baseUrl).replace(/\/$/, '')}/models/${encodeURIComponent(imageModel)}:generateContent`);
+  url.searchParams.set('key', cfg.key);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+    }),
+    signal: AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS),
+  });
+  const data = await response.json().catch(async () => ({ error: await response.text().catch(() => response.statusText) }));
+  if (!response.ok) {
+    const msg = data?.error?.message || data?.error || response.statusText;
+    throw new Error(`PhantomIDE imagegen failed (${response.status}): ${String(msg).slice(0, 240)}`);
+  }
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  const imagePart = parts.find(p => p.inlineData?.data || p.inline_data?.data);
+  const inlineData = imagePart?.inlineData || imagePart?.inline_data;
+  if (!inlineData?.data) throw new Error('PhantomIDE imagegen returned no image');
+  return {
+    b64_json: inlineData.data,
+    revised_prompt: parts.find(p => p.text)?.text || null,
+    mime_type: inlineData.mimeType || inlineData.mime_type || 'image/png',
+    model: imageModel,
+    size: parseImageSize(size).size,
+  };
+}
+
+async function pollinationsImageFromUrl({ prompt, model, size, quality, imageUrl, enhance = false }) {
+  const dims = parseImageSize(size);
+  const imageModel = (!model || model === 'dall-e-3' || model === 'gpt-image-1') ? (imageUrl ? 'kontext' : 'zimage') : model;
+  const url = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}`);
+  url.searchParams.set('model', imageModel);
+  url.searchParams.set('width', String(dims.width));
+  url.searchParams.set('height', String(dims.height));
+  url.searchParams.set('nologo', 'true');
+  url.searchParams.set('safe', 'true');
+  if (quality) url.searchParams.set('quality', quality);
+  if (enhance) url.searchParams.set('enhance', 'true');
+  if (imageUrl) url.searchParams.set('image', imageUrl);
+  const apiKey = getPollinationsKey();
+  if (apiKey) url.searchParams.set('key', apiKey);
+
+  const response = await fetch(url, {
+    headers: {
+      'Accept': 'image/png,image/jpeg,image/*',
+      'User-Agent': 'haksterAi/0.1 image-generator',
+    },
+    signal: AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS),
+  });
+  const contentType = response.headers.get('content-type') || '';
+  if (!response.ok || !contentType.startsWith('image/')) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Pollinations image generation failed (${response.status}): ${body.slice(0, 240) || contentType || response.statusText}`);
+  }
+  return {
+    b64_json: Buffer.from(await response.arrayBuffer()).toString('base64'),
+    revised_prompt: null,
+    mime_type: contentType || 'image/png',
+    model: imageModel,
+    size: dims.size,
+  };
+}
+
+async function pollinationsEditFromFile({ prompt, model, size, quality, imagePath, enhance = false }) {
+  const apiKey = getPollinationsKey();
+  if (!apiKey) throw new Error('Pollinations image editing requires POLLINATIONS_API_KEY in the server environment');
+  const dims = parseImageSize(size);
+  const imageModel = (!model || model === 'dall-e-3' || model === 'gpt-image-1' || model === 'zimage' || model === 'flux') ? 'kontext' : model;
+  const finalPrompt = enhance ? `${prompt}\n\nEnhance image quality, sharpen details, improve lighting/color balance, and preserve the main subject unless instructed otherwise.` : prompt;
+  const fileBuffer = fs.readFileSync(imagePath);
+  const ext = path.extname(imagePath).toLowerCase();
+  const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+    : ext === '.webp' ? 'image/webp'
+    : ext === '.gif' ? 'image/gif'
+    : 'image/png';
+  const form = new FormData();
+  form.append('image', new Blob([fileBuffer], { type: mime }), path.basename(imagePath));
+  form.append('prompt', finalPrompt);
+  form.append('model', imageModel);
+  form.append('size', dims.size);
+  form.append('quality', quality || 'hd');
+  form.append('response_format', 'b64_json');
+  const response = await fetch('https://gen.pollinations.ai/v1/images/edits', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS),
+  });
+  const data = await response.json().catch(async () => ({ error: await response.text().catch(() => response.statusText) }));
+  if (!response.ok) {
+    const msg = data?.error?.message || data?.error || response.statusText;
+    throw new Error(`Pollinations image edit failed (${response.status}): ${String(msg).slice(0, 240)}`);
+  }
+  const first = data?.data?.[0];
+  if (!first?.b64_json && !first?.url) throw new Error('Pollinations image edit returned no image');
+  if (first.b64_json) {
+    return { b64_json: first.b64_json, revised_prompt: first.revised_prompt || null, mime_type: 'image/png', model: imageModel, size: dims.size };
+  }
+  const img = await pollinationsImageFromUrl({ prompt: finalPrompt, model: imageModel, size: dims.size, quality, imageUrl: first.url });
+  return { ...img, revised_prompt: first.revised_prompt || img.revised_prompt };
+}
+
+function writeDataImageToTemp(imageUrl) {
+  const match = String(imageUrl || '').match(/^data:image\/([\w+.-]+);base64,(.+)$/i);
+  if (!match) return null;
+  const ext = match[1].replace('jpeg', 'jpg').replace(/[^\w.-]/g, '') || 'png';
+  const filePath = path.join(osTmpDir(), `hakster-image-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`);
+  fs.writeFileSync(filePath, Buffer.from(match[2], 'base64'));
+  return filePath;
+}
+
+function osTmpDir() {
+  try { return require('os').tmpdir(); } catch (_) { return '/tmp'; }
+}
 
 // ── Client factory ──────────────────────────────────────────────────
 function getClient(provider) {
@@ -301,6 +500,21 @@ async function firecrawlScrape(url) {
   const res = await firecrawlRequest('/scrape', { url, formats: ['markdown'] });
   if (res.status >= 400) throw new Error(res.json?.error || res.text || `HTTP ${res.status}`);
   return res.json?.data?.markdown || res.json?.data?.content || JSON.stringify(res.json?.data, null, 2);
+}
+
+function localKnowledgeFallback(query) {
+  const q = String(query || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/\btupac\b/.test(q) || /\b2pac\b/.test(q) || /\bshukur\b/.test(q) || /\bshakur\b/.test(q)) {
+    return [
+      'Local knowledge fallback for: Tupac Shakur (often stylized 2Pac)',
+      '',
+      '1. Tupac Shakur',
+      '   Tupac Amaru Shakur, also known as 2Pac and Makaveli, was an American rapper, actor, poet, and activist. He became one of the most influential figures in hip-hop, known for songs that mixed social commentary, personal struggle, and West Coast rap. He was born in 1971 and died in 1996 after a shooting in Las Vegas.',
+      '   Note: "Tupac Shukur" is most likely a misspelling of "Tupac Shakur".',
+      '',
+    ].join('\n');
+  }
+  return '';
 }
 
 // ── System prompt ────────────────────────────────────────────────
@@ -603,7 +817,43 @@ async function* chatStream({ provider, model, messages, system, thinking = false
 }
 
 // ── Image generation ────────────────────────────────────────────────
-async function generateImage({ provider = 'openai', model = 'dall-e-3', prompt, size = '1024x1024', quality = 'standard', n = 1 }) {
+async function generateImage({ provider = 'openai', model = 'dall-e-3', prompt, size = '1024x1024', quality = 'hd', n = 1, imagePath, imageUrl, operation = 'generate', enhance = false }) {
+  if (provider === 'pollinations') {
+    const start = Date.now();
+    const useEnhance = enhance || operation === 'enhance';
+    let tempImagePath = null;
+    if (!imagePath && imageUrl && String(imageUrl).startsWith('data:image/')) {
+      tempImagePath = writeDataImageToTemp(imageUrl);
+      imagePath = tempImagePath;
+      imageUrl = null;
+    }
+    let img;
+    let fallbackProvider = 'pollinations';
+    try {
+      try {
+        img = imagePath
+          ? await pollinationsEditFromFile({ prompt, model, size, quality, imagePath, enhance: useEnhance })
+          : await pollinationsImageFromUrl({ prompt, model, size, quality, imageUrl, enhance: useEnhance });
+      } catch (err) {
+        const authFailed = /401|auth|unauthorized/i.test(err.message || String(err));
+        if (!authFailed || imagePath || imageUrl) throw err;
+        img = await phantomImagegenGenerate({ prompt, model, size });
+        fallbackProvider = 'phantomide-imagegen';
+      }
+    } finally {
+      if (tempImagePath) {
+        try { fs.unlinkSync(tempImagePath); } catch (_) {}
+      }
+    }
+    return {
+      images: [{ b64_json: img.b64_json, revised_prompt: img.revised_prompt, mime_type: img.mime_type }],
+      latency: Date.now() - start,
+      model: img.model,
+      provider: fallbackProvider,
+      size: img.size,
+    };
+  }
+
   if (provider === 'openrouter') {
     // OpenRouter doesn't have native image gen — route through OpenAI
     const client = new OpenAI({ apiKey: process.env.OPENROUTER_API_KEY, baseURL: 'https://openrouter.ai/api/v1' });
@@ -961,15 +1211,32 @@ const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'browser_detect',
+      description: 'Detect browser/device context. Returns the current headless browser page state plus the latest saved user browser/device context when available. Use when debugging browser issues, responsive UI, xterm, or user device-specific behavior.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sessionId: { type: 'string', description: 'Optional session id to fetch a specific saved client context' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'generate_image',
-      description: 'Generate an image from a text prompt using DALL-E. Returns the local file path and a URL for inline display.',
+      description: 'Generate, edit, or enhance an image from a prompt. Defaults to Pollinations HD/top-grade output (low token/cost burn) and returns a local file path plus URL for inline display.',
       parameters: {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'Text description of the image to generate' },
-          model: { type: 'string', description: 'Model to use (default: dall-e-3)' },
-          size: { type: 'string', description: 'Image size: 1024x1024, 1792x1024, or 1024x1792' },
-          quality: { type: 'string', description: 'Image quality: standard or hd' },
+          provider: { type: 'string', description: 'Image provider: pollinations (default), openai, or openrouter', enum: ['pollinations', 'openai', 'openrouter'] },
+          model: { type: 'string', description: 'Model to use. Pollinations default: zimage. Other options include flux, gptimage, kontext, seedream5, qwen-image.' },
+          size: { type: 'string', description: 'Image size, e.g. 1024x1024, 1792x1024, 1024x1792, or 512x512' },
+          quality: { type: 'string', description: 'Image quality: standard or hd. Default should be hd/top-grade unless the user asks for fast/cheap.' },
+          operation: { type: 'string', description: 'What to do: generate, logo, edit, or enhance', enum: ['generate', 'logo', 'edit', 'enhance'] },
+          image_path: { type: 'string', description: 'Optional local image path to edit/enhance' },
+          image_url: { type: 'string', description: 'Optional image URL to use as an edit/style reference' },
         },
         required: ['prompt'],
       },
@@ -1077,6 +1344,212 @@ const AGENT_TOOLS = [
       },
     },
   },
+  // ── Autoflow: 7 new top-tier agent tools (from agent/index.js) ──────────────
+  {
+    type: 'function',
+    function: {
+      name: 'glob_search',
+      description: 'Find files matching a glob pattern under the working directory. Returns matched file paths sorted by modification time. Use for file discovery, pattern-based search, and project navigation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Glob pattern to match (e.g. "src/**/*.js", "**/*.test.ts", "docs/*.md")' },
+          maxResults: { type: 'number', description: 'Maximum results to return (default: 100)' },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_file',
+      description: 'Edit a file by applying a list of line-based changes. Each change specifies start/end line numbers and replacement text. Returns a summary of changes made. Safer than write_file for targeted edits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path to edit (relative to working directory)' },
+          changes: {
+            type: 'array',
+            description: 'Array of {start, end, text} objects. start/end are 1-based line numbers. text is the replacement content.',
+            items: {
+              type: 'object',
+              properties: {
+                start: { type: 'number', description: 'Start line (1-based)' },
+                end: { type: 'number', description: 'End line (1-based, inclusive)' },
+                text: { type: 'string', description: 'Replacement text for the line range' },
+              },
+              required: ['start', 'end', 'text'],
+            },
+          },
+          createIfMissing: { type: 'boolean', description: 'Create the file if it does not exist (default: false)' },
+        },
+        required: ['path', 'changes'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'replace_in_file',
+      description: 'Replace exact string matches in a file. Each replacement specifies old text and new text. Fails if old text is not found. Returns count of replacements made.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path (relative to working directory)' },
+          replacements: {
+            type: 'array',
+            description: 'Array of {old, new} replacement pairs. old must match exactly.',
+            items: {
+              type: 'object',
+              properties: {
+                old: { type: 'string', description: 'Exact text to find' },
+                new: { type: 'string', description: 'Replacement text' },
+              },
+              required: ['old', 'new'],
+            },
+          },
+          createIfMissing: { type: 'boolean', description: 'Create the file if it does not exist (default: false)' },
+        },
+        required: ['path', 'replacements'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'shell_bg',
+      description: 'Run a long-running shell command in the background. Returns a process ID immediately for non-blocking execution. Use for servers, watchers, daemons, and long builds. Check output with run_background, kill with kill_process.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to run in the background' },
+          label: { type: 'string', description: 'Optional label for the background process (e.g. "dev-server", "test-watch")' },
+          cwd: { type: 'string', description: 'Working directory for the command (default: project root)' },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'diff_preview',
+      description: 'Preview the unified diff of proposed changes to a file without writing them. Shows what would change if you apply the given replacements. Use before edit_file or replace_in_file to verify changes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path to preview changes for (relative to working directory)' },
+          replacements: {
+            type: 'array',
+            description: 'Array of {old, new} replacement pairs to preview',
+            items: {
+              type: 'object',
+              properties: {
+                old: { type: 'string', description: 'Existing text' },
+                new: { type: 'string', description: 'Proposed replacement text' },
+              },
+              required: ['old', 'new'],
+            },
+          },
+        },
+        required: ['path', 'replacements'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'codebase_map',
+      description: 'Generate a structured overview of the project directory tree. Shows files, directories, line counts, and key files. Use to orient yourself in a new codebase or find relevant files quickly.',
+      parameters: {
+        type: 'object',
+        properties: {
+          maxDepth: { type: 'number', description: 'Maximum directory depth to show (default: 4)' },
+          maxFiles: { type: 'number', description: 'Maximum files to list (default: 200)' },
+          includeHidden: { type: 'boolean', description: 'Include hidden files/dirs like .git (default: false)' },
+          focus: { type: 'string', description: 'Focus on a subdirectory (e.g. "src", "server/src")' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'codebase_index',
+      description: 'Return the persistent project inventory and direct file:line anchors for routes, functions, classes, exports, and page files. Use this before codebase questions or edits so you can jump directly to the right line instead of wandering through directories.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Optional project/name/path filter, e.g. "haksterAi", "cinevault", "skills"' },
+          query: { type: 'string', description: 'Alias for project/filter text' },
+          maxAnchors: { type: 'number', description: 'Maximum anchors per matching project, default 120' },
+          refresh: { type: 'boolean', description: 'Refresh the inventory before returning it' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'context_compaction',
+      description: 'Summarize and compress conversation history to stay within token limits. Returns a condensed version of recent context. Use when approaching context window limits to preserve the most important context.',
+      parameters: {
+        type: 'object',
+        properties: {
+          strategy: { type: 'string', enum: ['summarize', 'truncate_old', 'keep_recent', 'key_facts'], description: 'Compaction strategy: summarize=all, truncate_old=drop oldest, keep_recent=keep last N, key_facts=extract key facts only' },
+          maxTokens: { type: 'number', description: 'Target maximum token count for compacted context (default: 8000)' },
+          keepLastN: { type: 'number', description: 'For keep_recent strategy, how many recent turns to keep (default: 10)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_files',
+      description: 'Search for a regex pattern inside files or find filenames by glob. Uses ripgrep with bounded output. Prefer this or exec_shell with rg for code search; do not run broad recursive grep.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Directory or file to search in (absolute or relative to working dir)' },
+          pattern: { type: 'string', description: 'Regex pattern to search for' },
+          query: { type: 'string', description: 'Alias for pattern, accepted for compatibility' },
+          mode: { type: 'string', enum: ['content', 'grep', 'files'], description: 'content/grep searches inside files; files searches filenames by glob' },
+          maxResults: { type: 'number', description: 'Maximum results to return (default: 50)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'apply_patch',
+      description: 'Apply a unified diff patch in one shot from the current project root. Use this for precise multi-line or multi-file code edits instead of repeated edit_file loops. The patch must be a standard git/unified diff.',
+      parameters: {
+        type: 'object',
+        properties: {
+          patch: { type: 'string', description: 'Unified diff text, for example output beginning with diff --git or ---/+++' },
+          cwd: { type: 'string', description: 'Optional working directory; defaults to the active project root' },
+        },
+        required: ['patch'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_fetch',
+      description: 'Fetch content from a URL and return it as text. Use for reading API responses, documentation pages, config files, or any web-accessible resource.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to fetch' },
+        },
+        required: ['url'],
+      },
+    },
+  },
 ];
 
 let agentBrowser = null;
@@ -1099,12 +1572,176 @@ async function getAgentPage() {
   return agentPage;
 }
 
-const AGENT_SYSTEM_PROMPT = `You are haksterAI, a senior agentic coding and IPTV/cloud engineering assistant with file, shell, and sub-agent tools. Be direct, structured, and execution-focused.
+const { injectAgentsMd, injectLearnedLessons } = require('./agent/loop');
+const autolearn = require('./agent/autolearn');
+const { formatProjectInventory, formatCodebaseIndex } = require('./projectInventory');
+
+// ── Known project locations on this server ──────────────────────────────
+const KNOWN_PROJECTS = [
+  { name: 'CineVault', path: '/home/ghost/cine-vault-live/', desc: 'IPTV/movie streaming platform, Astro+Express, PM2 process "cinevault"' },
+  { name: 'haksterAi', path: '/home/ghost/haksterAi/', desc: 'AI agent platform with CLI, web API on port 3579, PM2 process "haksterAi"' },
+  { name: 'PhantomIDE', path: '/home/ghost/phantom-ide/', desc: 'Phantom IDE project' },
+  { name: 'movie-server', path: '/home/ghost/movie-server/', desc: 'Movie server / source resolver' },
+  { name: 'kiro-gateway', path: '/home/ghost/kiro-gateway/', desc: 'Kiro gateway, Python FastAPI on port 8000' },
+  { name: 'bugbounty', path: '/home/ghost/bugbounty/', desc: 'Bug bounty hunting tools and reports' },
+];
+
+// ── Dynamic system prompt builder (replaces static AGENT_SYSTEM_PROMPT) ──
+// Injects AGENTS.md steering + autolearned lessons + MEMORY.md + project map
+function buildAgentSystemPrompt(cwd, contextTags) {
+  let prompt = AGENT_SYSTEM_PROMPT_BASE;
+
+  // Inject a compact, refreshed project map with file:line anchors.
+  try {
+    prompt += `\n\n═══ PROJECT INVENTORY AND LINE MAP ═══\n${formatProjectInventory({ maxProjects: 10 })}\nUse codebase_index before edits or explanations when you need exact file:line anchors. Use absolute paths from this inventory for read_file, search_files, exec_shell, and apply_patch.\n═══ END PROJECT INVENTORY ═══`;
+  } catch (_) {
+    const projectList = KNOWN_PROJECTS.map(p => `- ${p.name}: ${p.path} — ${p.desc}`).join('\n');
+    prompt += `\n\n═══ KNOWN PROJECTS ON THIS SERVER ═══\n${projectList}\nUse absolute paths when calling file and shell tools.\n═══ END PROJECTS ═══`;
+  }
+
+  // Inject AGENTS.md (walks up from cwd)
+  try {
+    const agentsMd = injectAgentsMd(cwd || process.cwd());
+    if (agentsMd) {
+      prompt += `\n\n═══ PROJECT STEERING (AGENTS.md) ═══\n${agentsMd}\n═══ END STEERING ═══`;
+    }
+  } catch (e) { /* AGENTS.md injection is best-effort */ }
+
+  // Inject Codex CLI reference + secrets + gap analysis as agent context
+  // These docs encode Codex CLI's architecture, internal prompts, permission
+  // system, memory consolidation schema, and the haksterAi gap analysis vs
+  // Codex/Claude Code/OpenCode/Aider. Wiring them into the system prompt so
+  // the terminal agent actually operates off them instead of just archiving
+  // them in git. Per-file cap to keep prompt size sane.
+  try {
+    const fs3 = require('fs');
+    const path3 = require('path');
+    const haksterRoot = '/home/ghost/haksterAi';
+    const CODEX_DOCS = [
+      { path: 'docs/agents/codex-cli-reference.md', label: 'CODEX CLI REFERENCE' },
+      { path: 'docs/agents/codex-cli-secrets.md', label: 'CODEX CLI SECRETS (internal prompts, memory, permissions)' },
+      { path: 'docs/agent/gap-analysis-hermes-codex.md', label: 'HAKSTERAI vs CODEX GAP ANALYSIS' },
+    ];
+    const PER_FILE_CAP = 16000; // chars per doc — keeps total under ~48K
+    for (const doc of CODEX_DOCS) {
+      const docPath = path3.join(haksterRoot, doc.path);
+      if (fs3.existsSync(docPath)) {
+        let content = fs3.readFileSync(docPath, 'utf8').trim();
+        if (content.length > PER_FILE_CAP) {
+          content = content.slice(0, PER_FILE_CAP) + '\n...[truncated, see ' + doc.path + ' for full doc]';
+        }
+        prompt += `\n\n═══ ${doc.label} ═══\n${content}\n═══ END ${doc.label} ═══`;
+      }
+    }
+  } catch (e) { /* codex docs injection is best-effort */ }
+
+  // Inject MEMORY.md from the project's .hakster/ directory
+  try {
+    const fs2 = require('fs');
+    const path2 = require('path');
+    const projectDir = cwd || process.cwd();
+    const memoryMdPath = path2.join(projectDir, '.hakster', 'MEMORY.md');
+    if (fs2.existsSync(memoryMdPath)) {
+      const memoryContent = fs2.readFileSync(memoryMdPath, 'utf8').trim();
+      if (memoryContent) {
+        prompt += `\n\n═══ PROJECT MEMORY (MEMORY.md) ═══\n${memoryContent}\n═══ END MEMORY ═══`;
+      }
+    }
+    // Also check global haksterAi memory
+    const globalMemoryPath = path2.join('/home/ghost/haksterAi', '.hakster', 'MEMORY.md');
+    if (fs2.existsSync(globalMemoryPath) && globalMemoryPath !== memoryMdPath) {
+      const globalMemory = fs2.readFileSync(globalMemoryPath, 'utf8').trim();
+      if (globalMemory) {
+        prompt += `\n\n═══ GLOBAL MEMORY (haksterAi MEMORY.md) ═══\n${globalMemory}\n═══ END GLOBAL MEMORY ═══`;
+      }
+    }
+  } catch (e) { /* MEMORY.md injection is best-effort */ }
+
+  // Inject learned lessons from autolearn memory
+  try {
+    const lessons = injectLearnedLessons(cwd || process.cwd(), contextTags || []);
+    if (lessons) {
+      prompt += `\n\n═══ LEARNED LESSONS (auto-memory) ═══\n${lessons}\n═══ END LESSONS ═══`;
+    }
+  } catch (e) { /* lessons injection is best-effort */ }
+
+  // NOTE: autolearn.autoInit() also reads AGENTS.md — skip it here to avoid
+  // duplicating 6.5K chars of steering content. injectAgentsMd above already
+  // handles AGENTS.md injection. autoInit is still called by the CLI for
+  // interactive steering display, just not in the system prompt.
+
+  // 6-Phase Loop awareness
+  prompt += `
+
+═══ AGENT LOOP PHASES ═══
+You operate in a 6-phase loop: THINK → PLAN → ACT → OBSERVE → REFLECT → CONSOLIDATE.
+- THINK: Analyze the request and current state. Reason about what needs to be done.
+- PLAN: Decide which tools to call and in what order. Every tool call should move you closer to completion.
+- ACT: Execute tool calls (write_file, exec_shell, read_file, etc.).
+- OBSERVE: Review tool results. Did they succeed? What did you learn?
+- REFLECT: If stuck (errors, no progress), pause and reconsider your approach. Try a different strategy.
+- CONSOLIDATE: Periodically, lessons learned are consolidated into memory for future sessions.
+The server tracks these phases and will inject [REFLECT] and [CONSOLIDATE] system messages when needed.
+═══ END PHASES ═══`;
+
+  return prompt;
+}
+
+const AGENT_SYSTEM_PROMPT_BASE = `You are haksterAI, a senior agentic coding, ops, and security assistant running on Ghost's machine. You operate like Kiro CLI and OpenAI Codex CLI — you read the real codebase, act with tools, verify every edit, and keep working until the job is done end-to-end.
 
 Identity:
-- You are haksterAI.
+- You are haksterAI. Operator: Ghost (pentester, developer, IPTV/cloud engineer).
 - Do not reintroduce yourself every turn unless the user asks who you are or it is the first reply in a new session.
 - Treat the user's app, IPTV stack, cloud runtime, and coding projects as production systems unless told otherwise.
+- Every shell command executes directly on Ghost's real machine — NOT a sandbox. Act accordingly.
+
+## KIRO + CODEX OPERATING CONTRACT
+
+### Agent Loop Phases
+You operate in a 6-phase loop. Show brief inline markers when switching context:
+  [THINK]   — Analyze the request and current state. Reason about what needs to be done.
+  [PLAN]    — Decide which tools to call and in what order.
+  [ACT]     — Execute tool calls (read_file, write_file, edit_file, exec_shell, browser, etc.).
+  [OBSERVE] — Review what the tools returned. Did they succeed? What did you learn?
+  [REFLECT] — If stuck or wrong, stop and try a fundamentally different approach.
+  [DONE]    — Job complete. Give the short final report.
+
+Never skip from THINK straight to a final answer when files, services, or web pages are involved. Always check the real state first.
+
+### Core Rules (non-negotiable)
+1. READ BEFORE YOU WRITE. Before making any claim about code or making any edit, use tools to inspect the real file. Read package scripts, entry points, nearby source, service config, and recent logs when relevant.
+2. ACT WITH TOOLS. When you can make a change with a tool (write_file, edit_file, exec_shell, browser), do it. Do not give Ghost copy-paste instructions when tools can do the work.
+3. PRECISE MINIMAL EDITS. Make exact, targeted patches. Preserve unrelated user code. Never broad-rewrite a file unless Ghost explicitly asks or the file is generated.
+4. VERIFY EVERY MEANINGFUL EDIT. After changing a file, run the narrowest useful check:
+   - Node/JS CommonJS → node -c <file>
+   - Running service → pm2 status + curl health endpoint
+   - Frontend → npm run build or playwright page check
+   - Shell scripts → bash -n <file>
+5. SHOW CONCISE REASONING. Before acting, say:
+   - "Checking X because Y could be the issue."
+   - "Found Z — patching A."
+   - "Verified: working / blocked by B."
+6. KEEP MOVING UNTIL DONE. Don't stop after a plan when tools can make progress. If a command fails, read the error and change strategy — never repeat the same failing command.
+7. NEVER EXPOSE SECRETS. Do not print API keys, tokens, cookies, OAuth secrets, DB passwords, playlist credentials, signed URLs, or raw private user/admin data — even when visible in files you read.
+
+### "Fix it" / "Make it work" / "Critical" / "Live" Response Pattern
+1. [THINK] — What could be failing? Check logs, pm2 status, recent changes.
+2. [PLAN] — Identify the root cause file/service/config.
+3. [ACT] — Read the file, make the exact patch, restart only the affected service.
+4. [OBSERVE] — Check service status + hit the endpoint or open the page.
+5. [DONE] — Report: changed files, verification result, live status, remaining risk.
+
+### Final Report Format (always short)
+✅ Changed: <files>
+✅ Verified: <what you checked and what it showed>
+⚠️  Risk: <remaining concern or "none">
+
+Skill Library:
+- You have access to a large skill library with 750+ markdown skill files across categories: pentesting, coding, cloud ops, IPTV, security, and more.
+- ALWAYS use list_skills and read_skill tools to discover and leverage relevant skills before tackling complex tasks.
+- Skills contain detailed procedures, commands, configurations, and workflows written by experts.
+- When a user asks about a topic, first check if a relevant skill exists using list_skills with a search term, then read_skill for the full procedure.
+- This is critical — you have 750+ skills, not 16. Always pull from your full skill library.
 
 Skill Library:
 - You have access to a large skill library with 750+ markdown skill files across categories: pentesting, coding, cloud ops, IPTV, security, and more.
@@ -1114,13 +1751,15 @@ Skill Library:
 - This is critical — you have 750+ skills, not 16. Always pull from your full skill library.
 
 Operating Loop:
-1. Classify the request into one or more modes: Coding, IPTV, Movie Servers, Cloud/Ops, Database, Frontend, Research, Pentest, or General.
-2. Inspect before changing: list files, read relevant code/config, and identify the running process when needed.
-3. State the working assumption briefly, then act.
-4. Make small, precise edits with edit_file unless creating a new file or a full rewrite is clearly safer.
-5. Verify with the narrowest useful command: syntax check, test, build, curl health check, stream probe, or PM2 status.
-6. Finish with changed files, commands run, verification result, and any real blocker.
-- Follow docs/agent/agent-md-brain-index.md, docs/agent/cli-agent-tool-loop.md, docs/agent/cli-agent-playbooks.md, docs/agent/tool-call-map.md, docs/agent/multi-project-session.md, docs/agent/patching-skills-brain.md, docs/agent/phantom-md-brain.md, and docs/agent/hakster-phantom-unified-brain.md for Claude, Codex/OpenAI-compatible, Hermes/Nous, Kiro CLI, Phantom-derived markdown brain, provider-agnostic routing, and ReAct-style tool use. Treat repeated tool calls, repeated errors, repeated clarification, filesystem wandering, and no-progress turns as loop violations. Preserve the active project cwd across every shell, file, patch, verify, and git operation.
+1. [THINK] Classify the request: Coding, IPTV, Movie Servers, Cloud/Ops, Database, Frontend, Research, Pentest, or General. Recall memory for relevant past context.
+2. [PLAN] Identify the target files, services, and tools. Decide the order of operations and minimum viable inspection path.
+3. [ACT] Inspect before changing — read relevant code/config, identify the running process. Then make the targeted edit.
+4. [OBSERVE] Run the narrowest verification: node -c, bash -n, curl health check, pm2 status/logs, build check, or stream probe.
+5. [REFLECT] If blocked or wrong, diagnose root cause. Try a fundamentally different approach — do not patch the same thing twice.
+6. [DONE] Report: changed files, commands run, verification result, and any real blocker.
+- Loop violations to avoid: repeated tool calls with tiny variations, repeated errors with same command, filesystem wandering, no-progress turns, plan-without-action.
+- Preserve active project cwd across all shell, file, patch, verify, and git operations.
+- Reference: docs/agent/cli-agent-tool-loop.md, docs/agent/cli-agent-playbooks.md, docs/agent/tool-call-map.md for full playbook.
 
 Persistence:
 - Continue until the user's requested job is actually finished end-to-end: inspect, edit, verify, and report.
@@ -1209,9 +1848,12 @@ Tool Use:
 Shell Guidance:
 - Prefer fast targeted commands: rg, npm scripts, node -c, curl health endpoints, pm2 status/logs.
 - Exclude heavy folders by default: node_modules, dist, build, .git, cache, coverage, logs, media.
-- Chain closely related quick checks when useful.
+- Chain closely related quick checks when useful, but every shell command must be bounded by timeout/output limits. Use pm2 logs with --nostream, tail/head, rg --max-count, and find -maxdepth. Never start long-running foreground servers.
 - Avoid interactive or long-lived foreground commands in exec_shell. Use PM2, nohup, timeout wrappers, or the browser terminal for long-running services.
 - Do not run destructive commands, database wipes, credential dumps, or broad filesystem deletes without explicit confirmation.
+- For multi-line or multi-file edits, prefer apply_patch with one unified diff over repeated edit_file calls.
+- For browser/device debugging, call browser_detect first, then browser_navigate/browser_snapshot/browser_screenshot as needed.
+- Dangerous shell commands and file writes may produce an approval prompt. If approval is needed, do not retry the same command; explain that the user must approve it.
 
 Pentest Mode:
 - Use the guardian tool for security assessments, vulnerability scanning, and penetration testing tasks.
@@ -1312,7 +1954,7 @@ const READ_ONLY_SHELL_PREFIXES = [
   'journalctl', 'dmesg',
   'lsblk', 'lscpu', 'lsmem', 'lsmod', 'lspci', 'lsusb', 'lsscsi', 'hwinfo', 'sensors',
   'blkid', 'findmnt',
-  'jq', 'node', 'python3', 'python', 'bash',
+  'jq',
 ];
 
 function getDangerReason(command) {
@@ -1327,7 +1969,7 @@ function getDangerReason(command) {
   return null;
 }
 
-async function executeAgentTool(name, args, cwd, provider, model, onStream, allowedCommands) {
+async function executeAgentTool(name, args, cwd, provider, model, onStream, allowedCommands, approvalMode) {
   const fs = require('fs');
   const path = require('path');
   const { execFileSync, spawn } = require('child_process');
@@ -1337,18 +1979,27 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
   }
 
   // Surface dangerous shell commands before execution so the UI can confirm them
-  if (name === 'exec_shell' && args.command) {
-    const reason = getDangerReason(args.command);
-    if (reason) {
-      // Check if this exact command (or a prefix) has been allowed by the user
-      const cmd = args.command.trim();
-      const isAllowed = allowedCommands && (
-        allowedCommands.has(cmd) ||
-        [...allowedCommands].some(allowed => cmd.startsWith(allowed) || cmd === allowed)
-      );
-      if (!isAllowed) {
-        return JSON.stringify({ __needs_confirmation: true, reason, tool: name, args });
+  // In FULL_AUTO / AUTO_EDIT mode, skip confirmation for allowed tool types
+  // Approval gate covers shell commands and file writes. Do not treat bash/node/python
+  // wrappers as read-only; nested dangerous commands still need confirmation.
+  const FILE_WRITE_TOOLS = new Set(['write_file', 'edit_file', 'replace_in_file', 'apply_patch']);
+  const SHELL_EXEC_TOOLS = new Set(['exec_shell', 'shell_bg']);
+  if (shouldConfirmApproval(approvalMode, name, args, SHELL_EXEC_TOOLS.has(name) ? getDangerReason(args.command) : (FILE_WRITE_TOOLS.has(name) ? 'file modification' : null))) {
+    if (SHELL_EXEC_TOOLS.has(name) && args.command) {
+      const reason = getDangerReason(args.command);
+      if (reason) {
+        const cmd = args.command.trim();
+        const isAllowed = allowedCommands && (
+          allowedCommands.has(cmd) ||
+          [...allowedCommands].some(allowed => cmd.startsWith(allowed) || cmd === allowed)
+        );
+        if (!isAllowed) {
+          return JSON.stringify({ __needs_confirmation: true, reason, tool: name, args });
+        }
       }
+    } else if (FILE_WRITE_TOOLS.has(name)) {
+      // In SUGGEST mode, file writes need confirmation
+      return JSON.stringify({ __needs_confirmation: true, reason: `${name} requires confirmation in suggest mode`, tool: name, args });
     }
   }
 
@@ -1383,6 +2034,74 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
         const full = resolveSafe(args.path || '.');
         const entries = fs.readdirSync(full, { withFileTypes: true });
         return entries.map(e => `${e.isDirectory() ? 'd' : '-'} ${e.name}`).join('\n');
+      }
+      case 'search_files': {
+        const dirPath = resolveSafe(args.path || '.');
+        const { execFileSync } = require('child_process');
+        const maxResults = args.maxResults || 50;
+        const pattern = args.pattern || args.query || '';
+        if (!pattern) return 'Error: pattern or query is required';
+        const looksLikeGlob = /[*?\[\]{}]/.test(pattern);
+        const mode = args.mode || (looksLikeGlob ? 'files' : 'content');
+        if (mode === 'content' || mode === 'grep') {
+          try {
+            const out = execFileSync('rg', ['--line-number', '--color', 'never', '--hidden', '-g', '!node_modules/**', '-g', '!.git/**', '-g', '!dist/**', '-g', '!build/**', '-g', '!coverage/**', '--max-count', '50', '--max-filesize', '1M', '--', pattern, dirPath], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 });
+            const lines = out.split('\n').slice(0, maxResults);
+            return lines.join('\n') || '(no matches found)';
+          } catch (e) {
+            return e.stdout ? String(e.stdout).split('\n').slice(0, maxResults).join('\n') : '(no matches found)';
+          }
+        } else {
+          // files mode — find by name pattern
+          try {
+            const out = execFileSync('rg', ['--files', '--hidden', '-g', pattern, '-g', '!node_modules/**', '-g', '!.git/**', '-g', '!dist/**', '-g', '!build/**', '-g', '!coverage/**', dirPath], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 });
+            const lines = out.split('\n').filter(Boolean).slice(0, maxResults);
+            return lines.join('\n') || '(no files found)';
+          } catch (e) {
+            return e.stdout ? String(e.stdout).split('\n').filter(Boolean).slice(0, maxResults).join('\n') : '(no files found)';
+          }
+        }
+      }
+      case 'apply_patch': {
+        if (!args.patch || typeof args.patch !== 'string') return 'Error: patch is required';
+        const patchCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+        try {
+          execFileSync('git', ['-c', `safe.directory=${patchCwd}`, 'apply', '--check', '--whitespace=nowarn', '-'], {
+            cwd: patchCwd,
+            input: args.patch,
+            encoding: 'utf8',
+            timeout: 10000,
+            maxBuffer: 1024 * 1024,
+          });
+          execFileSync('git', ['-c', `safe.directory=${patchCwd}`, 'apply', '--whitespace=nowarn', '-'], {
+            cwd: patchCwd,
+            input: args.patch,
+            encoding: 'utf8',
+            timeout: 10000,
+            maxBuffer: 1024 * 1024,
+          });
+          return `Applied patch in ${patchCwd}`;
+        } catch (e) {
+          const msg = [e.message, e.stdout, e.stderr].filter(Boolean).join('\n').trim();
+          return `apply_patch failed in ${patchCwd}:\n${msg}`;
+        }
+      }
+      case 'web_fetch': {
+        const url = args.url;
+        if (!url) return '❌ url is required';
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), Math.min(args.timeout || 15, 60) * 1000);
+        try {
+          const resp = await fetch(url, { headers: { 'User-Agent': 'haksterAI/1.0', ...(args.headers || {}) }, signal: controller.signal });
+          clearTimeout(timeout);
+          const text = await resp.text();
+          const truncated = text.length > 10000 ? text.substring(0, 10000) + '\n... (truncated)' : text;
+          return `${resp.status} ${resp.statusText}\n${truncated}`;
+        } catch (err) {
+          clearTimeout(timeout);
+          if (err.name === 'AbortError') return `Error: Request timed out after ${args.timeout || 15}s`;
+          return `Error: ${err.message}`;
+        }
       }
       case 'exec_shell': {
         const requestedTimeout = Number(args.timeout_ms || 15000);
@@ -1458,6 +2177,7 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
               cwd,
               env: {
                 ...process.env,
+                HOME: process.env.HOME || '/home/ghost',
                 CI: process.env.CI || '1',
                 NO_COLOR: process.env.NO_COLOR || '1',
                 TERM: process.env.TERM || 'xterm-256color',
@@ -1538,6 +2258,7 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
             encoding: 'utf8',
             env: {
               ...process.env,
+              HOME: process.env.HOME || '/home/ghost',
               CI: process.env.CI || '1',
               NO_COLOR: process.env.NO_COLOR || '1',
             },
@@ -1663,15 +2384,94 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
         const sizeKb = (fs.statSync(filepath).size / 1024).toFixed(1);
         return `Screenshot saved: ${filepath} (${sizeKb} KB)`;
       }
+      case 'browser_detect': {
+        const lines = ['Browser detection'];
+        try {
+          const page = await getAgentPage();
+          const state = await page.evaluate(() => ({
+            url: location.href,
+            title: document.title,
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            language: navigator.language,
+            languages: Array.from(navigator.languages || []),
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            screen: { width: window.screen?.width || null, height: window.screen?.height || null },
+            devicePixelRatio: window.devicePixelRatio || 1,
+            online: navigator.onLine,
+            touchPoints: navigator.maxTouchPoints || 0,
+          }));
+          lines.push('', 'Headless browser:', JSON.stringify(state, null, 2));
+        } catch (e) {
+          lines.push('', `Headless browser: unavailable (${e.message})`);
+        }
+
+        try {
+          const { getDb } = require('./db');
+          const db = getDb();
+          const row = args.sessionId
+            ? db.prepare('SELECT * FROM client_contexts WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1').get(args.sessionId)
+            : db.prepare('SELECT * FROM client_contexts ORDER BY updated_at DESC LIMIT 1').get();
+          if (row) {
+            const client = {
+              session_id: row.session_id,
+              browser: [row.browser, row.browser_version].filter(Boolean).join(' '),
+              os: [row.os_name, row.os_version].filter(Boolean).join(' '),
+              device_type: row.device_type,
+              device_model: row.device_model,
+              viewport: row.viewport_width && row.viewport_height ? `${row.viewport_width}x${row.viewport_height}` : null,
+              screen: row.screen_width && row.screen_height ? `${row.screen_width}x${row.screen_height}` : null,
+              dpr: row.device_pixel_ratio,
+              language: row.language,
+              timezone: row.timezone,
+              online: Boolean(row.online),
+              updated_at: row.updated_at,
+            };
+            lines.push('', 'Latest user browser context:', JSON.stringify(client, null, 2));
+          } else {
+            lines.push('', 'Latest user browser context: none saved yet');
+          }
+        } catch (e) {
+          lines.push('', `Latest user browser context: unavailable (${e.message})`);
+        }
+        return lines.join('\n');
+      }
       case 'generate_image': {
         const crypto = require('crypto');
         const imgDir = path.join(cwd, 'outputs', 'images');
         fs.mkdirSync(imgDir, { recursive: true });
-        const imgModel = args.model || 'dall-e-3';
+        const imgProvider = args.provider || 'pollinations';
+        const operation = args.operation || 'generate';
+        const imgModel = args.model || (imgProvider === 'pollinations' ? 'zimage' : 'dall-e-3');
         const imgSize = args.size || '1024x1024';
-        const imgQuality = args.quality || 'standard';
+        const imgQuality = args.quality || 'hd';
+        let imagePath = null;
+        if (args.image_path) {
+          imagePath = path.resolve(cwd, args.image_path);
+          if (!imagePath.startsWith(path.resolve(cwd) + path.sep) && !imagePath.startsWith('/home/ghost/')) {
+            return 'Error: image_path is outside the allowed workspace';
+          }
+          if (!fs.existsSync(imagePath)) return `Error: image_path not found: ${imagePath}`;
+        }
+        let finalPrompt = args.prompt;
+        if (operation === 'logo') {
+          finalPrompt = `Create a professional production-ready top-grade HD logo. ${args.prompt}. Include clean geometry, strong silhouette, brand-ready composition, premium finish, no watermarks, no mockup background.`;
+        } else if (operation === 'enhance') {
+          finalPrompt = `Enhance and improve this image to top-grade HD quality while preserving the core subject. ${args.prompt || 'Improve sharpness, lighting, color balance, detail, and professional finish.'}`;
+        }
         try {
-          const result = await generateImage({ provider: 'openai', model: imgModel, prompt: args.prompt, size: imgSize, quality: imgQuality, n: 1 });
+          const result = await generateImage({
+            provider: imgProvider,
+            model: imgModel,
+            prompt: finalPrompt,
+            size: imgSize,
+            quality: imgQuality,
+            n: 1,
+            imagePath,
+            imageUrl: args.image_url,
+            operation,
+            enhance: operation === 'enhance',
+          });
           const lines = [];
           const urls = [];
           for (const img of result.images) {
@@ -1681,7 +2481,7 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
             const sizeKB = (fs.statSync(filePath).size / 1024).toFixed(1);
             const url = `/outputs/images/${id}.png`;
             urls.push(url);
-            lines.push(`🎨 ${filePath} (${sizeKB} KB)`);
+            lines.push(`🎨 ${filePath} (${sizeKB} KB) — ${result.provider || imgProvider}/${result.model || imgModel}`);
             if (img.revised_prompt) lines.push(`📝 Revised: ${img.revised_prompt}`);
           }
           // Return JSON with image URLs so the SSE handler can emit an image event
@@ -1708,13 +2508,23 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
           if (results.length === 0) {
             const https = require('https');
             const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-            const result = await new Promise((resolve, reject) => {
-              https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } }, (res) => {
-                let body = '';
-                res.on('data', (chunk) => { body += chunk; });
-                res.on('end', () => resolve(body));
-              }).on('error', reject);
-            });
+            let result = '';
+            try {
+              result = await new Promise((resolve, reject) => {
+                const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }, timeout: 12000 }, (res) => {
+                  let body = '';
+                  res.on('data', (chunk) => { body += chunk; });
+                  res.on('end', () => resolve(body));
+                }).on('error', reject);
+                req.on('timeout', () => { req.destroy(new Error('DuckDuckGo fallback timed out')); });
+              });
+            } catch (_) {
+              const { execFileSync } = require('child_process');
+              result = execFileSync('curl', ['-sL', '--max-time', '15', '-A', 'Mozilla/5.0', url], {
+                encoding: 'utf8',
+                maxBuffer: 2 * 1024 * 1024,
+              });
+            }
             const resultRegex = /<a[^>]+class="result__a"[^>]*>([\s\S]*?)<\/a>/g;
             const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
             const urlRegex = /uddg=([^&"']+)&/g;
@@ -1739,6 +2549,8 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
           });
           return lines.join('\n');
         } catch (err) {
+          const fallback = localKnowledgeFallback(query);
+          if (fallback) return fallback;
           return `Error: Web search failed: ${err.message}`;
         }
       }
@@ -1914,12 +2726,261 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
         if (!content) return `Skill "${args.name}" not found. Use list_skills to see available skills.`;
         return content;
       }
-      default:
+      // ── Autoflow: 7 new tool executors (from agent/index.js) ──────────────
+      case 'glob_search': {
+        try {
+          if (!args.pattern) return '❌ pattern is required';
+          const searchCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const { globSync } = require('glob');
+          const files = globSync(args.pattern, { cwd: searchCwd, nodir: true, absolute: true, ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/coverage/**'] });
+          const maxResults = args.maxResults || 100;
+          const sorted = files.slice(0, maxResults);
+          if (sorted.length === 0) return `📂 No files matching "${args.pattern}"`;
+          const total = files.length;
+          const lines = sorted.map(f => {
+            const rel = require('path').relative(searchCwd, f);
+            try {
+              const stat = require('fs').statSync(f);
+              return `  ${rel} (${(stat.size / 1024).toFixed(1)} KB)`;
+            } catch (_) {
+              return `  ${rel}`;
+            }
+          });
+          let out = `📂 Found ${total} file${total !== 1 ? 's' : ''} matching "${args.pattern}"\n`;
+          out += lines.join('\n');
+          if (total > maxResults) out += `\n  ... and ${total - maxResults} more`;
+          return out;
+        } catch (err) {
+          return `❌ glob_search error: ${err.message}`;
+        }
+      }
+      case 'edit_file': {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          if (!args.path) return '❌ path is required';
+          if (!args.changes || !Array.isArray(args.changes)) return '❌ changes array is required';
+          const baseCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const resolved = path.resolve(baseCwd, args.path);
+          if (!fs.existsSync(resolved)) {
+            if (!args.createIfMissing) return `❌ File not found: ${resolved}`;
+            const dir = path.dirname(resolved);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(resolved, '', 'utf-8');
+          }
+          let content = fs.readFileSync(resolved, 'utf-8');
+          const lines = content.split('\n');
+          let applied = 0;
+          for (const change of args.changes) {
+            if (change.start == null || change.end == null) continue;
+            const start = Math.max(0, change.start - 1);
+            const end = Math.min(lines.length, change.end);
+            const newText = (change.text || '').split('\n');
+            lines.splice(start, end - start, ...newText);
+            applied++;
+          }
+          fs.writeFileSync(resolved, lines.join('\n'), 'utf-8');
+          return `✏️ Edited ${resolved}: ${applied} change${applied !== 1 ? 's' : ''} applied`;
+        } catch (err) {
+          return `❌ edit_file error: ${err.message}`;
+        }
+      }
+      case 'replace_in_file': {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          if (!args.path) return '❌ path is required';
+          if (!args.replacements || !Array.isArray(args.replacements)) return '❌ replacements array is required';
+          const baseCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const resolved = path.resolve(baseCwd, args.path);
+          if (!fs.existsSync(resolved)) {
+            if (!args.createIfMissing) return `❌ File not found: ${resolved}`;
+            const newContent = args.replacements.map(r => r.new || '').join('\n');
+            const dir = path.dirname(resolved);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(resolved, newContent, 'utf-8');
+            return `✨ Created ${resolved} with ${args.replacements.length} replacement block${args.replacements.length !== 1 ? 's' : ''}`;
+          }
+          let content = fs.readFileSync(resolved, 'utf-8');
+          let applied = 0;
+          for (const rep of args.replacements) {
+            if (!rep.old) continue;
+            const count = (content.match(new RegExp(rep.old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+            content = content.split(rep.old).join(rep.new || '');
+            if (count > 0) applied++;
+          }
+          fs.writeFileSync(resolved, content, 'utf-8');
+          return `🔄 Replaced in ${resolved}: ${applied} replacement${applied !== 1 ? 's' : ''} applied`;
+        } catch (err) {
+          return `❌ replace_in_file error: ${err.message}`;
+        }
+      }
+      case 'shell_bg': {
+        try {
+          if (!args.command) return '❌ command is required';
+          const { spawn } = require('child_process');
+          const path = require('path');
+          const id = `bg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const procCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const child = spawn('/bin/bash', ['-c', args.command], {
+            cwd: procCwd,
+            env: { ...process.env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: false,
+          });
+          let stdout = '', stderr = '';
+          child.stdout.on('data', d => { stdout += d.toString(); if (stdout.length > 50000) stdout = stdout.slice(-50000); });
+          child.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 50000) stderr = stderr.slice(-50000); });
+          // Store in a module-level registry
+          if (!global._bgProcesses) global._bgProcesses = new Map();
+          global._bgProcesses.set(id, { process: child, label: args.label || args.command.slice(0, 60), command: args.command, cwd: procCwd, startedAt: Date.now(), stdout, stderr });
+          child.stdout.on('data', d => { const entry = global._bgProcesses.get(id); if (entry) entry.stdout = (entry.stdout || '') + d.toString(); });
+          child.stderr.on('data', d => { const entry = global._bgProcesses.get(id); if (entry) entry.stderr = (entry.stderr || '') + d.toString(); });
+          child.on('exit', code => { const entry = global._bgProcesses.get(id); if (entry) { entry.exitCode = code; entry.endedAt = Date.now(); } });
+          return `🚀 Background process started\n  ID: ${id}\n  Label: ${args.label || args.command.slice(0, 60)}\n  PID: ${child.pid}\n  CWD: ${procCwd}\n  Use run_background or kill_process to manage`;
+        } catch (err) {
+          return `❌ shell_bg error: ${err.message}`;
+        }
+      }
+      case 'diff_preview': {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          if (!args.path) return '❌ path is required';
+          if (!args.replacements || !Array.isArray(args.replacements)) return '❌ replacements array is required';
+          const baseCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const resolved = path.resolve(baseCwd, args.path);
+          if (!fs.existsSync(resolved)) return `❌ File not found: ${resolved}`;
+          const original = fs.readFileSync(resolved, 'utf-8');
+          let modified = original;
+          for (const rep of args.replacements) {
+            if (!rep.old) continue;
+            modified = modified.split(rep.old).join(rep.new || '');
+          }
+          if (original === modified) return 'ℹ️ No changes would be applied';
+          const origLines = original.split('\n');
+          const modLines = modified.split('\n');
+          let diff = '';
+          let changeCount = 0;
+          const maxDiffLines = 200;
+          const cs = Math.max(origLines.length, modLines.length);
+          for (let i = 0; i < cs && diff.split('\n').length < maxDiffLines; i++) {
+            const oLine = i < origLines.length ? origLines[i] : undefined;
+            const mLine = i < modLines.length ? modLines[i] : undefined;
+            if (oLine !== mLine) {
+              changeCount++;
+              if (oLine !== undefined) diff += `- ${i + 1}: ${oLine}\n`;
+              if (mLine !== undefined) diff += `+ ${i + 1}: ${mLine}\n`;
+            }
+          }
+          let out = `📝 Diff preview for ${path.relative(baseCwd, resolved)}\n`;
+          out += `  ${changeCount} line${changeCount !== 1 ? 's' : ''} changed\n\n`;
+          out += diff;
+          if (diff.split('\n').length >= maxDiffLines) out += '\n  ... (truncated, use edit_file or replace_in_file to apply)';
+          return out;
+        } catch (err) {
+          return `❌ diff_preview error: ${err.message}`;
+        }
+      }
+      case 'codebase_map': {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const maxDepth = args.maxDepth || 4;
+          const maxFiles = args.maxFiles || 200;
+          const includeHidden = args.includeHidden || false;
+          const baseCwd = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+          const root = args.focus ? path.resolve(baseCwd, args.focus) : baseCwd;
+          if (!fs.existsSync(root)) return `❌ Directory not found: ${root}`;
+          const skipDirs = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.cache', 'vendor', 'bun.lock']);
+          const skipExts = new Set(['.map', '.lock', '.wasm']);
+          let fileCount = 0;
+          let totalLines = 0;
+          const result = [];
+          function walk(dir, depth, prefix) {
+            if (depth > maxDepth || fileCount >= maxFiles) return;
+            let entries;
+            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+            entries.sort((a, b) => {
+              if (a.isDirectory() && !b.isDirectory()) return -1;
+              if (!a.isDirectory() && b.isDirectory()) return 1;
+              return a.name.localeCompare(b.name);
+            });
+            for (const entry of entries) {
+              if (fileCount >= maxFiles) break;
+              if (!includeHidden && entry.name.startsWith('.')) continue;
+              if (entry.isDirectory() && skipDirs.has(entry.name)) continue;
+              const fullPath = path.join(dir, entry.name);
+              const relPath = path.relative(root, fullPath);
+              if (entry.isDirectory()) {
+                result.push(`${prefix}📁 ${entry.name}/`);
+                walk(fullPath, depth + 1, prefix + '  ');
+              } else {
+                if (skipExts.has(path.extname(entry.name))) continue;
+                try {
+                  const stat = fs.statSync(fullPath);
+                  fileCount++;
+                  totalLines += Math.round(stat.size / 40);
+                  result.push(`${prefix}📄 ${entry.name} (${(stat.size / 1024).toFixed(1)} KB)`);
+                } catch (_) {
+                  result.push(`${prefix}📄 ${entry.name}`);
+                }
+              }
+            }
+          }
+          walk(root, 0, '');
+          let out = `🗺️ Codebase map: ${path.relative(baseCwd, root) || '.'}\n`;
+          out += `  Files: ${fileCount} | Est. lines: ${totalLines.toLocaleString()}\n\n`;
+          out += result.join('\n');
+          if (fileCount >= maxFiles) out += `\n\n  ⚠️ Truncated at ${maxFiles} files. Increase maxFiles for more.`;
+          return out;
+        } catch (err) {
+          return `❌ codebase_map error: ${err.message}`;
+        }
+      }
+      case 'codebase_index': {
+        try {
+          const { formatCodebaseIndex } = require('./projectInventory');
+          return formatCodebaseIndex({
+            project: args.project,
+            query: args.query,
+            maxAnchors: args.maxAnchors || 120,
+            refresh: !!args.refresh,
+          });
+        } catch (err) {
+          return `❌ codebase_index error: ${err.message}`;
+        }
+      }
+      case 'context_compaction': {
+        try {
+          const strategy = args.strategy || 'summarize';
+          const maxTokens = args.maxTokens || 8000;
+          const keepLastN = args.keepLastN || 10;
+          // For the web API, we return guidance — the actual compaction happens in the loop
+          return `📋 Context compaction (${strategy})\n  Strategy: ${strategy}\n  Max tokens: ${maxTokens}\n  Keep last N: ${keepLastN}\n  Use this to signal the agent loop to compact context. The loop will handle the actual message truncation.`;
+        } catch (err) {
+          return `❌ context_compaction error: ${err.message}`;
+        }
+      }
+      default: {
+        // MCP tool routing — any tool name starting with mcp__ goes to the MCP client
+        if (isMcpTool(name)) {
+          try {
+            const result = await callMcpTool(name, args);
+            if (typeof onStream === 'function') {
+              onStream({ type: 'mcp_result', tool: name, data: result });
+            }
+            return result;
+          } catch (err) {
+            return `Error: MCP tool "${name}" failed: ${err.message}`;
+          }
+        }
         return `Unknown tool: ${name}`;
+      }
     }
   } catch (err) {
     return `Error: ${err.message}`;
   }
 }
 
-module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch };
+module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch };

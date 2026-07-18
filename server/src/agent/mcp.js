@@ -133,6 +133,11 @@ function connectServer(serverName, config) {
       // Don't detach — we want the child to die when the parent dies
     });
 
+    // Prevent EPIPE crashes — swallow stdin errors when child exits
+    child.stdin.on('error', () => {});
+    child.stdout.on('error', () => {});
+    child.stderr.on('error', () => {});
+
     const server = {
       name: serverName,
       config,
@@ -180,10 +185,14 @@ function connectServer(serverName, config) {
         // Give npx-based servers time to download/install on first run
         // Direct binaries start instantly — no delay needed
         const isNpx = config.command === 'npx' || config.command === 'npx.cmd';
+        const isBun = config.command.endsWith('bun') || config.command.endsWith('/bun');
         if (isNpx) {
           const pkgName = config.args && config.args.length > 1 ? config.args[1] : '';
           _logFn(`  [MCP:${serverName}] npx starting${pkgName ? ` ${pkgName}` : ''}...`);
           await new Promise(r => setTimeout(r, 8000)); // 8s for npx package resolution
+        } else if (isBun) {
+          _logFn(`  [MCP:${serverName}] bun starting...`);
+          await new Promise(r => setTimeout(r, 2000)); // 2s for bun to warm up
         }
 
         // Step 1: Send "initialize" request

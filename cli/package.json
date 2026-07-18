@@ -1,7 +1,7 @@
 {
   "name": "hakster-cli",
   "version": "0.1.0",
-  "description": "haksterAi CLI — manage files, sessions, and agent interactions from the terminal",
+  "description": "haksterAi CLI — pentester AI agent shell with streaming chat, tool loop, file management, and Guardian pentest commands",
   "main": "index.js",
   "bin": {
     "hakster": "./index.js",
@@ -13,6 +13,6 @@
   "dependencies": {
     "commander": "^12.0.0"
   },
-  "keywords": ["hakster", "cli", "ai", "agent"],
+  "keywords": ["hakster", "cli", "ai", "agent", "pentest", "mcp", "terminal"],
   "license": "MIT"
 }

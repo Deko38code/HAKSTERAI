@@ -376,14 +376,30 @@ function sendSecurityNotifications(persistentAlerts) {
 }
 
 async function runScheduledAudit(serverDir, corsOrigins) {
+  // BUG FIX: The background audit was catching errors but silently swallowing
+  // them. Now we retry once with a fresh DB handle, and log the full error
+  // (not just .message) so we can actually diagnose persistent failures.
   try {
     const report = await runSecurityAudit(serverDir, corsOrigins);
     const { newAlerts, persistentAlerts, resolved } = persistFindings(report.findings);
     sendSecurityNotifications(persistentAlerts);
     return { report, newAlerts, persistentAlerts, resolved };
   } catch (err) {
-    console.error('[security] Scheduled audit failed:', err.message);
-    return null;
+    console.error('[security] Scheduled audit failed (attempt 1):', err.message);
+    // Retry once — the DB may have been momentarily locked by a concurrent write
+    try {
+      // Force a fresh DB connection to recover from stale-locked state
+      const { resetDb } = require('./db');
+      if (typeof resetDb === 'function') resetDb();
+      const report = await runSecurityAudit(serverDir, corsOrigins);
+      const { newAlerts, persistentAlerts, resolved } = persistFindings(report.findings);
+      sendSecurityNotifications(persistentAlerts);
+      console.log('[security] Scheduled audit succeeded on retry.');
+      return { report, newAlerts, persistentAlerts, resolved };
+    } catch (err2) {
+      console.error('[security] Scheduled audit failed (attempt 2, giving up):', err2.message, err2.stack);
+      return null;
+    }
   }
 }
 

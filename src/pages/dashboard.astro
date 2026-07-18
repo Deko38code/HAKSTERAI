@@ -230,6 +230,14 @@ import Layout from '../layouts/Layout.astro';
       </div>
     </div>
 
+    <!-- Token Usage by Google User -->
+    <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
+      <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+        🔢 Token Usage by Google User
+      </h2>
+      <div id="user-token-breakdown" class="space-y-3"></div>
+    </div>
+
     <!-- Recent Users & Activity Log -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
       <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
@@ -291,6 +299,10 @@ import Layout from '../layouts/Layout.astro';
         },
       });
     }
+    function authHeaders() {
+      const token = localStorage.getItem('hakster_google_token');
+      return token ? { 'x-api-key': token } : {};
+    }
     let dashboardSeq = 0;
     let dashboardRefreshTimer = null;
     function queueDashboardRefresh(delay) {
@@ -305,7 +317,11 @@ import Layout from '../layouts/Layout.astro';
     async function loadDashboard() {
       const seq = ++dashboardSeq;
       try {
-        const res = await liveFetch('/api/dashboard?live=1&compact=1');
+        const res = await liveFetch('/api/dashboard?live=1&compact=1', { headers: authHeaders() });
+        if (res.status === 401 || res.status === 403) {
+          window.location.href = res.status === 403 ? '/portal' : '/';
+          return;
+        }
         if (!res.ok) throw new Error('dashboard status ' + res.status);
         const data = await res.json();
         if (seq !== dashboardSeq) return;
@@ -483,6 +499,39 @@ import Layout from '../layouts/Layout.astro';
           breakdown.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No requests yet — start a chat or run an agent</div>';
         }
 
+        // Token usage by Google user
+        const userBreakdown = document.getElementById('user-token-breakdown');
+        if (userBreakdown) {
+          const rows = data.requests?.byUser || [];
+          if (rows.length > 0) {
+            const maxTokens = Math.max(...rows.map(u => (u.inputTokens || 0) + (u.outputTokens || 0)), 1);
+            userBreakdown.innerHTML = rows.map(u => {
+              const total = (u.inputTokens || 0) + (u.outputTokens || 0);
+              const pct = Math.max(2, Math.min(100, (total / maxTokens) * 100));
+              const label = u.label || 'unknown user';
+              const sub = [u.role || 'user', u.plan || 'free'].join(' · ');
+              const last = u.lastUsedAt ? new Date(u.lastUsedAt * 1000).toLocaleString() : 'never';
+              return `<div>
+                <div class="flex justify-between gap-3 text-sm mb-1">
+                  <div class="min-w-0">
+                    <div class="font-medium truncate">${escapeHtml(label)}</div>
+                    <div class="text-[10px] text-[#64748b] truncate">${escapeHtml(sub)} · ${u.requests || 0} runs · ${u.toolCalls || 0} tools · ${escapeHtml(last)}</div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="text-[#ffd700] font-mono">${fmtNum(total)}</div>
+                    <div class="text-[10px] text-[#64748b]">${fmtNum(u.inputTokens || 0)} in / ${fmtNum(u.outputTokens || 0)} out</div>
+                  </div>
+                </div>
+                <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-[#ffd700] to-[#7c3aed] rounded-full transition-all duration-500" style="width:${pct}%"></div>
+                </div>
+              </div>`;
+            }).join('');
+          } else {
+            userBreakdown.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No Google-linked token usage yet.</div>';
+          }
+        }
+
       } catch (err) {
         console.error('Dashboard load failed:', err);
         document.getElementById('status-badge').textContent = 'error';
@@ -501,11 +550,13 @@ import Layout from '../layouts/Layout.astro';
         if (!res.ok) throw new Error('memory status ' + res.status);
         const data = await res.json();
         const entries = data.entries || data.memories || [];
-        setText('mem-total', entries.length.toLocaleString());
-        const cats = new Set(entries.map(e => e.category || 'general'));
-        setText('mem-categories', cats.size.toLocaleString());
+        const stats = data.stats || {};
+        const total = Number(stats.total ?? entries.length ?? 0);
+        setText('mem-total', total.toLocaleString());
+        const categoryCount = Array.isArray(stats.byCategory) ? stats.byCategory.length : new Set(entries.map(e => e.category || 'general')).size;
+        setText('mem-categories', categoryCount.toLocaleString());
         setText('mem-last-compact', data.lastCompact || 'Never');
-        const pct = Math.min(100, Math.round((entries.length / 100) * 100));
+        const pct = Math.min(100, Math.round(Number(stats.contextUsagePct ?? (total / 40) * 100)));
         setText('mem-context-pct', pct + '%');
         setWidth('mem-context-bar', pct + '%');
       } catch {
@@ -581,9 +632,13 @@ import Layout from '../layouts/Layout.astro';
     // Recent users with IP tracking
     async function loadRecentUsers() {
       try {
-        const res = await liveFetch('/api/users/recent?limit=20');
-        const data = await res.json();
+        const res = await liveFetch('/api/users/recent?limit=20', { headers: authHeaders() });
         const list = document.getElementById('recent-users-list');
+        if (!res.ok) {
+          list.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">Admin sign-in required.</div>';
+          return;
+        }
+        const data = await res.json();
         if (!data.users || data.users.length === 0) {
           list.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No users yet</div>';
           return;
@@ -598,15 +653,15 @@ import Layout from '../layouts/Layout.astro';
           return `<div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3 hover:border-[#7c3aed]/30 transition-colors">
             <div class="flex items-center justify-between mb-1">
               <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-white/80">${u.username}${badge}</span>
-                <span class="text-[8px] ${statusColor} px-1.5 py-0.5 rounded-full bg-[#1e1e2e]">${u.status}</span>
+                <span class="text-sm font-medium text-white/80">${escapeHtml(u.username)}${badge}</span>
+                <span class="text-[8px] ${statusColor} px-1.5 py-0.5 rounded-full bg-[#1e1e2e]">${escapeHtml(u.status)}</span>
               </div>
               <span class="text-[10px] text-[#64748b]">${created.toLocaleDateString()} ${created.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
             </div>
-            <div class="text-xs text-[#64748b]">${u.email || '—'}</div>
+            <div class="text-xs text-[#64748b]">${escapeHtml(u.email || '—')}</div>
             <div class="flex items-center justify-between mt-1.5 text-[10px] text-[#4b5563]">
-              <span>🌐 ${u.last_ip || u.last_login_ip || '—'}</span>
-              <span>📱 ${deviceInfo}</span>
+              <span>🌐 ${escapeHtml(u.last_ip || u.last_login_ip || '—')}</span>
+              <span>📱 ${escapeHtml(deviceInfo)}</span>
             </div>
             <div class="flex items-center justify-between mt-1 text-[10px] text-[#4b5563]">
               <span>🔑 ${u.login_count || 0} logins</span>
@@ -624,9 +679,13 @@ import Layout from '../layouts/Layout.astro';
     // Activity log
     async function loadActivityLog() {
       try {
-        const res = await liveFetch('/api/users/activity?limit=50');
-        const data = await res.json();
+        const res = await liveFetch('/api/users/activity?limit=50', { headers: authHeaders() });
         const list = document.getElementById('activity-log-list');
+        if (!res.ok) {
+          list.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">Admin sign-in required.</div>';
+          return;
+        }
+        const data = await res.json();
         if (!data.activity || data.activity.length === 0) {
           list.innerHTML = '<div class="text-sm text-[#64748b] text-center py-4">No activity yet</div>';
           return;
@@ -649,10 +708,10 @@ import Layout from '../layouts/Layout.astro';
             <span class="${color}">${icon}</span>
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between">
-                <span class="${color} font-medium">${a.action}</span>
+                <span class="${color} font-medium">${escapeHtml(a.action)}</span>
                 <span class="text-[#4b5563] text-[10px]">${time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
               </div>
-              <div class="text-[#64748b] text-[10px] truncate">${a.username || a.email || 'anonymous'} · 🌐 ${ip}${device ? ' · 📱 ' + device : ''}</div>
+              <div class="text-[#64748b] text-[10px] truncate">${escapeHtml(a.username || a.email || 'anonymous')} · 🌐 ${escapeHtml(ip)}${device ? ' · 📱 ' + escapeHtml(device) : ''}</div>
             </div>
           </div>`;
         }).join('');

@@ -1,0 +1,353 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="haksterAi Portal">
+  <div class="min-h-screen pt-[60px] bg-[#0a0a0f] text-[#e2e8f0] px-4 py-6 max-w-7xl mx-auto">
+    <!-- Breadcrumb nav -->
+    <nav class="flex items-center gap-2 text-xs text-[#64748b] mb-4">
+      <a href="/" class="hover:text-[#7c3aed] transition-colors">🏠 Home</a>
+      <span>›</span>
+      <span class="text-[#7c3aed] font-medium">🌐 Portal</span>
+    </nav>
+
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-2 h-8 bg-[#f39c12] rounded-full"></div>
+      <h1 class="text-2xl font-bold tracking-tight">🌐 Portal Hub</h1>
+      <span class="text-xs text-[#64748b] bg-[#111118] px-2 py-1 rounded-full border border-[#1e1e2e]" id="portal-status">connecting...</span>
+      <a href="/" class="ml-auto text-xs bg-[#111118] text-[#cbd5e1] hover:text-[#7c3aed] hover:bg-[#1e1e2e] px-3 py-1.5 rounded-lg border border-[#1e1e2e] hover:border-[#7c3aed]/40 transition-colors flex items-center gap-1.5">
+        🏠 Home
+      </a>
+      <a href="/dashboard" data-admin-only="true" class="text-xs bg-[#111118] text-[#cbd5e1] hover:text-[#7c3aed] hover:bg-[#1e1e2e] px-3 py-1.5 rounded-lg border border-[#1e1e2e] hover:border-[#7c3aed]/40 transition-colors hidden items-center gap-1.5">
+        📊 Dashboard
+      </a>
+      <a href="/build" class="text-xs bg-[#7c3aed]/20 text-[#7c3aed] hover:bg-[#7c3aed]/30 px-3 py-1.5 rounded-lg border border-[#7c3aed]/30 transition-colors flex items-center gap-1.5">
+        💬 Chat
+      </a>
+    </div>
+
+    <!-- Portal Intro -->
+    <div class="bg-gradient-to-br from-[#111118] to-[#0d0d14] border border-[#f39c12]/30 rounded-xl p-6 mb-6">
+      <div class="flex items-start gap-4">
+        <div class="text-4xl">🌐</div>
+        <div>
+          <h2 class="text-lg font-bold mb-2">haksterAi Portal Center</h2>
+          <p class="text-sm text-[#64748b]">Real-time usage metrics, session tracking, and live dashboard analytics. Monitor your haksterAi deployment across all services.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Usage Tab Navigation -->
+    <div class="flex gap-2 mb-6 overflow-x-auto pb-2 border-b border-[#1e1e2e]">
+      <button onclick="switchUsageTab('overview')" class="usage-tab text-xs bg-[#f39c12]/10 text-[#f39c12] border-b-2 border-[#f39c12] px-3 py-1.5 rounded-none hover:bg-[#f39c12]/20 transition-colors whitespace-nowrap font-medium" data-tab="overview">📊 Overview</button>
+      <button onclick="switchUsageTab('tokens')" class="usage-tab text-xs bg-transparent text-[#64748b] border-b-2 border-transparent px-3 py-1.5 rounded-none hover:text-[#a855f7] transition-colors whitespace-nowrap font-medium" data-tab="tokens">🔢 Token Usage</button>
+      <button onclick="switchUsageTab('agents')" class="usage-tab text-xs bg-transparent text-[#64748b] border-b-2 border-transparent px-3 py-1.5 rounded-none hover:text-[#a855f7] transition-colors whitespace-nowrap font-medium" data-tab="agents">🤖 Agent Activity</button>
+      <button onclick="switchUsageTab('providers')" class="usage-tab text-xs bg-transparent text-[#64748b] border-b-2 border-transparent px-3 py-1.5 rounded-none hover:text-[#a855f7] transition-colors whitespace-nowrap font-medium" data-tab="providers">⚡ Providers</button>
+      <button onclick="switchUsageTab('trends')" class="usage-tab text-xs bg-transparent text-[#64748b] border-b-2 border-transparent px-3 py-1.5 rounded-none hover:text-[#a855f7] transition-colors whitespace-nowrap font-medium" data-tab="trends">📈 Trends</button>
+    </div>
+
+    <!-- Quick Stats Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-6">
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-3 hover:border-[#f39c12]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">📨 Requests</div>
+        <div class="text-xl font-bold text-[#7c3aed]" id="portal-requests">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-3 hover:border-[#f39c12]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">💬 Sessions</div>
+        <div class="text-xl font-bold text-[#00bfff]" id="portal-sessions">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-3 hover:border-[#f39c12]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">📝 Messages</div>
+        <div class="text-xl font-bold text-[#ff6bff]" id="portal-messages">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-3 hover:border-[#f39c12]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">🔢 Tokens</div>
+        <div class="text-xl font-bold text-[#ffd700]" id="portal-tokens">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-3 hover:border-[#f39c12]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">🎨 Artifacts</div>
+        <div class="text-xl font-bold text-[#ff6b6b]" id="portal-artifacts">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-3 hover:border-[#f39c12]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">🤖 AI Sessions</div>
+        <div class="text-xl font-bold text-[#a855f7]" id="portal-ai-sessions">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-3 hover:border-[#f39c12]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">⚡ Commands</div>
+        <div class="text-xl font-bold text-[#00ff88]" id="portal-commands">—</div>
+      </div>
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-3 hover:border-[#f39c12]/40 transition-colors">
+        <div class="text-xs text-[#64748b] uppercase tracking-wider mb-1">💾 Memory</div>
+        <div class="text-xl font-bold text-[#38bdf8]" id="portal-memory">—</div>
+      </div>
+    </div>
+
+    <!-- Usage Metrics Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+      <!-- Request Trends -->
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h3 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          Token Usage
+        </h3>
+        <div class="space-y-3">
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <span class="text-[#64748b]">Input Tokens</span>
+              <span id="portal-input-tokens" class="font-bold text-[#00ff88]">—</span>
+            </div>
+            <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+              <div id="portal-input-bar" class="h-full bg-gradient-to-r from-[#00ff88] to-[#00ffcc] rounded-full transition-all duration-500" style="width:0%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <span class="text-[#64748b]">Output Tokens</span>
+              <span id="portal-output-tokens" class="font-bold text-[#ff6bff]">—</span>
+            </div>
+            <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+              <div id="portal-output-bar" class="h-full bg-gradient-to-r from-[#ff6bff] to-[#ff88cc] rounded-full transition-all duration-500" style="width:0%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <span class="text-[#64748b]">Total Tokens</span>
+              <span id="portal-total-tokens" class="font-bold text-[#ffd700]">—</span>
+            </div>
+            <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+              <div id="portal-total-bar" class="h-full bg-gradient-to-r from-[#ffd700] to-[#ffed4e] rounded-full transition-all duration-500" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Agent Stats -->
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h3 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          🤖 AI Metrics
+        </h3>
+        <div class="space-y-3 text-sm">
+          <div class="flex justify-between">
+            <span class="text-[#64748b]">Tool Calls</span>
+            <span id="portal-tool-calls" class="font-bold text-[#00ff88]">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-[#64748b]">Unique Tools</span>
+            <span id="portal-unique-tools" class="font-bold text-[#ffd700]">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-[#64748b]">Reasoning Steps</span>
+            <span id="portal-reasoning-steps" class="font-bold text-[#00bfff]">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-[#64748b]">Files Processed</span>
+            <span id="portal-files-processed" class="font-bold text-[#ff6bff]">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-[#64748b]">Completion Tokens</span>
+            <span id="portal-completion-toks" class="font-bold text-[#38bdf8]">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Service Health -->
+      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <h3 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          🟢 Service Health
+        </h3>
+        <div id="portal-services" class="space-y-2 text-sm">
+          <div class="text-[#64748b]">Loading...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Provider Breakdown -->
+    <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
+      <h3 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+        📊 Requests by Provider
+      </h3>
+      <div id="portal-provider-breakdown" class="space-y-3">
+      </div>
+    </div>
+
+    <!-- Active Providers -->
+    <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
+      <h3 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        🧪 Active Providers
+      </h3>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" id="portal-providers-grid">
+      </div>
+    </div>
+
+    <!-- Auto-Refresh Status -->
+    <div class="text-center text-xs text-[#64748b] py-4">
+      <span>Updates every 2 seconds • Last refresh: <span id="portal-last-update">now</span></span>
+    </div>
+  </div>
+
+  <script define:vars={{}}>
+    function switchUsageTab(tab) {
+      // Hide all tab contents
+      document.querySelectorAll('.usage-tab').forEach(btn => {
+        btn.classList.remove('border-[#f39c12]', 'bg-[#f39c12]/10', 'text-[#f39c12]');
+        btn.classList.add('border-transparent', 'bg-transparent', 'text-[#64748b]');
+      });
+      // Set active tab
+      const btn = document.querySelector(`[data-tab="${tab}"]`);
+      if (btn) {
+        btn.classList.remove('border-transparent', 'bg-transparent', 'text-[#64748b]');
+        btn.classList.add('border-[#f39c12]', 'bg-[#f39c12]/10', 'text-[#f39c12]');
+      }
+      console.log('Switched to', tab, 'tab');
+    }
+
+    function fmtNum(n) {
+      n = Number(n || 0);
+      if (n > 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n > 1000) return (n / 1000).toFixed(1) + 'K';
+      return n.toLocaleString();
+    }
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+    function setWidth(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.style.width = value;
+    }
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[ch]));
+    }
+    function liveUrl(path) {
+      const sep = path.includes('?') ? '&' : '?';
+      return path + sep + '_=' + Date.now();
+    }
+    function liveFetch(path, options) {
+      return fetch(liveUrl(path), {
+        cache: 'no-store',
+        ...(options || {}),
+        headers: {
+          'Cache-Control': 'no-cache',
+          ...((options && options.headers) || {}),
+        },
+      });
+    }
+
+    async function loadPortalData() {
+      try {
+        const res = await liveFetch('/api/dashboard?public=1&live=1&compact=1');
+        if (!res.ok) throw new Error('portal status ' + res.status);
+        const data = await res.json();
+
+        // Top quick stats
+        setText('portal-requests', Number(data.requests?.total || 0).toLocaleString());
+        setText('portal-sessions', Number(data.sessions?.total || 0).toLocaleString());
+        setText('portal-messages', Number(data.sessions?.messages || 0).toLocaleString());
+        setText('portal-tokens', fmtNum(data.requests?.totalTokens || 0));
+        setText('portal-artifacts', Number(data.sessions?.artifacts || 0).toLocaleString());
+
+        // AI metrics
+        const cs = data.crush?.stats || {};
+        setText('portal-ai-sessions', Number(cs.sessions || 0).toLocaleString());
+        setText('portal-commands', Number(cs.toolCalls || 0).toLocaleString());
+
+        // Memory (use placeholder)
+        setText('portal-memory', '📦 Live');
+
+        // Token Usage with bars
+        const inputTokens = data.requests?.inputTokens || 0;
+        const outputTokens = data.requests?.outputTokens || 0;
+        const totalTokens = data.requests?.totalTokens || 0;
+        setText('portal-input-tokens', fmtNum(inputTokens));
+        setText('portal-output-tokens', fmtNum(outputTokens));
+        setText('portal-total-tokens', fmtNum(totalTokens));
+
+        // Simple bar sizing (normalize to 100px max)
+        const maxTokens = Math.max(inputTokens, outputTokens, totalTokens, 10000);
+        setWidth('portal-input-bar', Math.min(100, (inputTokens / maxTokens) * 100) + '%');
+        setWidth('portal-output-bar', Math.min(100, (outputTokens / maxTokens) * 100) + '%');
+        setWidth('portal-total-bar', Math.min(100, (totalTokens / maxTokens) * 100) + '%');
+
+        // AI Metrics
+        setText('portal-tool-calls', Number(cs.toolCalls || 0).toLocaleString());
+        setText('portal-unique-tools', Number(cs.uniqueTools || 0).toLocaleString());
+        setText('portal-reasoning-steps', Number(cs.reasoningSteps || 0).toLocaleString());
+        setText('portal-files-processed', Number(cs.files || 0).toLocaleString());
+        setText('portal-completion-toks', fmtNum(cs.completionTokens || 0));
+
+        // Services health
+        const servicesGrid = document.getElementById('portal-services');
+        const services = (data.services || []).slice(0, 3);
+        if (services.length > 0) {
+          servicesGrid.innerHTML = services.map(s => {
+            const statusColor = s.status === 'running' ? 'text-[#00ff88]' : 'text-[#ff4444]';
+            return `<div class="flex justify-between items-center">
+              <span class="flex items-center gap-1.5"><span class="${statusColor}">●</span><span class="text-[#64748b]">${escapeHtml(s.name || 'Service')} :${s.port}</span></span>
+              <span class="text-[10px] font-mono text-[#ffd700]">${s.status}</span>
+            </div>`;
+          }).join('');
+        }
+
+        // Provider breakdown
+        const breakdown = document.getElementById('portal-provider-breakdown');
+        if (data.requests.byProvider && data.requests.byProvider.length > 0) {
+          const maxReqs = Math.max(...data.requests.byProvider.map(p => p.requests || 1));
+          breakdown.innerHTML = data.requests.byProvider.map(p => {
+            const pct = maxReqs > 0 ? (p.requests / maxReqs * 100) : 0;
+            return `<div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="font-medium">${escapeHtml(p.provider)}</span>
+                <span class="text-[#64748b]">${p.requests} req · ${fmtNum((p.inputTokens || 0) + (p.outputTokens || 0))} tokens</span>
+              </div>
+              <div class="w-full h-1.5 bg-[#1e1e2e] rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-[#7c3aed] to-[#a855f7] rounded-full transition-all duration-500" style="width:${pct}%"></div>
+              </div>
+            </div>`;
+          }).join('');
+        } else {
+          breakdown.innerHTML = '<div class="text-xs text-[#64748b] text-center py-4">No provider data yet</div>';
+        }
+
+        // Providers grid
+        const providersGrid = document.getElementById('portal-providers-grid');
+        const provIcons = { ollama: '🦙', anthropic: '🤖', openai: '⚡', openrouter: '🌐', hermes: '🔥', 'claude-proxy': '🔮', codex: '🧠', nous: '✨' };
+        providersGrid.innerHTML = (data.providers || []).map(p => {
+          const icon = provIcons[p.id] || '🧠';
+          const isActive = p.id === (data.crush?.provider);
+          const borderClass = isActive ? 'border-[#7c3aed]' : 'border-[#1e1e2e]';
+          const activeBadge = isActive ? '<span class="text-[8px] bg-[#7c3aed] text-white px-1.5 py-0.5 rounded-full ml-auto ml-2">✓</span>' : '';
+          return `<div class="bg-[#0a0a0f] border ${borderClass} rounded-lg px-3 py-2">
+            <div class="flex items-center gap-1.5">
+              <span class="text-lg">${icon}</span>
+              <span class="text-xs font-medium">${escapeHtml(p.name)}</span>
+              ${activeBadge}
+            </div>
+            <div class="text-[10px] text-[#64748b] font-mono mt-0.5">${escapeHtml(p.defaultModel)}</div>
+          </div>`;
+        }).join('');
+
+        // Status badge
+        document.getElementById('portal-status').textContent = '✓ live';
+        document.getElementById('portal-status').className = 'text-xs text-[#00ff88] bg-[#111118] px-2 py-1 rounded-full border border-[#00ff88]/30';
+        setText('portal-last-update', new Date().toLocaleTimeString());
+      } catch (err) {
+        console.error('Portal load failed:', err);
+        document.getElementById('portal-status').textContent = '✗ error';
+        document.getElementById('portal-status').className = 'text-xs text-[#ff4444] bg-[#111118] px-2 py-1 rounded-full border border-[#ff4444]/30';
+      }
+    }
+
+    loadPortalData();
+    setInterval(loadPortalData, 2000);
+  </script>
+</Layout>

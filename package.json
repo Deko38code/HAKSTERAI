@@ -1,8 +1,8 @@
 {
   "name": "haksterai",
   "type": "module",
-  "version": "0.0.1",
-  "description": "haksterAI web app and universal CLI agent shell",
+  "version": "0.1.0",
+  "description": "haksterAi — pentester AI agent platform with web dashboard, CLI shell, MCP tool loop, and streaming chat",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -43,9 +43,10 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "cli": "node haksterai-cli.cjs",
+    "cli": "node cli/index.js",
     "dashboard": "node tui-dashboard.cjs",
-    "server": "cd server && node src/index.js"
+    "server": "cd server && node src/index.js",
+    "postinstall": "node -e \"try{require('fs').chmodSync(require('path').join(__dirname,'cli','index.js'),0o755)}catch{}\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.2",
@@ -56,5 +57,32 @@
     "commander": "^11.1.0",
     "puppeteer": "^25.3.0",
     "tailwindcss": "^4.3.2"
-  }
+  },
+  "keywords": [
+    "hakster",
+    "haksterai",
+    "cli",
+    "ai",
+    "agent",
+    "pentest",
+    "pentesting",
+    "mcp",
+    "tool-loop",
+    "streaming",
+    "ollama",
+    "security",
+    "recon",
+    "nmap",
+    "terminal"
+  ],
+  "author": "Deko38code",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Deko38code/HAKSTERAI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Deko38code/HAKSTERAI/issues"
+  },
+  "homepage": "https://github.com/Deko38code/HAKSTERAI#readme"
 }

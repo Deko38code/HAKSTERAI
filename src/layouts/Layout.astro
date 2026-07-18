@@ -49,7 +49,8 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
         <div class="hidden md:flex items-center gap-2 bg-[#111118]/80 border border-[#1e1e2e] rounded-full px-2 py-1.5 backdrop-blur-sm">
           <a href="/labs" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#a855f7] hover:bg-[#7c3aed]/10 transition-all flex items-center gap-1.5"><span>🧪</span> Labs</a>
           <a href="/hack" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#00ff88] hover:bg-[#00ff88]/10 transition-all flex items-center gap-1.5"><span>⚡</span> Hack Lab</a>
-          <a href="/dashboard" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5"><span>📊</span> Dashboard</a>
+          <a href="/portal" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#f39c12] hover:bg-[#f39c12]/10 transition-all flex items-center gap-1.5"><span>🌐</span> Portal</a>
+          <a href="/dashboard" data-admin-only="true" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all hidden items-center gap-1.5"><span>📊</span> Dashboard</a>
           <a href="/terminal" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#a855f7] hover:bg-[#7c3aed]/10 transition-all flex items-center gap-1.5"><span>⌨️</span> Terminal</a>
           <a href="/build" class="nav-link requires-auth px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5"><span>💬</span> Chat</a>
         </div>
@@ -105,7 +106,8 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
       >
       <div class="mx-auto max-w-6xl px-6 py-4 flex flex-col gap-4">
         <a href="/hack" class="mobile-nav-link requires-auth text-sm font-semibold text-[#00ff88] hover:text-[#a855f7] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>⚡</span> Hack Lab</a>
-        <a href="/dashboard" class="mobile-nav-link requires-auth text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>📊</span> Dashboard</a>
+        <a href="/portal" class="mobile-nav-link requires-auth text-sm font-medium text-[#f39c12] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>🌐</span> Portal</a>
+        <a href="/dashboard" data-admin-only="true" class="mobile-nav-link requires-auth text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] hidden items-center gap-2"><span>📊</span> Dashboard</a>
         <a href="/terminal" class="mobile-nav-link requires-auth text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>⌨️</span> Terminal</a>
         <a href="/build" class="mobile-nav-link requires-auth text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2"><span>💬</span> Chat</a>
         <!-- Mobile user badge + logout -->
@@ -167,7 +169,7 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
           <div class="flex items-center gap-6 text-sm text-[#64748b]">
             <a href="/hack" class="hover:text-[#00ff88] transition-colors text-[#00ff88] font-semibold">⚡ Hack Lab</a>
             <a href="/terminal" class="hover:text-[#a855f7] transition-colors">⌨️ Terminal</a>
-            <a href="/dashboard" class="hover:text-[#e2e8f0] transition-colors">📊 Dashboard</a>
+            <a href="/portal" class="hover:text-[#e2e8f0] transition-colors">🌐 Portal</a>
             <a href="/build" class="hover:text-[#e2e8f0] transition-colors">💬 Chat</a>
             <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="hover:text-[#e2e8f0] transition-colors">GitHub</a>
           </div>
@@ -192,6 +194,17 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
         const authParam = new URLSearchParams(window.location.search).get('google_auth');
         if (!token && !authParam) {
           window.location.href = '/';
+        }
+        if (path === '/dashboard' || path === '/dashboard/') {
+          if (!token) return;
+          fetch('/api/auth/authorize-page?page=dashboard', { headers: { 'x-api-key': token } })
+            .then(async (res) => {
+              if (res.ok) return;
+              let data = {};
+              try { data = await res.json(); } catch {}
+              window.location.href = data.redirect || '/portal';
+            })
+            .catch(() => { window.location.href = '/portal'; });
         }
       })();
 
@@ -293,6 +306,10 @@ const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname)
               picture: dbUser.picture || '',
             }));
             renderUserBadge(dbUser);
+            document.querySelectorAll('[data-admin-only="true"]').forEach((el) => {
+              el.classList.toggle('hidden', dbUser.role !== 'admin');
+              el.classList.toggle('flex', dbUser.role === 'admin');
+            });
           })
           .catch(() => {});
 

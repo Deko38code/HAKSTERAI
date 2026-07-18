@@ -76,6 +76,11 @@ import Layout from '../../layouts/Layout.astro';
         .replace(/"/g, '&quot;');
     }
 
+    function authHeaders() {
+      const token = localStorage.getItem('hakster_google_token');
+      return token ? { 'x-api-key': token } : {};
+    }
+
     function renderRows(users) {
       const tbody = document.getElementById('users-body');
       if (!users.length) {
@@ -131,10 +136,18 @@ import Layout from '../../layouts/Layout.astro';
 
     async function load() {
       try {
+        const headers = authHeaders();
         const [usersRes, logsRes] = await Promise.all([
-          fetch(`${API}/api/users`),
-          fetch(`${API}/api/access-logs?limit=1000`)
+          fetch(`${API}/api/users`, { headers }),
+          fetch(`${API}/api/access-logs?limit=1000`, { headers })
         ]);
+
+        if (!usersRes.ok || !logsRes.ok) {
+          document.getElementById('users-body').innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-[#ef4444]">Admin sign-in required.</td></tr>`;
+          document.getElementById('users-count').textContent = '0 users';
+          document.getElementById('logs-count').textContent = '0 access logs';
+          return;
+        }
 
         const usersData = await usersRes.json();
         const logsData = await logsRes.json();

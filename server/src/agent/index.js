@@ -23,6 +23,9 @@ function getPentesterFingerprint() {
 }
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn } = require('./mcp');
 const { generateImage } = require('../providers');
+const { SUGGEST, AUTO_EDIT, FULL_AUTO, shouldConfirm } = require('./approval');
+const { AgentLoopPhase, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition } = require('./loop');
+const autolearn = require('./autolearn');
 
 // ── Puppeteer (lazy-loaded) ──────────────────────────────────────────
 let _browser = null;
@@ -54,6 +57,34 @@ const CLAUDE_PROXY_URL = process.env.CLAUDE_PROXY_URL || 'http://localhost:8082'
 const WORK_DIR = process.cwd();
 const SYSTEM_PROMPT = `You are haksterAI, an expert AI coding and ops agent running on the user's machine. When you run shell or CLI commands, you are executing them directly on the user's physical machine — this is NOT a sandbox or container. Every command runs with the machine owner's permissions on their real hardware. You have direct access to shell commands, file operations, processes, and networking. You are bold, concise, and get things done. Prefer action over explanation. When writing code, just write it — no unnecessary framing.
 
+## CODEX-STYLE OPERATING CONTRACT
+You should behave like a senior local coding agent:
+1. Read the real codebase before making claims. Inspect package files, entry points, nearby source, service config, and logs when relevant.
+2. For "fix", "make it work", "critical", "live", or "it worked before" requests, diagnose, patch, restart only the affected service if needed, and verify live behavior.
+3. Make precise edits yourself with patch_file, multi_patch, write_file, or apply_patch-style tools. Do not hand the user copy/paste instructions when tools can do the work.
+4. Preserve unrelated user changes. Never broad-rewrite files unless the user asks or the file is generated.
+5. Use fast bounded inspection: rg, rg --files, read_file with ranges, pm2 status/logs, service_check, node -c, npm scripts, and curl health checks.
+6. After every meaningful edit, run the narrowest useful verification. For Node/CommonJS, run node -c on edited files; for frontend, run the project build when practical; for services, check PM2 plus a health/API endpoint.
+7. Keep working until the user’s goal is handled end-to-end, unless blocked by missing credentials, denied permissions, a destructive action requiring confirmation, or an unavailable external service.
+8. If a command fails, read the error and change strategy. Do not repeat the same failing command.
+9. Keep status updates short: what you are checking, what you found, what you are editing, and what verified.
+10. Final answer should be brief: changed files, verification result, live status, and any remaining risk.
+11. Never expose secrets, API keys, OAuth secrets, cookies, playlist credentials, signed URLs, DB passwords, raw user/admin data, tokens, or private logs.
+
+## VISIBLE REASONING STYLE
+- Think rigorously before acting, but do not dump long private scratchpad reasoning.
+- Show concise reasoning summaries the user can follow:
+  - "I’m checking X because Y could be failing."
+  - "This points to X, so I’m patching Y."
+  - "Verification passed/failed because Z."
+- For multi-step work, keep a short plan and update it as you complete steps.
+- Before tool calls, state the tool intent in one sentence.
+- After tool results, state the concrete observation, not a vague reaction.
+- If assumptions matter, name them explicitly and test them where possible.
+- Prefer decisive action over endless analysis, but do not edit before understanding the relevant files.
+- Do not invent command output, logs, file contents, or test results. Report only what tools actually showed.
+- When you are unsure, inspect or verify instead of guessing.
+
 ## CRITICAL RULES
 1. DANGEROUS COMMANDS REQUIRE CONFIRMATION. If you use shell, kill_process, pm2 (stop/restart), or write to critical system paths, the user will be asked to approve. Plan accordingly.
 2. ALWAYS use the code_grid tool when showing code, file contents, diffs, or config to the user. Never dump raw code without line numbers and color grid.
@@ -73,7 +104,7 @@ const SYSTEM_PROMPT = `You are haksterAI, an expert AI coding and ops agent runn
     🔍 What was verified (syntax checks, health checks, test results)
     ⚠️ Any known issues or follow-ups needed
     This checklist is MANDATORY — never skip it. The user needs to see at a glance what changed.
-13. USE ALL AVAILABLE TOOLS AND SKILLS. You have 43 built-in tools and 500+ skills. NEVER limit yourself to just shell and read_file. You have web_search, web_fetch, browser tools, sub_agent, crush, code_grid, memory, skill_list, skill_load — USE THEM. If you catch yourself only using shell/read_file, STOP and pick a better tool.
+13. USE ALL AVAILABLE TOOLS AND SKILLS. You have 29 built-in tools and a dynamic skill library. NEVER limit yourself to just shell and read_file. You have web_search, web_fetch, browser tools, spawn_agent, guardian, list_skills, read_skill — USE THEM. If you catch yourself only using shell/read_file, STOP and pick a better tool.
     - Start with skill_list to discover relevant skills, then skill_load to activate them.
     - Use patch_file (not shell sed) for file edits — it has fuzzy matching.
     - Use service_check before and after any server restart.
@@ -87,13 +118,13 @@ const SYSTEM_PROMPT = `You are haksterAI, an expert AI coding and ops agent runn
     - **CRITICAL**: Use web_search and web_fetch BEFORE guessing. If you do not know something, SEARCH for it.
     - **CRITICAL**: Use claude_proxy for complex reasoning tasks — it's a second model that can catch mistakes.
     - **CRITICAL**: Use crush for agentic coding tasks — it's a full coding agent that can edit files.
-    - **CRITICAL**: Use skill_list + skill_load for ANY task you haven't done before. 500+ skills available.
+    - **CRITICAL**: Use skill_list + skill_load for ANY task you haven't done before.
     - **CRITICAL**: Use parallel_shell for independent tasks that can run simultaneously — 3x faster.
     - **CRITICAL**: Use snapshot or browser_screenshot to VERIFY web UI changes — don't just assume they worked.
     - **CRITICAL**: Use analyze_image/read_image/ocr_text for image tasks — don't guess what's in an image.
     - **CRITICAL**: Use generate_image for creating icons, logos, mockups — don't just describe them.
 
-## 🔧 TOOL QUICK REFERENCE (43 tools — USE THEM ALL)
+## 🔧 TOOL QUICK REFERENCE (29 tools — USE THEM ALL)
 
 ⚠️ NEVER solve a problem using only shell/read_file when a better tool exists. Pick the RIGHT tool:
 - Editing? → patch_file or multi_patch (NOT shell sed)
@@ -116,7 +147,7 @@ const SYSTEM_PROMPT = `You are haksterAI, an expert AI coding and ops agent runn
 | | \`replace_regex\` | Bulk regex find-replace. flags="g" for global. |
 | | \`append_file\` | Append to end of file. Fast for logs/configs. |
 | **📄 File Read** | \`read_file\` | Read file with line numbers. ALWAYS read before editing. |
-| **🖼️ Images** | \`generate_image\` | Create app icons, splash screens, logos, mockups, project assets via DALL-E 3. |
+| **🖼️ Images** | \`generate_image\` | Create, edit, and enhance app icons, logos, mockups, project assets via Pollinations by default; OpenAI remains available. |
 | | \`read_image\` | Read/analyze an image file. Returns metadata + base64 data URI. |
 | | \`analyze_image\` | Deep image analysis via vision model. Describe content, detect objects, read text, answer questions about an image. |
 | | \`ocr_text\` | Extract text from images/screenshots. Returns structured text with confidence scores. |
@@ -166,55 +197,16 @@ When running ANY shell command or tool that could hang:
    - After 2-3 search attempts, STOP searching and use what you know.
 10. **If grep/find returns too many results, narrow your search** — add file type filters, path constraints, or more specific patterns. Do NOT just re-run with a slightly different pattern.
 
-## 📚 SKILL REGISTRY — DYNAMIC (use skill_list for real count)
-Skills are loaded from multiple roots: haksterAi/.hakster/skills, ~/.hakster/skills,
+## 📚 SKILL REGISTRY — DYNAMIC
+Skills are loaded dynamically from multiple roots: haksterAi/.hakster/skills, ~/.hakster/skills,
 ~/.agents/skills, ~/skills (master library), ~/.hermes/skills, pentest-agents/skills.
-The ACTUAL skill count and categories are injected at runtime below.
-ALWAYS run \`skill_list\` first — never quote a hardcoded number.
+The ACTUAL count is injected at runtime (see "Skills Available" section below).
+ALWAYS use \`skill_list\` to see the real, current list — never quote a hardcoded number.
+Use \`skill_load({name: "..."})\` to load a skill before following its steps.
 
 Key categories: software-development, creative, mlops, productivity, github, research,
 media, autonomous-ai-agents, devops, security/pentest, hunt-skills, data-science, email,
 gaming, note-taking, smart-home, haksterAi core (cloud-ops, coding, iptv, movie-servers).
-
-## 🎯 ONE-SHOT RESOLVE PATCHING
-
-When editing files, ALWAYS follow the one-shot resolve pattern — patch EXACTLY like Copilot CLI:
-
-1. **READ FIRST** — Use \`read_file\` to see the current code. Never guess. Read the FULL function, not just the line you're changing.
-2. **LOOK UP IF NEEDED** — Use \`web_search\` for questions, \`web_fetch\` for docs/APIs. Search BEFORE editing. Better to get it right in one shot.
-3. **GATHER ALL CONTEXT** — Read ALL files you'll need to edit. Read related imports, configs, types.
-4. **PATCH ONCE, PRECISELY** — Use \`multi_patch\` or \`patch_file\` with 3+ lines of context. One call, all changes.
-   - **Include ENOUGH context** in \`old_text\` to make the match unique (3-5 lines minimum).
-   - **Make SURGICAL changes** — only replace what needs to change. Don't rewrite surrounding code.
-   - **Never modify unrelated code** — if you discover bugs nearby, note them but don't fix unless directly related.
-   - **Use \`multi_patch\`** for multiple edits in the same file — batch them in one call.
-   - **NOT**: patch → fail → read again → patch again. Get it right the first time.
-5. **VERIFY** — After patching, run \`node -c file.js\` for syntax, \`curl -s http://localhost:PORT/api/health\` for services, \`pm2 list\` for processes.
-
-The pattern: **READ → RESEARCH → PATCH → VERIFY**. One cycle, not five.
-If a patch fails, DON'T just retry the same thing. Read the file again, understand WHY it failed, then patch with correct context.
-
-## 📊 SESSION METRICS (MANDATORY)
-
-After completing ANY task, ALWAYS include in the done checklist:
-- **Project line count** — report the current line count of the main project file (index.js).
-- Format: \`📊 Project: index.js = X,XXX lines\`
-- This is MANDATORY — the user tracks codebase growth.
-
-## 🧠 FOCUS & MOMENTUM
-
-You are bold, decisive, and action-oriented. When you feel yourself slowing down or going in circles:
-- **Stop planning, start doing.** Execute the most impactful next step NOW.
-- **Trust your context.** You've read the files. You know the issue. Make the call.
-- **One tool call at a time is fine** — but make EVERY call count. No throwaway exploration.
-- **If stuck, use web_search or web_fetch to look up the answer** — docs, StackOverflow, GitHub issues. Don't guess.
-- **Patch once, not five times.** Read fully, research if needed, then edit with confidence.
-- **The user wants results, not deliberation.** Ship it.
-
-## 📋 SKILL REGISTRY — DYNAMIC
-Skills are loaded dynamically from multiple roots. The ACTUAL count is injected at runtime
-(see "Skills Available" section below). ALWAYS use \`skill_list\` to see the real, current list.
-Use \`skill_load({name: "..."})\` to load a skill before following its steps.
 
 Core haksterAi skills (always available):
 - hakster-cloud-ops, hakster-coding, hakster-crush-config, hakster-iptv, hakster-movie-servers
@@ -222,7 +214,7 @@ Core haksterAi skills (always available):
 
 ## 📋 SKILL USAGE PATTERN — MANDATORY
 **YOU MUST check skills before starting ANY unfamiliar task. This is NOT optional.**
-1. **skill_list** → ALWAYS run this first. 500+ skills exist — one probably matches your task.
+1. **skill_list** → ALWAYS run this first — one probably matches your task.
 2. **skill_load** → Load it BEFORE proceeding. E.g., skill_load hakster-coding before editing code.
 3. **Execute** → Follow the skill's steps precisely.
 4. **skill_save** → If you develop a new repeatable process, save it for future use.
@@ -627,6 +619,41 @@ function buildSystemPrompt(clientContext) {
   if (fp.os.arch) prompt += `\n- Arch: ${fp.os.arch}, CPUs: ${fp.os.cpus}, RAM: ${fp.os.totalmem}GB`;
   prompt += `\nThis is your stable device identity. Use it for session tracking, audit logs, and receipts.`;
 
+  // ── Inject AGENTS.md steering content ──
+  const agentsMd = injectAgentsMd(process.cwd());
+  if (agentsMd) prompt += '\n\n' + agentsMd;
+
+  // ── Inject learned lessons from auto-learn ──
+  const lessons = injectLearnedLessons(process.cwd(), ['pentest', 'agent']);
+  if (lessons) prompt += '\n\n' + lessons;
+
+  // ── Inject plan/todo tool guidance + current state ──
+  prompt += '\n\n## 📝 Plan & Todo Tools';
+  prompt += '\nYou have two persistent planning tools (state survives across sessions):';
+  prompt += '\n- `plan` (action: write|read|clear, content) — keep a markdown implementation plan at `.hakster/plan.md`. Write it BEFORE multi-step work and update it at milestones.';
+  prompt += '\n- `todo` (action: add|list|update|remove|dep, id, title, description, status, depends_on) — track tasks in `.hakster/todos.json` with status (pending|in_progress|done|blocked) and dependencies.';
+  prompt += '\nUse them for any task spanning multiple steps. Mark a todo `in_progress` before starting it and `done` when complete. This counts as real progress and keeps you from looping.';
+
+  // Surface the current plan + todos so the agent picks up where it left off
+  try {
+    const hakHome = path.join(process.env.HOME || '/home/ghost', '.hakster');
+    const planPath = path.join(hakHome, 'plan.md');
+    if (fs.existsSync(planPath)) {
+      const planContent = fs.readFileSync(planPath, 'utf-8').trim();
+      if (planContent) prompt += '\n\n### Current Plan\n' + planContent;
+    }
+    const todoPath = path.join(hakHome, 'todos.json');
+    if (fs.existsSync(todoPath)) {
+      const raw = JSON.parse(fs.readFileSync(todoPath, 'utf-8') || '{}');
+      const todos = Array.isArray(raw.todos) ? raw.todos : [];
+      if (todos.length > 0) {
+        const lines = todos.map(t => `- [${t.status || 'pending'}] ${t.id}: ${t.title}`);
+        prompt += '\n\n### Current Todos\n' + lines.join('\n');
+        prompt += '\nResume the next pending/in_progress todo.';
+      }
+    }
+  } catch (_) { /* ignore read errors */ }
+
   return prompt;
 }
 
@@ -658,14 +685,15 @@ const MAX_LOG_LINES = (() => { const v = process.env.MAX_LOG_LINES; return v !==
 // ── Module-level state for stuck-loop detection (shared with agentLoop) ──
 let _lastAssistantResponse = '';   // Tracks last model response for loop detection
 let _noProgressCount = 0;          // Counts consecutive responses without tool calls
-const NO_PROGRESS_LIMIT = 6;       // Break loop after sustained no-progress, but allow long jobs to keep driving.
+const NO_PROGRESS_LIMIT = 15;      // Break loop after sustained no-progress (was 6)
 let _recentResponsePrefixes = [];  // Last N response prefixes for semantic loop detection
 let _emptyRetries = 0;              // Counts empty-response retries within a single agentLoop call
-const SEMANTIC_LOOP_WINDOW = 3;    // How many recent responses to check (was 5, lowered — catches loops faster)
-const SEMANTIC_LOOP_THRESHOLD = 2; // How many similar prefixes → loop detected (was 3, lowered to catch loops faster)
+const SEMANTIC_LOOP_WINDOW = 5;    // How many recent responses to check (was 3)
+const SEMANTIC_LOOP_THRESHOLD = 3; // How many similar prefixes → loop detected (was 2, raised to reduce false positives)
 let _messageQueue = [];            // Queue of incoming messages (flushed on stuck loop)
 let _batch = null;                 // Paste-batching state: { lines: string[], timer: NodeJS.Timeout }
 let _stuckCooldown = 0;             // After stuck-loop break, skip this many queued messages to prevent re-loop
+let _shellRepeatBreak = false;      // Set by shell executor when a generic repeat-loop is detected;
 
 // ── Tool-error loop detection ──
 // Track consecutive errors from the SAME tool — if a tool errors 3+ times in a row,
@@ -676,10 +704,54 @@ const TOOL_ERROR_LOOP_LIMIT = 3;    // Same tool erroring this many times → br
 // ── Grep/search command loop detection ──
 // Track consecutive shell commands that are grep/rg/find/search — if the model
 // keeps running search commands without making progress, break the loop.
-let _recentShellCommands = [];       // [{cmd, tool}] — last N shell commands
-const SHELL_LOOP_WINDOW = 6;         // How many recent shell calls to examine
-const GREP_LOOP_LIMIT = 3;           // If >= N of last W calls are grep/search → loop detected
+let _recentShellCommands = [];       // [{cmd, tool, sig}] — last N shell commands
+const SHELL_LOOP_WINDOW = 8;         // How many recent shell calls to examine (raised 6→8 for more headroom across rounds)
+const GREP_LOOP_LIMIT = 7;           // If >= N of last W calls are grep/search → loop detected (was 5). Raised so sequential recon rounds that legitimately interleave searches flow through.
 const GREP_CMD_MAX_OUTPUT = 200;     // Max lines of output from grep/rg commands
+
+// ── Generic shell repeat-loop detection (ALL shell commands, not just grep/find) ──
+// Catches the model re-running the same curl / git status / npm test / ls / build
+// command over and over without making progress. Runs before exec so it's fast and
+// can break a stall before the command even fires a second time.
+const SHELL_REPEAT_LIMIT = 4;        // same normalized command 4× in window → loop (raised 3→4 to cut false positives on legitimate sequential rounds)
+
+function _normalizeShellSig(command) {
+  // Collapse whitespace, lowercase, strip leading env assignments (FOO=bar), strip
+  // leading sudo/timeout wrappers, and drop volatile numeric/time args so that
+  // `sleep 2` vs `sleep 3` and `grep -n foo` vs `grep -ni foo` still cluster.
+  let s = (command || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  // strip leading env var assignments:  VAR=val VAR2=val cmd ...
+  s = s.replace(/^([a-z_][a-z0-9_]*=\S*\s+)+/, '');
+  // strip leading sudo / timeout N / nice / ionice wrappers (one-shot)
+  s = s.replace(/^(sudo|timeout\s+\d+|nice|ionice\s+-c\s+\d+)\s+/, '');
+  // normalize flags that don't change meaning: drop standalone -n / --color args ordering diffs
+  s = s.replace(/\s+--color(=never|always|auto)?/g, '');
+  s = s.replace(/\s+-n\b/g, ' ');
+  // collapse repeated slashes in paths
+  s = s.replace(/\/+/g, '/');
+  return s;
+}
+
+/**
+ * Detects a repeat-loop on ANY shell command (not just grep/find).
+ * Uses the shared `_recentShellCommands` window. Returns true (and resets
+ * trackers) when the same normalized command signature appears >= SHELL_REPEAT_LIMIT
+ * times in the window. Caller is responsible for the actual loop-break.
+ *
+ * @param {string} command - raw shell command about to execute
+ * @returns {{ loop: boolean, count: number, sig: string }}
+ */
+function _checkShellRepeatLoop(command) {
+  const sig = _normalizeShellSig(command);
+  if (!sig || sig.length < 3) return { loop: false, count: 0, sig };
+  // The current command is already pushed into _recentShellCommands by the
+  // shell executor before this runs, so the filter count includes it.
+  const count = _recentShellCommands.filter(c => c.sig === sig).length;
+  if (count >= SHELL_REPEAT_LIMIT) {
+    return { loop: true, count, sig };
+  }
+  return { loop: false, count, sig };
+}
 
 // ── Global tool call counter ──
 // Tracks the total number of tool calls across the entire session/loop.
@@ -731,6 +803,7 @@ const TOKEN_PRICING   = {      // Per 1M tokens (input/output in USD)
 let _stallGuardTimer  = null;
 const STALL_GUARD_MS  = 20000;  // 20 seconds — kickstart if no activity
 let _lastActivityTime = Date.now();
+let _awaitingConfirm  = false;  // True while waiting on a y/N dangerous-command prompt — suppresses status bar / stall guard so they don't clobber the readline question
 
 // ── Humane focus nudges — encouraging prompts to get back on task ──
 const FOCUS_NUDGES = [
@@ -756,8 +829,8 @@ const FOCUS_NUDGES = [
 // Pattern: list_dir→search_files→list_dir→read_file→list_dir... = stuck wandering.
 const EXPLORATION_TOOLS = new Set(['list_dir', 'search_files', 'read_file', 'list_directory', 'directory_tree', 'list_directory_with_sizes', 'find_file', 'file_search', 'glob', 'tree']);
 let _explorationCalls = [];          // [{tool, path}] — last N exploration tool calls
-const WANDERING_WINDOW = 8;          // How many recent calls to examine
-const WANDERING_DUPE_LIMIT = 5;      // If >= N of last W calls hit same/duplicate paths → wandering detected
+const WANDERING_WINDOW = 10;          // How many recent calls to examine (raised 8→10)
+const WANDERING_DUPE_LIMIT = 6;      // If >= N of last W calls hit same/duplicate paths → wandering detected (raised 5→6)
 const WANDERING_UNIQUE_LIMIT = 2;    // If only N unique directories in last W calls → wandering detected
 
 function _normalizePath(p) {
@@ -809,7 +882,7 @@ function _checkFilesystemWandering(toolName, toolArgs) {
   const totalCalls = _explorationCalls.length;
 
   // Check 2: Very few unique paths despite many calls = going in circles
-  if (uniquePaths <= WANDERING_UNIQUE_LIMIT && totalCalls >= 5) {
+  if (uniquePaths <= WANDERING_UNIQUE_LIMIT && totalCalls >= 6) {
     return true;
   }
 
@@ -1116,6 +1189,35 @@ const TOOL_TYPE = {
 // ── Confirmation system ──────────────────────────────────────────────────
 // _confirmFn is set by TUI/REPL; returns true (approved), false (denied), or a string (edited command)
 let _confirmFn = null; // (dangerMsg, tool, args) => Promise<boolean>
+let _approvalMode = process.env.HAKSTER_APPROVAL_MODE || SUGGEST;
+function setApprovalMode(mode) { _approvalMode = require('./approval').validateMode(mode); }
+
+// ── User ID tracking ────────────────────────────────────────────────────
+let _userId = null;
+function setUserId(id) { _userId = id; }
+function getUserId() { return _userId; }
+
+// ── AGENTS.md auto-loading ────────────────────────────────────────────────
+let _agentsMdCache = null;
+function loadAgentsMd(cwd) {
+  const candidates = [
+    path.join(cwd || WORK_DIR, 'AGENTS.md'),
+    path.join(cwd || WORK_DIR, '.hakster', 'AGENTS.md'),
+    path.join(cwd || WORK_DIR, 'HAKSTERAI-PHANTOM-MERGED.md'),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf8').trim();
+  if (content.length > 0) {
+          _agentsMdCache = content;
+          return content;
+        }
+      }
+    } catch (_) { /* skip unreadable */ }
+  }
+  return null;
+}
 
 // Safe shell command prefixes — read-only introspection commands that never modify state
 const SAFE_READ_CMDS = [
@@ -1496,10 +1598,12 @@ function renderReasoningPanel() {
   // ── Phase + elapsed timer ──
   const phaseElapsed = _tuiPhaseStart ? ((now - _tuiPhaseStart) / 1000).toFixed(0) : '?';
   const sessionElapsed = _tuiSessionStart ? _fmtDuration(now - _tuiSessionStart) : '0s';
-  // Phase icon: thinking=🧠, executing=⚡, complete=✅, idle=⏸, default=◇
-  const phaseIcons = { Thinking: '🧠', Executing: '⚡', Complete: '✅', Idle: '⏸' };
+  // Phase icons: 6-phase loop — THINK→PLAN→ACT→OBSERVE→REFLECT→CONSOLIDATE
+  const phaseIcons = { THINK: '🧠', PLAN: '📋', ACT: '⚡', OBSERVE: '👁', REFLECT: '🪞', CONSOLIDATE: '📦', Thinking: '🧠', Executing: '⚡', Complete: '✅', Idle: '⏸' };
+  const phaseColors = { THINK: C.info, PLAN: C.mustard, ACT: C.success, OBSERVE: C.cyan, REFLECT: C.magenta, CONSOLIDATE: C.error, Thinking: C.info, Executing: C.success, Complete: C.success, Idle: C.fgMuted };
+  const phaseColor = phaseColors[_tuiPhase] || C.fgBase;
   const phaseIcon = phaseIcons[_tuiPhase] || '◇';
-  lines.push(`${C.tertiary}${phaseIcon}${C.reset} ${C.fgBase}[${new Date().toLocaleTimeString()}]${C.reset} ${C.bold}${_tuiPhase}${C.reset} ${C.fgMuted}(${phaseElapsed}s)${C.reset} ${C.fgSubtle}⏱ ${sessionElapsed}${C.reset}`);
+  lines.push(`${C.tertiary}${phaseIcon}${C.reset} ${C.fgBase}[${new Date().toLocaleTimeString()}]${C.reset} ${phaseColor}${C.bold}${_tuiPhase}${C.reset} ${C.fgMuted}(${phaseElapsed}s)${C.reset} ${C.fgSubtle}⏱ ${sessionElapsed}${C.reset}`);
   const items = [];
   if (_tuiTarget)   items.push(`${C.fgMuted}├─${C.reset} ${C.fgSubtle}Target:${C.reset}   ${C.fgBase}${_tuiTarget}${C.reset}`);
   if (_tuiPorts)    items.push(`${C.fgMuted}├─${C.reset} ${C.fgSubtle}Ports:${C.reset}     ${C.info}${_tuiPorts}${C.reset}`);
@@ -2630,9 +2734,13 @@ let TOOLS = [
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'Text description of the desired image' },
-          model: { type: 'string', description: 'Model to use: dall-e-3 (default) or gpt-image-1', enum: ['dall-e-3', 'gpt-image-1'] },
-          size: { type: 'string', description: 'Image size: 1024x1024 (default), 1024x1792, or 1792x1024', enum: ['1024x1024', '1024x1792', '1792x1024'] },
-          quality: { type: 'string', description: 'Quality: standard (default) or hd (dall-e-3 only)', enum: ['standard', 'hd'] },
+          provider: { type: 'string', description: 'Image provider: pollinations (default, low-cost), openai, or openrouter', enum: ['pollinations', 'openai', 'openrouter'] },
+          model: { type: 'string', description: 'Model to use. Pollinations default: zimage. Other options: flux, gptimage, kontext, seedream5, qwen-image, dall-e-3, gpt-image-1' },
+          size: { type: 'string', description: 'Image size: 1024x1024 (default), 1024x1792, 1792x1024, or 512x512' },
+          quality: { type: 'string', description: 'Quality: hd/top-grade by default, or standard for faster/cheaper drafts', enum: ['standard', 'hd'] },
+          operation: { type: 'string', description: 'What to do: generate, logo, edit, or enhance', enum: ['generate', 'logo', 'edit', 'enhance'] },
+          image_path: { type: 'string', description: 'Optional local image file path to edit/enhance' },
+          image_url: { type: 'string', description: 'Optional image URL to use as an edit/style reference' },
         },
         required: ['prompt'],
       },
@@ -2695,6 +2803,179 @@ let TOOLS = [
           threshold: { type: 'number', description: 'Pixel difference threshold 0-255 (default: 10). Lower = stricter.' },
         },
         required: ['path_a', 'path_b'],
+      },
+    },
+  },
+  // ── Autoflow: 7 new top-tier agent tools ──────────────────────────────────
+  {
+    function: {
+      name: 'glob_search',
+      description: 'Find files matching a glob pattern under the working directory. Returns matched file paths sorted by modification time. Use for file discovery, pattern-based search, and project navigation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Glob pattern to match (e.g. "src/**/*.js", "**/*.test.ts", "docs/*.md")' },
+          maxResults: { type: 'number', description: 'Maximum results to return (default: 100)' },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    function: {
+      name: 'edit_file',
+      description: 'Edit a file by applying a list of line-based changes. Each change specifies start/end line numbers and replacement text. Returns a summary of changes made. Safer than write_file for targeted edits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path to edit (relative to working directory)' },
+          changes: {
+            type: 'array',
+            description: 'Array of {start, end, text} objects. start/end are 1-based line numbers. text is the replacement content.',
+            items: {
+              type: 'object',
+              properties: {
+                start: { type: 'number', description: 'Start line (1-based)' },
+                end: { type: 'number', description: 'End line (1-based, inclusive)' },
+                text: { type: 'string', description: 'Replacement text for the line range' },
+              },
+              required: ['start', 'end', 'text'],
+            },
+          },
+          createIfMissing: { type: 'boolean', description: 'Create the file if it does not exist (default: false)' },
+        },
+        required: ['path', 'changes'],
+      },
+    },
+  },
+  {
+    function: {
+      name: 'replace_in_file',
+      description: 'Replace exact string matches in a file. Each replacement specifies old text and new text. Fails if old text is not found. Returns count of replacements made.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path (relative to working directory)' },
+          replacements: {
+            type: 'array',
+            description: 'Array of {old, new} replacement pairs. old must match exactly.',
+            items: {
+              type: 'object',
+              properties: {
+                old: { type: 'string', description: 'Exact text to find' },
+                new: { type: 'string', description: 'Replacement text' },
+              },
+              required: ['old', 'new'],
+            },
+          },
+          createIfMissing: { type: 'boolean', description: 'Create the file if it does not exist (default: false)' },
+        },
+        required: ['path', 'replacements'],
+      },
+    },
+  },
+  {
+    function: {
+      name: 'shell_bg',
+      description: 'Run a long-running shell command in the background. Returns a process ID immediately for non-blocking execution. Use for servers, watchers, daemons, and long builds. Check output with check_bg_output, kill with kill_process.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to run in the background' },
+          label: { type: 'string', description: 'Optional label for the background process (e.g. "dev-server", "test-watch")' },
+          cwd: { type: 'string', description: 'Working directory for the command (default: project root)' },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    function: {
+      name: 'diff_preview',
+      description: 'Preview the unified diff of proposed changes to a file without writing them. Shows what would change if you apply the given replacements. Use before edit_file or replace_in_file to verify changes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path to preview changes for (relative to working directory)' },
+          replacements: {
+            type: 'array',
+            description: 'Array of {old, new} replacement pairs to preview',
+            items: {
+              type: 'object',
+              properties: {
+                old: { type: 'string', description: 'Existing text' },
+                new: { type: 'string', description: 'Proposed replacement text' },
+              },
+              required: ['old', 'new'],
+            },
+          },
+        },
+        required: ['path', 'replacements'],
+      },
+    },
+  },
+  {
+    function: {
+      name: 'codebase_map',
+      description: 'Generate a structured overview of the project directory tree. Shows files, directories, line counts, and key files. Use to orient yourself in a new codebase or find relevant files quickly.',
+      parameters: {
+        type: 'object',
+        properties: {
+          maxDepth: { type: 'number', description: 'Maximum directory depth to show (default: 4)' },
+          maxFiles: { type: 'number', description: 'Maximum files to list (default: 200)' },
+          includeHidden: { type: 'boolean', description: 'Include hidden files/dirs like .git (default: false)' },
+          focus: { type: 'string', description: 'Focus on a subdirectory (e.g. "src", "server/src")' },
+        },
+      },
+    },
+  },
+  {
+    function: {
+      name: 'context_compaction',
+      description: 'Summarize and compress conversation history to stay within token limits. Returns a condensed version of recent context. Use when approaching context window limits to preserve the most important context.',
+      parameters: {
+        type: 'object',
+        properties: {
+          strategy: { type: 'string', enum: ['summarize', 'truncate_old', 'keep_recent', 'key_facts'], description: 'Compaction strategy: summarize=all, truncate_old=drop oldest, keep_recent=keep last N, key_facts=extract key facts only' },
+          maxTokens: { type: 'number', description: 'Target maximum token count for compacted context (default: 8000)' },
+          keepLastN: { type: 'number', description: 'For keep_recent strategy, how many recent turns to keep (default: 10)' },
+        },
+      },
+    },
+  },
+  // ── Plan tool: persistent markdown plan (mirrors Copilot CLI plan.md) ──
+  {
+    type: 'function',
+    function: {
+      name: 'plan',
+      description: 'Manage the persistent implementation plan (markdown) at .hakster/plan.md. Use this to plan multi-step work BEFORE coding, then update it at milestones so progress persists across sessions. Writing/updating the plan counts as real progress (does not trigger loop detection).',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['write', 'read', 'clear'], description: 'write=replace the plan body, read=return current plan, clear=wipe the plan' },
+          content: { type: 'string', description: 'Markdown body for the plan (action=write). Ignored for read/clear.' },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  // ── Todo tool: persistent task tracking (mirrors Copilot CLI SQL todos) ──
+  {
+    type: 'function',
+    function: {
+      name: 'todo',
+      description: 'Manage a persistent todo list backed by .hakster/todos.json. Track multi-step task progress with status and dependencies. Listing/adding/updating todos counts as real progress (does not trigger loop detection).',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['add', 'list', 'update', 'remove', 'dep'], description: 'add=create a todo, list=show all todos, update=change status, remove=delete a todo, dep=record a dependency between two todos' },
+          id: { type: 'string', description: 'Todo id (kebab-case). Required for add/update/remove/dep.' },
+          title: { type: 'string', description: 'Short title in gerund form (action=add).' },
+          description: { type: 'string', description: 'What the todo entails (action=add).' },
+          status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'blocked'], description: 'New status (action=update).' },
+          depends_on: { type: 'string', description: 'Id of a todo this one depends on (action=dep).' },
+        },
+        required: ['action'],
       },
     },
   },
@@ -2813,12 +3094,25 @@ const toolExecutors = {
       if (timeout > 15) timeout = Math.min(timeout, 15);
     }
 
-    // Track grep/search commands for loop detection
-    if (isSearchCmd) {
-      _recentShellCommands.push({ cmd: command.substring(0, 120), tool: isGrepLike ? 'grep' : 'find' });
-      if (_recentShellCommands.length > SHELL_LOOP_WINDOW) _recentShellCommands.shift();
-    } else {
+    // Track EVERY shell command (with normalized signature) for repeat-loop detection.
+    // Search commands (grep/find) keep their `tool` tag so the grep-loop check still works.
+    const _sig = _normalizeShellSig(command);
+    _recentShellCommands.push({
+      cmd: command.substring(0, 120),
+      tool: isSearchCmd ? (isGrepLike ? 'grep' : 'find') : 'shell',
+      sig: _sig,
+    });
+    if (_recentShellCommands.length > SHELL_LOOP_WINDOW) _recentShellCommands.shift();
+
+    // ── Generic shell repeat-loop break (ALL commands, not just grep/find) ──
+    // Skip exec entirely to avoid stalls, and flag the tool-call path to do the
+    // full break (trim history, drain queue, set cooldown).
+    const _repeat = _checkShellRepeatLoop(command);
+    if (_repeat.loop) {
+      _shellRepeatBreak = true;
       _recentShellCommands = [];
+      const _rlWarn = `\n[🔴 SHELL REPEAT-LOOP: ran the same command ${_repeat.count}× in a row. SKIPPED execution to avoid a stall. STOP repeating "${_repeat.sig.substring(0, 60)}". You already have its output — act on it: edit a file, run a DIFFERENT command, or answer the user. Do NOT re-run the same command.]\n`;
+      return _rlWarn;
     }
 
     // Check for grep/search loop — inject warning if detected
@@ -2871,6 +3165,90 @@ const toolExecutors = {
       fs.writeFileSync(resolved, content, 'utf-8');
       const lines = content.split('\n').length;
       return `✓ Wrote ${lines} lines to ${resolved}`;
+    } catch (err) {
+      return `Error: ${err.message}`;
+    }
+  },
+
+  // ── Plan tool: persistent markdown plan at .hakster/plan.md ──
+  plan({ action, content }) {
+    const planDir = path.join(process.env.HOME || '/home/ghost', '.hakster');
+    const planPath = path.join(planDir, 'plan.md');
+    try {
+      if (action === 'read') {
+        if (!fs.existsSync(planPath)) return '(no plan yet — use plan with action=write to create one)';
+        return fs.readFileSync(planPath, 'utf-8');
+      }
+      if (action === 'clear') {
+        if (fs.existsSync(planPath)) fs.writeFileSync(planPath, '', 'utf-8');
+        return '✓ Plan cleared';
+      }
+      // action === 'write'
+      fs.mkdirSync(planDir, { recursive: true });
+      const stamp = `<!-- updated ${new Date().toISOString()} -->\n`;
+      fs.writeFileSync(planPath, stamp + (content || ''), 'utf-8');
+      const lines = (content || '').split('\n').length;
+      return `✓ Plan written (${lines} lines) to ${planPath}`;
+    } catch (err) {
+      return `Error: ${err.message}`;
+    }
+  },
+
+  // ── Todo tool: persistent todo list at .hakster/todos.json ──
+  todo({ action, id, title, description, status, depends_on }) {
+    const hakDir = path.join(process.env.HOME || '/home/ghost', '.hakster');
+    const todoPath = path.join(hakDir, 'todos.json');
+    const VALID_STATUS = new Set(['pending', 'in_progress', 'done', 'blocked']);
+    try {
+      fs.mkdirSync(hakDir, { recursive: true });
+      let todos = [];
+      let deps = [];
+      if (fs.existsSync(todoPath)) {
+        const raw = JSON.parse(fs.readFileSync(todoPath, 'utf-8') || '{}');
+        todos = Array.isArray(raw.todos) ? raw.todos : [];
+        deps = Array.isArray(raw.deps) ? raw.deps : [];
+      }
+
+      if (action === 'list') {
+        if (todos.length === 0) return '(no todos — use todo with action=add to create one)';
+        return todos.map(t => `[${(t.status || 'pending').padEnd(11)}] ${t.id}: ${t.title}${t.description ? ' — ' + t.description : ''}`).join('\n');
+      }
+
+      if (action === 'add') {
+        if (!id || !title) return 'Error: add requires id and title';
+        if (todos.some(t => t.id === id)) return `Error: todo "${id}" already exists`;
+        todos.push({ id, title, description: description || '', status: 'pending' });
+        fs.writeFileSync(todoPath, JSON.stringify({ todos, deps }, null, 2), 'utf-8');
+        return `✓ Added todo "${id}": ${title}`;
+      }
+
+      if (action === 'update') {
+        if (!id || !status || !VALID_STATUS.has(status)) return 'Error: update requires id and a valid status (pending|in_progress|done|blocked)';
+        const t = todos.find(x => x.id === id);
+        if (!t) return `Error: todo "${id}" not found`;
+        t.status = status;
+        fs.writeFileSync(todoPath, JSON.stringify({ todos, deps }, null, 2), 'utf-8');
+        return `✓ Updated todo "${id}" → ${status}`;
+      }
+
+      if (action === 'remove') {
+        if (!id) return 'Error: remove requires id';
+        const before = todos.length;
+        todos = todos.filter(x => x.id !== id);
+        deps = deps.filter(d => d.todo_id !== id && d.depends_on !== id);
+        fs.writeFileSync(todoPath, JSON.stringify({ todos, deps }, null, 2), 'utf-8');
+        return before === todos.length ? `Error: todo "${id}" not found` : `✓ Removed todo "${id}"`;
+      }
+
+      if (action === 'dep') {
+        if (!id || !depends_on) return 'Error: dep requires id and depends_on';
+        if (deps.some(d => d.todo_id === id && d.depends_on === depends_on)) return `✓ Dependency already exists`;
+        deps.push({ todo_id: id, depends_on });
+        fs.writeFileSync(todoPath, JSON.stringify({ todos, deps }, null, 2), 'utf-8');
+        return `✓ Added dependency: ${id} depends on ${depends_on}`;
+      }
+
+      return `Error: unknown action "${action}"`;
     } catch (err) {
       return `Error: ${err.message}`;
     }
@@ -3948,12 +4326,35 @@ const toolExecutors = {
     return `📬 Queued as ${id} (type: ${type}, priority: ${priority})`;
   },
 
-  async generate_image({ prompt, model = 'dall-e-3', size = '1024x1024', quality = 'standard' }) {
+  async generate_image({ prompt, provider = 'pollinations', model, size = '1024x1024', quality = 'hd', operation = 'generate', image_path, image_url }) {
     try {
       const imgDir = path.join(process.cwd(), 'outputs', 'images');
       if (!fs.existsSync(imgDir)) fs.mkdirSync(imgDir, { recursive: true });
 
-      const result = await generateImage({ provider: 'openai', model, prompt, size, quality, n: 1 });
+      const imageModel = model || (provider === 'pollinations' ? 'zimage' : 'dall-e-3');
+      let imagePath = null;
+      if (image_path) {
+        imagePath = path.resolve(process.cwd(), image_path);
+        if (!fs.existsSync(imagePath)) return `❌ Image file not found: ${imagePath}`;
+      }
+      let finalPrompt = prompt;
+      if (operation === 'logo') {
+        finalPrompt = `Create a professional production-ready logo. ${prompt}. Include clean geometry, strong silhouette, brand-ready composition, no watermarks, no mockup background.`;
+      } else if (operation === 'enhance') {
+        finalPrompt = `Enhance and improve this image while preserving the core subject. ${prompt || 'Improve sharpness, lighting, color balance, and professional finish.'}`;
+      }
+      const result = await generateImage({
+        provider,
+        model: imageModel,
+        prompt: finalPrompt,
+        size,
+        quality,
+        n: 1,
+        imagePath,
+        imageUrl: image_url,
+        operation,
+        enhance: operation === 'enhance',
+      });
 
       const saved = [];
       for (const img of result.images) {
@@ -3965,7 +4366,7 @@ const toolExecutors = {
         saved.push({ path: filePath, sizeKB, revised_prompt: img.revised_prompt });
       }
 
-      const lines = [`🎨 Image generated (${model}, ${size}, ${quality}) — ${result.latency}ms`];
+      const lines = [`🎨 Image generated (${result.provider || provider}, ${result.model || imageModel}, ${size}, ${quality}) — ${result.latency}ms`];
       saved.forEach(s => {
         lines.push(`  📁 ${s.path} (${s.sizeKB} KB)`);
         if (s.revised_prompt) lines.push(`  📝 Revised prompt: ${s.revised_prompt}`);
@@ -4108,6 +4509,239 @@ const toolExecutors = {
       }
     } catch (err) {
       return `❌ Error comparing images: ${err.message}`;
+    }
+  },
+
+  async glob_search({ pattern, maxResults = 100 }) {
+    try {
+      if (!pattern) return '❌ pattern is required';
+      const cwd = WORK_DIR;
+      const files = globSync(pattern, { cwd, nodir: true, absolute: true });
+      const sorted = files.slice(0, maxResults);
+      if (sorted.length === 0) return `📂 No files matching "${pattern}"`;
+      const total = files.length;
+      const truncated = total > maxResults;
+      const lines = sorted.map(f => {
+        const rel = path.relative(cwd, f);
+        try {
+          const stat = fs.statSync(f);
+          return `  ${rel} (${(stat.size / 1024).toFixed(1)} KB)`;
+        } catch (_) {
+          return `  ${rel}`;
+        }
+      });
+      let out = `📂 Found ${total} file${total !== 1 ? 's' : ''} matching "${pattern}"\n`;
+      out += lines.join('\n');
+      if (truncated) out += `\n  ... and ${total - maxResults} more`;
+      return out;
+    } catch (err) {
+      return `❌ glob_search error: ${err.message}`;
+    }
+  },
+
+  async edit_file({ path: filePath, changes, createIfMissing = false }) {
+    try {
+      if (!filePath) return '❌ path is required';
+      if (!changes || !Array.isArray(changes)) return '❌ changes array is required';
+      const resolved = path.resolve(WORK_DIR, filePath);
+      if (!fs.existsSync(resolved)) {
+        if (!createIfMissing) return `❌ File not found: ${resolved}`;
+        const dir = path.dirname(resolved);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(resolved, '', 'utf-8');
+      }
+      let content = fs.readFileSync(resolved, 'utf-8');
+      const lines = content.split('\n');
+      let applied = 0;
+      for (const change of changes) {
+        if (change.start == null || change.end == null) continue;
+        const start = Math.max(0, change.start - 1);
+        const end = Math.min(lines.length, change.end);
+        const newText = (change.text || '').split('\n');
+        lines.splice(start, end - start, ...newText);
+        applied++;
+      }
+      fs.writeFileSync(resolved, lines.join('\n'), 'utf-8');
+      return `✏️ Edited ${resolved}: ${applied} change${applied !== 1 ? 's' : ''} applied`;
+    } catch (err) {
+      return `❌ edit_file error: ${err.message}`;
+    }
+  },
+
+  async replace_in_file({ path: filePath, replacements, createIfMissing = false }) {
+    try {
+      if (!filePath) return '❌ path is required';
+      if (!replacements || !Array.isArray(replacements)) return '❌ replacements array is required';
+      const resolved = path.resolve(WORK_DIR, filePath);
+      if (!fs.existsSync(resolved)) {
+        if (!createIfMissing) return `❌ File not found: ${resolved}`;
+        // For createIfMissing with replacements, write the concatenated new values
+        const newContent = replacements.map(r => r.new || '').join('\n');
+        const dir = path.dirname(resolved);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(resolved, newContent, 'utf-8');
+        return `✨ Created ${resolved} with ${replacements.length} replacement block${replacements.length !== 1 ? 's' : ''}`;
+      }
+      let content = fs.readFileSync(resolved, 'utf-8');
+      let applied = 0;
+      for (const rep of replacements) {
+        if (!rep.old) continue;
+        const count = (content.match(new RegExp(rep.old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+        content = content.split(rep.old).join(rep.new || '');
+        if (count > 0) applied++;
+      }
+      fs.writeFileSync(resolved, content, 'utf-8');
+      return `🔄 Replaced in ${resolved}: ${applied} replacement${applied !== 1 ? 's' : ''} applied`;
+    } catch (err) {
+      return `❌ replace_in_file error: ${err.message}`;
+    }
+  },
+
+  async shell_bg({ command, label, cwd }) {
+    try {
+      if (!command) return '❌ command is required';
+      const id = `bg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const procCwd = cwd ? path.resolve(WORK_DIR, cwd) : WORK_DIR;
+      const child = spawn('/bin/bash', ['-c', command], {
+        cwd: procCwd,
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+      });
+      let stdout = '', stderr = '';
+      child.stdout.on('data', d => { stdout += d.toString(); if (stdout.length > 50000) stdout = stdout.slice(-50000); });
+      child.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 50000) stderr = stderr.slice(-50000); });
+      bgProcesses.set(id, { process: child, label: label || command.slice(0, 60), command, cwd: procCwd, startedAt: Date.now(), stdout: '', stderr: '' });
+      child.stdout.on('data', d => { const entry = bgProcesses.get(id); if (entry) entry.stdout = (entry.stdout || '') + d.toString(); });
+      child.stderr.on('data', d => { const entry = bgProcesses.get(id); if (entry) entry.stderr = (entry.stderr || '') + d.toString(); });
+      child.on('exit', code => { const entry = bgProcesses.get(id); if (entry) { entry.exitCode = code; entry.endedAt = Date.now(); } });
+      return `🚀 Background process started\n  ID: ${id}\n  Label: ${label || command.slice(0, 60)}\n  PID: ${child.pid}\n  CWD: ${procCwd}\n  Use run_background or kill_process to manage`;
+    } catch (err) {
+      return `❌ shell_bg error: ${err.message}`;
+    }
+  },
+
+  async diff_preview({ path: filePath, replacements }) {
+    try {
+      if (!filePath) return '❌ path is required';
+      if (!replacements || !Array.isArray(replacements)) return '❌ replacements array is required';
+      const resolved = path.resolve(WORK_DIR, filePath);
+      if (!fs.existsSync(resolved)) return `❌ File not found: ${resolved}`;
+      const original = fs.readFileSync(resolved, 'utf-8');
+      let modified = original;
+      for (const rep of replacements) {
+        if (!rep.old) continue;
+        modified = modified.split(rep.old).join(rep.new || '');
+      }
+      if (original === modified) return 'ℹ️ No changes would be applied';
+      const origLines = original.split('\n');
+      const modLines = modified.split('\n');
+      let diff = '';
+      let changeCount = 0;
+      const maxDiffLines = 200;
+      const cs = Math.max(origLines.length, modLines.length);
+      for (let i = 0; i < cs && diff.split('\n').length < maxDiffLines; i++) {
+        const oLine = i < origLines.length ? origLines[i] : undefined;
+        const mLine = i < modLines.length ? modLines[i] : undefined;
+        if (oLine !== mLine) {
+          changeCount++;
+          if (oLine !== undefined) diff += `- ${i + 1}: ${oLine}\n`;
+          if (mLine !== undefined) diff += `+ ${i + 1}: ${mLine}\n`;
+        }
+      }
+      let out = `📝 Diff preview for ${path.relative(WORK_DIR, resolved)}\n`;
+      out += `  ${changeCount} line${changeCount !== 1 ? 's' : ''} changed\n\n`;
+      out += diff;
+      if (diff.split('\n').length >= maxDiffLines) out += '\n  ... (truncated, use edit_file or replace_in_file to apply)';
+      return out;
+    } catch (err) {
+      return `❌ diff_preview error: ${err.message}`;
+    }
+  },
+
+  async codebase_map({ maxDepth = 4, maxFiles = 200, includeHidden = false, focus }) {
+    try {
+      const root = focus ? path.resolve(WORK_DIR, focus) : WORK_DIR;
+      if (!fs.existsSync(root)) return `❌ Directory not found: ${root}`;
+      const skipDirs = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.cache', 'vendor', 'bun.lock']);
+      const skipExts = new Set(['.map', '.lock', '.wasm']);
+      let fileCount = 0;
+      let totalLines = 0;
+      const result = [];
+      function walk(dir, depth, prefix) {
+        if (depth > maxDepth || fileCount >= maxFiles) return;
+        let entries;
+        try {
+          entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch (_) { return; }
+        entries.sort((a, b) => {
+          if (a.isDirectory() && !b.isDirectory()) return -1;
+          if (!a.isDirectory() && b.isDirectory()) return 1;
+          return a.name.localeCompare(b.name);
+        });
+        for (const entry of entries) {
+          if (fileCount >= maxFiles) break;
+          if (!includeHidden && entry.name.startsWith('.')) continue;
+          if (entry.isDirectory() && skipDirs.has(entry.name)) continue;
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.relative(root, fullPath);
+          if (entry.isDirectory()) {
+            result.push(`${prefix}📁 ${entry.name}/`);
+            walk(fullPath, depth + 1, prefix + '  ');
+          } else {
+            if (skipExts.has(path.extname(entry.name))) continue;
+            try {
+              const stat = fs.statSync(fullPath);
+              fileCount++;
+              totalLines += Math.round(stat.size / 40);
+              result.push(`${prefix}📄 ${entry.name} (${(stat.size / 1024).toFixed(1)} KB)`);
+            } catch (_) {
+              result.push(`${prefix}📄 ${entry.name}`);
+            }
+          }
+        }
+      }
+      walk(root, 0, '');
+      let out = `🗺️ Codebase map: ${path.relative(WORK_DIR, root) || '.'}\n`;
+      out += `  Files: ${fileCount} | Est. lines: ${totalLines.toLocaleString()}\n\n`;
+      out += result.join('\n');
+      if (fileCount >= maxFiles) out += `\n\n  ⚠️ Truncated at ${maxFiles} files. Increase maxFiles for more.`;
+      return out;
+    } catch (err) {
+      return `❌ codebase_map error: ${err.message}`;
+    }
+  },
+
+  async context_compaction({ strategy = 'summarize', maxTokens = 8000, keepLastN = 10 }) {
+    try {
+      const hist = this._conversationHistory || [];
+      if (hist.length === 0) return 'ℹ️ No conversation history to compact';
+      const totalMsgs = hist.length;
+      switch (strategy) {
+        case 'truncate_old': {
+          const kept = hist.slice(-keepLastN);
+          return `📌 Compacted: kept last ${kept.length} of ${totalMsgs} messages. Older messages truncated. Re-send your latest context if needed.`;
+        }
+        case 'keep_recent': {
+          const kept = hist.slice(-keepLastN);
+          return `📌 Compacted: kept ${kept.length} recent of ${totalMsgs} messages. Summarize key facts from earlier context and re-inject them.`;
+        }
+        case 'key_facts': {
+          const recent = hist.slice(-keepLastN);
+          const summary = recent.filter(m => m.role === 'assistant').map(m => {
+            const t = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            return t.slice(0, 200);
+          }).join('\n');
+          return `🔑 Key facts from ${kept.length} recent messages:\n${summary || '(no assistant messages found)'}\n\n📌 ${totalMsgs - keepLastN} older messages can be dropped.`;
+        }
+        case 'summarize':
+        default: {
+          const recentCount = Math.min(keepLastN, totalMsgs);
+          return `📋 Context compaction (${strategy})\n  Total messages: ${totalMsgs}\n  Keeping: recent ${recentCount} messages\n  Suggested budget: ~${maxTokens} tokens\n  Older context should be re-injected as a summary if still relevant.`;
+        }
+      }
+    } catch (err) {
+      return `❌ context_compaction error: ${err.message}`;
     }
   },
 };
@@ -4627,6 +5261,14 @@ function startSpinner(label) {
 async function agentLoop(userMessage, history, silent = false) {
   // Reset tool call counter for each new user request
   _toolCallCount = 0;
+  // BUG FIX: Reset ALL module-level loop-detection state per-call, not just at REPL start.
+  // Previously these only reset at repl() init or when a loop was already detected —
+  // meaning they accumulated across agentLoop() calls and caused false-positive
+  // "stuck-loop detected" breaks on normal multi-turn conversations.
+  _noProgressCount = 0;
+  _recentResponsePrefixes = [];
+  _emptyRetries = 0;
+  _explorationCalls = [];
   _agentActivity = 'Thinking'; _activityDetail = 'Starting'; _activityStart = Date.now();
   _lastActivityTime = Date.now();
 
@@ -4641,6 +5283,7 @@ async function agentLoop(userMessage, history, silent = false) {
   // ── Stall guard: kickstart if no activity for 20 seconds ──
   if (_stallGuardTimer) clearInterval(_stallGuardTimer);
   _stallGuardTimer = setInterval(() => {
+    if (_awaitingConfirm) return;  // Don't nudge while a y/N prompt is open
     const elapsed = Date.now() - _lastActivityTime;
     if (elapsed > STALL_GUARD_MS) {
       const nudge = FOCUS_NUDGES[Math.floor(Math.random() * FOCUS_NUDGES.length)];
@@ -4655,6 +5298,7 @@ async function agentLoop(userMessage, history, silent = false) {
     const statusBarFrames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⏏'];
     let sbarIdx = 0;
     _statusBarInterval = setInterval(() => {
+      if (_awaitingConfirm) return;  // Don't clobber the open y/N readline prompt
       const elapsed = ((Date.now() - _activityStart) / 1000).toFixed(0);
       const frame = statusBarFrames[sbarIdx % statusBarFrames.length];
       sbarIdx++;
@@ -4676,10 +5320,12 @@ async function agentLoop(userMessage, history, silent = false) {
   }
   // ── TUI dashboard: reset state at start of each user request ──
   if (!silent) tuiReset();
-  tuiSetPhase('Thinking');
+  tuiSetPhase('THINK');
 
   let lastHadToolCalls = false;
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // 6-phase: THINK at start of each turn
+    tuiSetPhase('THINK');
     // ── Drain notification queue at start of each turn ──
     // This ensures messages pushed by notify tool or background tasks
     // are displayed immediately, not just at REPL input time.
@@ -5015,7 +5661,7 @@ async function agentLoop(userMessage, history, silent = false) {
 
       // ── TUI dashboard: final render at normal exit ──
       if (!silent) {
-        tuiSetPhase('Complete');
+        tuiSetPhase('CONSOLIDATE');
         _agentActivity = 'Idle'; _activityDetail = '';
         if (_stallGuardTimer) { clearInterval(_stallGuardTimer); _stallGuardTimer = null; }
         if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; }
@@ -5087,6 +5733,16 @@ async function agentLoop(userMessage, history, silent = false) {
     // But require >= 3 to avoid false positives on reasonable clarification
     const clarifyingLoopCount = _recentResponsePrefixes.filter(p => _isClarifyingQuestion(p)).length;
     const isClarifyingLoop = clarifyingLoopCount >= 3;
+    // ── PROGRESS GATE: don't break legitimate sequential rounds/todos ──
+    // The semantic + clarifying detectors fire at count 3, which false-positives
+    // on steady sequential work (working through a todo list / pentest rounds
+    // where each step produces a similarly-shaped response). Only break when the
+    // agent has actually stalled — i.e. _noProgressCount > 0 (a clarifying or
+    // exploration-only turn). Real non-exploration tool calls keep _noProgressCount
+    // at 0, so sequential rounds flow straight through.
+    const _progressGate = _noProgressCount > 0;
+    const _toolSemanticBreak = toolSemanticLoop && _progressGate;
+    const _clarifyingBreak = isClarifyingLoop && _progressGate;
     // ── Grep/search loop detection in tool-call path ──
     const grepLoopCount = _recentShellCommands.filter(c => c.tool === 'grep' || c.tool === 'find').length;
     const isGrepLoop = grepLoopCount >= GREP_LOOP_LIMIT;
@@ -5114,16 +5770,43 @@ async function agentLoop(userMessage, history, silent = false) {
       }
     }
 
+    // ── Generic shell repeat-loop break (ALL shell commands, not just grep/find) ──
+    // The shell executor sets _shellRepeatBreak when the same normalized command was
+    // about to fire a 3rd+ time. Do the full break here (trim/cooldown/drain) so the
+    // loop doesn't stall re-running the command.
+    if (_shellRepeatBreak) {
+      log(`\n${C.red}${C.bold}🔴 Shell repeat-loop detected: same shell command re-run without progress. Breaking loop.${C.reset}`);
+      _shellRepeatBreak = false;
+      _recentShellCommands = [];
+      _noProgressCount = 0;
+      _explorationCalls = [];
+      _recentResponsePrefixes = [];
+      _stuckCooldown = Math.max(3, _messageQueue.length);
+      const drainedShell = _messageQueue.length;
+      _messageQueue.length = 0;
+      if (_batch?.timer) clearTimeout(_batch.timer);
+      _batch = null;
+      if (drainedShell > 0) log(`${C.dim}   (${drainedShell} queued message(s) cleared)${C.reset}`);
+      history.push({ role: 'system', content: 'SHELL REPEAT-LOOP BREAK: You re-ran the same shell command multiple times without making progress. The command was skipped. You already have its output from the first run. STOP repeating commands. Do one of: (1) Edit or write a file. (2) Run a DIFFERENT command. (3) Give the user a direct answer. Do NOT re-run the same command.' });
+      let shellTrim = 3;
+      while (shellTrim > 0 && history.length > 4) {
+        const last = history[history.length - 1];
+        if (last.role === 'assistant' || last.role === 'tool') { history.pop(); shellTrim--; }
+        else if (last.role === 'user') { history.pop(); }
+        else break;
+      }
+    }
+
     // CRITICAL FIX: also check noProgress in the tool-call path
     // Previously _noProgressCount was only checked in the no-tool path,
     // so the agent could loop indefinitely alternating trivial tool calls
     // with clarifying questions and never hit the stuck-loop break.
     const isToolStalled = _noProgressCount >= NO_PROGRESS_LIMIT;
 
-    if (toolSemanticLoop || isClarifyingLoop || isToolStalled) {
+    if (_toolSemanticBreak || _clarifyingBreak || isToolStalled) {
       let reason;
-      if (toolSemanticLoop) reason = `semantic loop detected (${_semanticLoopCount(toolResponseAll)} similar responses, even with tool calls)`;
-      else if (isClarifyingLoop) reason = `clarifying-question loop detected (${clarifyingLoopCount} clarifying responses)`;
+      if (_toolSemanticBreak) reason = `semantic loop detected (${_semanticLoopCount(toolResponseAll)} similar responses, even with tool calls)`;
+      else if (_clarifyingBreak) reason = `clarifying-question loop detected (${clarifyingLoopCount} clarifying responses)`;
       else reason = `${_noProgressCount} turns without real progress (tool-call path)`;
       log(`\n${C.yellow}${C.bold}⚠️  Stuck-loop detected: ${reason}. Breaking loop.${C.reset}`);
       log(`${C.dim}   (Clearing stale queued messages too)${C.reset}\n`);
@@ -5167,6 +5850,8 @@ async function agentLoop(userMessage, history, silent = false) {
 
     // Process tool calls
     const stepNum = turn + 1;
+    // 6-phase: PLAN before executing tools
+    tuiSetPhase('PLAN');
     // ── TUI dashboard: render ALL panels at each step (in-place scroll) ──
     if (!silent) {
       const dashParts = [];
@@ -5176,7 +5861,7 @@ async function agentLoop(userMessage, history, silent = false) {
       if (dashParts.length > 0) _writePanel('DASHBOARD', dashParts.join('\n'));
       log(`${C.magenta}${T.thick.repeat(3)}${C.reset} ${C.magenta}Step ${stepNum}/${MAX_TURNS}${C.reset} ${C.magenta}${T.thick.repeat(3)}${C.reset}`);
     }
-    tuiSetPhase('Executing');
+    tuiSetPhase('ACT');
     _agentActivity = 'Executing'; _activityDetail = `Step ${turn + 1}`; _lastActivityTime = Date.now();
     // BUG 16 FIX: strip fake queue/TUI lines from thinking to prevent re-looping
     // BUG 17 FIX: Use _stripFakeTui() helper for tool-call path thinking
@@ -5276,7 +5961,7 @@ async function agentLoop(userMessage, history, silent = false) {
 
       // ── Dangerous command confirmation ──
       const dangerReason = isDangerousCommand(fnName, fnArgs);
-      if (dangerReason) {
+      if (dangerReason && shouldConfirm(_approvalMode, fnName, fnArgs, dangerReason)) {
         log(`${C.yellow}${C.bold}⚠️ DANGEROUS: ${dangerReason}${C.reset}`);
         if (_confirmFn) {
           const approved = await _confirmFn(dangerReason, fnName, fnArgs);
@@ -5360,6 +6045,23 @@ async function agentLoop(userMessage, history, silent = false) {
       } else {
         // Tool succeeded — reset consecutive error tracking
         _consecutiveToolErrors = [];
+
+        // ── Auto-learn: CONSOLIDATE phase ──
+        if (shouldConsolidate(_toolCallCount)) {
+          try {
+            await autolearn.consolidateMemories(path.join(process.env.HOME || '/home/ghost', '.hakster'));
+          } catch (e) { /* non-blocking */ }
+        }
+
+        // ── Auto-learn: REFLECT phase ──
+        if (shouldReflect(_noProgressCount, _recentResponsePrefixes)) {
+          tuiSetPhase('REFLECT');
+          const reflection = injectLearnedLessons(process.cwd(), ['pentest', 'agent']);
+          if (reflection) {
+            history.push({ role: 'system', content: '🔄 Reflection: ' + reflection.substring(0, 800) });
+            _noProgressCount = 0;
+          }
+        }
       }
       // Check for HTTP status codes in the result (e.g. "200 OK", "502 Bad Gateway")
       const httpStatusMatch = String(result).match(/\b([45]\d{2}\s+\w+|2\d{2}\s+\w+)/);
@@ -5415,6 +6117,9 @@ async function agentLoop(userMessage, history, silent = false) {
         // Ollama expects tool_call_id matching
       });
     }
+
+    // 6-phase: OBSERVE after tool results
+    tuiSetPhase('OBSERVE');
 
     // ── TUI dashboard: render ALL panels after each step ──
     // All dashboard panels render as ONE combined block so they scroll
@@ -5669,17 +6374,27 @@ async function repl() {
   // ── Wire danger confirm as readline prompt ────────────────────────────
   _confirmFn = (dangerMsg, tool, args) => {
     return new Promise((resolve) => {
+      _awaitingConfirm = true;   // Freeze status bar + stall guard so they don't overwrite the prompt
       stopSpinner();
+      process.stdout.write('\r' + ' '.repeat(120) + '\r');  // wipe any leftover status-bar text on this line
       console.log(`\n${C.error}${C.bold}⚠  DANGEROUS OPERATION${C.reset}`);
       console.log(`  ${dangerMsg}`);
       console.log(`  Tool: ${tool}`);
       console.log(`  Args: ${JSON.stringify(args).substring(0, 200)}`);
       rl.question(`${C.bgError}${C.butter}${C.bold} y/N ${C.reset} Run this? `, (answer) => {
+        _awaitingConfirm = false;  // Resume status bar / stall guard
+        _lastActivityTime = Date.now();
         resolve(answer.toLowerCase() === 'y');
-        rl.prompt();
+        if (!answer) rl.prompt();
       });
     });
   };
+
+  // ── Full-auto mode ─────────────────────────────────────────────────
+  if (process.argv.includes('--full-auto') || process.env.HAKSTER_APPROVAL_MODE === 'full-auto') {
+    _approvalMode = FULL_AUTO;
+    console.log(`${C.yellow}⚠  FULL-AUTO MODE: All dangerous commands will execute without confirmation${C.reset}`);
+  }
 
   // ── Print banner with background splash ─────────────────────────────
   // Dark background splash — fill terminal with near-black to set the mood
@@ -5727,6 +6442,8 @@ async function repl() {
   _stuckCooldown = 0;            // Reset stuck-loop cooldown
   _emptyRetries = 0;              // Reset empty response retry counter
   _explorationCalls = [];         // Reset filesystem-wandering loop detection
+  _recentShellCommands = [];      // Reset shell repeat-loop detection for this session
+  _shellRepeatBreak = false;      // Reset shell repeat-loop break flag
   _actionsTaken = [];             // Reset action tracker for new session
 
   // ── Idle auto-review: health + skill hot-reload + self-repair ──
@@ -6035,11 +6752,12 @@ async function repl() {
       } else {
         // Interactive image gen mode
         console.log(`\n${C.primary}${C.bold}🎨 Image Generation Mode${C.reset}`);
-        console.log(`${C.fgMuted}Type a prompt to generate an image. Options: size, model, quality${C.reset}`);
+        console.log(`${C.fgMuted}Type a prompt to generate/edit an image. Options: size, model, quality, operation${C.reset}`);
         console.log(`${C.fgMuted}Examples:${C.reset}`);
         console.log(`  ${C.cyan}a retro cyberpunk city at sunset${C.reset}`);
         console.log(`  ${C.cyan}size=1024x1792 a tall poster for haksterAI${C.reset}`);
-        console.log(`  ${C.cyan}model=gpt-image-1 a modern logo${C.reset}`);
+        console.log(`  ${C.cyan}operation=logo model=zimage a modern logo${C.reset}`);
+        console.log(`  ${C.cyan}operation=enhance image=/path/to/photo.png improve lighting${C.reset}`);
         console.log(`  ${C.cyan}quality=hd a detailed infographic${C.reset}`);
         console.log(`${C.fgMuted}Type ${C.primary}/img${C.reset}${C.fgMuted} again or ${C.primary}exit${C.reset}${C.fgMuted} to leave image mode${C.reset}\n`);
         let imgMode = true;
@@ -6062,14 +6780,15 @@ async function repl() {
             console.log(`${C.fgMuted}Image mode commands:${C.reset}`);
             console.log(`  ${C.cyan}prompt text${C.reset} — generate image from prompt`);
             console.log(`  ${C.cyan}size=WxH prompt${C.reset} — set size (1024x1024, 1024x1792, 1792x1024)`);
-            console.log(`  ${C.cyan}model=NAME prompt${C.reset} — set model (dall-e-3, gpt-image-1)`);
+            console.log(`  ${C.cyan}model=NAME prompt${C.reset} — set model (zimage, flux, kontext, gptimage, dall-e-3, gpt-image-1)`);
+            console.log(`  ${C.cyan}operation=enhance image=/path/to/img.png prompt${C.reset} — edit/enhance a source image`);
             console.log(`  ${C.cyan}quality=hd prompt${C.reset} — set quality (standard, hd)`);
             console.log(`  ${C.cyan}exit${C.reset} or ${C.cyan}/img${C.reset} — leave image mode`);
             rl.prompt();
             return;
           }
-          // Parse options: size=, model=, quality=
-          let size = '1024x1024', model = 'dall-e-3', quality = 'standard';
+          // Parse options: size=, model=, quality=, operation=, image=
+          let size = '1024x1024', model = 'zimage', quality = 'hd', operation = 'generate', image_path = '';
           let promptText = text;
           const sizeMatch = text.match(/size=(\d+x\d+)\s*/i);
           if (sizeMatch) { size = sizeMatch[1]; promptText = promptText.replace(sizeMatch[0], ''); }
@@ -6077,6 +6796,10 @@ async function repl() {
           if (modelMatch) { model = modelMatch[1]; promptText = promptText.replace(modelMatch[0], ''); }
           const qualMatch = text.match(/quality=(\S+)\s*/i);
           if (qualMatch) { quality = qualMatch[1]; promptText = promptText.replace(qualMatch[0], ''); }
+          const opMatch = text.match(/operation=(\S+)\s*/i);
+          if (opMatch) { operation = opMatch[1]; promptText = promptText.replace(opMatch[0], ''); }
+          const imageMatch = text.match(/image=(\S+)\s*/i);
+          if (imageMatch) { image_path = imageMatch[1]; promptText = promptText.replace(imageMatch[0], ''); }
           promptText = promptText.trim();
           if (!promptText) { rl.prompt(); return; }
 
@@ -6085,7 +6808,7 @@ async function repl() {
           startSpinner('Generating');
           (async () => {
             try {
-              const result = await toolExecutors.generate_image({ prompt: promptText, model, size, quality });
+              const result = await toolExecutors.generate_image({ prompt: promptText, model, size, quality, operation, image_path });
               stopSpinner();
               console.log(`\n${C.success}${C.bold}🎨 Done${C.reset} ${C.fgMuted}(${model}, ${size}, ${quality})${C.reset}`);
               console.log(result);
@@ -6112,7 +6835,7 @@ async function repl() {
       console.log(`  ${C.tertiary}${C.bold}${T.star}${C.reset}  ${C.fgMuted}Paste an image file path, URL, or base64 data to analyze it${C.reset}`);
       console.log(`  ${C.primary}${C.bold}🎨 /img${C.reset}  ${C.fgMuted}Enter image generation mode — type prompts to generate images${C.reset}`);
       console.log(`  ${C.fgSubtle}${T.dots(60)}${C.reset}`);
-      console.log('  ⚠  Dangerous commands (rm, kill, shutdown, etc.) will prompt for confirmation');
+      console.log(`  ⚠  Approval mode: ${_approvalMode}${_approvalMode === FULL_AUTO ? ' — dangerous commands will execute WITHOUT confirmation' : ' — dangerous commands will prompt for confirmation'}`);
       rl.prompt();
       return;
     }
@@ -6309,6 +7032,6 @@ async function repl() {
 }
 
 // ── Export for use as module or direct run ───────────────────────────────
-module.exports = { agentLoop, TOOLS, toolExecutors, banner, buildSystemPrompt, initMcpTools, shutdownMcp, msgPush, msgDrain, msgPeek, msgClear, msgSize, serverNotify, setConfirmFn, getPentesterFingerprint };
+module.exports = { agentLoop, TOOLS, toolExecutors, banner, buildSystemPrompt, initMcpTools, shutdownMcp, msgPush, msgDrain, msgPeek, msgClear, msgSize, serverNotify, setConfirmFn, setApprovalMode, setUserId, getUserId, loadAgentsMd, getPentesterFingerprint };
 function setConfirmFn(fn) { _confirmFn = fn; }
 if (require.main === module) repl();

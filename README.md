@@ -4,30 +4,46 @@ haksterAI is the web app, API server, and universal CLI shell for local/cloud AI
 
 ## CLI Install
 
-From a downloaded repo:
+Install globally from npm:
 
 ```bash
-npm install
-npm link
-hakster status
-haksterai status
+npm install -g haksterai
 ```
 
-Or install the standalone CLI package:
+Or from the repo:
 
 ```bash
-cd cli
-npm install
-npm link
-hakster status
+git clone https://github.com/Deko38code/HAKSTERAI.git
+cd HAKSTERAI
+npm install -g .
 ```
 
-Configure the CLI to talk to a running haksterAI server:
+Initialize and configure:
 
 ```bash
+hakster init                              # interactive setup
 hakster config set server http://localhost:3579
-hakster health
+hakster config set apiKey hkai_yourkey
+hakster health                            # check server connection
 ```
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `hakster init` | Interactive setup — server URL + API key |
+| `hakster chat` | Interactive AI chat with streaming + tool loop |
+| `hakster agent "<prompt>"` | One-shot agent task with full tool loop |
+| `hakster models` | List available AI models from all providers |
+| `hakster mcp` | List MCP tools (filesystem, nmap, playwright, etc) |
+| `hakster ls [path]` | List files in server workspace |
+| `hakster download <path>` | Download a file from the server |
+| `hakster health` | Check if server is online |
+| `hakster status` | Show CLI config and connection status |
+| `hakster guardian <cmd>` | Run Guardian pentest commands (scan, recon, report) |
+| `hakster config set <key> <val>` | Set config value |
+| `hakster config get <key>` | Get config value |
+| `hakster config list` | List all config |
 
 ## 🚀 Project Structure
 

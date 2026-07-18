@@ -10,6 +10,8 @@ dist/
 .env
 server/.env
 *.env
+server/google-oauth-client.json
+client_secret_*.apps.googleusercontent.com.json
 
 # Data files (runtime generated)
 data/
@@ -44,3 +46,9 @@ gpt-oss-120b/
 *.bak*
 .kiro/
 pentest-agents/
+
+# Scrape caches & test artifacts
+.firecrawl/
+test-results/
+.git.broken/
+.git.old-root/

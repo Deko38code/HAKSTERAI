@@ -6,7 +6,7 @@ import Layout from '../layouts/Layout.astro';
 <script is:inline src="/js/addon-fit.js"></script>
 
 <Layout title="haksterAi — Chat">
-  <section id="hacker-chat" class="h-dvh min-h-0 flex flex-row bg-[#141414] text-white overflow-hidden">
+  <section id="hacker-chat" class="h-dvh min-h-0 flex flex-row bg-[#141414] text-white overflow-hidden pt-[64px]">
 
     <!-- LEFT SIDEBAR -->
     <aside id="sidebar" class="chat-side-grid hidden md:flex flex-col w-64 min-w-[256px] border-r border-[#333] bg-[#111] relative z-10 transition-all duration-300 fixed md:relative inset-y-0 left-0 z-40 md:z-10">
@@ -204,6 +204,10 @@ import Layout from '../layouts/Layout.astro';
 
       <!-- Chat composer -->
       <form id="chat-form" class="relative z-10 w-full px-2 sm:px-4 lg:px-6 pb-4">
+        <div id="send-status" class="send-status hidden" aria-live="polite">
+          <span class="send-status-dot"></span>
+          <span class="send-status-text">Working...</span>
+        </div>
         <div id="composer" class="rounded-[22px] border border-[#333] bg-[#1a1a1a] py-3 shadow-[0_12px_32px_rgba(0,0,0,0.02)] overflow-hidden">
           <div class="overflow-y-auto pl-4 pr-2">
             <textarea id="chat-input" rows="3" placeholder="Ask haksterAi to search, scrape, build, or analyze..." class="min-h-[28px] w-full resize-none border-0 bg-transparent p-0 pt-[1px] text-base leading-6 text-white outline-none placeholder:text-[#999]"></textarea>
@@ -229,7 +233,10 @@ import Layout from '../layouts/Layout.astro';
             <button type="button" id="terminal-btn" class="composer-btn" title="Open terminal"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 17 6-6-6-6"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19h8"/></svg></button>
             <button type="button" id="pentester-btn" class="composer-btn" title="Launch security review agent"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5M2 12l10 5 10-5"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v6m-3-3h6" /></svg></button>
             <div class="flex-1"></div>
-            <button type="submit" id="send-btn" class="send-btn" disabled><svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m-7 7 7-7 7 7"/></svg></button>
+            <button type="submit" id="send-btn" class="send-btn" disabled>
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m-7 7 7-7 7 7"/></svg>
+              <svg class="send-spinner h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+            </button>
           </div>
           <div id="ask-dropdown" class="hidden absolute left-3 bottom-full mb-2 w-72 rounded-xl border border-[#333] bg-[#111] shadow-2xl p-2 z-50">
             <div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">Quick prompts</div>
@@ -239,6 +246,8 @@ import Layout from '../layouts/Layout.astro';
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Run this shell command with exec_shell and report the output: ">⌘ Shell command</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Inspect the file, then use edit_file to patch the bug and verify with a syntax check or test: ">🩹 Patch file</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Write a safe remediation or verification script and explain each step">🛠️ Fix script</button>
+            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Diagnose this user's machine. First call browser_detect for browser/device context. Then create a downloadable diagnostic script with write_file and explain how to run it safely: ">🖥️ Diagnose machine</button>
+            <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Create a downloadable fix script for this issue. Use write_file with a descriptive filename, make the script safe and reversible where possible, and include run instructions: ">⬇️ Download fix</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use the generate_image tool to create a professional logo for this brand. Design it with modern aesthetics, bold colors, and clean lines.">🎨 Create a logo</button>
             <button class="quick-prompt w-full text-left px-3 py-2 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/[0.04] transition" data-prompt="Use the generate_image tool to enhance and upscale this image with better detail, lighting, and resolution.">✨ Enhance image</button>
           </div>
@@ -271,10 +280,10 @@ import Layout from '../layouts/Layout.astro';
         <div class="px-5 py-4 space-y-4">
           <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Prompt</label><textarea id="image-prompt" rows="3" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50 resize-none" placeholder="A haksterAi logo with purple neon..."></textarea></div>
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Model</label><select id="image-model" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50"><option value="dall-e-3">DALL-E 3</option><option value="gpt-image-1">GPT Image 1</option></select></div>
+            <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Model</label><select id="image-model" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50"><option value="zimage">Pollinations Z-Image</option><option value="flux">Pollinations Flux</option><option value="kontext">Pollinations Kontext Edit</option><option value="gptimage">Pollinations GPT Image</option><option value="dall-e-3">DALL-E 3</option><option value="gpt-image-1">GPT Image 1</option></select></div>
             <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Size</label><select id="image-size" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50"><option value="1024x1024">1024×1024</option><option value="1792x1024">1792×1024</option><option value="1024x1792">1024×1792</option><option value="512x512">512×512</option></select></div>
           </div>
-          <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Quality</label><div class="flex gap-3"><label class="flex items-center gap-1.5 text-sm text-white/70 cursor-pointer"><input type="radio" name="image-quality" value="standard" checked class="accent-[#7c3aed]" /> Standard</label><label class="flex items-center gap-1.5 text-sm text-white/70 cursor-pointer"><input type="radio" name="image-quality" value="hd" class="accent-[#7c3aed]" /> HD</label></div></div>
+          <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Quality</label><div class="flex gap-3"><label class="flex items-center gap-1.5 text-sm text-white/70 cursor-pointer"><input type="radio" name="image-quality" value="standard" class="accent-[#7c3aed]" /> Standard</label><label class="flex items-center gap-1.5 text-sm text-white/70 cursor-pointer"><input type="radio" name="image-quality" value="hd" checked class="accent-[#7c3aed]" /> HD</label></div></div>
           <button id="generate-image-btn" class="w-full rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white font-semibold py-2.5 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Generate Image</button>
           <div id="image-status" class="hidden text-center text-xs text-white/50 py-2"></div>
         </div>
@@ -455,7 +464,7 @@ import Layout from '../layouts/Layout.astro';
     </div>
   </section>
 
-  <style>
+  <style is:global>
     /* ── Chat-style minimal composer buttons ── */
     .composer-btn { display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; border: none; background: transparent; padding: 0; width: 32px; height: 32px; min-width: 0; color: #fff; cursor: pointer; transition: background 0.15s; flex-shrink: 0; }
     .composer-btn:hover { background: #222; }
@@ -466,6 +475,15 @@ import Layout from '../layouts/Layout.astro';
     .send-btn { display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; padding: 0; width: 32px; height: 32px; min-width: 0; background: #fff; color: #000; border: none; cursor: pointer; transition: opacity 0.15s; flex-shrink: 0; }
     .send-btn:disabled { pointer-events: none; opacity: 0.3; }
     .send-btn:hover { opacity: 0.9; }
+    .send-btn .send-spinner { display: none; animation: sendSpin 1s linear infinite; }
+    .send-btn.busy svg:first-child { display: none; }
+    .send-btn.busy .send-spinner { display: block; }
+    @keyframes sendSpin { to { transform: rotate(360deg); } }
+    .send-status { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0 0.5rem 0.35rem; font-size: 11px; font-weight: 500; color: #a78bfa; }
+    .send-status.hidden { display: none; }
+    .send-status-dot { width: 7px; height: 7px; border-radius: 9999px; background: #a78bfa; }
+    .send-status.spinning .send-status-dot { animation: pulseDot 1.2s ease-in-out infinite; }
+    @keyframes pulseDot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.35); } }
     .chat-fullscreen-btn {
       position: absolute;
       top: 0.75rem;
@@ -507,21 +525,27 @@ import Layout from '../layouts/Layout.astro';
     .output-result { color: #f1f5f9; }
     .output-thinking { color: #38bdf8; opacity: 0.9; }
     /* Message styles moved to Ink & grid section below */
-    .bubble-action { display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); padding: 0.2rem 0.55rem; font-size: 0.625rem; color: rgba(255,255,255,0.5); transition: all 0.15s; cursor: pointer; }
-    .bubble-action:hover { color: #fff; border-color: rgba(124,58,237,0.4); background: rgba(124,58,237,0.12); }
-    .bubble-action.copied { color: #34d399; border-color: rgba(52,211,153,0.5); background: rgba(52,211,153,0.1); }
-    .bubble-action svg { width: 11px; height: 11px; flex-shrink: 0; }
-    .bubble-action .copy-label, .bubble-action span { font-size: 0.625rem; }
-    /* ── Separator between bubble header (label + actions) and body ── */
+    .bubble-action { display: inline-flex; align-items: center; justify-content: center; gap: 0.2rem; border-radius: 9999px; border: 1px solid rgba(0,255,255,0.2); background: rgba(0,255,255,0.06); padding: 0.18rem 0.48rem; font-size: 0.58rem; color: #00ffff; transition: all 0.15s; cursor: pointer; }
+    .bubble-action:hover { color: #ffffff; border-color: rgba(0,255,255,0.55); background: rgba(0,255,255,0.15); }
+    .bubble-action.copied { color: #34d399; border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.08); }
+    .bubble-action svg { width: 9px; height: 9px; flex-shrink: 0; }
+    .bubble-action .copy-label, .bubble-action span { font-size: 0.55rem; }
+    /* ── Separator between bubble header (label + actions) and body ── TIGHT: widgets sit right on top of output */
     .msg-bubble > div:first-child {
-      padding-bottom: 0.45rem;
-      margin-bottom: 0.55rem;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding-bottom: 0.25rem;
+      margin-bottom: 0.25rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
     }
-    .msg-bubble > div:first-child .bubble-action { opacity: 0.7; }
+    .msg-bubble > div:first-child .bubble-action { opacity: 0.85; }
     .msg-bubble > div:first-child:hover .bubble-action { opacity: 1; }
-    /* The message body gets clear top separation from the controls */
-    .msg-bubble .msg-body { padding-top: 0.1rem; }
+    /* The message body gets minimal top separation — widgets are tight on top */
+    .msg-bubble .msg-body { padding-top: 0.15rem; margin-top: 0; }
+    /* Script bubbles — tui-code-block needs minimal top spacing so copy/paste widgets sit right on top of code output */
+    .msg-script > div:first-child { padding-bottom: 0.25rem; margin-bottom: 0.15rem; border-bottom: 1px solid rgba(16,185,129,0.12); }
+    .msg-script .tui-code-block { margin-top: 0; }
+    /* Bubble header wraps label and actions with proper flex layout */
+    .bubble-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+    .bubble-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
     .code-block-wrapper { position: relative; }
     .code-block-wrapper .code-copy-btn { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity 0.15s; }
     .code-block-wrapper:hover .code-copy-btn { opacity: 1; }
@@ -536,7 +560,7 @@ import Layout from '../layouts/Layout.astro';
         linear-gradient(90deg, rgba(56,189,248,0.06) 0 3px, transparent 3px),
         rgba(2,6,16,0.96);
       overflow: hidden;
-      margin: 0.75rem 0;
+      margin: 1.15rem 0;
       box-shadow: 0 0 0 1px rgba(124,58,237,0.12) inset, 0 10px 28px rgba(0,0,0,0.24);
     }
     .tui-code-header {
@@ -561,7 +585,7 @@ import Layout from '../layouts/Layout.astro';
       overflow: auto;
       background:
         linear-gradient(90deg, rgba(8,13,25,0.96) 0 3.1rem, rgba(56,189,248,0.14) 3.1rem 3.16rem, transparent 3.16rem),
-        repeating-linear-gradient(to bottom, transparent 0 1.5em, rgba(255,255,255,0.045) 1.5em 3em);
+        repeating-linear-gradient(to bottom, transparent 0 1.5em, rgba(56,189,248,0.15) 1.5em 3em);
     }
     .tui-code-body pre { margin: 0; padding: 0.75rem 0.9rem 0.85rem 0; font-size: 0.8rem; line-height: 1.5; font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace; white-space: pre; color: #edf2f7; text-shadow: 0 0 8px rgba(56,189,248,0.08); }
     .tui-code-body pre .ln { display: inline-block; width: 2.7rem; color: rgba(125,211,252,0.7); text-align: right; padding-right: 0.7rem; user-select: none; margin-right: 0.65rem; border-right: 1px solid rgba(56,189,248,0.12); }
@@ -575,10 +599,19 @@ import Layout from '../layouts/Layout.astro';
     .msg-body strong { color: #fff; font-weight: 600; }
     .msg-body a { color: #60a5fa; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgba(96,165,250,0.4); transition: text-decoration-color 0.15s, color 0.15s; }
     .msg-body a:hover { color: #93c5fd; text-decoration-color: #60a5fa; }
-    /* Web search result links — more prominent so users can see what the agent found */
-    .msg-search a { color: #fbbf24; text-decoration: underline; text-decoration-color: rgba(251,191,36,0.5); font-weight: 500; }
-    .msg-search a:hover { color: #fcd34d; text-decoration-color: #fbbf24; }
-    .msg-search .search-url { color: #fbbf24; text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
+    /* Web search result links — highlighted with background tint + bold underline so users can see what the agent found */
+    .msg-search a { color: #fbbf24; text-decoration: underline; text-decoration-color: #fbbf24; text-underline-offset: 3px; text-decoration-thickness: 2px; font-weight: 600; background: rgba(251,191,36,0.1); padding: 0.05rem 0.3rem; border-radius: 0.25rem; transition: all 0.15s; }
+    .msg-search a:hover { color: #fcd34d; text-decoration-color: #fcd34d; background: rgba(251,191,36,0.2); opacity: 0.95; }
+    .msg-search .search-url { color: #fbbf24; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 2px; text-decoration-color: rgba(251,191,36,0.6); word-break: break-all; font-size: 0.85em; background: rgba(251,191,36,0.08); padding: 0.05rem 0.25rem; border-radius: 0.2rem; }
+    /* ── Search result entries — highlighted + underlined links ── */
+    .search-result-entry { padding: 0.3rem 0.5rem; margin: 0.2rem 0; border-radius: 0.4rem; background: rgba(251,191,36,0.06); border-left: 2px solid rgba(251,191,36,0.3); transition: background 0.15s; }
+    .search-result-entry:hover { background: rgba(251,191,36,0.12); }
+    .search-emoji { font-size: 0.9em; margin-right: 0.15rem; }
+    .search-result-link { color: #fbbf24 !important; text-decoration: underline !important; text-underline-offset: 2px; text-decoration-thickness: 1.5px; text-decoration-color: #fbbf24 !important; font-weight: 600 !important; word-break: break-all; background: rgba(251,191,36,0.1); padding: 0.05rem 0.25rem; border-radius: 0.2rem; transition: all 0.15s; }
+    .search-result-link:hover { color: #fcd34d !important; text-decoration-color: #fcd34d !important; background: rgba(251,191,36,0.2) !important; }
+    .search-result-url { display: block; color: #fbbf24 !important; text-decoration: underline !important; text-underline-offset: 2px; text-decoration-thickness: 1.5px; text-decoration-color: #fbbf24 !important; font-weight: 600 !important; word-break: break-all; font-size: 0.85em; background: rgba(251,191,36,0.1); padding: 0.15rem 0.35rem; border-radius: 0.3rem; margin: 0.15rem 0; transition: all 0.15s; }
+    .search-result-url:hover { color: #fcd34d !important; text-decoration-color: #fcd34d !important; background: rgba(251,191,36,0.2) !important; }
+    .search-result-header { font-weight: 700; color: #fcd34d; font-size: 0.85rem; margin-bottom: 0.3rem; padding: 0.2rem 0; border-bottom: 1px solid rgba(251,191,36,0.15); }
     .attachment-chip img { height: 2.25rem; width: 2.25rem; object-fit: cover; border-radius: 0.5rem; }
     .attachment-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; color: rgba(255,255,255,0.7); }
     .attachment-chip button { flex: 0 0 auto; color: rgba(255,255,255,0.35); transition: color 0.15s; }
@@ -723,6 +756,121 @@ import Layout from '../layouts/Layout.astro';
     .msg-user { background: linear-gradient(135deg, rgba(124,58,237,0.18), rgba(8,13,25,0.78)); border: 1px solid rgba(168,85,247,0.34); box-shadow: 0 2px 12px rgba(124,58,237,0.1); }
     .msg-assistant { background: linear-gradient(135deg, rgba(15,23,42,0.92), rgba(3,7,18,0.84)); border: 1px solid rgba(56,189,248,0.2); box-shadow: 0 2px 14px rgba(0,0,0,0.24); }
     .msg-thinking { background: rgba(8,47,73,0.28); border: 1px solid rgba(56,189,248,0.22); color: rgba(125,211,252,0.9); }
+    /* Inline thinking block inside an assistant bubble — keeps reasoning visible and highlighted */
+    .thinking-inline {
+      margin: 0.35rem 0 0.55rem;
+      padding: 0.45rem 0.6rem;
+      border-radius: 0.5rem;
+      background: rgba(8,47,73,0.34);
+      border: 1px solid rgba(56,189,248,0.24);
+      border-left: 3px solid rgba(56,189,248,0.6);
+      color: rgba(125,211,252,0.92);
+      font-size: 0.78rem;
+      line-height: 1.5;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+      position: relative;
+      overflow: hidden;
+    }
+    .thinking-inline.streaming::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(56,189,248,0.85), transparent);
+      animation: thinking-pulse 1.2s infinite;
+    }
+    @keyframes thinking-pulse {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    .thinking-header {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: rgba(125,211,252,0.85);
+      margin-bottom: 0.3rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .thinking-header:hover { color: rgba(125,211,252,1); }
+    .thinking-spinner {
+      width: 0.7rem;
+      height: 0.7rem;
+      border: 2px solid rgba(56,189,248,0.35);
+      border-top-color: rgba(56,189,248,0.95);
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .thinking-body {
+      max-height: 220px;
+      overflow: auto;
+      padding-right: 0.25rem;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(56,189,248,0.35) transparent;
+    }
+    .thinking-body::-webkit-scrollbar { width: 5px; }
+    .thinking-body::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.35); border-radius: 999px; }
+    .thinking-inline.collapsed .thinking-body { display: none; }
+    .thinking-toggle { margin-left: auto; font-size: 0.58rem; color: rgba(125,211,252,0.55); }
+    .agent-loop-inline {
+      margin: 0.35rem 0 0.55rem;
+      padding: 0.45rem 0.6rem;
+      border-radius: 0.5rem;
+      background: rgba(15,23,42,0.76);
+      border: 1px solid rgba(34,211,238,0.2);
+      color: rgba(165,243,252,0.9);
+      font-size: 0.72rem;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .agent-loop-inline.done { color: rgba(187,247,208,0.86); border-color: rgba(34,197,94,0.24); }
+    .agent-loop-dot {
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 999px;
+      border: 2px solid rgba(34,211,238,0.28);
+      border-top-color: rgba(34,211,238,0.95);
+      animation: spin 0.7s linear infinite;
+      flex: none;
+    }
+    .agent-loop-inline.done .agent-loop-dot {
+      animation: none;
+      border-color: rgba(34,197,94,0.65);
+      background: rgba(34,197,94,0.8);
+    }
+    .agent-loop-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Tool work feed — visible inline list of file/tool operations during agent run */
+    .tool-work-feed {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      margin: 0.3rem 0 0.5rem;
+    }
+    .tool-work-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.55rem;
+      border-radius: 0.4rem;
+      background: rgba(15,23,42,0.55);
+      border: 1px solid rgba(99,102,241,0.18);
+      font-size: 0.7rem;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      color: rgba(199,210,254,0.85);
+      animation: toolFadeIn 0.15s ease-out;
+    }
+    @keyframes toolFadeIn { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+    .tool-work-icon { font-size: 0.75rem; flex: none; }
+    .tool-work-name { color: rgba(165,180,252,0.9); font-weight: 600; flex: none; }
+    .tool-work-arg { color: rgba(148,163,184,0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .msg-image { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); }
     .msg-script { background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.18); }
     .msg-script .tui-code-block { border-color: rgba(16,185,129,0.25); background: rgba(2,1,8,0.95); }
@@ -730,6 +878,8 @@ import Layout from '../layouts/Layout.astro';
     .msg-script .tui-code-lang { color: #6ee7b7; }
     .msg-script .ln { color: rgba(16,185,129,0.35); border-right-color: rgba(16,185,129,0.12); }
     .msg-search { background: rgba(251,191,36,0.07); border: 1px solid rgba(251,191,36,0.18); }
+    /* Search bubbles — tight separator between header (Web label + copy/paste) and search result links */
+    .msg-search > div:first-child { padding-bottom: 0.25rem; margin-bottom: 0.15rem; border-bottom: 1px solid rgba(251,191,36,0.12); }
     .msg-confirmation { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25); }
     /* Ink-wash frame with corner brackets around the chat column */
     .chat-ink-frame {
@@ -899,7 +1049,7 @@ import Layout from '../layouts/Layout.astro';
       { id: 'cloud-ops', name: 'Cloud Ops', icon: '☁️', desc: 'PM2, systemd, ports, health checks', enabled: true },
       { id: 'pentest', name: 'Pentest', icon: '🎯', desc: 'Guardian security scanning & recon', enabled: false },
       { id: 'firecrawl', name: 'Firecrawl', icon: '🔥', desc: 'Web search, scrape & extract', enabled: true },
-      { id: 'image-gen', name: 'Image Gen', icon: '🎨', desc: 'DALL-E image generation inline', enabled: true },
+      { id: 'image-gen', name: 'Image Gen', icon: '🎨', desc: 'HD image/logo generation inline', enabled: true },
       { id: 'memory', name: 'Memory', icon: '🧠', desc: 'Persistent context across sessions', enabled: true },
     ];
     let activeSkills = new Set(AGENT_SKILLS.filter(s => s.enabled).map(s => s.id));
@@ -1506,6 +1656,7 @@ import Layout from '../layouts/Layout.astro';
       const data = chatTermWriteBuf;
       chatTermWriteBuf = '';
       chatTerm.write(data);
+      chatTerm.scrollToBottom();
     }
 
     function enqueueChatTermWrite(data: string) {
@@ -1987,7 +2138,12 @@ import Layout from '../layouts/Layout.astro';
         await fetch(`${API}/api/client-context`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(ctx),
+          body: JSON.stringify({
+            ...ctx,
+            // Pass google token so server can link this session to the authenticated user
+            // even when accessing from a different machine on the network
+            google_token: localStorage.getItem('hakster_google_token') || undefined,
+          }),
         });
       } catch (e) { /* silent — don't block chat if this fails */ }
     }
@@ -2152,6 +2308,53 @@ import Layout from '../layouts/Layout.astro';
       maybeScroll();
     }
 
+    // ── Render web search results with highlighted, underlined links ──
+    function renderSearchResults(content: string): string {
+      if (!content) return '';
+      const lines = content.split('\n');
+      const html: string[] = [];
+      let currentUrl = '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) { html.push('<br>'); continue; }
+        // Detect lines that are just a URL (indented or standalone)
+        const urlMatch = trimmed.match(/^(https?:\/\/[^\s<)>]+)/);
+        if (urlMatch && trimmed === urlMatch[1]) {
+          // Standalone URL line — render as highlighted clickable link
+          const url = urlMatch[1];
+          html.push(`<a href="${url}" target="_blank" rel="noopener" class="search-result-url">🔗 ${url}</a>`);
+          continue;
+        }
+        // Lines starting with emoji markers (📖 🔍 📝) — these are search result entries
+        const entryMatch = trimmed.match(/^([📖🔍📝⚠️❗])\s*(.+)/);
+        if (entryMatch) {
+          const emoji = entryMatch[1];
+          const text = entryMatch[2];
+          // Check if there's a Source: URL embedded
+          const sourceMatch = text.match(/(Source:\s*)(https?:\/\/[^\s]+)/);
+          if (sourceMatch) {
+            const before = text.slice(0, sourceMatch.index);
+            const url = sourceMatch[2];
+            html.push(`<div class="search-result-entry"><span class="search-emoji">${emoji}</span> ${escapeHtml(before)}<a href="${url}" target="_blank" rel="noopener" class="search-result-link">Source</a></div>`);
+          } else {
+            // Auto-link bare URLs inside the text
+            const linked = escapeHtml(text).replace(/(https?:\/\/[^\s<)>]+)/g, (match) => `<a href="${match}" target="_blank" rel="noopener" class="search-result-link">${match}</a>`);
+            html.push(`<div class="search-result-entry"><span class="search-emoji">${emoji}</span> ${linked}</div>`);
+          }
+          continue;
+        }
+        // "Searching web:" / "Scraping page:" header lines
+        if (/^(Searching|Scraping)/i.test(trimmed)) {
+          html.push(`<div class="search-result-header">${escapeHtml(trimmed)}</div>`);
+          continue;
+        }
+        // Fallback: auto-link any bare URLs, otherwise escape
+        const escaped = escapeHtml(trimmed).replace(/(https?:\/\/[^\s<)>]+)/g, (match) => `<a href="${match}" target="_blank" rel="noopener" class="search-result-link">${match}</a>`);
+        html.push(`<div>${escaped}</div>`);
+      }
+      return html.join('');
+    }
+
     function addMessageBubble(msg: Message) {
       if (msg.role === 'image') {
         const bubble = document.createElement('div');
@@ -2187,12 +2390,12 @@ import Layout from '../layouts/Layout.astro';
           const commandPreview = msg.command ? `<div class="mt-2 rounded-lg bg-[#1a1a1a] border border-[#333] px-3 py-2 text-xs font-mono text-red-300/90 overflow-x-auto">${escapeHtml(msg.command)}</div>` : '';
           bodyHtml = `<div class="text-sm text-white/80">${escapeHtml(msg.content)}</div>${commandPreview}`;
         } else if (msg.role === 'search') {
-          bodyHtml = escapeHtmlWithInline(msg.content);
+          bodyHtml = renderSearchResults(msg.content);
         } else {
           bodyHtml = escapeHtml(msg.content);
         }
         const allowBtn = isConfirmation ? `<button type="button" class="bubble-action" data-action="allow" title="Allow this command for this session">${allowIcon}<span>Allow this session</span></button><button type="button" class="bubble-action" data-action="allow-always" title="Add to permanent allow list">${pinIcon}<span>Always</span></button><button type="button" class="bubble-action" data-action="deny" title="Deny this command">${denyIcon}<span>Deny</span></button>` : '';
-        bubble.innerHTML = `<div class="flex items-center justify-between gap-3 mb-1"><div class="text-[10px] font-semibold uppercase tracking-wider ${labelColor}">${label}</div><div class="flex items-center gap-1">${allowBtn}<button type="button" class="bubble-action" data-action="copy" title="Copy message">${copyIcon}<span class="copy-label">Copy</span></button><button type="button" class="bubble-action" data-action="paste" title="Paste into composer">${pasteIcon}<span>Paste</span></button></div></div><div class="${bodyClass}">${bodyHtml}</div>`;
+        bubble.innerHTML = `<div class="bubble-header"><div class="text-[10px] font-semibold uppercase tracking-wider ${labelColor}">${label}</div><div class="bubble-actions">${allowBtn}<button type="button" class="bubble-action" data-action="copy" title="Copy message">${copyIcon}<span class="copy-label">Copy</span></button><button type="button" class="bubble-action" data-action="paste" title="Paste into composer">${pasteIcon}<span>Paste</span></button></div></div><div class="${bodyClass}">${bodyHtml}</div>`;
         if (isAssistant || isScript) attachCodeCopyHandlers(bubble);
         const copyBtn = bubble.querySelector('[data-action="copy"]');
         copyBtn?.addEventListener('click', async () => {
@@ -2260,6 +2463,89 @@ import Layout from '../layouts/Layout.astro';
       maybeScroll();
     }
 
+    // ── Inline thinking block inside the active assistant bubble ──
+    function getAssistantBubbleRoot(bodyEl: HTMLElement | null): HTMLElement | null {
+      return bodyEl?.closest('.msg-assistant') as HTMLElement | null;
+    }
+    function ensureThinkingBlock(bodyEl: HTMLElement | null): { root: HTMLElement; body: HTMLElement } | null {
+      const bubble = getAssistantBubbleRoot(bodyEl);
+      if (!bubble) return null;
+      let thinking = bubble.querySelector('.thinking-inline') as HTMLElement | null;
+      if (!thinking) {
+        thinking = document.createElement('div');
+        thinking.className = 'thinking-inline streaming';
+        thinking.innerHTML = `<div class="thinking-header"><span class="thinking-spinner"></span><span class="thinking-label">Thinking</span><span class="thinking-toggle">−</span></div><div class="thinking-body"></div>`;
+        thinking.querySelector('.thinking-header')?.addEventListener('click', () => {
+          thinking?.classList.toggle('collapsed');
+          const toggle = thinking?.querySelector('.thinking-toggle');
+          if (toggle) toggle.textContent = thinking?.classList.contains('collapsed') ? '+' : '−';
+        });
+        const msgBody = bubble.querySelector('.msg-body');
+        if (msgBody) bubble.insertBefore(thinking, msgBody);
+        else bubble.appendChild(thinking);
+      }
+      const body = thinking.querySelector('.thinking-body') as HTMLElement;
+      return { root: thinking, body };
+    }
+    function appendThinking(bodyEl: HTMLElement | null, text: string) {
+      if (!text) return;
+      const t = ensureThinkingBlock(bodyEl);
+      if (!t) { addMessageBubble({ role: 'thinking', content: text }); return; }
+      t.root.classList.add('streaming');
+      const label = t.root.querySelector('.thinking-label');
+      if (label) label.textContent = 'Thinking';
+      t.body.textContent += text;
+      maybeScroll();
+    }
+    function setThinkingFinished(bodyEl: HTMLElement | null) {
+      const bubble = getAssistantBubbleRoot(bodyEl);
+      const thinking = bubble?.querySelector('.thinking-inline') as HTMLElement | null;
+      if (!thinking) return;
+      thinking.classList.remove('streaming');
+      const label = thinking.querySelector('.thinking-label');
+      if (label) label.textContent = 'Thought';
+      const toggle = thinking.querySelector('.thinking-toggle');
+      if (toggle) toggle.textContent = thinking.classList.contains('collapsed') ? '+' : '−';
+    }
+
+    function setAgentLoopStatus(bodyEl: HTMLElement | null, text: string, done = false) {
+      const bubble = getAssistantBubbleRoot(bodyEl);
+      if (!bubble || !text) return;
+      let loop = bubble.querySelector('.agent-loop-inline') as HTMLElement | null;
+      if (!loop) {
+        loop = document.createElement('div');
+        loop.className = 'agent-loop-inline';
+        loop.innerHTML = '<span class="agent-loop-dot"></span><span class="agent-loop-text"></span>';
+        const msgBody = bubble.querySelector('.msg-body');
+        if (msgBody) bubble.insertBefore(loop, msgBody);
+        else bubble.appendChild(loop);
+      }
+      loop.classList.toggle('done', done);
+      const label = loop.querySelector('.agent-loop-text') as HTMLElement | null;
+      if (label) label.textContent = text;
+      maybeScroll();
+    }
+
+    // appendToolWork — shows file/tool operations as visible inline work items
+    function appendToolWork(bodyEl: HTMLElement | null, icon: string, toolName: string, argHint: string) {
+      const bubble = getAssistantBubbleRoot(bodyEl);
+      if (!bubble) return;
+      let workFeed = bubble.querySelector('.tool-work-feed') as HTMLElement | null;
+      if (!workFeed) {
+        workFeed = document.createElement('div');
+        workFeed.className = 'tool-work-feed';
+        const msgBody = bubble.querySelector('.msg-body');
+        if (msgBody) bubble.insertBefore(workFeed, msgBody);
+        else bubble.appendChild(workFeed);
+      }
+      const item = document.createElement('div');
+      item.className = 'tool-work-item';
+      const shortArg = argHint ? argHint.replace(/^\/home\/ghost\/haksterAi\//, '').replace(/^\/home\/ghost\//, '~/').slice(0, 70) : '';
+      item.innerHTML = `<span class="tool-work-icon">${icon}</span><span class="tool-work-name">${escapeHtml(toolName)}</span>${shortArg ? `<span class="tool-work-arg">${escapeHtml(shortArg)}</span>` : ''}`;
+      workFeed.appendChild(item);
+      maybeScroll();
+    }
+
     function renderScriptLines(text: string): string {
       const lines = text.split('\n');
       return lines.map((line, i) => `<span class="ln">${i + 1}</span>${escapeHtml(line)}`).join('\n');
@@ -2275,7 +2561,7 @@ import Layout from '../layouts/Layout.astro';
       const checkIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
       const headerHtml = renderScriptLines(header);
       const downloadIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>`;
-      bubble.innerHTML = `<div class="flex items-center justify-between gap-3 mb-1"><div class="text-[10px] font-semibold uppercase tracking-wider text-emerald-300/70">Script</div><div class="flex items-center gap-1"><button type="button" class="bubble-action" data-action="copy" title="Copy script output">${copyIcon}<span class="copy-label">Copy</span></button><button type="button" class="bubble-action" data-action="download" title="Download as file">${downloadIcon}<span>Save</span></button><button type="button" class="bubble-action" data-action="paste" title="Paste into composer">${pasteIcon}<span>Paste</span></button></div></div><div class="tui-code-block"><div class="tui-code-header"><span class="tui-code-lang">SHELL</span><span class="tui-code-copy" data-code-id="${scriptId}"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><span class="tui-copy-label">Copy</span></span></div><div class="tui-code-body"><pre class="script-output" id="${scriptId}">${headerHtml}\n</pre></div></div>`;
+      bubble.innerHTML = `<div class="bubble-header"><div class="text-[10px] font-semibold uppercase tracking-wider text-emerald-300/70">Script</div><div class="bubble-actions"><button type="button" class="bubble-action" data-action="copy" title="Copy script output">${copyIcon}<span class="copy-label">Copy</span></button><button type="button" class="bubble-action" data-action="download" title="Download as file">${downloadIcon}<span>Save</span></button><button type="button" class="bubble-action" data-action="paste" title="Paste into composer">${pasteIcon}<span>Paste</span></button></div></div><div class="tui-code-block"><div class="tui-code-header"><span class="tui-code-lang">SHELL</span><span class="tui-code-copy" data-code-id="${scriptId}"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><span class="tui-copy-label">Copy</span></span></div><div class="tui-code-body"><pre class="script-output" id="${scriptId}">${headerHtml}\\n</pre></div></div>`;
       attachCodeCopyHandlers(bubble);
       const body = bubble.querySelector('.script-output') as HTMLElement;
       const rawBody = document.createElement('div');
@@ -2455,6 +2741,7 @@ import Layout from '../layouts/Layout.astro';
         sel.innerHTML = '';
         models.forEach((m: string) => { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; sel.appendChild(opt); });
         if (currentModel && models.includes(currentModel)) sel.value = currentModel;
+        else if (models.includes('glm-5.2:cloud')) sel.value = 'glm-5.2:cloud';
         else if (models.includes('gpt-oss:120b-cloud')) sel.value = 'gpt-oss:120b-cloud';
       };
       populate(modelSelect); populate(sidebarModelSelect);
@@ -2493,6 +2780,18 @@ import Layout from '../layouts/Layout.astro';
 
     // ===== UI Helpers =====
     function setReadyState() { sendBtn.disabled = (!chatInput.value.trim() && pendingImages.length === 0) || busy; }
+    const sendStatusEl = document.getElementById('send-status') as HTMLElement | null;
+    const sendStatusTextEl = sendStatusEl?.querySelector('.send-status-text') as HTMLElement | null;
+    function setLiveStatus(text: string) {
+      if (sendStatusTextEl) sendStatusTextEl.textContent = text;
+    }
+    function setBusyState(isBusy: boolean) {
+      busy = isBusy;
+      sendBtn.classList.toggle('busy', isBusy);
+      sendStatusEl?.classList.toggle('hidden', !isBusy);
+      sendStatusEl?.classList.toggle('spinning', isBusy);
+      if (sendStatusTextEl) sendStatusTextEl.textContent = isBusy ? 'Working...' : 'Ready';
+    }
     function renderAttachments() {
       const strip = document.getElementById('attachment-strip')!;
       strip.innerHTML = '';
@@ -2518,9 +2817,29 @@ import Layout from '../layouts/Layout.astro';
         reader.readAsDataURL(file);
       });
     }
+    async function compressImageFile(file: File): Promise<string> {
+      const raw = await fileToDataUrl(file);
+      if (raw.length <= 1_400_000) return raw;
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxSide = 1600;
+          const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(raw);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.86));
+        };
+        img.onerror = () => resolve(raw);
+        img.src = raw;
+      });
+    }
     async function attachFiles(files: FileList | File[]) {
-      const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/')).slice(0, 6);
-      for (const file of imageFiles) pendingImages.push({ name: file.name, dataUrl: await fileToDataUrl(file) });
+      const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/')).slice(0, 3);
+      for (const file of imageFiles) pendingImages.push({ name: file.name, dataUrl: await compressImageFile(file) });
       renderAttachments();
       setReadyState();
     }
@@ -2665,36 +2984,45 @@ import Layout from '../layouts/Layout.astro';
     if (askBtn) askBtn.addEventListener('click', (e) => { e.stopPropagation(); askDropdown.classList.toggle('hidden'); });
     document.addEventListener('click', () => askDropdown.classList.add('hidden'));
     clearBtn.addEventListener('click', () => { outputArea.innerHTML = ''; outputPanel.classList.add('hidden'); });
+    function setAgentPrompt(prompt: string) {
+      const cwdLine = activeProjectCwd ? `\n\nActive project cwd: ${activeProjectCwd}` : '';
+      chatInput.value = `${prompt}${cwdLine}`;
+      setReadyState();
+      chatInput.focus();
+      askDropdown.classList.add('hidden');
+    }
     document.getElementById('firecrawl-btn')!.addEventListener('click', () => {
-      chatInput.value = 'Use Firecrawl to search for current information about this topic, then provide detailed findings.';
-      setReadyState(); chatInput.focus();
+      setAgentPrompt('Use web_search first, then firecrawl_scrape on the best result if needed. Find current information about this topic and provide concise findings: ');
     });
     document.getElementById('scrape-btn')!.addEventListener('click', () => {
       const url = prompt('Enter URL to scrape with Firecrawl:');
-      if (url) { chatInput.value = `Use Firecrawl to scrape and analyze this URL: ${url}\n\nExtract the main content, structure, and key information. Then implement or explain based on what you find.`; setReadyState(); chatInput.focus(); }
+      if (url) setAgentPrompt(`Use firecrawl_scrape to scrape and analyze this URL: ${url}\n\nExtract the main content, structure, and key information. Then implement or explain based on what you find.`);
     });
     document.getElementById('shell-btn')!.addEventListener('click', () => {
       const cmd = prompt('Enter a shell command to run:');
-      if (cmd) { chatInput.value = `Run this shell command using the exec_shell tool and report the full stdout/stderr:\n\n\`\`\`\n${cmd}\n\`\`\``; setReadyState(); chatInput.focus(); }
+      if (cmd) setAgentPrompt(`Run this shell command using exec_shell with a bounded timeout and report stdout/stderr:\n\n\`\`\`\n${cmd}\n\`\`\``);
     });
     document.getElementById('patch-btn')!.addEventListener('click', () => {
       const file = prompt('Which file should I patch?');
-      if (file) { chatInput.value = `Inspect \`${file}\`, identify the bug or requested change, then use the edit_file tool to apply a precise patch. After patching, verify with the narrowest useful command (syntax check, test, or build).`; setReadyState(); chatInput.focus(); }
+      if (file) setAgentPrompt(`Inspect \`${file}\`, identify the bug or requested change, then use apply_patch or edit_file to apply a precise patch. After patching, verify with the narrowest useful command.`);
     });
 
     // ===== Core Send Message =====
     const IMAGE_INSTRUCTION = [
       'You are the Chat tab agent.',
       'For any request to create, generate, design, draw, make, improve, upscale, or enhance a logo, picture, photo, avatar, icon, banner, cover, illustration, graphic, UI mockup, product image, or visual asset, you MUST call the generate_image tool.',
+      'Default to provider="pollinations", quality="hd", and top-grade/premium output. If the user attaches an image and asks to edit, enhance, upscale, restyle, or improve it, use the attached image file path supplied by the server with operation="edit" or operation="enhance".',
       'Do not answer image/logo requests with text-only advice unless the generate_image tool fails. After the tool returns, summarize the image and include the generated image event/result.',
+      'When a script or command would solve the user request, do not only paste it. Run safe commands yourself with tools, or ask approval before destructive/admin/network-install actions and then run them.',
+      'When asked to start a dev server, watcher, preview, tunnel, or long-running job, use shell_bg/background execution so the chat does not hang, then verify with a short health/log command and report the URL, PID/process id, and status.',
       'For web/current info, use web_search first; for page content, use firecrawl_scrape.'
     ].join(' ');
 
     async function sendMessage(prompt: string) {
       const attachedImages = [...pendingImages];
       const userPrompt = prompt || (attachedImages.length ? 'Analyze the attached image(s) and help me with them.' : '');
-      busy = true; if (sendState) sendState.textContent = 'Running'; sendBtn.disabled = true; chatInput.disabled = true;
-      const model = currentModel || modelSelect.value || 'gpt-oss:120b-cloud';
+      setBusyState(true); chatInput.disabled = true; if (sendState) sendState.textContent = 'Running';
+      const model = currentModel || modelSelect.value || 'glm-5.2:cloud';
       let activeId = getActiveId(); let convs = loadConversations(); let conv = convs.find(c => c.id === activeId);
       if (!conv) { conv = createConversation(userPrompt, model); activeId = conv.id; }
       else if (conv.messages.length === 0) { updateConversationTitle(conv.id, userPrompt); }
@@ -2717,12 +3045,16 @@ import Layout from '../layouts/Layout.astro';
               ...attachedImages.map(img => ({ type: 'image_url', image_url: { url: img.dataUrl } })),
             ];
           }
+          const outboundMessages = attachedImages.length > 0
+            ? [allMessages[allMessages.length - 1]]
+            : allMessages.slice(-20);
           const res = await fetch(endpoint, {
             method: 'POST', headers: authHeaders,
             body: JSON.stringify({ provider: currentProvider, model, sessionId: conv.id, stream: true,
-              thinking: thinkingEnabled,
+              approvalMode: 'full-auto',
+              thinking: true,
               cwd: activeProjectCwd || undefined,
-              messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-10)] }),
+              messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...outboundMessages] }),
           });
           if (!res.ok || !res.body) {
             const errData = await res.json().catch(() => ({}));
@@ -2736,7 +3068,26 @@ import Layout from '../layouts/Layout.astro';
           if (lastBubble) lastBubble.textContent = '';
           const scriptOutputs = new Map<string, { el: HTMLElement; msg: Message; rawEl?: HTMLElement | null; pending?: string; raf?: number | null }>();
           const webOutputs = new Map<string, Message>();
-          const flushScriptOutput = (entry: { el: HTMLElement; msg: Message; rawEl?: HTMLElement | null; pending?: string; raf?: number | null }) => {
+          setAgentLoopStatus(lastBubble, 'Thinking...');
+          const _saveConvDebounced = (() => {
+            let timer: any = null;
+            return (conv: Conversation) => {
+              if (timer) return;
+              timer = setTimeout(() => {
+                timer = null;
+                saveConversation(conv);
+              }, 400);
+            };
+          })();
+          const _scrollThrottle = (() => {
+            let queued = false;
+            return () => {
+              if (queued) return;
+              queued = true;
+              requestAnimationFrame(() => { queued = false; maybeScroll(); });
+            };
+          })();
+          const flushScriptOutput = (entry: { el: HTMLElement; msg: Message; rawEl?: HTMLElement | null; pending?: string; raf?: number | null; isFinal?: boolean }) => {
             entry.raf = null;
             const next = entry.pending || '';
             entry.pending = '';
@@ -2747,9 +3098,15 @@ import Layout from '../layouts/Layout.astro';
             }
             if (!entry.rawEl) entry.rawEl = entry.el.closest('.msg-bubble')?.querySelector('.script-raw') as HTMLElement | null;
             if (entry.rawEl) entry.rawEl.textContent = entry.msg.content;
-            entry.el.innerHTML = renderScriptLines(entry.msg.content);
-            saveConversation(conv);
-            maybeScroll();
+            // Throttle HTML re-render: only re-render on final flush or every ~150ms
+            const now = Date.now();
+            if (entry.isFinal || !entry._lastRender || now - entry._lastRender > 150) {
+              entry._lastRender = now;
+              entry.el.innerHTML = renderScriptLines(entry.msg.content);
+            }
+            if (entry.isFinal) saveConversation(conv);
+            else _saveConvDebounced(conv);
+            _scrollThrottle();
           };
           let tokenCount = 0;
           let renderTimer: any = null;
@@ -2763,6 +3120,7 @@ import Layout from '../layouts/Layout.astro';
                 if (event.type === 'content' || event.type === 'delta') {
                   if (lastBubble) lastBubble.textContent += event.content || '';
                   assistantMsg.content += event.content || ''; tokenCount++;
+                  setThinkingFinished(lastBubble);
                   // Debounced code block re-render — only when we detect a closing fence
                   if (assistantMsg.content.includes('```')) {
                     if (renderTimer) clearTimeout(renderTimer);
@@ -2770,16 +3128,24 @@ import Layout from '../layouts/Layout.astro';
                       if (lastBubble) {
                         lastBubble.innerHTML = renderCodeBlocks(assistantMsg.content);
                         attachCodeCopyHandlers(lastBubble.parentElement || lastBubble as HTMLElement);
-                        maybeScroll();
+                        _scrollThrottle();
                       }
                     }, 300);
                   }
+                  _scrollThrottle();
                 } else if (event.type === 'thinking' || event.type === 'thought') {
-                  addMessageBubble({ role: 'thinking', content: event.content || event.message || '' });
+                  setAgentLoopStatus(lastBubble, 'Reasoning...');
+                  appendThinking(lastBubble, event.content || event.message || '');
                 } else if (event.type === 'tool_call_start') {
                   const toolName = event.tool_name || '';
+                  const args = event.tool_args || {};
+                  // Build a readable label for what the tool is doing
+                  const argHint = args.path || args.file || args.command || args.query || args.url || args.search || args.name || '';
+                  const shortHint = argHint ? `: ${String(argHint).replace(/^\/home\/ghost\/haksterAi\//, '').slice(0, 60)}` : '';
+                  const toolLabel = toolName ? `${toolName}${shortHint}` : 'Using tool';
+                  setAgentLoopStatus(lastBubble, toolLabel);
+                  setLiveStatus(`⚙ ${toolLabel}`);
                   if (toolName === 'web_search' || toolName === 'firecrawl_scrape') {
-                    const args = event.tool_args || {};
                     const target = args.query || args.url || args.search || JSON.stringify(args);
                     const msg: Message = {
                       role: 'search',
@@ -2790,11 +3156,25 @@ import Layout from '../layouts/Layout.astro';
                     webOutputs.set(event.tool_call_id || `${toolName}-${Date.now()}`, msg);
                     conv.messages.push(msg); saveConversation(conv); addMessageBubble(msg);
                   } else if (toolName && toolName !== 'exec_shell') {
-                    addMessageBubble({ role: 'thinking', content: `Using ${toolName}` });
+                    // Show file/tool operations as visible inline work items
+                    const isFileOp = ['read_file','write_file','edit_file','list_dir','apply_patch','patch_file','multi_patch','delete_file','move_file','copy_file','search_files','codebase_index'].includes(toolName);
+                    const icon = toolName.startsWith('read') || toolName === 'list_dir' || toolName === 'search_files' ? '👁' :
+                                 toolName.startsWith('write') || toolName === 'edit_file' || toolName.includes('patch') ? '✏️' :
+                                 toolName === 'exec_shell' ? '⚡' : '🔧';
+                    if (isFileOp) {
+                      appendToolWork(lastBubble, icon, toolName, argHint);
+                    } else {
+                      appendThinking(lastBubble, `${icon} ${toolLabel}`);
+                    }
                   }
                 } else if (event.type === 'tool_call') {
-                  addMessageBubble({ role: 'thinking', content: `⚡ ${event.toolCall?.function?.name || event.name || 'tool'}` });
+                  setAgentLoopStatus(lastBubble, 'Calling tool');
+                  setLiveStatus('⚙ Calling tool...');
+                  appendThinking(lastBubble, `⚡ ${event.toolCall?.function?.name || event.name || 'tool'}`);
                 } else if (event.type === 'shell_start') {
+                  const cmdShort = (event.command || '').slice(0, 60);
+                  setAgentLoopStatus(lastBubble, event.command ? `$ ${cmdShort}` : 'Running shell');
+                  setLiveStatus(`⚡ $ ${cmdShort || 'shell command'}`);
                   const key = event.tool_call_id || `shell-${Date.now()}`;
                   const el = addScriptBubble(event.command || '', event.cwd || '');
                   const msg: Message = { role: 'script', content: el.textContent || '' };
@@ -2814,9 +3194,13 @@ import Layout from '../layouts/Layout.astro';
                   entry.pending = `${entry.pending || ''}${prefix}${event.data || ''}`;
                   if (!entry.raf) entry.raf = requestAnimationFrame(() => flushScriptOutput(entry));
                 } else if (event.type === 'shell_end') {
+                  const exitOk = (event.exit_code ?? 0) === 0;
+                  setAgentLoopStatus(lastBubble, `Shell ${exitOk ? '✓' : '✗'} (exit ${event.exit_code ?? '?'})`);
+                  setLiveStatus(exitOk ? '✓ Shell done' : `✗ Shell exit ${event.exit_code ?? '?'}`);
                   const entry = scriptOutputs.get(event.tool_call_id || '');
                   if (entry) {
                     if (entry.raf) cancelAnimationFrame(entry.raf);
+                    entry.isFinal = true;
                     flushScriptOutput(entry);
                     const rawEl = entry.el.closest('.msg-bubble')?.querySelector('.script-raw') as HTMLElement;
                     const exitLine = `\n[exit ${event.exit_code ?? '?'}]`;
@@ -2826,9 +3210,12 @@ import Layout from '../layouts/Layout.astro';
                     saveConversation(conv);
                   }
                 } else if (event.type === 'shell_error') {
+                  setAgentLoopStatus(lastBubble, 'Shell error');
+                  setLiveStatus('✗ Shell error');
                   const entry = scriptOutputs.get(event.tool_call_id || '');
                   if (entry) {
                     if (entry.raf) cancelAnimationFrame(entry.raf);
+                    entry.isFinal = true;
                     flushScriptOutput(entry);
                     const rawEl = entry.el.closest('.msg-bubble')?.querySelector('.script-raw') as HTMLElement;
                     const errLine = `\n[error] ${event.error || 'Script failed'}`;
@@ -2840,6 +3227,9 @@ import Layout from '../layouts/Layout.astro';
                     addMessageBubble({ role: 'script', content: `[error] ${event.error || 'Script failed'}` });
                   }
                 } else if (event.type === 'tool_result' || event.type === 'tool_call_result') {
+                  const resultToolName = event.tool_name || '';
+                  setAgentLoopStatus(lastBubble, resultToolName ? `✓ ${resultToolName}` : '✓ Tool done');
+                  setLiveStatus(resultToolName ? `✓ ${resultToolName} done` : '✓ Tool done');
                   const toolResult = event.result || event.tool_result || '';
                   const webMsg = webOutputs.get(event.tool_call_id || '');
                   if (webMsg) {
@@ -2864,6 +3254,28 @@ import Layout from '../layouts/Layout.astro';
                 } else if (event.type === 'needs_confirmation') {
                   const confirmMsg: Message = { role: 'confirmation', content: `⚠️ ${event.reason || 'Dangerous command requires approval'}`, command: event.command || '', toolCallId: event.tool_call_id || '', sessionId: conv.id };
                   conv.messages.push(confirmMsg); saveConversation(conv); addMessageBubble(confirmMsg);
+                } else if (event.type === 'phase') {
+                  const phase = String(event.phase || '').toLowerCase();
+                  const phaseLabels: Record<string, string> = {
+                    think: '🧠 Thinking...',
+                    plan: '📋 Planning...',
+                    act: '⚙ Running tools...',
+                    observe: '👁 Reviewing results...',
+                    reflect: '🔄 Adjusting approach...',
+                    consolidate: '💾 Saving notes...',
+                  };
+                  const phaseStatus = phaseLabels[phase] || `${phase}...`;
+                  setAgentLoopStatus(lastBubble, phaseStatus);
+                  setLiveStatus(phaseStatus);
+                } else if (event.type === 'done') {
+                  setAgentLoopStatus(lastBubble, '✅ Done', true);
+                  setLiveStatus('✅ Done');
+                } else if (event.type === 'max_turns') {
+                  setAgentLoopStatus(lastBubble, 'Stopped at turn limit', true);
+                  setLiveStatus('⏹ Turn limit reached');
+                } else if (event.type === 'loop_detected') {
+                  setAgentLoopStatus(lastBubble, event.message || 'Loop stopped', true);
+                  setLiveStatus('⏹ Loop stopped');
                 } else if (event.type === 'error') {
                   const errText = event.error || event.message || 'Unknown error';
                   // Skip aborted streams and duplicate errors; suppress non-critical errors if a file was already downloaded
@@ -2875,11 +3287,13 @@ import Layout from '../layouts/Layout.astro';
                 } else if (event.content) {
                   if (lastBubble) lastBubble.textContent += event.content;
                   assistantMsg.content += event.content; tokenCount++;
+                  setThinkingFinished(lastBubble);
                 }
-                maybeScroll();
+                _scrollThrottle();
               } catch {}
             }
           }
+          setThinkingFinished(lastBubble);
           assistantMsg.content = lastBubble?.textContent || assistantMsg.content;
           assistantContent = assistantMsg.content;
           // Final code block render pass — re-render with full content
@@ -2893,7 +3307,7 @@ import Layout from '../layouts/Layout.astro';
           const allMessages = conv.messages.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
           const res = await fetch(endpoint, {
             method: 'POST', headers: authHeaders,
-            body: JSON.stringify({ provider: currentProvider, model, sessionId: conv.id, cwd: activeProjectCwd || undefined, messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-10)] }),
+            body: JSON.stringify({ provider: currentProvider, model, sessionId: conv.id, cwd: activeProjectCwd || undefined, messages: [{ role: 'system', content: IMAGE_INSTRUCTION }, ...allMessages.slice(-20)] }),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Chat request failed');
@@ -2913,7 +3327,7 @@ import Layout from '../layouts/Layout.astro';
           conv.messages.push(errMsg); saveConversation(conv); addMessageBubble(errMsg);
         }
       } finally {
-        busy = false; if (sendState) sendState.textContent = 'Ready'; chatInput.disabled = false; chatInput.value = '';
+        setBusyState(false); if (sendState) sendState.textContent = 'Ready'; chatInput.disabled = false; chatInput.value = '';
         pendingImages = []; renderAttachments();
         setReadyState(); renderHistoryList();
       }
@@ -2926,7 +3340,7 @@ import Layout from '../layouts/Layout.astro';
     });
     chatForm.addEventListener('submit', (e) => { e.preventDefault(); const prompt = chatInput.value.trim(); if ((prompt || pendingImages.length > 0) && !busy) sendMessage(prompt); });
     document.querySelectorAll('.quick-prompt').forEach(btn => {
-      btn.addEventListener('click', () => { chatInput.value = (btn as HTMLElement).dataset.prompt || ''; setReadyState(); chatInput.focus(); askDropdown.classList.add('hidden'); });
+      btn.addEventListener('click', () => { setAgentPrompt((btn as HTMLElement).dataset.prompt || ''); });
     });
 
     const attachImageBtn = document.getElementById('attach-image-btn')!;
@@ -2962,13 +3376,14 @@ import Layout from '../layouts/Layout.astro';
     generateImageBtn.addEventListener('click', async () => {
       const prompt = imagePromptInput.value.trim(); if (!prompt) return;
       generateImageBtn.disabled = true; generateImageBtn.textContent = 'Generating...';
-      imageStatus.classList.remove('hidden'); imageStatus.textContent = 'Creating your image with DALL-E...'; imageResult.classList.add('hidden');
+      imageStatus.classList.remove('hidden'); imageStatus.textContent = 'Creating your image with Pollinations...'; imageResult.classList.add('hidden');
       const model = imageModelSelect.value; const size = imageSizeSelect.value;
-      const quality = (document.querySelector('input[name="image-quality"]:checked') as HTMLInputElement)?.value || 'standard';
+      const quality = (document.querySelector('input[name="image-quality"]:checked') as HTMLInputElement)?.value || 'hd';
+      const provider = ['dall-e-3', 'gpt-image-1'].includes(model) ? 'openai' : 'pollinations';
       try {
         const res = await fetch(`${API}/api/images/generate`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', ...(localStorage.getItem('hakster_google_token') ? { 'x-api-key': localStorage.getItem('hakster_google_token')! } : {}) },
-          body: JSON.stringify({ provider: 'openai', model, prompt, size, quality }),
+          body: JSON.stringify({ provider, model, prompt, size, quality }),
         });
         const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Image generation failed');
         if (data.images && data.images[0]) {
@@ -3124,7 +3539,8 @@ import Layout from '../layouts/Layout.astro';
         const el = document.getElementById('sidebar-account-usage');
         if (!el) return;
         if (data.remaining === -1) {
-          el.textContent = `✦ Unlimited · ${(data.tokenBalance || 0).toLocaleString()} tokens`;
+          const usedTokens = data.tokenUsage?.totalTokens || 0;
+          el.textContent = `✦ Unlimited · ${usedTokens.toLocaleString()} used`;
           el.style.color = '#a855f7';
         } else if (data.limitEnabled) {
           el.textContent = `${data.remaining}/${data.limit} free uses left`;
