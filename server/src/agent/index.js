@@ -2166,9 +2166,18 @@ function banner() {
     try { skillCount += globSync(path.join(skillsDir, '**', '*.md')).length; } catch (_) {}
   }
   const mcpToolCount = getMcpTools().length;
-  const toolLabel = mcpToolCount > 0 ? `${TOOLS.length} + ${mcpToolCount} MCP` : `${TOOLS.length}`;
+  // Built-in tool count is the snapshot taken before MCP tools were merged into TOOLS.
+  // Using TOOLS.length here double-counts MCP (they're already in TOOLS after initMcpTools).
+  const builtInTools = (typeof _builtinToolCount === 'number') ? _builtinToolCount : TOOLS.length - mcpToolCount;
+  const toolLabel = mcpToolCount > 0 ? `${builtInTools} + ${mcpToolCount} MCP` : `${builtInTools}`;
+  // Memory notes: aggregate notes.json across ALL hakster roots (not just WORK_DIR).
   let memCount = 0;
-  try { memCount = JSON.parse(fs.readFileSync(path.join(WORK_DIR, '.hakster', 'memory', 'notes.json'), 'utf-8')).length; } catch (_) {}
+  for (const root of getHaksterRoots()) {
+    try {
+      const notes = JSON.parse(fs.readFileSync(path.join(root, 'memory', 'notes.json'), 'utf-8'));
+      if (Array.isArray(notes)) memCount += notes.length;
+    } catch (_) {}
+  }
 
   const W = _termWidth() - 6;  // 6 = border + padding chars
   const bdr = C.bgSubtle + C.bold;  // Charcoal borders (HaksterAI-style)
