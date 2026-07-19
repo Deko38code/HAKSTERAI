@@ -43,6 +43,31 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       .term-fullscreen-btn.active .fullscreen-exit { display: block; }
       #terminal-root.term-fullscreen-fallback { position: fixed; inset: 0; z-index: 9999; width: 100vw; height: 100dvh; }
 
+      /* ── Cockpit header strip ── */
+      #term-cockpit-header {
+        height: 56px; min-height: 56px; flex-shrink: 0;
+        background: #0a0a0f; border-bottom: 1px solid #1e1e2e;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0 14px; gap: 12px; overflow: hidden;
+      }
+      #term-cockpit-header .cockpit-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 800; color: #00ff88; white-space: nowrap; }
+      #term-cockpit-header .cockpit-brand span.ghost { filter: drop-shadow(0 0 6px rgba(0,255,136,0.4)); }
+      #term-cockpit-header .cockpit-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: #94a3b8; white-space: nowrap; }
+      #term-cockpit-header .cockpit-pill { background: #111118; border: 1px solid #1e1e2e; border-radius: 6px; padding: 3px 8px; display: flex; align-items: center; gap: 5px; }
+      #term-cockpit-header .cockpit-pill .dot { width: 6px; height: 6px; border-radius: 999px; background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+      #term-cockpit-header .cockpit-pill .label { color: #64748b; }
+      #term-cockpit-header .cockpit-pill .val { color: #e2e8f0; font-weight: 600; }
+      #term-cockpit-header .cockpit-deck { display: flex; align-items: center; gap: 6px; }
+      #term-cockpit-header .cockpit-deck a, #term-cockpit-header .cockpit-deck button {
+        font-size: 10px; font-weight: 600; color: #00bfff; background: #111118; border: 1px solid #1e1e2e;
+        border-radius: 5px; padding: 4px 8px; text-decoration: none; cursor: pointer; transition: all 0.15s; white-space: nowrap;
+      }
+      #term-cockpit-header .cockpit-deck a:hover, #term-cockpit-header .cockpit-deck button:hover { border-color: #7c3aed; background: #1a1a2e; color: #e2e8f0; }
+      @media (max-width: 900px) {
+        #term-cockpit-header { flex-wrap: wrap; height: auto; min-height: 48px; padding: 6px 10px; }
+        #term-cockpit-header .cockpit-meta { display: none; }
+      }
+
       /* ── Main area: sidebar + terminal ── */
       #term-main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
 
@@ -165,6 +190,34 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
             <svg class="fullscreen-enter" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5"/></svg>
             <svg class="fullscreen-exit" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6"/></svg>
           </button>
+        </div>
+      </div>
+      <div id="term-cockpit-header">
+        <div class="cockpit-brand">
+          <span class="ghost">👻</span>
+          <span>HAKSTER</span>
+          <span style="color:#7c3aed">AI</span>
+        </div>
+        <div class="cockpit-meta">
+          <div class="cockpit-pill">
+            <span class="dot" id="cockpit-status-dot"></span>
+            <span class="val" id="cockpit-status-text">ONLINE</span>
+          </div>
+          <div class="cockpit-pill">
+            <span class="label">model</span>
+            <span class="val" id="cockpit-model-text">—</span>
+          </div>
+          <div class="cockpit-pill">
+            <span class="label">uptime</span>
+            <span class="val" id="cockpit-uptime-text">—</span>
+          </div>
+        </div>
+        <div class="cockpit-deck">
+          <a href="/cockpit">Cockpit</a>
+          <a href="/dashboard">Dashboard</a>
+          <a href="/build">Chat</a>
+          <a href="/hack">Hack</a>
+          <button type="button" id="cockpit-reload" title="Refresh dashboard data">↻</button>
         </div>
       </div>
       <div id="term-main">
@@ -430,6 +483,9 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
             const mins = Math.floor((d.system.uptime % 3600) / 60);
             uptimeEl.innerHTML = 'Uptime: <span>' + hrs + 'h ' + mins + 'm</span>';
           }
+          updateCockpitHeader(d);
+        } else {
+          updateCockpitHeader(d);
         }
       }).catch(() => {});
 
@@ -565,6 +621,41 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         const el = document.getElementById(id);
         if (el) el.textContent = String(value);
       }
+
+      function updateCockpitHeader(d) {
+        const modelText = document.getElementById('cockpit-model-text');
+        const uptimeText = document.getElementById('cockpit-uptime-text');
+        const statusDot = document.getElementById('cockpit-status-dot');
+        const statusText = document.getElementById('cockpit-status-text');
+        if (modelText) {
+          const m = d.crush?.model || '';
+          const p = d.crush?.provider || '';
+          modelText.textContent = (m || p || '—').length > 22 ? (m || p).slice(0, 20) + '…' : (m || p || '—');
+          const provName = (d.providers || []).find(x => x.id === p)?.name;
+          modelText.title = (provName || p) + (m ? ' · ' + m : '');
+        }
+        if (uptimeText && d.system?.uptime) {
+          const hrs = Math.floor(d.system.uptime / 3600);
+          const mins = Math.floor((d.system.uptime % 3600) / 60);
+          uptimeText.textContent = hrs + 'h ' + mins + 'm';
+          uptimeText.title = d.system.uptime + 's';
+        }
+        if (d.crush || d.system) {
+          if (statusText) statusText.textContent = 'ONLINE';
+          if (statusDot) { statusDot.style.background = '#00ff88'; statusDot.style.boxShadow = '0 0 8px #00ff88'; }
+        }
+      }
+
+      document.getElementById('cockpit-reload')?.addEventListener('click', () => {
+        fetch('/api/dashboard').then(r => r.json()).then(d => {
+          updateCockpitHeader(d);
+        }).catch(() => {
+          const statusText = document.getElementById('cockpit-status-text');
+          const statusDot = document.getElementById('cockpit-status-dot');
+          if (statusText) statusText.textContent = 'ERROR';
+          if (statusDot) { statusDot.style.background = '#ff4444'; statusDot.style.boxShadow = '0 0 8px #ff4444'; }
+        });
+      });
 
       function renderCrushLiveState() {
         setText('cs-agent-status', crushLiveState.status);

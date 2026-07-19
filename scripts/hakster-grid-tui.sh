@@ -6,10 +6,10 @@
 
 set -euo pipefail
 
-# ─── Configuration ───────────────────────────────────────────────────────────
-REFRESH_MS=500           # Grid refresh rate
-SCROLL_SPEED=2           # Lines to scroll per tick
-MAX_LOG_LINES=100        # Max stored log lines
+# ─── Configuration (overridable via env, matching hakster-grids.sh) ───────────
+REFRESH_MS="${REFRESH_MS:-500}"           # Grid refresh rate (ms)
+SCROLL_SPEED="${SCROLL_SPEED:-2}"         # Spinner/nudge speed multiplier
+MAX_LOG_LINES="${MAX_LOG_LINES:-100}"      # Max stored log lines
 
 # ─── ANSI Colors ─────────────────────────────────────────────────────────────
 RESET='\033[0m'
@@ -460,8 +460,10 @@ main() {
     # Render
     render_grids
 
-    # Sleep for refresh rate
-    sleep "0.${REFRESH_MS}"
+    # Sleep for refresh rate (convert ms to seconds)
+    local sleep_sec
+    sleep_sec=$(awk "BEGIN { printf \"%.3f\", ${REFRESH_MS}/1000 }")
+    sleep "${sleep_sec}"
   done
 }
 

@@ -70,23 +70,24 @@ function searchMemories(query, { limit = 20, category = null } = {}) {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return listMemories({ category, limit });
 
-  // Build WHERE clause with LIKE for each term
+  // Build WHERE clause with LIKE for each term — OR logic (any term match is relevant)
   const whereParts = terms.map(() => `(lower(key) LIKE ? OR lower(value) LIKE ? OR lower(category) LIKE ?)`);
-  const whereClause = whereParts.join(' AND ');
+  const whereClause = whereParts.join(' OR ');
   const params = terms.flatMap(t => [`%${t}%`, `%${t}%`, `%${t}%`]);
 
+  // Also search the full query as a phrase (boosts exact matches)
+  whereParts.push(`(lower(key) LIKE ? OR lower(value) LIKE ?)`);
+  params.push(`%${query.toLowerCase()}%`, `%${query.toLowerCase()}%`);
+  const fullWhere = whereParts.join(' OR ');
+
   let sql = `SELECT *, (confidence * (1.0 + access_count * 0.1) * (1.0 / (1.0 + (unixepoch() - updated_at) / 86400.0))) as relevance
-             FROM memories WHERE (${whereClause})`;
+             FROM memories WHERE (${fullWhere})`;
   const allParams = [...params];
 
   if (category) {
     sql += ` AND category = ?`;
     allParams.push(category);
   }
-
-  // Also search the full query as a phrase
-  sql += ` OR (lower(key) LIKE ? OR lower(value) LIKE ?)`;
-  allParams.push(`%${query.toLowerCase()}%`, `%${query.toLowerCase()}%`);
 
   sql += ` ORDER BY relevance DESC, updated_at DESC LIMIT ?`;
   allParams.push(limit);

@@ -1,0 +1,346 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="haksterAi Cockpit">
+  <style is:global>
+    /* Hide global site navbar on cockpit page for a focused command-deck view */
+    body:has(#cockpit-root) #navbar { display: none !important; }
+    body:has(#cockpit-root) { padding-top: 0 !important; }
+  </style>
+  <div class="min-h-screen bg-[#050507] text-[#e2e8f0] font-mono overflow-x-auto">
+    <div id="cockpit-root" class="mx-auto px-4 py-5" style="max-width:980px;">
+      <!-- Top command bar -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+            <img src="/logo-32.png" alt="haksterAi" class="w-6 h-6 rounded" />
+            <span class="font-bold text-lg tracking-tight text-[#e2e8f0]">hakster<span class="text-[#7c3aed]">Ai</span></span>
+          </a>
+          <span class="text-[10px] uppercase tracking-widest text-[#64748b] border-l border-[#1e1e2e] pl-3">Cockpit</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="cockpit-clock" class="text-xs text-[#94a3b8]">--:--</span>
+          <a href="/" class="text-[10px] bg-[#111118] hover:bg-[#1a1a2e] text-[#94a3b8] hover:text-[#e2e8f0] px-2.5 py-1 rounded border border-[#1e1e2e] transition-colors">🏠 Home</a>
+          <a href="/terminal" class="text-[10px] bg-[#7c3aed]/10 hover:bg-[#7c3aed]/20 text-[#7c3aed] px-2.5 py-1 rounded border border-[#7c3aed]/30 transition-colors">⌨️ Terminal</a>
+        </div>
+      </div>
+
+      <!-- Phantom-style ASCII header -->
+      <div class="border-2 border-[#7c3aed] rounded-lg bg-[#0a0a0f] p-4 mb-4 shadow-[0_0_20px_rgba(124,58,237,0.12)]">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div class="text-[#00ff88] text-sm font-bold mb-1" id="cockpit-logo">
+              👻 HAKSTER AI <span class="text-[#64748b] font-normal">// terminal cockpit</span>
+            </div>
+            <div class="text-[11px] text-[#94a3b8]">
+              Autonomous pentester AI · <span class="text-[#00bfff]">truecolor</span> · <span class="text-[#7c3aed]">MCP tool loop</span>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs"><span class="text-[#00ff88]">● ONLINE</span> <span class="text-[#64748b]">session ready</span></div>
+            <div class="text-[10px] text-[#94a3b8] mt-0.5" id="cockpit-uptime">uptime: --</div>
+          </div>
+        </div>
+
+        <!-- Status legend row -->
+        <div class="flex flex-wrap items-center gap-3 mt-4 text-[10px]">
+          <span class="text-[#00ff88]">[x] COMPLETE</span>
+          <span class="text-[#ffd700]">[>] ACTIVE</span>
+          <span class="text-[#64748b]">[ ] TODO</span>
+          <span class="text-[#ff4444] ml-auto" id="cockpit-burn">burn: --</span>
+        </div>
+      </div>
+
+      <!-- AI Provider Grid -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mb-4" id="cockpit-provider-grid">
+        <!-- filled by JS -->
+        <div class="col-span-full text-[10px] text-[#64748b] bg-[#111118] border border-[#1e1e2e] rounded p-3">Loading provider grid...</div>
+      </div>
+
+      <!-- Memory facts + system -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div class="bg-[#111118] border border-[#1e1e2e] rounded-lg p-3">
+          <div class="text-[10px] uppercase tracking-wider text-[#64748b] mb-1">🧠 Memory Facts</div>
+          <div class="text-2xl font-bold text-[#00ff88]" id="cockpit-memory-count">—</div>
+        </div>
+        <div class="bg-[#111118] border border-[#1e1e2e] rounded-lg p-3">
+          <div class="text-[10px] uppercase tracking-wider text-[#64748b] mb-1">⚡ Active Model</div>
+          <div class="text-sm font-bold text-[#00bfff] truncate" id="cockpit-active-model">—</div>
+          <div class="text-[10px] text-[#94a3b8]" id="cockpit-active-provider">—</div>
+        </div>
+        <div class="bg-[#111118] border border-[#1e1e2e] rounded-lg p-3">
+          <div class="text-[10px] uppercase tracking-wider text-[#64748b] mb-1">💰 Cost Estimate</div>
+          <div class="text-2xl font-bold text-[#ff6bff]" id="cockpit-cost">—</div>
+        </div>
+      </div>
+
+      <!-- Command Deck + Activity -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <!-- Command Deck -->
+        <div class="bg-[#111118] border border-[#1e1e2e] rounded-lg p-4">
+          <div class="text-[10px] uppercase tracking-wider text-[#7c3aed] font-bold mb-3">🎮 Command Deck</div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <a href="/terminal" class="block bg-[#0a0a0f] hover:bg-[#1a1a2e] border border-[#1e1e2e] hover:border-[#7c3aed]/40 rounded px-3 py-2 transition-colors">
+              <div class="text-[#00bfff] text-xs font-bold">⌨️ Terminal</div>
+              <div class="text-[9px] text-[#64748b]">PTY agent shell</div>
+            </a>
+            <a href="/build" class="block bg-[#0a0a0f] hover:bg-[#1a1a2e] border border-[#1e1e2e] hover:border-[#7c3aed]/40 rounded px-3 py-2 transition-colors">
+              <div class="text-[#00ff88] text-xs font-bold">💬 Chat</div>
+              <div class="text-[9px] text-[#64748b]">Crush build loop</div>
+            </a>
+            <a href="/hack" class="block bg-[#0a0a0f] hover:bg-[#1a1a2e] border border-[#1e1e2e] hover:border-[#7c3aed]/40 rounded px-3 py-2 transition-colors">
+              <div class="text-[#ffd700] text-xs font-bold">⚡ Hack Lab</div>
+              <div class="text-[9px] text-[#64748b]">Pentest tools</div>
+            </a>
+            <a href="/labs" class="block bg-[#0a0a0f] hover:bg-[#1a1a2e] border border-[#1e1e2e] hover:border-[#7c3aed]/40 rounded px-3 py-2 transition-colors">
+              <div class="text-[#ff6bff] text-xs font-bold">🧪 Labs</div>
+              <div class="text-[9px] text-[#64748b]">Experiments</div>
+            </a>
+            <a href="/dashboard" class="block bg-[#0a0a0f] hover:bg-[#1a1a2e] border border-[#1e1e2e] hover:border-[#7c3aed]/40 rounded px-3 py-2 transition-colors">
+              <div class="text-[#00ffff] text-xs font-bold">📊 Dashboard</div>
+              <div class="text-[9px] text-[#64748b]">Full analytics</div>
+            </a>
+            <button id="cockpit-fullscreen-btn" type="button" class="text-left bg-[#0a0a0f] hover:bg-[#1a1a2e] border border-[#1e1e2e] hover:border-[#7c3aed]/40 rounded px-3 py-2 transition-colors">
+              <div class="text-[#ff4444] text-xs font-bold">🖥 Fullscreen</div>
+              <div class="text-[9px] text-[#64748b]">Focus mode</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Activity Stream -->
+        <div class="bg-[#111118] border border-[#1e1e2e] rounded-lg p-4 flex flex-col" style="min-height:180px;">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-[10px] uppercase tracking-wider text-[#7c3aed] font-bold">🔥 Activity</div>
+            <span class="text-[9px] text-[#64748b]" id="cockpit-activity-status">live</span>
+          </div>
+          <div id="cockpit-activity" class="flex-1 overflow-auto text-[11px] leading-relaxed space-y-1 pr-1" style="max-height:220px;">
+            <div class="text-[#64748b]">Waiting for events...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats strip -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded p-2 text-center">
+          <div class="text-[9px] uppercase text-[#64748b]">Requests</div>
+          <div class="text-sm font-bold text-[#7c3aed]" id="stat-req">—</div>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded p-2 text-center">
+          <div class="text-[9px] uppercase text-[#64748b]">Tokens</div>
+          <div class="text-sm font-bold text-[#ffd700]" id="stat-tok">—</div>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded p-2 text-center">
+          <div class="text-[9px] uppercase text-[#64748b]">Sessions</div>
+          <div class="text-sm font-bold text-[#00bfff]" id="stat-sess">—</div>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded p-2 text-center">
+          <div class="text-[9px] uppercase text-[#64748b]">Messages</div>
+          <div class="text-sm font-bold text-[#ff6bff]" id="stat-msg">—</div>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded p-2 text-center">
+          <div class="text-[9px] uppercase text-[#64748b]">Tools</div>
+          <div class="text-sm font-bold text-[#00ff88]" id="stat-tools">—</div>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded p-2 text-center">
+          <div class="text-[9px] uppercase text-[#64748b]">Files</div>
+          <div class="text-sm font-bold text-[#ff4444]" id="stat-files">—</div>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded p-2 text-center">
+          <div class="text-[9px] uppercase text-[#64748b]">CPU</div>
+          <div class="text-sm font-bold text-[#00ffff]" id="stat-cpu">—</div>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded p-2 text-center">
+          <div class="text-[9px] uppercase text-[#64748b]">Memory</div>
+          <div class="text-sm font-bold text-[#e2e8f0]" id="stat-mem">—</div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="text-[9px] text-[#64748b] flex items-center justify-between border-t border-[#1e1e2e] pt-3">
+        <span>Run <span class="text-[#00ff88]">haksterai cockpit</span> from CLI to reopen.</span>
+        <span id="cockpit-version">v0.1.0</span>
+      </div>
+    </div>
+  </div>
+
+  <script is:inline>
+    (function() {
+      const PALETTE = {
+        primary: '#7c3aed', green: '#00ff88', gold: '#ffd700', ice: '#00bfff',
+        coral: '#ff4444', pink: '#ff6bff', cyan: '#00ffff', muted: '#64748b'
+      };
+
+      function $(id) { return document.getElementById(id); }
+
+      function fmtNum(n) {
+        if (n == null || isNaN(n)) return '—';
+        n = Number(n);
+        if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+        return String(n);
+      }
+
+      function fmtCost(n) {
+        if (n == null || isNaN(n)) return '—';
+        return '$' + Number(n).toFixed(4);
+      }
+
+      function fmtUptime(sec) {
+        if (!sec) return 'uptime: --';
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        return `uptime: ${h}h ${m}m`;
+      }
+
+      function renderProviders(providers, crush) {
+        const grid = $('cockpit-provider-grid');
+        if (!grid) return;
+        const activeProv = crush?.provider || 'ollama';
+        const activeModel = crush?.model || '';
+        const list = (providers || []).length ? providers : [{ id: 'ollama', name: 'Ollama' }];
+        grid.innerHTML = list.map(p => {
+          const isActive = p.id === activeProv;
+          const hasModel = isActive && activeModel;
+          return `
+            <div class="bg-[#111118] border ${isActive ? 'border-[#7c3aed]' : 'border-[#1e1e2e]'} rounded p-2 transition-colors">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full ${isActive ? 'bg-[#00ff88] shadow-[0_0_8px_#00ff88]' : 'bg-[#64748b]'}" title="${isActive ? 'active' : 'idle'}"></span>
+                <span class="text-xs font-bold ${isActive ? 'text-[#e2e8f0]' : 'text-[#94a3b8]'} truncate">${p.name || p.id}</span>
+              </div>
+              ${hasModel ? `<div class="text-[9px] text-[#7c3aed] truncate mt-1">${activeModel}</div>` : ''}
+            </div>
+          `;
+        }).join('');
+      }
+
+      let ws = null, wsBackoff = 1000;
+      const activity = [];
+
+      function pushActivity(html) {
+        if (!html) return;
+        const box = $('cockpit-activity');
+        if (!box) return;
+        activity.push(html);
+        if (activity.length > 50) activity.shift();
+        box.innerHTML = activity.join('');
+        box.scrollTop = box.scrollHeight;
+      }
+
+      function wsConnect() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const url = proto + '//' + location.host;
+        try {
+          ws = new WebSocket(url);
+          ws.onopen = () => {
+            wsBackoff = 1000;
+            setText('cockpit-activity-status', '<span style="color:#00ff88">● live</span>');
+            try { ws.send(JSON.stringify({ action: 'subscribe', types: ['notification', 'agent'] })); } catch {}
+          };
+          ws.onmessage = (ev) => {
+            try {
+              const msg = JSON.parse(ev.data);
+              handleWsEvent(msg);
+            } catch {}
+          };
+          ws.onclose = () => {
+            setText('cockpit-activity-status', '<span style="color:#ff4444">○ offline</span>');
+            wsBackoff = Math.min(wsBackoff * 2, 30000);
+            setTimeout(wsConnect, wsBackoff);
+          };
+          ws.onerror = () => {
+            setText('cockpit-activity-status', '<span style="color:#ff4444">○ error</span>');
+          };
+        } catch {
+          setTimeout(wsConnect, wsBackoff);
+        }
+      }
+
+      function handleWsEvent(msg) {
+        const t = msg.type || 'unknown';
+        const ts = new Date().toLocaleTimeString();
+        const iconColor = {
+          tool_call_start: '#ffd700', tool_start: '#ffd700', tool_call_result: '#00ff88',
+          tool_result: '#00ff88', tool_end: '#00ff88', phase: '#7c3aed',
+          thinking: '#00bfff', chat_result: '#00ff88', error: '#ff4444',
+          notification: '#00ffff', done: '#00ff88', loop_detected: '#ff6bff'
+        }[t] || '#64748b';
+        let text = '';
+        if (t === 'tool_call_start' || t === 'tool_start') text = `⚡ ${msg.tool_name || msg.name || 'tool'} started`;
+        else if (t === 'tool_call_result' || t === 'tool_result' || t === 'tool_end') text = `✓ ${msg.tool_name || msg.name || 'tool'} → ${(msg.tool_result || msg.result || '').toString().slice(0, 40)}`;
+        else if (t === 'phase') text = `${msg.phase || msg.name} [turn ${msg.turn || '?'}]`;
+        else if (t === 'chat_result') text = `◆ chat ${msg.model || '?'} ${fmtNum((msg.inputTokens||0)+(msg.outputTokens||0))} tok`;
+        else if (t === 'error') text = `✗ ${(msg.error || msg.message || '').toString().slice(0, 60)}`;
+        else if (t === 'done') text = `✓ agent done ${msg.model || ''}`;
+        else if (t === 'loop_detected') text = `⚠ loop: ${(msg.reason || '').toString().slice(0, 40)}`;
+        else if (t === 'notification') text = `ℹ ${(msg.msg || msg.message || 'notify').toString().slice(0, 60)}`;
+        else if (t === 'heartbeat') return;
+        else text = `${t}: ${(msg.content || msg.text || '').toString().slice(0, 50)}`;
+        pushActivity(`<div><span style="color:#64748b">${ts}</span> <span style="color:${iconColor}">${text}</span></div>`);
+      }
+
+      function setText(id, html) {
+        const el = $(id);
+        if (el) el.innerHTML = html;
+      }
+
+      async function loadDashboard() {
+        try {
+          const r = await fetch('/api/dashboard');
+          const d = await r.json();
+
+          renderProviders(d.providers, d.crush);
+
+          if (d.crush) {
+            setText('cockpit-active-model', d.crush.model || '—');
+            const provName = (d.providers || []).find(x => x.id === d.crush.provider)?.name || d.crush.provider || '—';
+            setText('cockpit-active-provider', provName);
+            setText('cockpit-cost', fmtCost(d.crush.costEstimate || d.crush.cost));
+            setText('stat-tools', fmtNum(d.crush.toolCalls || d.crush.toolsUsed || 0));
+            setText('stat-files', fmtNum(d.crush.filesModified || 0));
+            setText('cockpit-burn', 'burn: ' + fmtCost(d.crush.costEstimate || d.crush.cost || 0) + '/session');
+          }
+
+          if (d.stats) {
+            setText('stat-req', fmtNum(d.stats.requests));
+            setText('stat-tok', fmtNum(d.stats.tokens));
+            setText('stat-sess', fmtNum(d.stats.sessions));
+            setText('stat-msg', fmtNum(d.stats.messages));
+          }
+
+          if (d.system) {
+            setText('cockpit-uptime', fmtUptime(d.system.uptime));
+            setText('stat-cpu', d.system.cpuUsage != null ? d.system.cpuUsage + '%' : '—');
+            setText('stat-mem', d.system.memUsage != null ? d.system.memUsage + '%' : '—');
+          }
+
+          if (d.memory != null) {
+            setText('cockpit-memory-count', fmtNum(d.memory.totalFacts || d.memory.count || d.memory));
+          } else if (d.memories != null) {
+            setText('cockpit-memory-count', fmtNum(Array.isArray(d.memories) ? d.memories.length : d.memories));
+          }
+        } catch (e) {
+          pushActivity(`<span style="color:#ff4444">Dashboard poll failed: ${e.message}</span>`);
+        }
+      }
+
+      function updateClock() {
+        const now = new Date();
+        const el = $('cockpit-clock');
+        if (el) el.textContent = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      }
+
+      loadDashboard();
+      setInterval(loadDashboard, 5000);
+      updateClock();
+      setInterval(updateClock, 60000);
+      wsConnect();
+
+      $('cockpit-fullscreen-btn')?.addEventListener('click', () => {
+        const root = document.documentElement;
+        if (document.fullscreenElement) document.exitFullscreen();
+        else root.requestFullscreen?.().catch(() => {});
+      });
+    })();
+  </script>
+</Layout>

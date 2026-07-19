@@ -1,4 +1,4 @@
 {
-  "provider": "ollama",
-  "model": "glm-5.2:cloud"
+  "provider": "nous",
+  "model": "deepseek/deepseek-v4-flash"
 }

@@ -10,16 +10,24 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
-async function spawnSubAgent(task, cwd, provider = 'ollama', model = null) {
-  const cfg = PROVIDERS[provider] || PROVIDERS['ollama'];
+async function spawnSubAgent(task, cwd, provider = null, model = null) {
+  const prov = provider || process.env.DEFAULT_PROVIDER || process.env.HAKSTER_PROVIDER || 'ollama';
+  const cfg = PROVIDERS[prov] || PROVIDERS['ollama'];
   if (!cfg) return 'Error: No provider configured for sub-agent';
+
+  // Ollama's OpenAI-compat endpoint is /v1/chat/completions — the OpenAI SDK
+  // appends /chat/completions to baseURL, so make sure baseURL ends with /v1.
+  let baseURL = cfg.baseURL;
+  if (cfg.type === 'openai-compat' && !/\/v1\/?$/.test(baseURL)) {
+    baseURL = baseURL.replace(/\/?$/, '') + '/v1';
+  }
 
   const client = new OpenAI({
     apiKey: cfg.apiKey || 'ollama',
-    baseURL: cfg.baseURL,
+    baseURL,
   });
 
-  const subModel = model || cfg.defaultModel || 'gpt-oss:120b-cloud';
+  const subModel = model || cfg.defaultModel || (cfg.type === 'openai-compat' ? 'glm-5.2:cloud' : 'gpt-oss:120b-cloud');
 
   // Build machine context for the sub-agent
   let dirListing = '';

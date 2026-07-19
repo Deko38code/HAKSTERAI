@@ -21,7 +21,7 @@ function loadHaksterConfig() {
     const raw = fs.readFileSync(path.join(ENV_ROOT, 'hakster-config.json'), 'utf8');
     return JSON.parse(raw);
   } catch {
-    return { provider: 'ollama', model: 'glm-5.2:cloud' };
+    return { provider: process.env.DEFAULT_PROVIDER || 'nous', model: process.env.DEFAULT_MODEL || 'deepseek/deepseek-v4-flash' };
   }
 }
 
@@ -31,7 +31,7 @@ function loadHaksterConfig() {
 function runAgent(prompt, sessionId) {
   const cfg = loadHaksterConfig();
   const body = JSON.stringify({
-    provider: cfg.provider || 'ollama',
+    provider: cfg.provider || process.env.DEFAULT_PROVIDER || 'nous',
     model: cfg.model || undefined,
     messages: [{ role: 'user', content: prompt }],
     sessionId,
@@ -201,13 +201,46 @@ function initBots() {
       console.warn(`[telegram] missing ${key} — skipping ${ROLES[key].name} bot`);
       continue;
     }
-    const bot = new TelegramBot(token, { polling: true });
+    // BUGFIX: 409 Conflict — "terminated by other getUpdates request"
+    // Caused by PM2 restarts not killing old polling connections cleanly.
+    // Fix: use polling with interval + retry, and clear any existing webhook
+    // before starting polling (Telegram only allows one active connection).
+    const bot = new TelegramBot(token, {
+      polling: {
+        interval: 300,     // poll every 300ms
+        autoStart: false,  // don't start polling until we clear webhooks
+        params: { timeout: 10 },
+      },
+    });
     ROLES[key].bot = bot;
+
+    // Clear any existing webhook before starting polling — prevents 409
+    bot.deleteWebHook().then(() => {
+      return bot.startPolling();
+    }).catch(() => {
+      // deleteWebHook might fail if no webhook exists — that's fine
+      bot.startPolling().catch(() => {});
+    });
 
     bot.getMe().then(me => {
       ROLES[key].username = me.username;
       console.log(`[telegram] ${ROLES[key].name} bot live @${me.username}`);
     }).catch(e => console.error(`[telegram] ${ROLES[key].name} getMe failed:`, e.message));
+
+    // Handle polling errors gracefully instead of crashing
+    bot.on('polling_error', (error) => {
+      const msg = error?.message || String(error);
+      if (msg.includes('409') || msg.includes('terminated by other')) {
+        console.warn(`[telegram] ${ROLES[key].name}: 409 conflict (stale polling) — stopping and restarting polling`);
+        bot.stopPolling().then(() => {
+          setTimeout(() => bot.startPolling().catch(() => {}), 2000);
+        }).catch(() => {});
+      } else if (msg.includes('EFATAL') || msg.includes('fetch failed')) {
+        console.warn(`[telegram] ${ROLES[key].name}: network error — will auto-retry`);
+      } else {
+        console.error(`[telegram] ${ROLES[key].name} polling error:`, msg);
+      }
+    });
 
     bot.on('message', msg => {
       if (!msg.text) return;
@@ -281,8 +314,8 @@ async function handleMessage(roleKey, msg) {
     try {
       const cfg = loadHaksterConfig();
       const response = await chat({
-        provider: cfg.provider || 'ollama',
-        model: cfg.model || 'glm-5.2:cloud',
+        provider: cfg.provider || process.env.DEFAULT_PROVIDER || 'nous',
+        model: cfg.model || process.env.DEFAULT_MODEL || 'deepseek/deepseek-v4-flash',
         messages: [{ role: 'user', content: text }],
         system: 'You are a helpful AI companion. Keep responses short and practical.',
       });

@@ -1,0 +1,257 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="Terminal">
+  <div class="max-w-4xl mx-auto p-4">
+    <h1 class="text-2xl font-bold mb-4 text-[#e2e8f0]">Terminal UI</h1>
+    <div id="terminal-panel" class="border-t border-[#1e1e2e] bg-[#0a0a0f] flex flex-col" style="height: 80vh;">
+      <div class="flex items-center justify-between px-3 py-1.5 bg-[#111118] border-b border-[#1e1e2e]">
+        <span class="text-xs font-mono text-[#64748b]">TUI – haksterAI</span>
+        <div class="flex items-center gap-2">
+          <button id="terminal-fullscreen" class="text-[#64748b] hover:text-[#7c3aed] transition-colors" title="Fullscreen">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l4 4m8-4h4m0 0v4m0-4l-4 4M4 16v4m0 0h4m-4 0l4-4m8 4h4m0 0v-4m0 4l-4-4"/></svg>
+          </button>
+          <button id="terminal-close" class="text-[#64748b] hover:text-red-400 text-xs transition-colors" title="Close">✕</button>
+        </div>
+      </div>
+      <!-- Relative container so the scroll arrow is positioned inside -->
+      <div id="terminal-wrapper" class="relative w-full flex-1 overflow-hidden">
+        <div id="terminal-container" class="w-full h-full"></div>
+        <!-- Floating scroll-to-bottom arrow -->
+        <button id="scroll-bottom-btn" class="hidden absolute bottom-4 right-4 z-50 flex items-center justify-center w-10 h-10 rounded-full bg-[#7c3aed]/90 hover:bg-[#7c3aed] shadow-lg shadow-[#7c3aed]/30 transition-all duration-200 cursor-pointer border border-[#a855f7]/40" title="Scroll to bottom" aria-label="Scroll to bottom">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+        </button>
+      </div>
+      <button id="copy-terminal-btn" class="absolute top-2 right-2 bg-[#4b5563] hover:bg-[#6b7280] text-white text-xs py-1 px-2 rounded" style="z-index:10;">Copy</button>
+    </div>
+  </div>
+  <style>
+    #terminal-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: relative;
+    }
+    #terminal-container {
+      width: 100%;
+      height: 100%;
+    }
+    #scroll-bottom-btn {
+      animation: scrollArrowPulse 2s ease-in-out infinite;
+    }
+    @keyframes scrollArrowPulse {
+      0%, 100% { opacity: 0.85; transform: translateY(0); }
+      50% { opacity: 1; transform: translateY(-3px); }
+    }
+  </style>
+  <link rel="stylesheet" href="/css/xterm.css" />
+  <script is:inline src="/js/xterm.js"></script>
+  <script is:inline src="/js/addon-fit.js"></script>
+  <script type="module">
+    // Terminal script with auto-scroll + floating arrow
+    let xtermTerm = null;
+    let xtermFit = null;
+    let ptyWs = null;
+    let terminalContainer = null;
+    let terminalResizeObserver = null;
+    let terminalPingTimer = null;
+    let terminalFitRaf = 0;
+
+    // ── Auto-scroll state ──
+    // Tracks whether the terminal is at the bottom (auto-scroll active)
+    // or the user has scrolled up (auto-scroll paused, arrow shown)
+    let autoScrollEnabled = true;
+    let scrollArrowBtn = null;
+
+    function sendPtyInput(data) {
+      if (ptyWs?.readyState === WebSocket.OPEN) {
+        ptyWs.send(JSON.stringify({ type: 'input', data }));
+      }
+    }
+    function pasteIntoTerminal(text) {
+      sendPtyInput(text);
+    }
+    function scheduleTerminalFit() {
+      if (terminalFitRaf) cancelAnimationFrame(terminalFitRaf);
+      terminalFitRaf = requestAnimationFrame(() => {
+        if (xtermFit) xtermFit.fit();
+      });
+    }
+    function fitAndResizeTerminal() {
+      if (xtermFit) xtermFit.fit();
+    }
+
+    // ── Scroll helpers ──
+    function isAtBottom() {
+      if (!xtermTerm) return true;
+      // xterm.js exposes the viewport's scroll position
+      const viewport = xtermTerm.element?.querySelector('.xterm-viewport');
+      if (!viewport) return true;
+      const threshold = 5; // px tolerance
+      return (viewport.scrollTop + viewport.clientHeight) >= (viewport.scrollHeight - threshold);
+    }
+
+    function scrollToBottom() {
+      if (xtermTerm) {
+        xtermTerm.scrollToBottom();
+      }
+      autoScrollEnabled = true;
+      hideScrollArrow();
+    }
+
+    function showScrollArrow() {
+      if (scrollArrowBtn) {
+        scrollArrowBtn.classList.remove('hidden');
+        scrollArrowBtn.classList.add('flex');
+      }
+    }
+
+    function hideScrollArrow() {
+      if (scrollArrowBtn) {
+        scrollArrowBtn.classList.add('hidden');
+        scrollArrowBtn.classList.remove('flex');
+      }
+    }
+
+    function writeTerminalBanner() {
+      if (!xtermTerm) return;
+      xtermTerm.write('\x1b[38;2;124;58;237m');
+      xtermTerm.write('  __  __      __        __            ___  ___\r\n');
+      xtermTerm.write(' / / / /___ _/ /_______/ /____  _____/   |/ (_) \r\n');
+      xtermTerm.write('/ /_/ / __ `/ //_/ ___/ __/ _ \\/ ___/ /| / / /  \r\n');
+      xtermTerm.write('/ __  / /_/ / ,< (__  ) /_/  __/ /  / ___ / /   \r\n');
+      xtermTerm.write('/_/ /_/\\__,_/_/|_/____/\\__/\\___/_/  /_/  |_/_/    \r\n');
+      xtermTerm.write('\x1b[0m');
+      xtermTerm.write('\x1b[90mReal PTY terminal. Select to highlight, Ctrl+Shift+C copies, Ctrl+Shift+V pastes. Run `hakster` when you want the CLI.\x1b[0m\r\n\r\n');
+    }
+
+    function initTerminal() {
+      if (xtermTerm) return;
+      // @ts-ignore - loaded via script tag
+      xtermTerm = new Terminal({
+        theme: {
+          background: '#0a0a0f', foreground: '#e2e8f0', cursor: '#7c3aed', cursorAccent: '#0a0a0f', selectionBackground: '#7c3aed55', selectionForeground: '#ffffff', black: '#0a0a0f', red: '#f87171', green: '#22c55e', yellow: '#facc15', blue: '#60a5fa', magenta: '#a855f7', cyan: '#22d3ee', white: '#e2e8f0', brightBlack: '#64748b', brightRed: '#fca5a5', brightGreen: '#4ade80', brightYellow: '#fde047', brightBlue: '#93c5fd', brightMagenta: '#c084fc', brightCyan: '#67e8f9', brightWhite: '#f8fafc',
+        },
+        fontFamily: 'JetBrains Mono, monospace', fontSize: 16, lineHeight: 1.28, letterSpacing: 0, cursorBlink: true, cursorStyle: 'bar', scrollback: 150000, fastScrollModifier: 'alt', fastScrollSensitivity: 8, scrollSensitivity: 1, smoothScrollDuration: 80, convertEol: false, rightClickSelectsWord: true, macOptionIsMeta: true, windowsMode: false, allowProposedApi: true,
+      });
+      // @ts-ignore
+      xtermFit = new FitAddon.FitAddon();
+      xtermTerm.loadAddon(xtermFit);
+      xtermTerm.open(terminalContainer);
+      writeTerminalBanner();
+      fitAndResizeTerminal();
+      terminalContainer.tabIndex = 0;
+      terminalContainer.addEventListener('mousedown', () => xtermTerm?.focus());
+      terminalContainer.addEventListener('click', () => xtermTerm?.focus());
+
+      // ── Scroll tracking: detect user scroll-up → show arrow, pause auto-scroll ──
+      const viewport = xtermTerm.element?.querySelector('.xterm-viewport');
+      if (viewport) {
+        let scrollTimeout = null;
+        viewport.addEventListener('scroll', () => {
+          // Debounce scroll detection
+          if (scrollTimeout) clearTimeout(scrollTimeout);
+          scrollTimeout = setTimeout(() => {
+            const atBottom = isAtBottom();
+            if (atBottom) {
+              autoScrollEnabled = true;
+              hideScrollArrow();
+            } else {
+              // User scrolled up — pause auto-scroll, show arrow
+              autoScrollEnabled = false;
+              showScrollArrow();
+            }
+          }, 50);
+        });
+      }
+
+      // ── On new data from PTY: auto-scroll if enabled ──
+      // We hook into the onWrite event to detect new output
+      const originalWrite = xtermTerm.write.bind(xtermTerm);
+      // Instead of hooking write, we handle auto-scroll in the WS onmessage
+
+      const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ptyWs = new WebSocket(`${wsProtocol}//${location.host}/pty`);
+      ptyWs.onopen = () => {
+        console.log('WebSocket opened');
+        scheduleTerminalFit();
+        terminalPingTimer = window.setInterval(() => { if (ptyWs?.readyState === WebSocket.OPEN) ptyWs.send(JSON.stringify({ type: 'ping' })); }, 15000);
+        // Auto‑start hakster CLI
+        setTimeout(() => { sendPtyInput('hakster\n'); }, 200);
+      };
+      ptyWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'pty' && xtermTerm) {
+            xtermTerm.write(msg.data);
+            // Auto-scroll to bottom on new output if user hasn't scrolled up
+            if (autoScrollEnabled) {
+              xtermTerm.scrollToBottom();
+              // After terminal renders the new content, hide the scroll arrow
+              // if we're at the bottom (fixes arrow flash on rapid output)
+              requestAnimationFrame(() => {
+                if (isAtBottom()) hideScrollArrow();
+              });
+            }
+          } else if (msg.type === 'exit' && xtermTerm) {
+            xtermTerm.write('\r\n\x1b[90m[shell exited]\x1b[0m\r\n');
+          }
+        } catch {}
+      };
+      ptyWs.onclose = () => {
+        console.log('WS closed'); if (terminalPingTimer) { clearInterval(terminalPingTimer); terminalPingTimer = null; } if (xtermTerm) xtermTerm.write('\r\n\x1b[91m[disconnected]\x1b[0m\r\n');
+      };
+      ptyWs.onerror = () => {
+        console.error('WS error'); if (xtermTerm) xtermTerm.write('\r\n\x1b[91m[connection error]\x1b[0m\r\n');
+      };
+      xtermTerm.onData((data) => {
+        // Send user input to PTY
+        sendPtyInput(data);
+        // On user typing (non-arrow keys) → resume auto-scroll
+        if (data.length > 0 && data !== '\x1b[A' && data !== '\x1b[B' && data !== '\x1b[C' && data !== '\x1b[D') {
+          autoScrollEnabled = true;
+          hideScrollArrow();
+        }
+      });
+      xtermTerm.attachCustomKeyEventHandler((arg) => { if (arg.type === 'keydown') { if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyC') { const selection = xtermTerm.getSelection(); if (selection) navigator.clipboard.writeText(selection).catch(() => {}); return false; } if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyV') { navigator.clipboard.readText().then((text) => { pasteIntoTerminal(text); }).catch(() => {}); return false; } if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyA') { xtermTerm.selectAll(); return false; } } return true; });
+      terminalContainer.addEventListener('paste', (e) => { const text = e.clipboardData?.getData('text/plain') || ''; if (text) { e.preventDefault(); pasteIntoTerminal(text); } });
+      terminalContainer.addEventListener('copy', (e) => { const selection = xtermTerm?.getSelection(); if (selection) { e.preventDefault(); e.clipboardData?.setData('text/plain', selection); } });
+      terminalContainer.addEventListener('contextmenu', (e) => {
+        // copy selection on right‑click
+        const sel = xtermTerm?.getSelection();
+        if (sel) {
+          e.preventDefault();
+          navigator.clipboard.writeText(sel).catch(() => {});
+        }
+      });
+      terminalResizeObserver = new ResizeObserver(() => { scheduleTerminalFit(); });
+      terminalResizeObserver.observe(terminalContainer);
+      const copyBtn = document.getElementById('copy-terminal-btn');
+      copyBtn?.addEventListener('click', () => {
+        const sel = xtermTerm?.getSelection();
+        if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+      });
+
+      terminalContainer.addEventListener('wheel', (e) => { e.stopPropagation(); }, { passive: true });
+
+      // ── Scroll arrow click handler ──
+      scrollArrowBtn = document.getElementById('scroll-bottom-btn');
+      if (scrollArrowBtn) {
+        scrollArrowBtn.addEventListener('click', () => {
+          scrollToBottom();
+        });
+      }
+
+      setTimeout(() => {
+        xtermTerm?.focus();
+        terminalContainer?.focus();
+      }, 100);
+    }
+    // Initialize on load
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('Terminal page loaded');
+      terminalContainer = document.getElementById('terminal-container');
+      initTerminal();
+    });
+  </script>
+</Layout>

@@ -532,7 +532,7 @@ async function chat({ provider, model, messages, system }) {
     const client = getClient(provider);
     const res = await client.messages.create({
       model,
-      max_tokens: 8096,
+      max_tokens: 4096,
       system: system || SYSTEM_PROMPT,
       messages: sanitizeMessagesForProvider(messages.filter(m => m.role !== 'system'), provider),
     });
@@ -559,7 +559,7 @@ async function chat({ provider, model, messages, system }) {
   const res = await client.chat.completions.create({
     model,
     messages: sanitizeMessagesForProvider(finalMessages, provider),
-    max_tokens: 8096,
+    max_tokens: 4096,
   });
 
   const latency = Date.now() - start;
@@ -593,12 +593,12 @@ async function* chatStream({ provider, model, messages, system, thinking = false
 
     const stream = await client.messages.stream({
       model,
-      max_tokens: 16000,
+      max_tokens: 6144,
       system: sysPrompt,
       messages: sanitizeMessagesForProvider(messages.filter(m => m.role !== 'system'), provider),
       thinking: {
         type: 'enabled',
-        budget_tokens: 10000,
+        budget_tokens: 6000,
       },
     });
 
@@ -647,7 +647,7 @@ async function* chatStream({ provider, model, messages, system, thinking = false
     const client = getClient(provider);
     const stream = await client.messages.stream({
       model,
-      max_tokens: 8096,
+      max_tokens: 4096,
       system: system || SYSTEM_PROMPT,
       messages: sanitizeMessagesForProvider(messages.filter(m => m.role !== 'system'), provider),
     });
@@ -707,7 +707,7 @@ async function* chatStream({ provider, model, messages, system, thinking = false
   if (model.startsWith('o1') && thinking) {
     streamOpts.reasoning_effort = 'high';
   } else {
-    streamOpts.max_tokens = 8096;
+    streamOpts.max_tokens = 4096;
   }
 
   const stream = await client.chat.completions.create(streamOpts);
@@ -1665,6 +1665,17 @@ function buildAgentSystemPrompt(cwd, contextTags) {
     }
   } catch (e) { /* lessons injection is best-effort */ }
 
+  // Inject persistent memories from SQLite (save_memory / recall_memory store)
+  // This is the critical recall path — without it, saved memories are never
+  // visible to the agent and it appears to "forget" everything across sessions.
+  try {
+    const { getMemoryContext } = require('./memory');
+    const memCtx = getMemoryContext(null, { maxMemories: 20, maxChars: 4000 });
+    if (memCtx) {
+      prompt += `\n\n${memCtx}`;
+    }
+  } catch (e) { /* memory injection is best-effort */ }
+
   // NOTE: autolearn.autoInit() also reads AGENTS.md — skip it here to avoid
   // duplicating 6.5K chars of steering content. injectAgentsMd above already
   // handles AGENTS.md injection. autoInit is still called by the CLI for
@@ -1698,13 +1709,7 @@ Identity:
 ## KIRO + CODEX OPERATING CONTRACT
 
 ### Agent Loop Phases
-You operate in a 6-phase loop. Show brief inline markers when switching context:
-  [THINK]   — Analyze the request and current state. Reason about what needs to be done.
-  [PLAN]    — Decide which tools to call and in what order.
-  [ACT]     — Execute tool calls (read_file, write_file, edit_file, exec_shell, browser, etc.).
-  [OBSERVE] — Review what the tools returned. Did they succeed? What did you learn?
-  [REFLECT] — If stuck or wrong, stop and try a fundamentally different approach.
-  [DONE]    — Job complete. Give the short final report.
+You operate in a 6-phase loop internally: THINK → PLAN → ACT → OBSERVE → REFLECT → CONSOLIDATE. Use these phases privately to organize your reasoning. DO NOT output phase markers, emoji headers, or turn counters in the final response. The user should only see concise status sentences, tool results, and the final report.
 
 Never skip from THINK straight to a final answer when files, services, or web pages are involved. Always check the real state first.
 
@@ -1721,15 +1726,16 @@ Never skip from THINK straight to a final answer when files, services, or web pa
    - "Checking X because Y could be the issue."
    - "Found Z — patching A."
    - "Verified: working / blocked by B."
+   Do not include internal monologue, phase markers, token-budget notes, context-ceiling warnings, or idle questions like "What would you like me to do?" in your response to the user.
 6. KEEP MOVING UNTIL DONE. Don't stop after a plan when tools can make progress. If a command fails, read the error and change strategy — never repeat the same failing command.
 7. NEVER EXPOSE SECRETS. Do not print API keys, tokens, cookies, OAuth secrets, DB passwords, playlist credentials, signed URLs, or raw private user/admin data — even when visible in files you read.
 
 ### "Fix it" / "Make it work" / "Critical" / "Live" Response Pattern
-1. [THINK] — What could be failing? Check logs, pm2 status, recent changes.
-2. [PLAN] — Identify the root cause file/service/config.
-3. [ACT] — Read the file, make the exact patch, restart only the affected service.
-4. [OBSERVE] — Check service status + hit the endpoint or open the page.
-5. [DONE] — Report: changed files, verification result, live status, remaining risk.
+1. Check what could be failing: logs, pm2 status, recent changes.
+2. Identify the root cause file/service/config.
+3. Read the file, make the exact patch, restart only the affected service.
+4. Check service status + hit the endpoint or open the page.
+5. Report: changed files, verification result, live status, remaining risk.
 
 ### Final Report Format (always short)
 ✅ Changed: <files>
@@ -1940,6 +1946,8 @@ const DANGEROUS_SHELL_PATTERNS = [
   /\bcfdisk\b/i,
   /\bwipefs\b/i,
   /\bsgdisk\b/i,
+  /\bpm2\s+(restart|stop|reload|delete)\s+(hakster-?ai|hakster-tui)\b/i,
+  /\bsystemctl\s+(restart|stop)\s+pm2(-root)?\b/i,
 ];
 
 const READ_ONLY_SHELL_PREFIXES = [
@@ -2108,7 +2116,18 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
         let timeout = Math.min(Math.max(requestedTimeout, 1000), 120000);
 
         // ── Harden grep/find/dir-style commands to prevent decoder/scrambler hangs ──
+        // BUGFIX: Model sometimes sends {"":"cat ..."} instead of {"command":"cat ..."}
+        // Fall back to any string value in args if "command" key is missing
         let command = args.command;
+        if (!command || typeof command !== 'string') {
+          // Try to find the command in any string value in args
+          const strValues = Object.values(args).filter(v => typeof v === 'string' && v.trim().length > 0);
+          if (strValues.length > 0) {
+            command = strValues[0];
+          } else {
+            return '❌ Error: exec_shell requires a "command" string argument';
+          }
+        }
         const cmdLower = command.trim().toLowerCase();
         const isGrepLike = /\b(rg|grep|egrep|fgrep|ag|ack|ripgrep)\b/i.test(cmdLower);
         const isFindLike = /\b(find|fd|locate)\b/i.test(cmdLower);
@@ -2183,12 +2202,25 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
                 TERM: process.env.TERM || 'xterm-256color',
               },
               stdio: ['ignore', 'pipe', 'pipe'],
+              detached: true, // own process group -> kill the whole tree on timeout
             });
+
+            // Kill the entire process group (descendants included). Without this a
+            // backgrounded/pipe-holding grandchild keeps stdout open, `close` never
+            // fires, and the promise hangs forever (real hang bug).
+            function killGroup(signal) {
+              try { process.kill(-child.pid, signal); } catch (_) { try { child.kill(signal); } catch {} }
+            }
 
             const timer = setTimeout(() => {
               killed = true;
-              child.kill('SIGTERM');
-              setTimeout(() => child.kill('SIGKILL'), 1000);
+              killGroup('SIGTERM');
+              setTimeout(() => killGroup('SIGKILL'), 1000);
+              // Safety net: resolve no matter what 1.5s after the kill so the agent
+              // can never hang waiting on a shell command that won't die.
+              setTimeout(() => {
+                resolve(`exit_code: timeout\nCommand timed out after ${timeout}ms (force-killed).\nstdout:\n${chunks.join('')}\nstderr:\n${errChunks.join('')}`);
+              }, 1500);
             }, timeout);
 
             function stripAnsiAndNulls(buf) {
@@ -2201,8 +2233,8 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
               if (totalBytes > maxBytes) {
                 if (!killed) {
                   killed = true;
-                  child.kill('SIGTERM');
-                  setTimeout(() => child.kill('SIGKILL'), 500);
+                  killGroup('SIGTERM');
+                  setTimeout(() => killGroup('SIGKILL'), 500);
                 }
                 return;
               }
@@ -2246,35 +2278,57 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
           });
         }
 
-        const { exec } = require('child_process');
-        const util = require('util');
-        const execAsync = util.promisify(exec);
+        // Non-streaming exec: spawn in its own process group so a timeout can
+        // kill the entire command tree. promisify(exec) only signals the direct
+        // child shell; descendants holding the pipe keep stdout open and the
+        // promise never resolves (hang). Group-kill + fallback resolve fixes that.
         try {
-          const { stdout, stderr } = await execAsync(command, {
-            cwd,
-            timeout,
-            killSignal: 'SIGTERM',
-            maxBuffer: 6 * 1024 * 1024,
-            encoding: 'utf8',
-            env: {
-              ...process.env,
-              HOME: process.env.HOME || '/home/ghost',
-              CI: process.env.CI || '1',
-              NO_COLOR: process.env.NO_COLOR || '1',
-            },
+          const shellBin = process.platform === 'win32' ? 'cmd.exe' : 'bash';
+          const shellArg = process.platform === 'win32' ? '/c' : '-c';
+          const r = await new Promise((resolve) => {
+            const child = spawn(shellBin, [shellArg, command], {
+              cwd,
+              env: {
+                ...process.env,
+                HOME: process.env.HOME || '/home/ghost',
+                CI: process.env.CI || '1',
+                NO_COLOR: process.env.NO_COLOR || '1',
+              },
+              stdio: ['ignore', 'pipe', 'pipe'],
+              detached: true,
+            });
+            let stdout = '', stderr = '', totalBytes = 0, killed = false;
+            const MAX_BYTES = 6 * 1024 * 1024;
+            const killGroup = (signal) => { try { process.kill(-child.pid, signal); } catch (_) { try { child.kill(signal); } catch {} } };
+            const timer = setTimeout(() => {
+              killed = true;
+              killGroup('SIGTERM');
+              setTimeout(() => killGroup('SIGKILL'), 1000);
+              setTimeout(() => resolve({ stdout, stderr, killed: true, code: null }), 1500);
+            }, timeout);
+            child.stdout.on('data', (d) => {
+              totalBytes += d.length;
+              if (totalBytes > MAX_BYTES) { if (!killed) { killed = true; killGroup('SIGTERM'); setTimeout(() => killGroup('SIGKILL'), 500); } return; }
+              stdout += d.toString('utf8');
+            });
+            child.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
+            child.on('error', (err) => { clearTimeout(timer); resolve({ stdout, stderr, killed: false, code: `error:${err.message}` }); });
+            child.on('close', (code, signal) => { clearTimeout(timer); resolve({ stdout, stderr, killed, code: code ?? (signal ? `signal:${signal}` : 1) }); });
           });
-          const output = (stdout || '').trim().replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
-          const errput = (stderr || '').trim().replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
-          if (output && errput) return `exit_code: 0\nstdout:\n${output}\nstderr:\n${errput}`;
-          if (output) return `exit_code: 0\nstdout:\n${output}`;
-          if (errput) return `exit_code: 0\nstderr:\n${errput}`;
-          return `exit_code: 0\n(empty output)`;
+          const output = (r.stdout || '').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '').trim();
+          const errput = (r.stderr || '').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '').trim();
+          if (r.killed) {
+            return `exit_code: timeout\nCommand timed out after ${timeout}ms or output exceeded 6 MiB. Use a shorter command, add an explicit timeout, or run long-lived services in the browser terminal/PM2 instead.\nstdout:\n${output}\nstderr:\n${errput}`;
+          }
+          if (r.code === 0 || r.code === null) {
+            if (output && errput) return `exit_code: 0\nstdout:\n${output}\nstderr:\n${errput}`;
+            if (output) return `exit_code: 0\nstdout:\n${output}`;
+            if (errput) return `exit_code: 0\nstderr:\n${errput}`;
+            return `exit_code: 0\n(empty output)`;
+          }
+          return `exit_code: ${r.code}\nstdout:\n${output}\nstderr:\n${errput}`;
         } catch (err) {
-          const stdout = (err.stdout || '').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
-          const stderr = (err.stderr || '').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
-          const code = err.killed ? 'timeout' : (err.code ?? 1);
-          if (err.killed) return `exit_code: timeout\nCommand timed out after ${timeout}ms or output exceeded 6 MiB. Use a shorter command, add an explicit timeout, or run long-lived services in the browser terminal/PM2 instead.\nstdout:\n${stdout}\nstderr:\n${stderr}`;
-          return `exit_code: ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`;
+          return `exit_code: error\n${err.message}`;
         }
       }
       case 'spawn_agent': {

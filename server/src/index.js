@@ -20,6 +20,7 @@ const crypto = require('crypto');
 const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
+const stuckMonitor = require('./agent/stuckMonitor');
 // ── Autoflow: 6-phase loop + autolearn + approval modules ──
 const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName } = require('./agent/loop');
 const autolearn = require('./agent/autolearn');
@@ -633,9 +634,15 @@ function isCerebrasModel(model) {
 }
 
 function getHaksterModelConfig() {
+  // Priority: env vars > hakster-config.json > hardcoded defaults
+  const envProvider = process.env.DEFAULT_PROVIDER;
+  const envModel = process.env.DEFAULT_MODEL;
+  if (envProvider && PROVIDERS[envProvider]) {
+    return { provider: envProvider, model: envModel || PROVIDERS[envProvider].defaultModel };
+  }
   const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');
-  let provider = 'ollama';
-  let model = PROVIDERS.ollama.defaultModel;
+  let provider = 'nous';
+  let model = PROVIDERS.nous.defaultModel;
   try {
     const cfg = JSON.parse(fs.readFileSync(haksterConfigPath, 'utf8'));
     if (cfg.provider && !isCerebrasValue(cfg.provider)) provider = cfg.provider;
@@ -722,7 +729,15 @@ function recordUserTokenUsage(user, usage) {
 
 async function openAICompatStreamFetch(baseURL, payload, signal) {
   const apiBase = String(baseURL || '').replace(/\/$/, '').replace(/\/v1$/, '');
-  const resp = await fetch(`${apiBase}/v1/chat/completions`, {
+  // Use undici dispatcher with long headersTimeout to avoid HeadersTimeoutError on slow cloud models.
+  // GLM-5.2:cloud can take 60-120s to send first byte on cold starts.
+  const { Agent, fetch: undiciFetch } = require('undici');
+  const dispatcher = new Agent({
+    headersTimeout: 600_000,   // 10 min — matches streamAbort timeout
+    bodyTimeout: 600_000,
+    connectTimeout: 30_000,
+  });
+  const resp = await undiciFetch(`${apiBase}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -730,6 +745,7 @@ async function openAICompatStreamFetch(baseURL, payload, signal) {
     },
     body: JSON.stringify(payload),
     signal,
+    dispatcher,
   });
   if (!resp.ok || !resp.body) {
     const text = await resp.text().catch(() => '');
@@ -765,6 +781,23 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0', providers: Object.keys(PROVIDERS) });
 });
 
+// ── Stuck-Loop Monitor endpoints ─────────────────────────────────────────
+app.get('/api/agent/stuck-alerts', (req, res) => {
+  const filter = {};
+  if (req.query.severity) filter.severity = req.query.severity;
+  if (req.query.needsHelp === 'true') filter.needsHelp = true;
+  res.json(stuckMonitor.getStuckAlerts(filter));
+});
+
+app.post('/api/agent/stuck-alerts/clear', (_req, res) => {
+  res.json(stuckMonitor.clearStuckAlerts());
+});
+
+app.get('/api/agent/stuck-summary', (_req, res) => {
+  res.json(stuckMonitor.getSummary());
+});
+
+// ── Security endpoints ────────────────────────────────────────────────────
 app.get('/api/health/security', async (_req, res) => {
   try {
     const report = await runSecurityAudit(path.join(__dirname, '..'), CORS_ORIGINS);
@@ -1629,20 +1662,40 @@ app.post('/api/memory/compact', (req, res) => {
 app.post('/api/sessions', (req, res) => {
   const db = getDb();
   const id = uuidv4();
-  const { provider = 'ollama', model, title } = req.body;
+  const { provider: reqProvider, model, title } = req.body;
+  const cfgProvider = reqProvider || getHaksterModelConfig().provider;
+  const provider = cfgProvider;
   const cfg = PROVIDERS[provider];
   if (!cfg) return res.status(400).json({ error: `Unknown provider: ${provider}` });
 
   const finalModel = model || cfg.defaultModel;
+  // BUGFIX: Attach user_id to new sessions so they're scoped per Google account
+  const apiKey = req.headers['x-api-key'] || req.body?.apiKey || req.body?.google_token;
+  let userId = null;
+  if (apiKey) {
+    const user = db.prepare('SELECT id FROM users WHERE api_key = ?').get(apiKey);
+    if (user) userId = user.id;
+  }
   db.prepare(
-    `INSERT INTO sessions (id, provider, model, title) VALUES (?, ?, ?, ?)`
-  ).run(id, provider, finalModel, title || null);
+    `INSERT INTO sessions (id, user_id, provider, model, title) VALUES (?, ?, ?, ?, ?)`
+  ).run(id, userId, provider, finalModel, title || null);
 
-  res.status(201).json({ id, provider, model: finalModel, title, createdAt: Date.now() });
+  res.status(201).json({ id, provider, model: finalModel, title, createdAt: Date.now(), userId });
 });
 
-app.get('/api/sessions', (_req, res) => {
+app.get('/api/sessions', (req, res) => {
   const db = getDb();
+  // BUGFIX: Filter sessions by user_id when API key is provided
+  // so different Google accounts don't see each other's sessions
+  const apiKey = req.headers['x-api-key'] || req.query.apiKey;
+  if (apiKey) {
+    const user = db.prepare('SELECT id FROM users WHERE api_key = ?').get(apiKey);
+    if (user) {
+      const sessions = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC').all(user.id);
+      return res.json({ sessions });
+    }
+  }
+  // Fallback: return all sessions (legacy behavior for non-authenticated users)
   const sessions = db.prepare(
     `SELECT * FROM sessions ORDER BY updated_at DESC`
   ).all();
@@ -1877,11 +1930,12 @@ function detectPhantomLoopNudge(loopDetect, assistantContent, toolCalls, workDir
   const recentTargets = loopDetect.explorationCalls.map((c) => c.target);
   const uniqueTargets = new Set(recentTargets).size;
   const sameSubtreeCount = recentTargets.length >= 4 && uniqueTargets <= 2;
-  // BUG FIX: Was >= 2, letting the model search twice before nudging.
-  // Now >= 1 — the FIRST search-only turn triggers the nudge so the model
-  // acts immediately instead of wandering for 2-3 turns.
-  const searchLoop = (loopDetect.searchOnlyCount || 0) >= 1;
-  const clarifyLoop = (loopDetect.clarifyingCount || 0) >= 1;
+  // Allow up to 5 search-only turns before nudging — the model needs to
+  // explore files, read code, and understand context before acting.
+  // Was >= 1 which killed exploration after a single read_file — agent
+  // could never read more than 1 file before being forced to "act".
+  const searchLoop = (loopDetect.searchOnlyCount || 0) >= 5;
+  const clarifyLoop = (loopDetect.clarifyingCount || 0) >= 2;
 
   if (clarifyLoop) {
     loopDetect.clarifyingCount = 0;
@@ -2597,7 +2651,7 @@ ${dirListing}
       if (Array.isArray(m.content)) {
         for (const part of m.content) {
           if (part.type === 'text') chars += (part.text || '').length;
-          else if (part.type === 'image_url') chars += 1200;
+          else if (part.type === 'image_url') chars += lowToken ? 600 : 1200;
         }
       } else {
         chars += (m.content || '').length;
@@ -2605,12 +2659,11 @@ ${dirListing}
       if (m.tool_calls) {
         for (const tc of m.tool_calls) {
           chars += (tc.function?.arguments || '').length;
-          // Tool definitions add overhead — function name + description + params
-          chars += 100; // per tool call: name, id, type overhead
+          chars += lowToken ? 60 : 100; // per tool call: name, id, type overhead
         }
       }
       // Tool result messages include tool_call_id overhead
-      if (m.role === 'tool') chars += 50;
+      if (m.role === 'tool') chars += lowToken ? 30 : 50;
     }
     // Use aggressive 1.5:1 ratio (code/special chars tokenize higher than plain text)
     return Math.ceil(chars / 1.5);
@@ -2634,24 +2687,39 @@ ${dirListing}
     const content = (m.content || '').length > effectiveMax
       ? m.content.substring(0, effectiveMax) + '\n[trimmed]'
       : m.content;
-    // BUG FIX: Do NOT truncate tool_calls arguments. Truncating mid-JSON
-    // produces malformed argument strings that confuse the model and cause
-    // "invalid tool call arguments" 400 errors on the next turn. Tool call
-    // arguments are small and critical — truncate tool RESULTS instead.
     return { ...m, content };
+  }
+
+  // Shared char accumulator so totalChars always matches estimateTokens()
+  function messageChars(m) {
+    let chars = 0;
+    if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part.type === 'text') chars += (part.text || '').length;
+        else if (part.type === 'image_url') chars += lowToken ? 600 : 1200;
+      }
+    } else {
+      chars += (m.content || '').length;
+    }
+    if (m.tool_calls) {
+      for (const tc of m.tool_calls) {
+        chars += (tc.function?.arguments || '').length;
+        chars += lowToken ? 60 : 100;
+      }
+    }
+    if (m.role === 'tool') chars += lowToken ? 30 : 50;
+    return chars;
   }
 
   // Enforce hard ceiling on total context before sending to model
   // Strategy: keep ALL messages, just truncate content to fit budget
   function enforceContextCeiling(msgs) {
-    let totalChars = msgs.reduce((sum, m) => sum + (m.content || '').length +
-      (m.tool_calls ? m.tool_calls.reduce((s, tc) => s + (tc.function?.arguments || '').length, 0) : 0), 0);
+    let totalChars = msgs.reduce((sum, m) => sum + messageChars(m), 0);
 
     // Step 1: Truncate every message to MAX_MSG_CHARS (except system)
     msgs = msgs.map(m => truncateMessage(m, MAX_MSG_CHARS));
 
-    totalChars = msgs.reduce((sum, m) => sum + (m.content || '').length +
-      (m.tool_calls ? m.tool_calls.reduce((s, tc) => s + (tc.function?.arguments || '').length, 0) : 0), 0);
+    totalChars = msgs.reduce((sum, m) => sum + messageChars(m), 0);
 
     // Step 2: If still over budget, progressively truncate harder — never drop messages
     // Reduce max per-message length until we fit
@@ -2659,8 +2727,7 @@ ${dirListing}
     while (totalChars > MAX_CONTEXT_CHARS && perMsgLimit > 100) {
       perMsgLimit = Math.floor(perMsgLimit * 0.6); // shrink by 40% each pass
       msgs = msgs.map((m, i) => i === 0 ? m : truncateMessage(m, perMsgLimit));
-      totalChars = msgs.reduce((sum, m) => sum + (m.content || '').length +
-        (m.tool_calls ? m.tool_calls.reduce((s, tc) => s + (tc.function?.arguments || '').length, 0) : 0), 0);
+      totalChars = msgs.reduce((sum, m) => sum + messageChars(m), 0);
     }
 
     // Step 3: Absolute last resort — nuclear 100 char truncation
@@ -2670,17 +2737,15 @@ ${dirListing}
 
     // Step 4: If STILL over budget, drop oldest messages (except system prompt)
     // This is the nuclear option — we must not exceed the token limit
-    totalChars = msgs.reduce((sum, m) => sum + (m.content || '').length +
-      (m.tool_calls ? m.tool_calls.reduce((s, tc) => s + (tc.function?.arguments || '').length, 0) : 0), 0);
+    totalChars = msgs.reduce((sum, m) => sum + messageChars(m), 0);
     let spliceGuard = 0;
     while (totalChars > MAX_CONTEXT_CHARS && msgs.length > 2 && spliceGuard < 200) {
       // Drop the oldest non-system message (index 1)
       const dropped = msgs.splice(1, 1);
-      totalChars -= (dropped[0]?.content || '').length;
+      totalChars -= messageChars(dropped[0]);
       spliceGuard++;
     }
-    totalChars = msgs.reduce((sum, m) => sum + (m.content || '').length +
-      (m.tool_calls ? m.tool_calls.reduce((s, tc) => s + (tc.function?.arguments || '').length, 0) : 0), 0);
+    totalChars = msgs.reduce((sum, m) => sum + messageChars(m), 0);
 
     return msgs;
   }
@@ -2801,8 +2866,9 @@ ${dirListing}
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
 
-        // Reasoning / thinking content (OpenAI-compatible models like GLM-5.1)
-        const thinkingContent = delta.reasoning_content || delta.thinking;
+        // Reasoning / thinking content (OpenAI-compatible models like GLM-5.1/5.2)
+        // GLM-5.2 streams reasoning as delta.reasoning (not reasoning_content or thinking)
+        const thinkingContent = delta.reasoning_content || delta.thinking || delta.reasoning;
         if (thinkingContent) {
           if (!thinkingActive) {
             thinkingActive = true;
@@ -3154,6 +3220,33 @@ ${dirListing}
 
           res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
 
+          // ── Capture raw memory for the autolearn pipeline ──
+          // This is the entry point that was missing — without this, raw_memories.json
+          // stays empty and the entire consolidation pipeline is dead.
+          // Write to BOTH the workspace dir AND the project root so the CLI
+          // (which reads from /home/ghost/haksterAi/.hakster/) gets the memories.
+          try {
+            const isErr = /^Error[:\n]|^❌/i.test(String(result).trim());
+            const observation = `${toolName}(${JSON.stringify(toolArgs).slice(0, 100)}) → ${String(displayResult).slice(0, 200).replace(/\n/g, ' ')}`;
+            const memEntry = {
+              id: `mem_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+              timestamp: new Date().toISOString(),
+              turn,
+              phase: phaseName(currentPhase),
+              tags: [toolName, isErr ? 'error' : 'success'],
+              observation,
+              type: isErr ? 'error' : 'pattern',
+              confidence: isErr ? 0.9 : 0.6,
+            };
+            // Write to workspace dir
+            autolearn.addRawMemory(memEntry, workDir);
+            // Also write to project root (where the CLI reads from)
+            const projectRoot = '/home/ghost/haksterAi';
+            if (path.resolve(workDir) !== path.resolve(projectRoot)) {
+              autolearn.addRawMemory(memEntry, projectRoot);
+            }
+          } catch(_memErr) { console.error('[memory] capture failed:', _memErr.message, 'workDir:', workDir); /* don't let memory capture break the agent loop */ }
+
           if (['write_file', 'edit_file', 'patch_file', 'multi_patch'].includes(toolName) && toolArgs.path) {
             const isErr = /^Error[:\n]/i.test(String(result).trim()) || /^\u274c/i.test(String(result).trim());
             const fullPath = path.resolve(workDir, toolArgs.path);
@@ -3294,6 +3387,26 @@ ${dirListing}
 
         // Notify frontend: tool call result
         res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
+
+        // ── Capture raw memory for the autolearn pipeline (path 2) ──
+        try {
+          const _isErr = /^Error[:\n]|^❌/i.test(String(result).trim());
+          const _observation = `${toolName}(${JSON.stringify(toolArgs).slice(0, 100)}) → ${String(displayResult).slice(0, 200).replace(/\n/g, ' ')}`;
+          const _memEntry = {
+            id: `mem_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+            timestamp: new Date().toISOString(),
+            turn, phase: phaseName(currentPhase),
+            tags: [toolName, _isErr ? 'error' : 'success'],
+            observation: _observation,
+            type: _isErr ? 'error' : 'pattern',
+            confidence: _isErr ? 0.9 : 0.6,
+          };
+          autolearn.addRawMemory(_memEntry, workDir);
+          const _projectRoot = '/home/ghost/haksterAi';
+          if (path.resolve(workDir) !== path.resolve(_projectRoot)) {
+            autolearn.addRawMemory(_memEntry, _projectRoot);
+          }
+        } catch(_e2) { console.error('[memory] capture failed (path2):', _e2.message); }
 
         // If a file was written/edited, emit a file event so frontend can show a download button.
         // Only emit on success — the tool result must not be an error and the file must actually exist,
@@ -3861,7 +3974,9 @@ app.post('/api/generate', async (req, res) => {
         if (!delta) continue;
 
         // Reasoning / thinking content
-        const thinkingContent = delta.reasoning_content || delta.thinking;
+        // Reasoning / thinking content (OpenAI-compatible models like GLM-5.1/5.2)
+        // GLM-5.2 streams reasoning as delta.reasoning (not reasoning_content or thinking)
+        const thinkingContent = delta.reasoning_content || delta.thinking || delta.reasoning;
         if (thinkingContent) {
           if (!thinkingActive) {
             thinkingActive = true;
@@ -4040,6 +4155,27 @@ app.post('/api/generate', async (req, res) => {
         const contextResult = displayResult.length > SHELL_CONTEXT_LIMIT ? displayResult.slice(0, SHELL_CONTEXT_LIMIT) + '\n[trimmed]' : displayResult;
 
         res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
+
+        // ── Capture raw memory for the autolearn pipeline (path 3) ──
+        try {
+          const _isErr = /^Error[:\n]|^❌/i.test(String(result).trim());
+          const _observation = `${toolName}(${JSON.stringify(toolArgs).slice(0, 100)}) → ${String(displayResult).slice(0, 200).replace(/\n/g, ' ')}`;
+          const _memEntry = {
+            id: `mem_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+            timestamp: new Date().toISOString(),
+            turn,
+            phase: phaseName(currentPhase),
+            tags: [toolName, _isErr ? 'error' : 'success'],
+            observation: _observation,
+            type: _isErr ? 'error' : 'pattern',
+            confidence: _isErr ? 0.9 : 0.6,
+          };
+          autolearn.addRawMemory(_memEntry, workDir);
+          const _projectRoot = '/home/ghost/haksterAi';
+          if (path.resolve(workDir) !== path.resolve(_projectRoot)) {
+            autolearn.addRawMemory(_memEntry, _projectRoot);
+          }
+        } catch(_e3) { console.error('[memory] capture failed (path3):', _e3.message); }
 
         // Emit image events for inline preview
         if (imageUrls && imageUrls.length > 0) {
@@ -4557,9 +4693,9 @@ function applyCrushGuardConfig(cfg) {
   cfg.models.small.reasoning_effort = cfg.models.small.reasoning_effort || 'low';
   cfg.options = cfg.options || {};
   cfg.options.disable_provider_auto_update = true;
-  cfg.options.skills_paths = ['/home/ghost/.agents/skills-ericdahl/skills'];
+  cfg.options.skills_paths = ['/home/ghost/.agents/skills'];
   cfg.context_paths = ['CRUSH.md', 'AGENTS.md'];
-  cfg.global_context_paths = ['~/.config/crush/CRUSH.md'];
+  cfg.global_context_paths = ['/home/ghost/haksterAi/CRUSH.md'];
   return cfg;
 }
 

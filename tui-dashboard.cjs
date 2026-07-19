@@ -27,8 +27,10 @@ const http = require('http');
 const WebSocket = require('ws');
 const { execSync } = require('child_process');
 
-// ── Config ────────────────────────────────────────────────────────
+// ── Config (shared with hakster-grids.sh) ─────────────────────────
 const REFRESH_MS = parseInt(process.env.REFRESH_MS || '2000', 10);
+const SCROLL_SPEED = parseInt(process.env.SCROLL_SPEED || '1', 10);
+const MAX_LOG_LINES = parseInt(process.env.MAX_LOG_LINES || '200', 10);
 const API_BASE = (process.env.HAKSTER_HOST || 'http://localhost:3579').replace(/\/$/, '');
 const HISTORY_LEN = 60;
 
@@ -106,47 +108,110 @@ function wsReconnect() {
   }, wsBackoff);
 }
 
+let lastPhase = null;
+let lastToolName = null;
+
+function truncate(s, n) {
+  if (!s) return '';
+  let out = String(s).replace(/\r\n|\r|\n/g, ' ').trim();
+  if (out.length > n) out = out.substring(0, n - 1) + '…';
+  return out;
+}
+
 function handleWSEvent(msg) {
   const t = msg.type || 'unknown';
   const ts = new Date().toLocaleTimeString();
 
-  // Agent/tool events from streaming
-  if (t === 'tool_call_start') {
-    const tool = msg.tool_name || '?';
+  // Tokens: only show first/last few to avoid flooding
+  if (t === 'token') {
+    const text = truncate(msg.token || msg.text || msg.content, 60);
+    if (!text) return;
+    logBox.log(`{${C.fgSubtle}}${ts} {${C.accent}}tok{/${C.accent}} ${text}{/${C.fgSubtle}}`);
+    return;
+  }
+
+  // Phase changes: only log when phase actually changes
+  if (t === 'phase') {
+    const p = msg.phase || msg.name || String(msg).substring(0, 12);
+    if (p && p !== lastPhase) {
+      lastPhase = p;
+      const icon = { THINK: '🧠', PLAN: '📋', ACT: '⚡', OBSERVE: '👁', REFLECT: '🔮', CONSOLIDATE: '📦' }[p.toUpperCase()] || '◇';
+      logBox.log(`{${C.secondary}}${icon} ${p.toUpperCase()}{/${C.secondary}} {${C.fgMuted}}[turn ${msg.turn || '?'}]{/${C.fgMuted}}`);
+    }
+    return;
+  }
+
+  // Tool events (legacy + new names)
+  if (t === 'tool_call_start' || t === 'tool_start') {
+    const tool = msg.tool_name || msg.name || '?';
+    lastToolName = tool;
     logBox.log(`{${C.mustard}}⚡{/${C.mustard}} {${C.fg}}${ts}{/${C.fg}} {${C.accent}}TOOL{/${C.accent}} {bold}${tool}{/bold} {${C.fgSubtle}}started{/${C.fgSubtle}}`);
-  } else if (t === 'tool_call_result') {
-    const tool = msg.tool_name || '?';
-    const result = (msg.tool_result || '').substring(0, 80).replace(/\n/g, ' ');
-    const color = result.length > 0 ? C.success : C.error;
-    logBox.log(`{${C.success}}✓{/${C.success}} {${C.fg}}${ts}{/${C.fg}} {${C.accent}}TOOL{/${C.accent}} {bold}${tool}{/bold} {${C.fgSubtle}}→{/${C.fgSubtle}} {${color}}${result}{/${color}}`);
-  } else if (t === 'thinking_start') {
+    return;
+  }
+  if (t === 'tool_call_result' || t === 'tool_result' || t === 'tool_end') {
+    const tool = msg.tool_name || msg.name || lastToolName || '?';
+    lastToolName = null;
+    const raw = msg.tool_result || msg.result || msg.stdout || msg.stderr || '';
+    const result = truncate(raw, 80);
+    const color = (raw && !msg.error) ? C.success : C.error;
+    logBox.log(`{${color}}✓{/${color}} {${C.fg}}${ts}{/${C.fg}} {${C.accent}}TOOL{/${C.accent}} {bold}${tool}{/bold} {${C.fgSubtle}}→{/${C.fgSubtle}} ${result}`);
+    return;
+  }
+
+  // Thinking lifecycle
+  if (t === 'thinking_start') {
     logBox.log(`{${C.secondary}}🧠{/${C.secondary}} {${C.fg}}${ts}{/${C.fg}} {${C.secondary}}THINKING{/${C.secondary}} {${C.fgSubtle}}started{/${C.fgSubtle}}`);
-  } else if (t === 'thinking') {
-    const snippet = (msg.content || '').substring(0, 120).replace(/\n/g, ' ');
-    logBox.log(`{${C.secondary}}  {/${C.secondary}} {${C.fgSubtle}}${snippet}{/${C.fgSubtle}}`);
-  } else if (t === 'thinking_end') {
+    return;
+  }
+  if (t === 'thinking') {
+    const snippet = truncate(msg.content, 120);
+    if (snippet) logBox.log(`{${C.secondary}}  {/${C.secondary}} {${C.fgSubtle}}${snippet}{/${C.fgSubtle}}`);
+    return;
+  }
+  if (t === 'thinking_end') {
     logBox.log(`{${C.secondary}}🧠{/${C.secondary}} {${C.fg}}${ts}{/${C.fg}} {${C.secondary}}THINKING{/${C.secondary}} {${C.fgSubtle}}done{/${C.fgSubtle}}`);
-  } else if (t === 'chat_result') {
+    return;
+  }
+
+  if (t === 'chat_result') {
     const model = msg.model || '?';
     const tokens = (msg.inputTokens || 0) + (msg.outputTokens || 0);
     logBox.log(`{${C.primary}}◆{/${C.primary}} {${C.fg}}${ts}{/${C.fg}} {${C.success}}CHAT{/${C.success}} {${C.fg}}${model}{/${C.fg}} {${C.fgMuted}}│{/${C.fgMuted}} {${C.fg}}${fmtBytes(tokens)} tok{/${C.fg}}`);
-  } else if (t === 'notification') {
-    const ntype = msg.type || 'notify';
+    return;
+  }
+
+  if (t === 'notification') {
+    const ntype = msg.notifyType || msg.type || 'notify';
     const icon = ntype === 'error' ? `{${C.error}}✗{/${C.error}}` : ntype === 'warn' ? `{${C.mustard}}⚠{/${C.mustard}}` : `{${C.info}}ℹ{/${C.info}}`;
-    logBox.log(`${icon} {${C.fg}}${ts}{/${C.fg}} {bold}${msg.msg || msg.message || 'notification'}{/bold}`);
-  } else if (t === 'done') {
+    const text = truncate(msg.msg || msg.message, 120);
+    logBox.log(`${icon} {${C.fg}}${ts}{/${C.fg}} {bold}${text || 'notification'}{/bold}`);
+    return;
+  }
+
+  if (t === 'done') {
     logBox.log(`{${C.success}}✓{/${C.success}} {${C.fg}}${ts}{/${C.fg}} {${C.fgSubtle}}Agent done {${msg.model || ''} ${msg.provider || ''}{/${C.fgSubtle}}`);
-  } else if (t === 'error') {
-    logBox.log(`{${C.error}}✗{/${C.error}} {${C.fg}}${ts}{/${C.fg}} {${C.error}}${msg.error || 'WS error'}{/${C.error}}`);
-  } else if (t === 'heartbeat') {
-    // Silently ignore heartbeats
-  } else if (t === 'loop_detected') {
-    logBox.log(`{${C.mustard}}⚠{/${C.mustard}} {${C.fg}}${ts}{/${C.fg}} {${C.mustard}}LOOP {${msg.reason || ''}{/${C.mustard}} {${C.fgSubtle}}${msg.message || ''}{/${C.fgSubtle}}`);
-  } else if (t !== 'unknown') {
-    // Catch-all for any other event types
+    lastPhase = null;
+    return;
+  }
+
+  if (t === 'error') {
+    const err = truncate(msg.error || msg.message || 'WS error', 120);
+    logBox.log(`{${C.error}}✗{/${C.error}} {${C.fg}}${ts}{/${C.fg}} {${C.error}}${err}{/${C.error}}`);
+    return;
+  }
+
+  if (t === 'heartbeat') return;
+
+  if (t === 'loop_detected') {
+    logBox.log(`{${C.mustard}}⚠{/${C.mustard}} {${C.fg}}${ts}{/${C.fg}} {${C.mustard}}LOOP {${truncate(msg.reason, 40)}{/${C.mustard}} {${C.fgSubtle}}${truncate(msg.message, 40)}{/${C.fgSubtle}}`);
+    return;
+  }
+
+  // Unknown event: print type and a tiny preview only (never JSON.stringify)
+  if (t !== 'unknown') {
     const label = String(t).substring(0, 16);
-    const content = JSON.stringify(msg).substring(0, 100);
-    logBox.log(`{${C.fgSubtle}}${ts} {${C.fgMuted}}${label}{/${C.fgMuted}} ${content}{/${C.fgSubtle}}`);
+    const preview = truncate(msg.content || msg.text || msg.data || '', 60);
+    logBox.log(`{${C.fgSubtle}}${ts} {${C.fgMuted}}${label}{/${C.fgMuted}} ${preview}`);
   }
 }
 
@@ -303,27 +368,27 @@ const providersBox = blessed.box({ top:12, left:'33%', width:'34%', height:10,
 const usersBox = blessed.list({ top:12, left:'67%', width:'33%', height:10,
   label:` {${C.primary}}◆{/} USERS & LOGS `, border:{type:'line'}, style:{...bdrStyle(), selected:{bg:C.bgSubtle}}, tags:true, scrollable:true, keys:true, vi:true });
 
-const historyBox = blessed.box({ top:22, left:'50%', width:'50%', height:9,
+const historyBox = blessed.box({ top:22, left:'50%', width:'50%', height:5,
   label:` {${C.primary}}◆{/} HISTORY `, border:{type:'line'}, style:bdrStyle(), tags:true, scrollable:true });
 
 const pm2Box = blessed.list({ top:22, left:0, width:'50%', height:9,
   label:` {${C.primary}}◆{/} PM2 {${C.fgSubtle}}enter:restart{/${C.fgSubtle}} `, border:{type:'line'}, style:{...bdrStyle(), selected:{bg:C.bgSubtle}}, tags:true, scrollable:true, keys:true, vi:true });
 
-const networkBox = blessed.list({ top:22, left:'50%', width:'50%', height:9,
+const networkBox = blessed.list({ top:27, left:'50%', width:'50%', height:4,
   label:` {${C.primary}}◆{/} NETWORK `, border:{type:'line'}, style:{...bdrStyle(), selected:{bg:C.bgSubtle}}, tags:true, scrollable:true, keys:true, vi:true });
 
-const peopleBox = blessed.list({ top:31, left:0, width:'33%', height:'100%-33',
+const peopleBox = blessed.list({ top:31, left:0, width:'33%', height:'100%-32',
   label:` {${C.primary}}◆{/} PEOPLE `, border:{type:'line'}, style:{...bdrStyle(), selected:{bg:C.bgSubtle}}, tags:true, scrollable:true, keys:true, vi:true });
 
-const machinesBox = blessed.list({ top:31, left:'33%', width:'33%', height:'100%-33',
+const machinesBox = blessed.list({ top:31, left:'33%', width:'34%', height:'100%-32',
   label:` {${C.primary}}◆{/} MACHINES `, border:{type:'line'}, style:{...bdrStyle(), selected:{bg:C.bgSubtle}}, tags:true, scrollable:true, keys:true, vi:true });
 
-const integrationsBox = blessed.box({ top:31, left:'66%', width:'34%', height:'100%-33',
+const integrationsBox = blessed.box({ top:31, left:'67%', width:'33%', height:5,
   label:` {${C.primary}}◆{/} INTEGRATIONS `, border:{type:'line'}, style:bdrStyle(), tags:true, scrollable:true });
 
-const logBox = blessed.log({ top:31, left:'66%', width:'34%', height:'100%-33',
+const logBox = blessed.log({ top:36, left:'67%', width:'33%', height:'100%-37',
   label:` {${C.primary}}◆{/} AGENT ACTIVITY `, border:{type:'line'}, style:bdrStyle(), tags:true, scrollable:true,
-  alwaysScroll:true, scrollback:500,
+  alwaysScroll:true, scrollback:MAX_LOG_LINES,
   scrollbar:{ch:'█',style:{fg:C.primary}} });
 
 // Auto-scroll: force logBox to bottom after every message
@@ -341,11 +406,11 @@ screen.key(['s'], () => {
 
 function updateFooter() {
   const scrollLabel = autoScroll ? '{green-fg}● auto{/{green-fg}' : '{red-fg}○ manual{/{red-fg}';
-  footer.setContent(`{center}{${C.fgSubtle}}q:quit │ r:refresh │ s:toggle-scroll │ 1-9:jump │ ${scrollLabel} │ ${REFRESH_MS}ms{/${C.fgSubtle}}{/center}`);
+  footer.setContent(`{center}{${C.fgSubtle}}q:quit │ r:refresh │ s:toggle-scroll │ 1-9:jump │ ${scrollLabel} │ ${REFRESH_MS}ms │ scroll:${SCROLL_SPEED} │ log:${MAX_LOG_LINES}{/${C.fgSubtle}}{/center}`);
 }
 
 const footer = blessed.box({ bottom:0, left:0, width:'100%', height:1,
-  content:`{center}{${C.fgSubtle}}q:quit │ r:refresh │ ↑↓:scroll │ enter:restart(pm2) │ 1-9:jump │ auto-scroll:on │ ${REFRESH_MS}ms{/${C.fgSubtle}}{/center}`,
+  content:`{center}{${C.fgSubtle}}q:quit │ r:refresh │ ↑↓:scroll │ enter:restart(pm2) │ 1-9:jump │ auto-scroll:on │ ${REFRESH_MS}ms │ scroll:${SCROLL_SPEED} │ log:${MAX_LOG_LINES}{/${C.fgSubtle}}{/center}`,
   tags:true, style:{bg:C.bgSubtle, fg:C.fgMuted} });
 
 // ── Renderers ─────────────────────────────────────────────────────
@@ -644,7 +709,7 @@ screen.append(header); screen.append(systemBox); screen.append(servicesBox);
 screen.append(sessionsBox); screen.append(providersBox); screen.append(usersBox); screen.append(historyBox); screen.append(pm2Box);
 screen.append(networkBox); screen.append(peopleBox); screen.append(machinesBox); screen.append(integrationsBox); screen.append(logBox); screen.append(footer);
 
-logBox.log(`{${C.primary}}◆{/} {bold}{${C.fg}}haksterAi TUI v4{/bold}{/${C.fg}} {${C.fgMuted}}started{/${C.fgMuted}} {${C.fgSubtle}}│ ${REFRESH_MS}ms │ ${API_BASE}{/${C.fgSubtle}}`);
+logBox.log(`{${C.primary}}◆{/} {bold}{${C.fg}}haksterAi TUI v4{/bold}{/${C.fg}} {${C.fgMuted}}started{/${C.fgMuted}} {${C.fgSubtle}}│ ${REFRESH_MS}ms │ scroll:${SCROLL_SPEED} │ log:${MAX_LOG_LINES} │ ${API_BASE}{/${C.fgSubtle}}`);
 logBox.log(`{${C.fgSubtle}}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{/${C.fgSubtle}}`);
 logBox.log(`{${C.fgMuted}}Panels: SYSTEM │ SERVICES │ SESSIONS │ PROVIDERS │ USERS │ HISTORY │ PM2 │ NETWORK │ PEOPLE │ MACHINES │ INTG │ LOG{/${C.fgMuted}}`);
 logBox.log(`{${C.fgMuted}}Keys: 1-9 jump │ r refresh │ s scroll-lock │ enter restart(pm2) │ q quit{/${C.fgMuted}}`);

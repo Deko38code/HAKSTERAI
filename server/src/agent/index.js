@@ -26,6 +26,13 @@ const { generateImage } = require('../providers');
 const { SUGGEST, AUTO_EDIT, FULL_AUTO, shouldConfirm } = require('./approval');
 const { AgentLoopPhase, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition } = require('./loop');
 const autolearn = require('./autolearn');
+const session = require('./session');
+const git = require('./git');
+const sandbox = require('./sandbox');
+const subagent = require('./subagent');
+
+// ── Memory Engine v2 (importance-scored, entity-extracting) ──
+const memoryEngine = require('./memory-engine');
 
 // ── Puppeteer (lazy-loaded) ──────────────────────────────────────────
 let _browser = null;
@@ -52,7 +59,12 @@ async function getPage() {
 // ── Config ──────────────────────────────────────────────────────────────
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
 const HAKSTER_HOST = process.env.HAKSTER_HOST || 'http://localhost:3579';
-const MODEL = process.env.HAKSTER_MODEL || 'gpt-oss:120b-cloud';
+const MODEL = process.env.HAKSTER_MODEL || (() => {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'hakster-config.json'), 'utf8'));
+    return cfg.model || 'gpt-oss:120b-cloud';
+  } catch { return 'gpt-oss:120b-cloud'; }
+})();
 const CLAUDE_PROXY_URL = process.env.CLAUDE_PROXY_URL || 'http://localhost:8082';
 const WORK_DIR = process.cwd();
 const SYSTEM_PROMPT = `You are haksterAI, an expert AI coding and ops agent running on the user's machine. When you run shell or CLI commands, you are executing them directly on the user's physical machine — this is NOT a sandbox or container. Every command runs with the machine owner's permissions on their real hardware. You have direct access to shell commands, file operations, processes, and networking. You are bold, concise, and get things done. Prefer action over explanation. When writing code, just write it — no unnecessary framing.
@@ -238,9 +250,9 @@ Key skills to auto-load:
 - **firecrawl** → Load for any web scraping or data extraction
 
 ## System Knowledge (live — refreshed every 5 min)
-${DYNAMIC_MACHINE_CONTEXT}
+\${DYNAMIC_MACHINE_CONTEXT}
 
-${CLIENT_DEVICE_CONTEXT}
+\${CLIENT_DEVICE_CONTEXT}
 
 ## 🖥️ Machine Owner Context (IMPORTANT)
 You are running on the machine owner's system. REMEMBER these key paths and facts:
@@ -526,6 +538,84 @@ function getMachineContext() {
   _machineCtxTime = now;
   return result;
 }
+
+// ── Knowledge library index — let the agent pull from ALL agent-doc .md files
+//    (phantom, kiro, claude/anthropic, codex/openai, gemini/hermes, etc.) ──
+const _KNOWLEDGE_DIRS = [
+  path.join(__dirname, '..', '..', '..', '.firecrawl', 'cli-skills', '.firecrawl'),
+  path.join(__dirname, '..', '..', '..', '.firecrawl'),
+  path.join(__dirname, '..', '..', '..'), // repo root (HAKSTERAI-PHANTOM-MERGED.md, AGENTS.md)
+];
+const _KNOWLEDGE_GROUPS = [
+  { re: /phantom|HAKSTERAI-PHANTOM/i, label: 'phantom' },
+  { re: /kiro/i, label: 'kiro' },
+  { re: /anthropic|claude/i, label: 'claude' },
+  { re: /openai\.com-codex|codex-cli/i, label: 'codex' },
+  { re: /gemini|hermes/i, label: 'hermes' },
+  { re: /cursor/i, label: 'cursor' },
+  { re: /opencode/i, label: 'opencode' },
+  { re: /aider/i, label: 'aider' },
+  { re: /chatgpt|openai-help/i, label: 'chatgpt' },
+];
+function buildKnowledgeLibraryIndex() {
+  try {
+    const byGroup = {};
+    const seen = new Set();
+    for (const dir of _KNOWLEDGE_DIRS) {
+      let files = [];
+      try { files = globSync(path.join(dir, '**', '*.md')); } catch (_) { continue; }
+      for (const f of files) {
+        if (seen.has(f)) continue;
+        seen.add(f);
+        const base = path.basename(f);
+        // skip repo-level noise (README/AGENTS handled elsewhere)
+        if (['README.md', 'AGENTS.md', 'CLAUDE.md'].includes(base) && dir === _KNOWLEDGE_DIRS[2]) continue;
+        let g = 'other';
+        for (const grp of _KNOWLEDGE_GROUPS) { if (grp.re.test(base)) { g = grp.label; break; } }
+        if (!byGroup[g]) byGroup[g] = [];
+        let sz = 0; try { sz = fs.statSync(f).size; } catch (_) {}
+        byGroup[g].push({ path: f, kb: Math.max(1, Math.round(sz / 1024)) });
+      }
+    }
+    const order = ['phantom','kiro','claude','codex','hermes','cursor','opencode','aider','chatgpt','other'];
+    const lines = [];
+    for (const g of order) {
+      const arr = byGroup[g]; if (!arr || !arr.length) continue;
+      lines.push(`### ${g} (${arr.length} docs)`);
+      // cap per group so the index stays small
+      for (const doc of arr.slice(0, 40)) lines.push(`- ${doc.path} (${doc.kb}KB)`);
+      if (arr.length > 40) lines.push(`- …and ${arr.length - 40} more`);
+    }
+    if (!lines.length) return '';
+    return `\n\n## 📚 Knowledge Library (agent-doc .md files)\nThe following agent documentation is available on disk. To "pull" from any of these, use read_file or skill_load on the path BEFORE you need it — do not guess, read the actual file.\n\n${lines.join('\n')}`;
+  } catch (_) { return ''; }
+}
+
+// ── Consolidated MEMORY.md from the user's project + home (read each session) ──
+function buildProjectMemoryBlock(cwd) {
+  try {
+    const candidates = [
+      path.join(cwd || WORK_DIR, '.hakster', 'MEMORY.md'),
+      path.join(process.env.HOME || '/home/ghost', '.hakster', 'MEMORY.md'),
+    ];
+    for (const p of candidates) {
+      try {
+        if (fs.existsSync(p)) {
+          const content = fs.readFileSync(p, 'utf-8').trim();
+          if (content.length > 0) {
+            const cap = 4000;
+            const trimmed = content.length > cap
+              ? content.slice(0, cap) + '\n... (MEMORY.md truncated — read the rest with read_file)'
+              : content;
+            return `\n\n## 🧠 Project Memory (MEMORY.md, loaded this session)\n${trimmed}`;
+          }
+        }
+      } catch (_) { /* try next */ }
+    }
+  } catch (_) { /* non-blocking */ }
+  return '';
+}
+
 function buildSystemPrompt(clientContext) {
   let prompt = SYSTEM_PROMPT.replace('${DYNAMIC_MACHINE_CONTEXT}', getMachineContext());
 
@@ -627,6 +717,12 @@ function buildSystemPrompt(clientContext) {
   const lessons = injectLearnedLessons(process.cwd(), ['pentest', 'agent']);
   if (lessons) prompt += '\n\n' + lessons;
 
+  // ── Inject memory-engine v2 recall (importance-scored) ──
+  try {
+    const memFrag = memoryEngine.recallForPrompt(process.cwd(), { maxChars: 2500 });
+    if (memFrag) prompt += '\n\n## Relevant Memories (v2)\n' + memFrag;
+  } catch (e) { /* non-blocking */ }
+
   // ── Inject plan/todo tool guidance + current state ──
   prompt += '\n\n## 📝 Plan & Todo Tools';
   prompt += '\nYou have two persistent planning tools (state survives across sessions):';
@@ -654,6 +750,12 @@ function buildSystemPrompt(clientContext) {
     }
   } catch (_) { /* ignore read errors */ }
 
+  // ── Read project MEMORY.md + skill/memory each session (auto-learn) ──
+  prompt += buildProjectMemoryBlock(process.cwd());
+
+  // ── Knowledge library index: phantom / kiro / claude / codex / hermes ──
+  prompt += buildKnowledgeLibraryIndex();
+
   return prompt;
 }
 
@@ -672,7 +774,9 @@ function getHaksterRoots() {
 }
 
 // (Idle review prompt removed — health checks now run directly via shell, no model call)
-const MAX_TURNS = Math.max(50, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '80', 10) || 80);
+const MAX_TURNS_DEFAULT = Math.max(30, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '50', 10) || 50);
+const LOW_TOKEN_MAX_TURNS = Math.max(20, parseInt(process.env.HAKSTER_LOW_TOKEN_MAX_TURNS || '30', 10) || 30);
+const MAX_TURNS = MAX_TURNS_DEFAULT;
 const IDLE_TIMEOUT_MS = 120000; // 2 minutes idle → auto review
 
 // ── TUI Config (env-var tunable) ──────────────────────────────────────────
@@ -686,6 +790,46 @@ const MAX_LOG_LINES = (() => { const v = process.env.MAX_LOG_LINES; return v !==
 let _lastAssistantResponse = '';   // Tracks last model response for loop detection
 let _noProgressCount = 0;          // Counts consecutive responses without tool calls
 const NO_PROGRESS_LIMIT = 15;      // Break loop after sustained no-progress (was 6)
+
+// ── Stuck-state debug logging (persistent alerts) ─────────────────────────
+// Writes structured alerts to data/stuck-alerts.log so they survive terminal scroll.
+// Tracks: timestamps, turn number, detection type, reason, and context snippet.
+const STUCK_ALERT_LOG = require('path').join(__dirname, '..', '..', 'data', 'stuck-alerts.log');
+let _stuckAlertTurnCount = 0;
+const _stuckAlertThresholds = new Set([3, 5, 8, 10, 12, 15]);
+function _stuckDebugLog(type, reason, context) {
+  const ts = new Date().toISOString();
+  _stuckAlertTurnCount++;
+  const entry = JSON.stringify({
+    ts, turn: _stuckAlertTurnCount, type, reason,
+    noProgressCount: _noProgressCount,
+    context: (context || '').substring(0, 300),
+  });
+  try { require('fs').appendFileSync(STUCK_ALERT_LOG, entry + '\n'); } catch (_) {}
+  const colorMap = { no_progress_warn: C.yellow, stuck_break: C.red+C.bold, grep_loop: C.yellow+C.bold, shell_repeat: C.red+C.bold, semantic_loop: C.magenta, stall_guard: C.cyan };
+  const c = colorMap[type] || C.yellow;
+  log('\n'+c+'🔍 STUCK-ALERT ['+type+'] turn='+_stuckAlertTurnCount+' noProgress='+_noProgressCount+': '+reason+C.reset);
+  if (context) log('   context: '+context.substring(0, 200));
+
+  // ── Push to stuckMonitor for HTTP API / CLI status ──────────────────────
+  const severityMap = {
+    stuck_break: 'critical',
+    shell_repeat: 'critical',
+    semantic_loop: 'warning',
+    grep_loop: 'warning',
+    no_progress_warn: 'warning',
+    stall_guard: 'warning',
+  };
+  try {
+    const stuckMonitor = require('./stuckMonitor');
+    stuckMonitor.logStuckAlert(type, reason, {
+      turn: _stuckAlertTurnCount,
+      noProgressCount: _noProgressCount,
+      snippet: context ? context.substring(0, 300) : null,
+    }, severityMap[type] || 'warning');
+  } catch (_) {}
+}
+
 let _recentResponsePrefixes = [];  // Last N response prefixes for semantic loop detection
 let _emptyRetries = 0;              // Counts empty-response retries within a single agentLoop call
 const SEMANTIC_LOOP_WINDOW = 5;    // How many recent responses to check (was 3)
@@ -700,6 +844,9 @@ let _shellRepeatBreak = false;      // Set by shell executor when a generic repe
 // it's likely a code bug (like ReferenceError) causing an infinite retry loop.
 let _consecutiveToolErrors = [];     // [{name, count}]  recent tool error counts
 const TOOL_ERROR_LOOP_LIMIT = 3;    // Same tool erroring this many times → break loop
+const TOOL_REPEAT_LIMIT = 3;       // Same tool called with identical args this many times → break loop (tighten tool loops)
+let _recentToolSigs = [];          // Recent normalized tool-call signatures (for repeat-tool-loop detection)
+let _repeatToolSigCount = 0;        // Consecutive identical tool-call signatures
 
 // ── Grep/search command loop detection ──
 // Track consecutive shell commands that are grep/rg/find/search — if the model
@@ -1046,6 +1193,19 @@ function isDangerousCommand(tool, args) {
   // Shell commands
   if (tool === 'shell') {
     const cmd = args.command || '';
+    const lower = cmd.toLowerCase();
+    // Sudo-specific: any command starting with sudo is treated as elevated
+    if (/^\s*sudo\s+/.test(cmd)) {
+      // Still match dangerous patterns under sudo for detailed reasons
+      for (const pat of DANGEROUS_SHELL_PATTERNS) {
+        if (pat.test(cmd)) return `⚠️ SUDO DANGEROUS: ${cmd.substring(0, 100)}`;
+      }
+      // Sudo itself without an obviously dangerous wrapper is still flagged
+      // so the user can explicitly approve elevated execution
+      const inner = cmd.replace(/^\s*sudo\s+/, '').trim();
+      if (inner) return `⚠️ SUDO ELEVATED COMMAND: ${inner.substring(0, 100)}`;
+      return '⚠️ Bare sudo (no command)';
+    }
     for (const pat of DANGEROUS_SHELL_PATTERNS) {
       if (pat.test(cmd)) return `Dangerous shell command: ${cmd.substring(0, 100)}`;
     }
@@ -1059,6 +1219,8 @@ function isDangerousCommand(tool, args) {
   // Write/overwrite on critical paths
   if (['write_file', 'patch_file', 'multi_patch', 'insert_lines', 'delete_lines', 'replace_regex'].includes(tool)) {
     const fp = path.resolve(WORK_DIR, args.path || '');
+    if (!sandbox.isWritable(fp)) return `Sandbox: write outside writable root blocked (${fp})`;
+    git.checkpoint(fp, 'before ' + tool);
     for (const cp of CRITICAL_PATHS) {
       if (fp.startsWith(cp)) return `Writing to critical path: ${fp}`;
     }
@@ -1583,7 +1745,7 @@ let _tuiPorts      = '';
 let _tuiServices   = '';
 let _tuiVulns      = [];   // [{svc, cve, flag}]  e.g. [{svc:'Apache 2.4.49', cve:'CVE-2021-41773', flag:'🚩'}]
 let _tuiStep       = 0;
-let _tuiMaxSteps   = MAX_TURNS;
+let _tuiMaxSteps   = MAX_TURNS_DEFAULT;
 let _tuiPhaseStart = Date.now(); // when current phase started
 let _tuiPhaseLog   = [];  // [{phase, duration}] — completed phases with durations
 let _tuiKeyInsights = []; // [{step, text}] — key reasoning insights extracted from thinking
@@ -1603,7 +1765,17 @@ function renderReasoningPanel() {
   const phaseColors = { THINK: C.info, PLAN: C.mustard, ACT: C.success, OBSERVE: C.cyan, REFLECT: C.magenta, CONSOLIDATE: C.error, Thinking: C.info, Executing: C.success, Complete: C.success, Idle: C.fgMuted };
   const phaseColor = phaseColors[_tuiPhase] || C.fgBase;
   const phaseIcon = phaseIcons[_tuiPhase] || '◇';
+  // ── Phase progress ring (visual indicator) ──
+  const phaseOrder = ['THINK', 'PLAN', 'ACT', 'OBSERVE', 'REFLECT', 'CONSOLIDATE'];
+  const phaseIdx = phaseOrder.indexOf(_tuiPhase);
+  const ringParts = phaseOrder.map((p, i) => {
+    if (i < phaseIdx) return `${C.success}●${C.reset}`;   // completed
+    if (i === phaseIdx) return `${phaseColor}${C.bold}◉${C.reset}`; // current
+    return `${C.fgSubtle}○${C.reset}`;                     // pending
+  });
+  const ringStr = ringParts.join(' ');
   lines.push(`${C.tertiary}${phaseIcon}${C.reset} ${C.fgBase}[${new Date().toLocaleTimeString()}]${C.reset} ${phaseColor}${C.bold}${_tuiPhase}${C.reset} ${C.fgMuted}(${phaseElapsed}s)${C.reset} ${C.fgSubtle}⏱ ${sessionElapsed}${C.reset}`);
+  lines.push(`           ${ringStr}  ${C.fgSubtle}loop phases${C.reset}`);
   const items = [];
   if (_tuiTarget)   items.push(`${C.fgMuted}├─${C.reset} ${C.fgSubtle}Target:${C.reset}   ${C.fgBase}${_tuiTarget}${C.reset}`);
   if (_tuiPorts)    items.push(`${C.fgMuted}├─${C.reset} ${C.fgSubtle}Ports:${C.reset}     ${C.info}${_tuiPorts}${C.reset}`);
@@ -1615,10 +1787,10 @@ function renderReasoningPanel() {
       items.push(`${C.fgMuted}│   ${C.reset}${C.fgMuted}├─${C.reset} ${C.fgHalf}${v.svc}${C.reset} ${C.tertiary}→${C.reset} ${C.bold}${v.cve}${C.reset} ${flag}`);
     }
   }
-  // ── Key insights from thinking (last 3) ──
+  // ── Key insights from thinking (last 5, expanded) ──
   if (_tuiKeyInsights.length > 0) {
     items.push(`${C.fgMuted}├─${C.reset} ${C.fgSubtle}Insights:${C.reset}`);
-    const recentInsights = _tuiKeyInsights.slice(-3);
+    const recentInsights = _tuiKeyInsights.slice(-5);
     for (const ins of recentInsights) {
       const insShort = ins.text.length > 70 ? ins.text.substring(0, 67) + '...' : ins.text;
       items.push(`${C.fgMuted}│   ${C.reset}${C.accent}💡${C.reset} ${C.fgHalf}${insShort}${C.reset} ${C.fgSubtle}[S${ins.step}]${C.reset}`);
@@ -1679,7 +1851,7 @@ function renderThinkingPanel(thinkText) {
   const thinkLines = cleaned.split('\n').filter(l => l.trim());
   // Wrap each thinking line to fit in the panel
   const maxW = W - 4; // leave room for " │ " prefix
-  const maxLines = 10;  // HaksterAI shows max 10 lines for thinking
+  const maxLines = 12;  // Increased from 10
   for (const line of thinkLines.slice(0, maxLines)) {
     const raw = _stripAnsi(line);
     if (raw.length <= maxW) {
@@ -1706,7 +1878,7 @@ function renderThinkingPanel(thinkText) {
   // HaksterAI-style "Thought for Xs" footer
   if (_tuiThinkingStart) {
     const elapsed = ((Date.now() - _tuiThinkingStart) / 1000).toFixed(1);
-    lines.push(`${C.bgSubtle}─${C.reset}${C.fgMuted} Thought for ${elapsed}s${C.reset}`);
+    lines.push(`${C.bgSubtle}─${C.reset}${C.fgMuted} Thought for ${elapsed}s · ${thinkLines.length} lines${C.reset}`);
   }
   return drawBox('THINKING', lines, W, C.secondary);
 }
@@ -1767,26 +1939,27 @@ function renderToolPanel() {
     const baseName = t.name.split(' → ')[0];
     const badge = TOOL_TYPE[baseName] || '??';
     const badgeStr = `${C.fgSubtle}${badge}${C.reset}`;
-    // Duration display
+    // Duration display with color coding
     let durStr = '';
     if (t.status === 'running' && t.startTime) {
       const elapsed = ((Date.now() - t.startTime) / 1000).toFixed(1);
-      durStr = ` ${C.fgMuted}${elapsed}s${C.reset}`;
+      durStr = ` ${elapsed >= 5 ? C.error : C.mustard}${elapsed}s${C.reset}`;
     } else if (t.duration) {
-      durStr = ` ${C.fgSubtle}${t.duration < 1000 ? `${t.duration}ms` : `${(t.duration / 1000).toFixed(1)}s`}${C.reset}`;
+      const d = t.duration < 1000 ? `${t.duration}ms` : `${(t.duration / 1000).toFixed(1)}s`;
+      durStr = ` ${C.fgSubtle}${d}${C.reset}`;
     }
     const left  = `${badgeStr} ${statusIcon} ${nameColor}${_truncPad(t.name, leftW - 10)}${C.reset}${durStr}`;
     // ── Live output for the running tool, static output for completed ──
     let right;
     if (t.status === 'running' && _tuiCurrentOutput && isLast) {
-      // Show live streaming output — last 1 line of the output, truncated
+      // Show live streaming output — last line of the output, truncated
       const outLines = _tuiCurrentOutput.split('\n').filter(l => l.trim());
       const lastLine = outLines.length > 0 ? outLines[outLines.length - 1] : '';
       right = `${C.mustard}${_truncPad(lastLine.substring(0, rightW - 3), rightW - 3)}${C.reset}`;
     } else if (t.status === 'running') {
       right = `${C.mustard}${C.bold}⏳ running...${C.reset}`;
     } else {
-      // Completed: show output truncated
+      // Completed: show output truncated with status-based color
       const outPreview = (t.output || '').substring(0, rightW - 2);
       const outColor = t.status === 'ok' ? C.fgHalf : C.error;
       right = `${outColor}${_truncPad(outPreview, rightW - 2)}${C.reset}`;
@@ -1853,11 +2026,17 @@ function renderChainPanel() {
   const W = BOX_W;
   const lines = [];
   for (const c of _tuiChains) {
-    // HaksterAI-style: ◇ icon for chain items
-    lines.push(`${C.tertiary}◇${C.reset} ${C.bold}${c.desc}${C.reset}`);
+    // HaksterAI-style: ◇ icon for chain items with arrow visualization
+    const parts = c.desc.split('→').map(p => p.trim());
+    const chainStr = parts.map((p, i) => {
+      const color = i === parts.length - 1 ? C.mustard + C.bold : C.fgBase;
+      return `${color}${p}${C.reset}`;
+    }).join(` ${C.tertiary}→${C.reset} `);
+    lines.push(`${C.tertiary}${c.tag}${C.reset} ${chainStr}`);
   }
   // HaksterAI-style: subtle ── divider instead of ══
   lines.push(`${C.bgSubtle}${'─'.repeat(W - 4)}${C.reset}`);
+  lines.push(`${C.fgSubtle}◇ ${_tuiChains.length} exploit chain${_tuiChains.length !== 1 ? 's' : ''} mapped${C.reset}`);
   return drawBox('CHAIN TABLE', lines, W, C.mustard);
 }
 
@@ -1936,15 +2115,21 @@ function tuiToolDone(name, status, output) {
   const calloutW = Math.min((process.stdout.columns || 80) - 6, 72);
   const label = baseName.length > calloutW - 16 ? baseName.substring(0, calloutW - 19) + '...' : baseName;
   const statusStr = status === 'ok' ? 'DONE' : status === 'error' ? 'FAIL' : 'END';
+  // Output preview on second line
+  const outPreview = (output || '').substring(0, 50);
   const inner = `${doneEmoji} ║ ${doneColor}${C.bold}${statusStr}${C.reset} ${C.bgSubtle}${badge}${C.reset} ${C.tertiary}${label}${C.reset} ${C.fgSubtle}${durStr}${C.reset}`;
   log(`  ${C.bgSubtle}${C.bold}╭${C.reset}${C.bgSubtle}${'─'.repeat(Math.min(calloutW, 60))}${C.reset}${C.bgSubtle}${C.bold}╮${C.reset}`);
   log(`  ${C.bgSubtle}${C.bold}│${C.reset} ${inner}${C.reset}${' '.repeat(Math.max(0, calloutW - label.length - 20))} ${C.bgSubtle}${C.bold}│${C.reset}`);
+  if (outPreview && outPreview.trim()) {
+    const previewLine = `  ${C.bgSubtle}${C.bold}│${C.reset} ${C.fgHalf}${_truncPad(outPreview, calloutW - 4)}${C.reset}${' '.repeat(Math.max(0, calloutW - label.length - 30))} ${C.bgSubtle}${C.bold}│${C.reset}`;
+    log(previewLine);
+  }
   log(`  ${C.bgSubtle}${C.bold}╰${C.reset}${C.bgSubtle}${'─'.repeat(Math.min(calloutW, 60))}${C.reset}${C.bgSubtle}${C.bold}╯${C.reset}`);
 }
 function tuiAddChain(desc, tag) { _tuiChains.push({ desc, tag: tag || '🎯' }); }
 function tuiReset() {
   _tuiPhase = 'Idle'; _tuiTarget = ''; _tuiPorts = ''; _tuiServices = '';
-  _tuiVulns = []; _tuiStep = 0; _tuiMaxSteps = MAX_TURNS;
+  _tuiVulns = []; _tuiStep = 0; _tuiMaxSteps = _maxTurns;
   _tuiToolGrid = []; _tuiChains = []; _tuiThinkingStart = null;
   _tuiPhaseStart = Date.now();
   // Preserve session-level state across turns (not resetting):
@@ -2058,7 +2243,7 @@ function banner() {
   const reasoningLines = [
     `${C.tertiary}⏸${R} ${C.fgBase}[${new Date().toLocaleTimeString()}]${R} ${C.bold}Idle${R} ${C.fgMuted}(0s)${R}`,
     `          ${C.fgSubtle}Enter a task to begin${R}`,
-    `          ${C.fgMuted}└─${R} ${C.fgSubtle}Progress${R} ${C.primary}${'░'.repeat(20)}${R} ${C.bold}${C.fgBase}0%${R} ${C.fgMuted}Step 0/${MAX_TURNS}${R}`,
+    `          ${C.fgMuted}└─${R} ${C.fgSubtle}Progress${R} ${C.primary}${'░'.repeat(20)}${R} ${C.bold}${C.fgBase}0%${R} ${C.fgMuted}Step 0/${MAX_TURNS_DEFAULT}${R}`,
   ];
   lines.push(innerBox('REASONING', reasoningLines, C.info));
 
@@ -2221,6 +2406,24 @@ let TOOLS = [
           timeout: { type: 'number', description: 'Timeout in seconds (default: 15, max: 60). Use higher for slow APIs.' },
         },
         required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'firecrawl',
+      description: 'Firecrawl web extraction. Actions: "scrape" (clean markdown/HTML of one URL), "crawl" (crawl a whole site, returns job id + first batch), "map" (list all URLs on a site), "search" (web search via Firecrawl). CRITICAL: prefer firecrawl scrape over web_fetch when you need CLEAN readable page content (docs, articles, listings) — it returns parsed markdown, not raw HTML. Requires FIRECRAWL_API_KEY.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', description: 'One of: scrape, crawl, map, search', enum: ['scrape', 'crawl', 'map', 'search'] },
+          url: { type: 'string', description: 'Target URL (required for scrape/crawl/map)' },
+          query: { type: 'string', description: 'Search query (required for action=search)' },
+          limit: { type: 'number', description: 'Max results/urls (default 25 for map/search, 10 for crawl)' },
+          formats: { type: 'array', items: { type: 'string' }, description: 'Output formats for scrape (default ["markdown"]). Options: markdown, html, rawHtml' },
+        },
+        required: ['action'],
       },
     },
   },
@@ -3161,6 +3364,7 @@ const toolExecutors = {
   write_file({ path: filePath, content }) {
     const resolved = path.resolve(WORK_DIR, filePath);
     try {
+      if (!sandbox.isWritable(resolved)) return `❌ Sandbox: write to ${resolved} blocked (outside writable root)`;
       fs.mkdirSync(path.dirname(resolved), { recursive: true });
       fs.writeFileSync(resolved, content, 'utf-8');
       const lines = content.split('\n').length;
@@ -3411,6 +3615,65 @@ const toolExecutors = {
       return `${resp.status} ${resp.statusText}\n${truncated}`;
     } catch (err) {
       if (err.name === 'AbortError') return `Error: Request timed out after ${timeout}s — URL may be unreachable or slow. Try a different approach.`;
+      return `Error: ${err.message}`;
+    }
+  },
+
+  async firecrawl({ action = 'scrape', url, query, limit, formats }) {
+    const key = process.env.FIRECRAWL_API_KEY;
+    if (!key) return 'Error: FIRECRAWL_API_KEY not configured (set it in .env).';
+    const base = process.env.FIRECRAWL_BASE_URL || 'https://api.firecrawl.dev/v1';
+    const hdrs = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+    const fetchJson = async (path, body, timeoutMs = 30000) => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const r = await fetch(base + path, { method: 'POST', headers: hdrs, body: JSON.stringify(body), signal: ctrl.signal });
+        const txt = await r.text();
+        let data; try { data = JSON.parse(txt); } catch (_) { data = { raw: txt }; }
+        return { ok: r.ok, status: r.status, data };
+      } finally { clearTimeout(t); }
+    };
+    const trunc = (str, n) => str.length > n ? str.slice(0, n) + '\n... (truncated)' : str;
+    try {
+      if (action === 'scrape') {
+        if (!url) return 'Error: scrape requires url';
+        const { ok, status, data } = await fetchJson('/scrape', {
+          url,
+          formats: formats && formats.length ? formats : ['markdown'],
+        }, 45000);
+        if (!ok) return `Error: Firecrawl scrape failed (${status}): ${JSON.stringify(data).slice(0, 400)}`;
+        const md = data?.data?.markdown || data?.data?.html || data?.data?.rawHtml || JSON.stringify(data?.data || {});
+        return `🔥 Firecrawl scrape ${url}
+${trunc(md, 12000)}`;
+      }
+      if (action === 'map') {
+        if (!url) return 'Error: map requires url';
+        const { ok, status, data } = await fetchJson('/map', { url, limit: limit || 25 }, 30000);
+        if (!ok) return `Error: Firecrawl map failed (${status}): ${JSON.stringify(data).slice(0, 400)}`;
+        const links = data?.links || data?.data?.links || [];
+        return `🔥 Firecrawl map ${url} — ${links.length} URLs\n${trunc(links.join('\n'), 8000)}`;
+      }
+      if (action === 'search') {
+        if (!query) return 'Error: search requires query';
+        const { ok, status, data } = await fetchJson('/search', { query, limit: limit || 25 }, 30000);
+        if (!ok) return `Error: Firecrawl search failed (${status}): ${JSON.stringify(data).slice(0, 400)}`;
+        const items = data?.data || data?.results || [];
+        const out = items.map((it, i) => `${i + 1}. ${it.title || ''}\n   ${it.url || it.link || ''}\n   ${(it.description || it.markdown || '').slice(0, 200)}`).join('\n\n');
+        return `🔥 Firecrawl search "${query}" — ${items.length} results\n${trunc(out, 10000)}`;
+      }
+      if (action === 'crawl') {
+        if (!url) return 'Error: crawl requires url';
+        const { ok, status, data } = await fetchJson('/crawl', { url, limit: limit || 10 }, 30000);
+        if (!ok) return `Error: Firecrawl crawl failed (${status}): ${JSON.stringify(data).slice(0, 400)}`;
+        const jobId = data?.id || data?.jobId;
+        const docs = data?.data || [];
+        const sample = docs.slice(0, 3).map((d, i) => `--- ${i + 1}: ${d.source || d.url || ''} ---\n${(d.markdown || '').slice(0, 800)}`).join('\n\n');
+        return `🔥 Firecrawl crawl ${url} — job ${jobId || 'n/a'} (first ${docs.length} pages)\n${trunc(sample, 10000)}`;
+      }
+      return `Error: unknown firecrawl action "${action}"`;
+    } catch (err) {
+      if (err.name === 'AbortError') return 'Error: Firecrawl request timed out. Try a smaller limit or a different URL.';
       return `Error: ${err.message}`;
     }
   },
@@ -3817,7 +4080,7 @@ const toolExecutors = {
       const taskHist = [{ role: 'system', content: buildSystemPrompt() }];
       log(`${C.primary}  ◆ ${taskName}: ${task.goal.substring(0, 80)}${C.reset}`);
       try {
-        const result = await agentLoop(task.goal, taskHist, true); // silent mode
+        const result = await agentLoop(task.goal, taskHist, true, { lowToken: _lowToken }); // silent mode
         const lastAssistant = [...taskHist].reverse().find(m => m.role === 'assistant');
         return { name: taskName, status: 'done', result: lastAssistant?.content || '(completed)' };
       } catch (err) {
@@ -4544,6 +4807,7 @@ const toolExecutors = {
       if (!filePath) return '❌ path is required';
       if (!changes || !Array.isArray(changes)) return '❌ changes array is required';
       const resolved = path.resolve(WORK_DIR, filePath);
+      if (!sandbox.isWritable(resolved)) return `❌ Sandbox: edit to ${resolved} blocked (outside writable root)`;
       if (!fs.existsSync(resolved)) {
         if (!createIfMissing) return `❌ File not found: ${resolved}`;
         const dir = path.dirname(resolved);
@@ -4796,15 +5060,18 @@ async function initMcpTools() {
 }
 
 // ── Ollama API Call ─────────────────────────────────────────────────────
-function callOllama(messages, tools, { onToken } = {}) {
+function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
   return new Promise((resolve, reject) => {
+    const numPredict = lowToken
+      ? Math.max(1024, parseInt(process.env.HAKSTER_LOW_TOKEN_NUM_PREDICT || '4096', 10) || 4096)
+      : 16384;
     const body = JSON.stringify({
       model: MODEL,
       messages,
       tools: tools || undefined,
       stream: true,   // ← STREAMING: tokens arrive in real-time instead of blocking until complete
       options: {
-        num_predict: 16384,   // max output tokens per turn — enough for thinking + response
+        num_predict: numPredict,
         temperature: 0.3,     // lower temp = faster convergence, less creative drift
         top_p: 0.9,
       },
@@ -4979,8 +5246,14 @@ function callOllama(messages, tools, { onToken } = {}) {
 // gpt-oss:120b-cloud has 131k context. Budget: ~114k tokens (131k minus 16k output).
 // Ceiling: ~100k chars at ~2:1 ratio (conservative estimate).
 // Aggressive threshold to stay well below the model's hard limit.
-const MAX_CONTEXT_CHARS = 80000;  // proactive compact threshold (leave headroom)
-const ABSOLUTE_CONTEXT_CHARS = 100000; // hard ceiling — matches server/index.js
+const LOW_TOKEN_MAX_CONTEXT_CHARS = parseInt(process.env.HAKSTER_LOW_TOKEN_CONTEXT_CHARS || '12000', 10) || 12000;
+const LOW_TOKEN_ABSOLUTE_CONTEXT_CHARS = Math.max(15000, Math.floor(LOW_TOKEN_MAX_CONTEXT_CHARS * 1.25));
+const LOW_TOKEN_CONTEXT_WINDOW = 16384;
+const LOW_TOKEN_MIN_MESSAGES = 6;
+const LOW_TOKEN_MAX_MESSAGES = 30;
+
+const MAX_CONTEXT_CHARS = 50000;  // proactive compact threshold (leave headroom)
+const ABSOLUTE_CONTEXT_CHARS = 70000; // hard ceiling — matches server/index.js
 const CONTEXT_WINDOW = 131072;    // gpt-oss:120b-cloud context window (for % display)
 const MIN_MESSAGES_TO_KEEP = 10;  // Keep last 5 exchanges (10 messages)
 
@@ -4988,14 +5261,14 @@ function estimateChars(history) {
   return history.reduce((sum, m) => sum + (m.content?.length || 0), 0);
 }
 
-// ── Context usage percentage (like Copilot CLI) ──
-function contextPercent(history) {
+function contextPercent(history, lowToken = false) {
   const chars = estimateChars(history);
-  return Math.min(100, ((chars / CONTEXT_WINDOW) * 100)).toFixed(1);
+  const window = lowToken ? LOW_TOKEN_CONTEXT_WINDOW : CONTEXT_WINDOW;
+  return Math.min(100, ((chars / window) * 100)).toFixed(1);
 }
 
-function logContextUsage(history, label = '') {
-  const pct = contextPercent(history);
+function logContextUsage(history, label = '', lowToken = false) {
+  const pct = contextPercent(history, lowToken);
   const chars = estimateChars(history);
   const msgs = history.length - 1; // exclude system
   const pctNum = parseFloat(pct);
@@ -5162,38 +5435,40 @@ function sanitizeHistory(history) {
   }
 }
 
-function compactHistory(history) {
+function compactHistory(history, lowToken = false) {
   if (history.length <= 1) return; // system prompt only
-  
+
+  const ctxMax = lowToken ? LOW_TOKEN_MAX_CONTEXT_CHARS : MAX_CONTEXT_CHARS;
+  const ctxAbs = lowToken ? LOW_TOKEN_ABSOLUTE_CONTEXT_CHARS : ABSOLUTE_CONTEXT_CHARS;
+  const maxMsgs = lowToken ? LOW_TOKEN_MAX_MESSAGES : 60;
+  const minMsgs = lowToken ? LOW_TOKEN_MIN_MESSAGES : MIN_MESSAGES_TO_KEEP;
+  const msgStartLimit = lowToken ? 300 : 1000;
+  const msgFloor = lowToken ? 60 : 100;
+
   // Don't compact if there are in-progress tool calls — wait until they settle
   if (hasPendingToolCalls(history)) {
     log(`${C.fgMuted}◇ Skipping compact — tool calls in progress${C.reset}`);
     return;
   }
-  
+
   // ALWAYS enforce message count limit, regardless of char size.
-  // Models get confused with too many messages even if each is short.
-  const MAX_MESSAGES = 60; // keep last 60 messages (~30 exchanges)
-  if (history.length > MAX_MESSAGES + 1) { // +1 for system prompt
-    const dropCount = history.length - MAX_MESSAGES - 1;
-    log(`${C.mustard}◇ Dropping ${dropCount} oldest messages (history has ${history.length - 1} msgs, max ${MAX_MESSAGES})${C.reset}`);
-    logContextUsage(history, 'before drop');
+  if (history.length > maxMsgs + 1) { // +1 for system prompt
+    const dropCount = history.length - maxMsgs - 1;
+    log(`${C.mustard}◇ Dropping ${dropCount} oldest messages (history has ${history.length - 1} msgs, max ${maxMsgs})${C.reset}`);
+    logContextUsage(history, 'before drop', lowToken);
     history.splice(1, dropCount);
-    logContextUsage(history, 'after drop');
+    logContextUsage(history, 'after drop', lowToken);
   }
 
-  const totalChars = estimateChars(history);
-  logContextUsage(history, 'checking compact');
+  logContextUsage(history, 'checking compact', lowToken);
 
   // Progressive truncation — shrink message content, never drop messages
-  // Target: get below MAX_CONTEXT_CHARS (80k), with absolute ceiling at ABSOLUTE_CONTEXT_CHARS (100k)
-  const MAX_MSG = 1000;
   let msgs = [...history];  // ALWAYS copy — never alias the original array
-  let perMsgLimit = MAX_MSG;
+  let perMsgLimit = msgStartLimit;
   let iterations = 0;
-  
-  while (estimateChars(msgs) > MAX_CONTEXT_CHARS && perMsgLimit > 100) {
-    perMsgLimit = Math.max(100, Math.floor(perMsgLimit * 0.6));
+
+  while (estimateChars(msgs) > ctxMax && perMsgLimit > msgFloor) {
+    perMsgLimit = Math.max(msgFloor, Math.floor(perMsgLimit * 0.6));
     msgs = msgs.map((m, i) => {
       if (i === 0 && m.role === 'system') return m; // never truncate system prompt
       const content = (m.content || '');
@@ -5204,15 +5479,15 @@ function compactHistory(history) {
   }
 
   // Nuclear: if still over absolute ceiling, cap everything hard
-  if (estimateChars(msgs) > ABSOLUTE_CONTEXT_CHARS) {
+  if (estimateChars(msgs) > ctxAbs) {
     msgs = msgs.map((m, i) => {
       if (i === 0 && m.role === 'system') return m;
       const content = (m.content || '');
-      if (content.length <= 100) return m;
-      return { ...m, content: content.substring(0, 100) + '\n[trimmed]' };
+      if (content.length <= msgFloor) return m;
+      return { ...m, content: content.substring(0, msgFloor) + '\n[trimmed]' };
     });
     // If STILL over, drop oldest messages until under ceiling
-    while (msgs.length > MIN_MESSAGES_TO_KEEP + 1 && estimateChars(msgs) > ABSOLUTE_CONTEXT_CHARS) {
+    while (msgs.length > minMsgs + 1 && estimateChars(msgs) > ctxAbs) {
       msgs.splice(1, 1); // remove oldest non-system message
     }
   }
@@ -5258,7 +5533,9 @@ function startSpinner(label) {
 }
 
 // ── Agent Loop ───────────────────────────────────────────────────────────
-async function agentLoop(userMessage, history, silent = false) {
+async function agentLoop(userMessage, history, silent = false, opts = {}) {
+  const _lowToken = opts.lowToken || false;
+  const _maxTurns = _lowToken ? LOW_TOKEN_MAX_TURNS : MAX_TURNS;
   // Reset tool call counter for each new user request
   _toolCallCount = 0;
   // BUG FIX: Reset ALL module-level loop-detection state per-call, not just at REPL start.
@@ -5269,6 +5546,8 @@ async function agentLoop(userMessage, history, silent = false) {
   _recentResponsePrefixes = [];
   _emptyRetries = 0;
   _explorationCalls = [];
+  _recentToolSigs = [];
+  _repeatToolSigCount = 0;  // reset per-call too — prevent cross-call false positives
   _agentActivity = 'Thinking'; _activityDetail = 'Starting'; _activityStart = Date.now();
   _lastActivityTime = Date.now();
 
@@ -5311,7 +5590,7 @@ async function agentLoop(userMessage, history, silent = false) {
       const costStr = _sessionCost > 0 ? '$' + _sessionCost.toFixed(4) : '$0';
       const tokInfo = _sessionTokensIn > 0 ? C.fgSubtle + '│' + C.reset + ' ' + C.tertiary + '↑' + C.reset + C.fgBase + sessIn + 'k' + C.reset + ' ' + C.secondary + '↓' + C.reset + C.fgBase + sessOut + 'k' + C.reset + ' ' + C.fgSubtle + '🔥' + C.reset + C.fgBase + burnRate + 'k/m' + C.reset : '';
       const costInfo = _sessionCost > 0 ? C.fgSubtle + '│' + C.reset + ' ' + C.butter + C.bold + '💰' + C.reset + C.fgBase + costStr + C.reset : C.fgSubtle + '│' + C.reset + ' ' + C.fgSubtle + '💰' + C.reset + C.fgSubtle + '$0' + C.reset;
-      const turnInfo = C.fgSubtle + 'Step' + C.reset + ' ' + C.fgBase + _toolCallCount + C.reset + C.fgSubtle + '/' + C.reset + C.fgMuted + MAX_TURNS + C.reset;
+      const turnInfo = C.fgSubtle + 'Step' + C.reset + ' ' + C.fgBase + _toolCallCount + C.reset + C.fgSubtle + '/' + C.reset + C.fgMuted + _maxTurns + C.reset;
       const pendingStr = _pendingTools.length > 0 ? ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.mustard + '🔍' + C.reset + C.fgBase + _pendingTools.length + C.reset + C.mustard + ' pending' + C.reset + ' ' + C.fgMuted + _pendingTools.map(p => p.name).join(',').substring(0, 40) + C.reset : '';
       process.stdout.write('\r' + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + _agentActivity + C.reset + detail + ' ' + C.fgSubtle + frame + C.reset + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + ' ' + C.reset + '   ');
     }, 500);
@@ -5323,12 +5602,10 @@ async function agentLoop(userMessage, history, silent = false) {
   tuiSetPhase('THINK');
 
   let lastHadToolCalls = false;
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
+  for (let turn = 0; turn < _maxTurns; turn++) {
     // 6-phase: THINK at start of each turn
     tuiSetPhase('THINK');
     // ── Drain notification queue at start of each turn ──
-    // This ensures messages pushed by notify tool or background tasks
-    // are displayed immediately, not just at REPL input time.
     const pendingNotifs = msgDrain(10);
     if (pendingNotifs.length > 0 && !silent) {
       const typeColors = { notify: C.cyan, warn: C.yellow, error: C.red, task: C.green, mcp: C.magenta, system: C.dim };
@@ -5341,14 +5618,14 @@ async function agentLoop(userMessage, history, silent = false) {
     }
 
     // ── TUI dashboard: update step counter ──
-    tuiSetStep(turn + 1, MAX_TURNS);
+    tuiSetStep(turn + 1, _maxTurns);
     const spinner = silent ? null : startSpinner('thinking...');
     let response;
     try {
       // Only compact when the previous turn did NOT end with tool calls
       // (i.e., we're not in the middle of a tool chain)
       if (!lastHadToolCalls) {
-        compactHistory(history);
+        compactHistory(history, _lowToken);
       } else {
         log(`${C.fgMuted}◇ Skipping compact — still in tool chain (turn ${turn})${C.reset}`);
       }
@@ -5368,8 +5645,8 @@ async function agentLoop(userMessage, history, silent = false) {
         console.log(`[DEBUG] sys_prompt_len=${(_sysMsg?.content||'').length} first_user_len=${(_firstUser?.content||'').length} first_user_preview=${JSON.stringify((_firstUser?.content||'').substring(0,200))}`);
       }
       // ── Activity: thinking ──
-      _agentActivity = 'Thinking'; _activityDetail = `Turn ${turn + 1}/${MAX_TURNS}`; _activityStart = Date.now();
-      response = await callOllama(history, TOOLS, { onToken: tokenCallback });
+      _agentActivity = 'Thinking'; _activityDetail = `Turn ${turn + 1}/${_maxTurns}`; _activityStart = Date.now();
+      response = await callOllama(history, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
       _lastActivityTime = Date.now();
       const _rContent = (response?.message?.content || '');
       const _rThinking = (response?.message?.thinking || '');
@@ -5396,7 +5673,7 @@ async function agentLoop(userMessage, history, silent = false) {
         await new Promise(r => setTimeout(r, 2000 * (retry + 1))); // backoff
         const retrySpinner = silent ? null : startSpinner('retrying...');
         try {
-          response = await callOllama(history, TOOLS, { onToken: tokenCallback });
+          response = await callOllama(history, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
           if (retrySpinner) retrySpinner.stop('');
           log(`${C.success}✓ API retry succeeded${C.reset}`);
           lastErr = null;
@@ -5437,7 +5714,7 @@ async function agentLoop(userMessage, history, silent = false) {
           log(`${C.yellow}📦 Compacted to ${estimateChars(history).toLocaleString()} chars (${history.length} messages)${C.reset}`);
           // Retry with compacted history
           try {
-            const retryResp = await callOllama(history, TOOLS, { onToken: tokenCallback });
+            const retryResp = await callOllama(history, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
             if (retryResp.message) {
               response = retryResp;
               msg = response.message;
@@ -5461,7 +5738,7 @@ async function agentLoop(userMessage, history, silent = false) {
       let retried = false;
       for (let retry = 0; retry < 2; retry++) {
         try {
-          const retryResp = await callOllama(history, TOOLS, { onToken: tokenCallback });
+          const retryResp = await callOllama(history, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
           if (retryResp.message) {
             // Success on retry — process normally below
             response = retryResp;
@@ -5546,7 +5823,7 @@ async function agentLoop(userMessage, history, silent = false) {
     if (msg.tool_calls && msg.tool_calls.length > 0 && !hasContent && !hasThinking && _emptyRetries < EMPTY_RETRY_LIMIT) {
       _emptyRetries++;
       log(`${C.mustard}⚠  Model returned tool_calls with no content/thinking (stuck-loop pattern, retry ${_emptyRetries}/${EMPTY_RETRY_LIMIT}). Compacting and retrying...${C.reset}`);
-      compactHistory(history);
+      compactHistory(history, _lowToken);
       // Don't save this empty tool-call turn — just retry with a nudge
       history.push({ role: 'system', content: 'CRITICAL: You MUST include text content (explanation or reasoning) with every response. Do NOT call tools without explaining what you are doing. Respond with substantive text content, then call tools if needed. Never return empty content.' });
       history.push({ role: 'user', content: userMessage });
@@ -5557,7 +5834,7 @@ async function agentLoop(userMessage, history, silent = false) {
         _emptyRetries++;
         log(`${C.mustard}⚠  Model returned empty response (retry ${_emptyRetries}/${EMPTY_RETRY_LIMIT}). Compacting history and retrying...${C.reset}`);
         // Compact history aggressively before retry
-        compactHistory(history);
+        compactHistory(history, _lowToken);
         // Remove the empty assistant entry we just pushed
         if (history.length > 0 && history[history.length - 1].role === 'assistant' && !(history[history.length - 1].content || '').trim()) {
           history.pop();
@@ -5741,8 +6018,14 @@ async function agentLoop(userMessage, history, silent = false) {
     // exploration-only turn). Real non-exploration tool calls keep _noProgressCount
     // at 0, so sequential rounds flow straight through.
     const _progressGate = _noProgressCount > 0;
-    const _toolSemanticBreak = toolSemanticLoop && _progressGate;
-    const _clarifyingBreak = isClarifyingLoop && _progressGate;
+    // Tighten: an EXACT repeated response head across the prefix window is a hard loop,
+    // even if _noProgressCount is 0 (real tool calls can still repeat the same preamble).
+    const _exactRepeatCount = toolNormPrefix && toolNormPrefix.length >= 10
+      ? _recentResponsePrefixes.filter(p => p === toolNormPrefix).length
+      : 0;
+    const _hardRepeat = _exactRepeatCount >= 2;  // same preamble seen 2+ times in window
+    const _toolSemanticBreak = (toolSemanticLoop || _hardRepeat) && _progressGate;
+    const _clarifyingBreak = (isClarifyingLoop || _hardRepeat) && _progressGate;
     // ── Grep/search loop detection in tool-call path ──
     const grepLoopCount = _recentShellCommands.filter(c => c.tool === 'grep' || c.tool === 'find').length;
     const isGrepLoop = grepLoopCount >= GREP_LOOP_LIMIT;
@@ -5859,7 +6142,7 @@ async function agentLoop(userMessage, history, silent = false) {
       if (_tuiToolGrid.length > 0) dashParts.push(renderToolPanel());
       if (_tuiChains.length > 0) dashParts.push(renderChainPanel());
       if (dashParts.length > 0) _writePanel('DASHBOARD', dashParts.join('\n'));
-      log(`${C.magenta}${T.thick.repeat(3)}${C.reset} ${C.magenta}Step ${stepNum}/${MAX_TURNS}${C.reset} ${C.magenta}${T.thick.repeat(3)}${C.reset}`);
+      log(`${C.magenta}${T.thick.repeat(3)}${C.reset} ${C.magenta}Step ${stepNum}/${_maxTurns}${C.reset} ${C.magenta}${T.thick.repeat(3)}${C.reset}`);
     }
     tuiSetPhase('ACT');
     _agentActivity = 'Executing'; _activityDetail = `Step ${turn + 1}`; _lastActivityTime = Date.now();
@@ -5909,6 +6192,42 @@ async function agentLoop(userMessage, history, silent = false) {
       let parsedArgs = fnArgs;
       try { if (typeof fnArgs === 'string') parsedArgs = JSON.parse(fnArgs); } catch(_) {}
       const isWandering = _checkFilesystemWandering(fnName, parsedArgs || {});
+      // ── Generic repeat-tool-call guard (all tools, not just shell/exploration) ──
+      // Catches agents that re-invoke the same tool with the same args while varying
+      // the surrounding text — a loop shape the shell/exploration detectors miss.
+      try {
+        const _toolSig = fnName + ':' + JSON.stringify(parsedArgs || {}).slice(0, 200);
+        if (!_recentToolSigs) _recentToolSigs = [];
+        if (_recentToolSigs.length && _recentToolSigs[_recentToolSigs.length - 1] === _toolSig) {
+          _repeatToolSigCount = (_repeatToolSigCount || 0) + 1;
+        } else {
+          _repeatToolSigCount = 0;
+        }
+        _recentToolSigs.push(_toolSig);
+        if (_recentToolSigs.length > 8) _recentToolSigs.shift();
+        if (_repeatToolSigCount >= TOOL_REPEAT_LIMIT) {
+          log(`\n${C.red}${C.bold}🔁 Tool repeat-loop detected: "${fnName}" called ${_repeatToolSigCount + 1}x with identical args. Breaking loop.${C.reset}`);
+          _repeatToolSigCount = 0;
+          _recentToolSigs = [];
+          _noProgressCount = 0;
+          _explorationCalls = [];
+          _recentResponsePrefixes = [];
+          _stuckCooldown = Math.max(3, _messageQueue.length);
+          const _drainedTool = _messageQueue.length;
+          _messageQueue.length = 0;
+          if (_batch?.timer) clearTimeout(_batch.timer);
+          _batch = null;
+          if (_drainedTool > 0) log(`${C.dim}   (${_drainedTool} queued message(s) cleared)${C.reset}`);
+          history.push({ role: 'system', content: `TOOL REPEAT-LOOP BREAK: You called ${fnName} multiple times with identical arguments. You already have its result. STOP repeating the same tool call. Use the result you already have: edit a file, run a DIFFERENT command/tool, or answer the user. Do NOT call ${fnName} again with the same arguments.` });
+          let _toolRepTrim = 3;
+          while (_toolRepTrim > 0 && history.length > 4) {
+            const _l = history[history.length - 1];
+            if (_l.role === 'assistant' || _l.role === 'tool') { history.pop(); _toolRepTrim--; }
+            else if (_l.role === 'user') { history.pop(); }
+            else break;
+          }
+        }
+      } catch (_) { /* non-blocking */ }
       if (isWandering) {
         const wanderCallCount = _explorationCalls.length;
         log(`\n${C.yellow}${C.bold}⚠️  Filesystem-wandering loop detected: ${wanderCallCount} calls exploring same subtree without convergence. Breaking loop.${C.reset} ${C.bgSubtle}${T.hashFill(15, C.yellow)}${C.reset}`);
@@ -6051,7 +6370,28 @@ async function agentLoop(userMessage, history, silent = false) {
           try {
             await autolearn.consolidateMemories(path.join(process.env.HOME || '/home/ghost', '.hakster'));
           } catch (e) { /* non-blocking */ }
+
+          // ── Memory Engine v2: consolidate + extract entities ──
+          try {
+            const hDir = path.join(process.env.HOME || '/home/ghost', '.hakster');
+            memoryEngine.consolidate(hDir);
+          } catch (e) { /* non-blocking */ }
         }
+
+        // ── Memory Engine v2: record tool result as memory ──
+        try {
+          const toolName = (result && result.name) || fnName || 'unknown';
+          const toolContent = typeof (result && result.content) === 'string'
+            ? result.content.substring(0, 500)
+            : JSON.stringify(result).substring(0, 500);
+          memoryEngine.addMemory({
+            type: 'observation',
+            observation: `[${toolName}] ${toolContent}`,
+            context: { source: 'tool', tool: toolName },
+            tags: [toolName, 'tool-result'],
+            timestamp: new Date().toISOString()
+          }, process.cwd());
+        } catch (e) { /* non-blocking */ }
 
         // ── Auto-learn: REFLECT phase ──
         if (shouldReflect(_noProgressCount, _recentResponsePrefixes)) {
@@ -6978,7 +7318,7 @@ async function repl() {
     (async () => {
       try {
         serverNotify(`Agent started: ${input.substring(0, 80)}`, { type: 'task', priority: 'high' });
-        await agentLoop(input, history);
+        await agentLoop(input, history, false, { lowToken: process.env.HAKSTER_LOW_TOKEN === '1' || process.env.HAKSTER_LOW_TOKEN === 'true' });
         stopSpinner();
         console.log(`\n${C.success}${C.bold}✓ Done${C.reset} ${C.bgSubtle}${T.hashFill(20, C.success)}${C.reset}`);
         _printDoneChecklist();

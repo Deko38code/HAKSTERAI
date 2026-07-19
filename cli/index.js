@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 'use strict';
+// Avoid Node's "NO_COLOR ignored due to FORCE_COLOR" warning leaking into the TUI/alt-screen.
+if (process.env.NO_COLOR && process.env.FORCE_COLOR) { delete process.env.NO_COLOR; }
 
 // ════════════════════════════════════════════════════════════════════════
 // haksterAi CLI — index.js
@@ -19,6 +21,17 @@ const https = require('https');
 const pkg = require('./package.json');
 const { showIntro, C: logoC } = require('./logo');
 
+// ── Grid helpers ───────────────────────────────────────────────────────
+function _avg(arr) {
+  if (!arr.length) return 0;
+  return Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+}
+function _fmtMs(ms) {
+  if (ms < 1000) return ms + 'ms';
+  const s = (ms / 1000).toFixed(1);
+  return s + 's';
+}
+
 // ── New module imports ──────────────────────────────────────────────────
 const providers = require('./providers');
 const tools = require('./tools');
@@ -31,8 +44,10 @@ const C = providers.C;
 // ── Auto-learn module (non-blocking) ─────────────────────────────────────
 const autolearn = require('../server/src/agent/autolearn');
 
-// Show intro on every launch
-showIntro(pkg.version);
+// Show intro on every launch (skip for TUI mode — Ink manages the screen)
+if (!process.argv.includes('ui')) {
+  showIntro(pkg.version);
+}
 
 // ── Auto-learn: eager init on startup (non-blocking, caches for later) ──
 let _startupSteering = '';
@@ -68,6 +83,40 @@ function getConfig() {
   return cfg;
 }
 
+// ── CLI conversation history persistence (survives restart) ─────────────
+const HISTORY_FILE = path.join(CONFIG_DIR, 'cli-history.json');
+const HISTORY_MAX_MESSAGES = 200;
+
+function loadHistory() {
+  try {
+    const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+    if (Array.isArray(data && data.messages)) {
+      return data.messages
+        .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .slice(-HISTORY_MAX_MESSAGES);
+    }
+  } catch {}
+  return [];
+}
+
+function saveHistory(history) {
+  try {
+    if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    const msgs = (history || [])
+      .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+      .slice(-HISTORY_MAX_MESSAGES);
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify({ savedAt: Date.now(), messages: msgs }, null, 2));
+  } catch {}
+}
+
+function clearHistory() {
+  try {
+    if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify({ savedAt: Date.now(), messages: [] }, null, 2));
+  } catch {}
+}
+
+
 // ── Danger password helper ───────────────────────────────────────────────
 function getDangerPassword() {
   // Primary source: environment variable (HAKSTER_DANGER_PASSWORD)
@@ -79,6 +128,11 @@ function getDangerPassword() {
   } catch {}
   return null;
 }
+
+// ── Default AI provider + model (config first, env override, sensible fallback) ──
+const _cfgDefaults = (() => { try { return loadConfig(); } catch { return {}; } })();
+const DEFAULT_AI_PROVIDER = process.env.HAKSTER_PROVIDER || process.env.DEFAULT_PROVIDER || _cfgDefaults.provider || 'ollama';
+const DEFAULT_MODEL = process.env.HAKSTER_MODEL || _cfgDefaults.model || 'glm-5.2:cloud';
 
 // ── HTTP helper (preserved with timeoutMs support) ───────────────────────
 function fetchUrl(url, { method = 'GET', headers = {}, body = null, timeoutMs = 0 } = {}) {
@@ -257,7 +311,13 @@ async function offlineLLMCall(messages, opts = {}) {
 
   // Extract content from OpenAI-compatible response
   if (parsed.choices && parsed.choices[0]) {
-    return parsed.choices[0].message?.content || '';
+    // GLM-5.2 puts reasoning in message.reasoning, content in message.content
+    // If content is empty but reasoning exists, fall back to reasoning (so the
+    // offline loop at least gets text to parse/display instead of hanging).
+    return parsed.choices[0].message?.content
+      || parsed.choices[0].message?.reasoning
+      || parsed.choices[0].message?.thinking
+      || '';
   }
   // Anthropic-style response
   if (parsed.content && parsed.content[0]) {
@@ -350,6 +410,13 @@ async function offlineAgentLoop(history, sysPrompt, opts = {}) {
 
     // Execute tools locally
     console.log(`\n${C.gray}  [offline] executing ${parsed.length} tool(s)...${C.reset}`);
+    // ── Plan grid: render when hak_plan fires in offline mode ────────────
+    for (const t of parsed) {
+      if (t.name === 'plan' && Array.isArray(t.args && t.args.steps)) {
+        const offlinePlanState = { steps: t.args.steps.map(s => ({ text: s, done: false })) };
+        ui.printScriptGrid(offlinePlanState.steps, null);
+      }
+    }
     const { results } = await tools.execTools(parsed, trustCfg, null);
 
     // Feed tool results back into history
@@ -510,12 +577,16 @@ program
   .option('-p, --provider <name>', 'Provider (ollama, openai, anthropic, etc)')
   .option('--no-full-auto', 'Disable full autonomous mode (require confirmations)')
   .option('--low-token', 'Enable low-token mode (aggressive context limits to save credits)')
+  .option('--fresh', 'Start fresh - ignore saved conversation history')
   .action(async (opts) => {
     let serverCfg = {};
     try { serverCfg = getConfig(); } catch { /* no server configured */ }
     const { server, apiKey } = serverCfg;
     const readline = require('readline');
-    const history = [];
+    const history = (opts.fresh ? [] : loadHistory());
+    if (!opts.fresh && history.length > 0) {
+      console.log(`${C.gray}  ~ restored ${history.length} message(s) from last session${C.reset}\n`);
+    }
 
     // ── Auto-init: use cached startup result or fetch fresh ──
     let autoInitFragment = '';
@@ -551,6 +622,16 @@ program
       console.log(`${C.yellow}  ⚠ OFFLINE MODE — using local providers (no server)${C.reset}\n`);
     }
 
+    // ── Low throttle mode: slow down sends to reduce server load/credits ──
+    const LOW_THROTTLE = !!(opts.lowToken || process.env.HAKSTER_LOW_THROTTLE);
+    const THROTTLE_DELAY_MS = parseInt(process.env.HAKSTER_THROTTLE_MS || '3000', 10);
+    let _lastSendTime = 0;
+
+    // ── Show low throttle status ──
+    if (LOW_THROTTLE) {
+      console.log(`${C.yellow}  🐢 LOW THROTTLE MODE — ${THROTTLE_DELAY_MS / 1000}s cooldown between sends (set HAKSTER_THROTTLE_MS to change)${C.reset}\n`);
+    }
+
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -575,6 +656,7 @@ program
       // ── Clear ──
       if (cmd === '/clear') {
         history.length = 0;
+        clearHistory();
         console.log(`${C.gray}history cleared${C.reset}`);
         rl.prompt();
         return true;
@@ -1050,6 +1132,18 @@ program
         return;
       }
 
+      // ── Low throttle: enforce minimum inter-send cooldown ──
+      if (LOW_THROTTLE && !pending) {
+        const now = Date.now();
+        const elapsed = now - _lastSendTime;
+        if (_lastSendTime > 0 && elapsed < THROTTLE_DELAY_MS) {
+          const wait = THROTTLE_DELAY_MS - elapsed;
+          process.stdout.write(`${C.yellow}  ⏳ throttle: waiting ${(wait / 1000).toFixed(1)}s...${C.reset}\r`);
+          await new Promise(r => setTimeout(r, wait));
+          process.stdout.write(' '.repeat(50) + '\r'); // clear throttle line
+        }
+      }
+
       history.push({ role: 'user', content: text });
 
       // ══════════════════════════════════════════════════════════════════
@@ -1066,6 +1160,7 @@ program
           // Store in history
           if (fullResponse) {
             history.push({ role: 'assistant', content: fullResponse });
+            saveHistory(history);
             // ── Render markdown for final display ──
             console.log('\n');
             try { ui.renderMarkdown(fullResponse); } catch { /* plain text already shown */ }
@@ -1094,8 +1189,8 @@ program
       const body = JSON.stringify({
         messages: [{ role: 'system', content: sysPrompt }, ...history],
         stream: true,
-        provider: opts.provider || 'ollama',
-        model: opts.model || null,
+        provider: opts.provider || DEFAULT_AI_PROVIDER,
+        model: opts.model || DEFAULT_MODEL,
         ...(agentCwd ? { cwd: agentCwd } : {}),
         ...(opts.fullAuto ? { approvalMode: 'full-auto' } : {}),
         ...(opts.lowToken ? { lowToken: true } : {}),
@@ -1105,6 +1200,7 @@ program
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
       pending = true;
+      _lastSendTime = Date.now();
       let fullResponse = '';
       let toolCount = 0;
       let turnCount = 0;
@@ -1115,41 +1211,62 @@ program
       // before callbacks so connection errors can clean up safely.
       const GRID_H = 14; // 7 (todo box) + 7 (reasoning grid) — always fixed
       const termRows = process.stdout.rows || 24;
-      const useLiveGrid = process.env.HAKSTER_LIVE_GRID === '1' && process.stdout.isTTY && termRows > GRID_H + 5;
-      const useSpinner = process.env.HAKSTER_SPINNER === '1' && process.stdout.isTTY;
+      const useLiveGrid = process.stdout.isTTY && termRows > GRID_H + 5 && process.env.HAKSTER_LIVE_GRID !== '0';
+      const useSpinner = process.stdout.isTTY && process.env.HAKSTER_SPINNER !== '0';
       let scrollTop = 0;
+      let lastRenderTime = 0;
+      const MIN_RENDER_MS = LOW_THROTTLE ? 200 : 80; // throttle grid re-renders; slower in low-throttle mode
+      const gridTurnCount = { value: 0 };
+      const gridToolTimes = []; // track tool durations for avg display
       const endLiveGrid = () => {
         if (!useLiveGrid) return;
-        process.stdout.write('\x1b[s');
-        process.stdout.write('\x1b[1;1H');
+        process.stdout.write('\x1b[s\x1b[1;1H');
         for (let i = 0; i < GRID_H; i++) process.stdout.write('\x1b[2K\x1b[1B');
-        process.stdout.write('\x1b[r');   // reset scroll region → full screen
-        process.stdout.write('\x1b[u');   // restore cursor
+        process.stdout.write('\x1b[r\x1b[u');
       };
-      const todoState = { status: 'active', phase: 'THINK', totalTools: 0, completedTools: 0, activeTool: 'agent', cwd: agentCwd || '' };
+      const todoState = { status: 'active', phase: 'THINK', totalTools: 0, completedTools: 0, activeTool: 'agent', cwd: agentCwd || '', turnCount: 0, startTime: Date.now() };
+      // ── Plan step grid state (phantom-style checklist) ────────────────
+      const planState = { steps: [] };
       const showTodo = (patch = {}) => {
+        const now = Date.now();
+        if (now - lastRenderTime < MIN_RENDER_MS) return; // debounce rapid updates
+        lastRenderTime = now;
         Object.assign(todoState, patch);
         if (!useLiveGrid) return;
-        if (useLiveGrid) {
-          process.stdout.write('\x1b[s');   // save streaming cursor
-          process.stdout.write('\x1b[1;1H'); // jump to grid region (top)
-          for (let i = 0; i < GRID_H; i++) process.stdout.write('\x1b[2K\x1b[1B'); // clear
-          process.stdout.write('\x1b[1;1H'); // back to top
-        }
+        // Batch all ANSI escapes into a single write call to eliminate flicker
+        const buf = [];
+        buf.push('\x1b[s');   // save streaming cursor
+        buf.push('\x1b[1;1H'); // jump to grid region (top)
+        for (let i = 0; i < GRID_H; i++) buf.push('\x1b[2K\x1b[1B'); // clear
+        buf.push('\x1b[1;1H'); // back to top
+        process.stdout.write(buf.join(''));
         try {
           ui.renderAgentTodoBox(todoState);
           ui.renderAgentReasoningGrid(todoState);
         } catch {}
-        if (useLiveGrid) {
-          process.stdout.write('\x1b[u');   // restore streaming cursor
-        }
+        process.stdout.write('\x1b[u');   // restore streaming cursor
       };
 
       try {
         const res = await fetchUrl(`${server}/api/agent/run`, { method: 'POST', headers, body, timeoutMs: 15000 });
 
+        // ── SSE idle watchdog: fires if server goes silent mid-stream ──
+        const sseWatchdog = makeSseIdleWatchdog(res, () => {
+          if (pending) {
+            console.error(`\n${C.red}  ✗ SSE stream stalled (no data for ${SSE_IDLE_TIMEOUT_MS / 1000}s) — aborting${C.reset}`);
+            pending = false;
+            endLiveGrid();
+            if (!_offlineMode) {
+              console.log(`${C.yellow}  ⚠ Switching to OFFLINE MODE...${C.reset}`);
+              _offlineMode = true;
+            }
+            if (!rl.closed) rl.prompt();
+          }
+        });
+
         // ── Socket error handling ──
         res.socket.on('error', () => {
+          sseWatchdog.stop();
           if (pending) {
             console.error(`\n${C.red}  ✗ Connection lost${C.reset}`);
             pending = false;
@@ -1164,6 +1281,7 @@ program
         });
 
         res.on('close', () => {
+          sseWatchdog.stop();
           if (pending) {
             console.error(`\n${C.red}  ✗ Connection closed by server${C.reset}`);
             pending = false;
@@ -1200,6 +1318,7 @@ program
         };
 
         res.on('data', (chunk) => {
+          sseWatchdog.arm(); // reset idle timer on every incoming chunk
           buffer += chunk.toString();
           const lines = buffer.split('\n');
           buffer = lines.pop();
@@ -1245,17 +1364,44 @@ program
                 const tname = evt.tool_name || 'unknown';
                 const args = evt.tool_args || {};
                 const argStr = Object.keys(args).length ? ' ' + JSON.stringify(args).slice(0, 100) : '';
+                todoState._toolStart = Date.now();
+                todoState._lastToolName = tname;
                 showTodo({ totalTools: toolCount, activeTool: tname, status: 'active' });
                 startSpinner('ACT', `running ${tname}`);
                 process.stdout.write(`\n${C.gray}  ↳ [tool ${toolCount}] ${C.cyan}${tname}${C.reset}${C.gray}${argStr}${C.reset}`);
+                // ── Plan grid: parse steps when plan(action=write) fires ──────
+                if (tname === 'plan' && args.action === 'write' && args.content) {
+                  const rawSteps = String(args.content).split('\n')
+                    .map(l => l.replace(/^\s*(\d+[.)]\s*|-\s*|\*\s*)/, '').trim())
+                    .filter(Boolean);
+                  if (rawSteps.length > 0) {
+                    planState.steps = rawSteps.map(s => ({ text: s, done: false }));
+                    process.stdout.write('\n');
+                    ui.printScriptGrid(planState.steps, null);
+                  }
+                }
               }
               else if (evt.type === 'tool_call_result') {
                 const tname = evt.tool_name || '';
                 const result = (evt.tool_result || '').toString();
                 const preview = result.slice(0, 150).replace(/\n/g, ' ');
-                showTodo({ completedTools: Math.max(todoState.completedTools, toolCount), activeTool: tname || todoState.activeTool });
+                const dur = todoState._toolStart ? Date.now() - todoState._toolStart : 0;
+                if (dur > 0) gridToolTimes.push(dur);
+                if (gridToolTimes.length > 20) gridToolTimes.shift();
+                todoState._toolStart = null;
+                showTodo({ completedTools: Math.max(todoState.completedTools, toolCount), activeTool: tname || todoState.activeTool, avgToolTime: _avg(gridToolTimes) });
                 startSpinner('OBSERVE', `checking ${tname || 'tool'} result`);
                 process.stdout.write(`\n${C.gray}  ↳ ${C.green}✓${C.reset} ${C.gray}${preview}${result.length > 150 ? '...' : ''}${C.reset}\n`);
+                // ── Plan grid: show plan as read back from server ──────────────
+                if (tname === 'plan' && planState.steps.length === 0 && result.includes('\n')) {
+                  const rawSteps = result.split('\n')
+                    .map(l => l.replace(/^\s*(\d+[.)]\s*|-\s*|\*\s*)/, '').trim())
+                    .filter(l => l && !l.startsWith('#') && !l.startsWith('Updated'));
+                  if (rawSteps.length > 1) {
+                    planState.steps = rawSteps.map(s => ({ text: s, done: false }));
+                    ui.printScriptGrid(planState.steps, null);
+                  }
+                }
               }
               else if (evt.type === 'tool_use' || evt.type === 'tool_call') {
                 stopSpinner();
@@ -1287,6 +1433,8 @@ program
               else if (evt.type === 'turn_end') {
                 stopSpinner();
                 turnCount++;
+                gridTurnCount.value = turnCount;
+                todoState.turnCount = turnCount;
                 if (fullResponse) process.stdout.write('\n');
               }
               else if (evt.type === 'compact') {
@@ -1311,8 +1459,23 @@ program
               else if (evt.type === 'needs_confirmation') {
                 stopSpinner();
                 showTodo({ status: 'blocked', activeTool: evt.tool_name || 'approval', message: evt.reason || 'Approval needed' });
-                process.stdout.write(`\n${C.yellow}  ? Approval needed: ${evt.reason || evt.command || 'command/file change'}${C.reset}\n`);
-                if (evt.command) process.stdout.write(`${C.gray}  $ ${evt.command}${C.reset}\n`);
+                const cmd = evt.command || 'command/file change';
+                const reason = evt.reason || cmd;
+                const isSudoCmd = /^\s*sudo\b/i.test(String(cmd));
+                // Prominent system prompt for dangerous operations
+                if (isSudoCmd) {
+                  process.stdout.write(`\n${C.red}${C.bold}╔══════════════════════════════════════════════════════════╗${C.reset}\n`);
+                  process.stdout.write(`${C.red}${C.bold}║  🔑  SUDO PASSWORD REQUIRED — ELEVATED EXECUTION           ║${C.reset}\n`);
+                  process.stdout.write(`${C.red}${C.bold}╚══════════════════════════════════════════════════════════╝${C.reset}\n`);
+                  process.stdout.write(`${C.yellow}  Reason: ${reason}${C.reset}\n`);
+                  process.stdout.write(`${C.gray}  Command: $ ${cmd}${C.reset}\n`);
+                } else {
+                  process.stdout.write(`\n${C.yellow}${C.bold}╔══════════════════════════════════════════════════════════╗${C.reset}\n`);
+                  process.stdout.write(`${C.yellow}${C.bold}║  ⚠️  DANGEROUS COMMAND DETECTED — AGENT NEEDS APPROVAL   ║${C.reset}\n`);
+                  process.stdout.write(`${C.yellow}${C.bold}╚══════════════════════════════════════════════════════════╝${C.reset}\n`);
+                  process.stdout.write(`${C.yellow}  Reason: ${reason}${C.reset}\n`);
+                  process.stdout.write(`${C.gray}  Command: $ ${cmd}${C.reset}\n`);
+                }
                 // Determine if a danger password is configured.
                 const dangerPwd = getDangerPassword();
                 if (dangerPwd) {
@@ -1324,7 +1487,7 @@ program
                     if (pwdRl.stdoutMuted) pwdRl.output.write('*');
                     else pwdRl.output.write(string);
                   };
-                  // Write prompt visibly BEFORE muting so user sees "Enter to approve:".
+                  // Write prompt visibly BEFORE muting so user sees the prompt text.
                   pwdRl.stdoutMuted = false;
                   process.stdout.write(`${C.bgError}${C.butter}${C.bold} password ${C.reset} Enter to approve: `);
                   pwdRl.stdoutMuted = true;
@@ -1353,12 +1516,26 @@ program
                   // Pause the main readline so its 'line' handler doesn't grab the y/N answer as a new message.
                   rl.pause();
                   const confRl = readline.createInterface({ input: process.stdin, output: process.stdout });
-                  confRl.question(`${C.bgError}${C.butter}${C.bold} y/N ${C.reset} Approve this? `, async (ans) => {
+                  const promptText = isSudoCmd
+                    ? `${C.bgError}${C.butter}${C.bold} 🔑 sudo ${C.reset} Enter your system password to approve, or Ctrl+C to deny: `
+                    : `${C.bgError}${C.butter}${C.bold} y/N ${C.reset} Approve this? `;
+                  confRl.question(promptText, async (ans) => {
                     confRl.close();
-                    const approved = ans.trim().toLowerCase() === 'y';
-                    process.stdout.write(approved
-                      ? `${C.green}  ✓ approved${C.reset}\n`
-                      : `${C.red}  ✗ denied${C.reset}\n`);
+                    let approved = false;
+                    if (isSudoCmd) {
+                      // In sudo mode without a configured dangerPassword,
+                      // any non-empty input is treated as approval.
+                      // You can set HAKSTER_DANGER_PASSWORD to require an exact match.
+                      approved = ans.trim().length > 0;
+                      process.stdout.write(approved
+                        ? `${C.green}  ✓ sudo approved${C.reset}\n`
+                        : `${C.red}  ✗ denied${C.reset}\n`);
+                    } else {
+                      approved = ans.trim().toLowerCase() === 'y';
+                      process.stdout.write(approved
+                        ? `${C.green}  ✓ approved${C.reset}\n`
+                        : `${C.red}  ✗ denied${C.reset}\n`);
+                    }
                     try {
                       await fetchJson(`${server}/api/agent/confirm`, {
                         method: 'POST',
@@ -1402,12 +1579,13 @@ program
               }
               else if (evt.type === 'done') {
                 stopSpinner();
-                showTodo({ status: 'done', phase: 'COMPLETE', activeTool: 'complete', completedTools: Math.max(todoState.completedTools, toolCount), totalTools: Math.max(todoState.totalTools, toolCount) });
+                const elapsed = Date.now() - (todoState.startTime || Date.now());
+                showTodo({ status: 'done', phase: 'COMPLETE', activeTool: 'complete', completedTools: Math.max(todoState.completedTools, toolCount), totalTools: Math.max(todoState.totalTools, toolCount), turnCount: turnCount, avgToolTime: _avg(gridToolTimes), sessionDur: elapsed });
                 if (fullResponse) process.stdout.write('\n');
                 const model = evt.model || '';
                 const prov = evt.provider || '';
                 if (toolCount > 0 || turnCount > 0) {
-                  process.stdout.write(`${C.green}  ── done${C.reset} ${C.gray}(${toolCount} tools, ${turnCount} turns${model ? ', ' + model : ''})${C.reset}\n`);
+                  process.stdout.write(`${C.green}  ── done${C.reset} ${C.gray}(${toolCount} tools, ${turnCount} turns, ${_fmtMs(elapsed)}${model ? ', ' + model : ''})${C.reset}\n`);
                 }
               }
               else if (evt.type === 'aborted') {
@@ -1420,8 +1598,10 @@ program
 
         res.on('end', () => {
           stopSpinner();
+          sseWatchdog.stop();
           if (fullResponse) {
             history.push({ role: 'assistant', content: fullResponse });
+            saveHistory(history);
             // ── Render markdown for final display (after streaming) ──
             // Only do additional markdown rendering if the response wasn't streamed inline
             // (streaming already showed it). We skip re-rendering to avoid duplication.
@@ -1442,6 +1622,7 @@ program
 
         res.on('error', (err) => {
           stopSpinner();
+          sseWatchdog.stop();
           console.error(`${C.red}  ✗ Stream error: ${err.message}${C.reset}`);
           // ── Fall back to offline mode on stream error ──
           if (!_offlineMode) {
@@ -1467,6 +1648,7 @@ program
             const fullResponse = await offlineAgentLoop(userHistory, fullSysPrompt, { maxRounds: 30 });
             if (fullResponse) {
               history.push({ role: 'assistant', content: fullResponse });
+              saveHistory(history);
               console.log('\n');
               try { ui.renderMarkdown(fullResponse); } catch {}
               try { mem.showTokenBar(history); } catch {}
@@ -1709,8 +1891,8 @@ program
         { role: 'user', content: prompt },
       ],
       stream: true,
-      provider: opts.provider || 'ollama',
-      model: opts.model || null,
+      provider: opts.provider || DEFAULT_AI_PROVIDER,
+      model: opts.model || DEFAULT_MODEL,
       ...(agentCwd ? { cwd: agentCwd } : {}),
       ...(opts.fullAuto ? { approvalMode: 'full-auto' } : {}),
       ...(opts.lowToken ? { lowToken: true } : {}),
@@ -1729,7 +1911,14 @@ program
       let spinner = null;
       const stopSpinner = () => { if (spinner) { spinner.stop(); spinner = null; } };
 
+      // ── SSE idle watchdog for one-shot agent ──
+      const agentWatchdog = makeSseIdleWatchdog(res, () => {
+        console.error(`\n${C.red}✗ SSE stream stalled (no data for ${SSE_IDLE_TIMEOUT_MS / 1000}s) — aborting${C.reset}`);
+        stopSpinner();
+      });
+
       res.on('data', (chunk) => {
+        agentWatchdog.arm(); // reset idle timer on every incoming chunk
         buffer += chunk.toString();
         const lines = buffer.split('\n');
         buffer = lines.pop();
@@ -1782,10 +1971,12 @@ program
       });
 
       res.on('end', () => {
+        agentWatchdog.stop();
         console.log(`\n${C.green}── done (${toolCount} tool calls) ──${C.reset}`);
       });
 
       res.on('error', (err) => {
+        agentWatchdog.stop();
         console.error(`${C.red}Stream error: ${err.message}${C.reset}`);
         process.exit(1);
       });
@@ -1888,7 +2079,7 @@ program
             const sseBody = JSON.stringify({
               messages: [{ role: 'system', content: agent.prompt }, { role: 'user', content: accumulatedContext }],
               stream: true,
-              provider: 'ollama',
+              provider: DEFAULT_AI_PROVIDER,
               model: agent.model,
               ...(inferAgentCwd(accumulatedContext) ? { cwd: inferAgentCwd(accumulatedContext) } : {}),
             });
@@ -1963,6 +2154,197 @@ program
     } else {
       console.log(`\n${C.gray}Auto USB sync disabled${C.reset}`);
     }
+  });
+
+// ── TUI mode — Ink/React interface ───────────────────────────────────────
+program
+  .command('ui')
+  .description('Launch haksterAI TUI (Ink/React)')
+  .action(() => {
+    // Ink requires a real TTY for raw mode key input
+    if (!process.stdin.isTTY) {
+      console.log(`${C.red}✗ TUI requires a real terminal (TTY).${C.reset}`);
+      console.log(`${C.dim}Run this command directly in your terminal, not through a pipe or non-interactive shell.${C.reset}`);
+      console.log(`${C.dim}Try: ${C.green}node cli/index.js ui${C.reset}`);
+      process.exit(1);
+    }
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    // Enter alternate screen buffer so TUI doesn't clobber scrollback
+    process.stdout.write('\x1b[?1049h\x1b[?25l');
+
+    // ── Terminal restoration: ensure the screen never “disappears” on exit/crash ──
+    let _restored = false;
+    function restoreTerminal() {
+      if (_restored) return;
+      _restored = true;
+      try { process.stdin.setRawMode(false); } catch {}
+      try { process.stdin.pause(); } catch {}
+      // show cursor + leave alternate screen so scrollback is restored
+      process.stdout.write('\x1b[?25h\x1b[?1049l');
+    }
+    process.on('exit', restoreTerminal);
+    process.on('SIGINT',  () => { restoreTerminal(); process.exit(0); });
+    process.on('SIGTERM', () => { restoreTerminal(); process.exit(0); });
+    process.on('uncaughtException', (err) => {
+      restoreTerminal();
+      console.error('\n' + (err && err.stack ? err.stack : err));
+      process.exit(1);
+    });
+    process.on('unhandledRejection', (err) => {
+      restoreTerminal();
+      console.error('\nUnhandled rejection:', err);
+      process.exit(1);
+    });
+
+    import('./ui.mjs').then(mod => {
+      try { mod.start(); }
+      catch (err) { restoreTerminal(); console.error(err); process.exit(1); }
+    }).catch(err => { restoreTerminal(); console.error(err); process.exit(1); });
+  });
+
+// ── sessions — grid box view of server sessions ──────────────────────────
+program
+  .command('sessions')
+  .description('List all server sessions in a grid box layout')
+  .option('-l, --limit <n>', 'Max sessions to display', '20')
+  .action(async (opts) => {
+    const { server } = getConfig();
+    try {
+      const data = await fetchJson(`${server}/api/sessions`);
+      let sessions = data.sessions || [];
+      const limit = parseInt(opts.limit, 10) || 20;
+      sessions = sessions.slice(0, limit);
+
+      if (sessions.length === 0) {
+        console.log(`${C.dim}No sessions found.${C.reset}`);
+        return;
+      }
+
+      // Box width and layout
+      const COLS = 2;
+      const BOX_W = 44;
+      const HALF_W = Math.floor((BOX_W - 3) / 2); // for two boxes side by side
+
+      function pad(str, len) {
+        str = String(str || '');
+        if (str.length > len) return str.slice(0, len - 1) + '…';
+        return str + ' '.repeat(len - str.length);
+      }
+
+      function boxTop(label) {
+        return `${C.cyan}┌─${C.reset}${C.bold}${label}${C.reset}${C.cyan}${'─'.repeat(Math.max(1, HALF_W - label.length - 1))}┐${C.reset}`;
+      }
+      function boxMid() {
+        return `${C.cyan}│${' '.repeat(HALF_W)}│${C.reset}`;
+      }
+      function boxRow(label, val) {
+        const line = `${C.dim}${pad(label, 8)}${C.reset}${pad(val, HALF_W - 8)}`;
+        return `${C.cyan}│${C.reset}${line}${C.cyan}│${C.reset}`;
+      }
+      function boxBot() {
+        return `${C.cyan}└${'─'.repeat(HALF_W)}┘${C.reset}`;
+      }
+
+      console.log(`\n${C.bold}${C.magenta}  📦 haksterAi Sessions${C.reset} ${C.dim}— ${sessions.length} session(s)${C.reset}\n`);
+
+      for (let i = 0; i < sessions.length; i += COLS) {
+        const row = sessions.slice(i, i + COLS);
+        const lines = [];
+
+        // Top borders
+        lines.push(row.map(s => boxTop(s.id.slice(0, 8))).join(' '));
+        // ID row
+        lines.push(row.map(s => boxRow('ID', s.id.slice(0, HALF_W - 9))).join(' '));
+        // Provider
+        lines.push(row.map(s => boxRow('PROV', s.provider || 'ollama')).join(' '));
+        // Model
+        lines.push(row.map(s => boxRow('MODEL', (s.model || '').slice(0, HALF_W - 9))).join(' '));
+        // Title
+        lines.push(row.map(s => boxRow('TITLE', (s.title || '(untitled)').slice(0, HALF_W - 9))).join(' '));
+        // Updated
+        const updated = (s) => {
+          const ts = s.updated_at || s.created_at;
+          if (!ts) return '—';
+          const d = new Date(typeof ts === 'number' ? ts : Date.parse(ts));
+          return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        };
+        lines.push(row.map(s => boxRow('UPD', updated(s))).join(' '));
+        // Msgs count if available
+        lines.push(row.map(s => boxRow('MSGS', String(s.message_count || (s.messages ? s.messages.length : '—')))).join(' '));
+        // Bottom borders
+        lines.push(row.map(s => boxBot()).join(' '));
+
+        for (const line of lines) console.log('  ' + line);
+        console.log();
+      }
+
+      console.log(`${C.dim}  Use ${C.reset}${C.green}hakster resume <id>${C.reset}${C.dim} to continue a session${C.reset}`);
+    } catch (err) {
+      console.error(`Failed to fetch sessions: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+// ── resume — continue a saved session ──────────────────────────────────
+program
+  .command('resume <id>')
+  .description('Resume a saved session by ID — loads its messages and opens the chat REPL')
+  .option('-m, --model <model>', 'Model to use')
+  .option('-p, --provider <name>', 'Provider')
+  .action(async (id, opts) => {
+    const { server } = getConfig();
+    try {
+      const sess = await fetchJson(`${server}/api/sessions/${id}`);
+      if (!sess || sess.error) {
+        console.error(`Session not found: ${id}`);
+        process.exit(1);
+      }
+      const msgs = (sess.messages || [])
+        .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .map(m => ({ role: m.role, content: m.content }));
+      saveHistory(msgs);
+      console.log(`${C.green}✓${C.reset} Resumed session ${C.bold}${id.slice(0, 8)}${C.reset} — ${msgs.length} message(s) loaded into history`);
+      if (sess.provider) console.log(`  Provider: ${sess.provider}`);
+      if (sess.model) console.log(`  Model:    ${sess.model}`);
+      // Re-launch the chat REPL; it auto-loads the history we just saved.
+      const { spawn } = require('child_process');
+      const args = [__filename, 'chat'];
+      if (opts.model) args.push('--model', opts.model);
+      if (opts.provider) args.push('--provider', opts.provider);
+      const child = spawn(process.execPath, args, { stdio: 'inherit' });
+      child.on('exit', (code) => process.exit(code || 0));
+    } catch (err) {
+      console.error(`Failed to resume: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+// ── cockpit — open the web cockpit dashboard in a browser ───────────────────
+program
+  .command('cockpit')
+  .description('Open the haksterAi web cockpit dashboard in your default browser')
+  .option('--host <url>', 'Server host', null)
+  .action(async (opts) => {
+    const { exec } = require('child_process');
+    const { server } = getConfig();
+    const host = (opts.host || server || 'http://localhost:3579').replace(/\/$/, '');
+    const url = `${host}/cockpit`;
+    console.log(`${C.green}●${C.reset} Opening cockpit at ${C.cyan}${url}${C.reset}`);
+
+    const platform = process.platform;
+    let cmd;
+    if (platform === 'darwin') cmd = `open ${JSON.stringify(url)}`;
+    else if (platform === 'win32') cmd = `start "" ${JSON.stringify(url)}`;
+    else cmd = `xdg-open ${JSON.stringify(url)}`;
+
+    exec(cmd, (err) => {
+      if (err) {
+        console.log(`${C.yellow}⚠ Could not auto-open browser.${C.reset}`);
+        console.log(`${C.dim}Open manually:${C.reset} ${C.cyan}${url}${C.reset}`);
+        process.exit(0);
+      }
+    });
   });
 
 // ── no args? launch straight into chat ──────────────────────────────────

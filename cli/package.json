@@ -8,11 +8,26 @@
     "haksterai": "./index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "build:ui": "cd ui && node build.mjs"
   },
   "dependencies": {
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "ink": "^7.1.1",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.7"
   },
-  "keywords": ["hakster", "cli", "ai", "agent", "pentest", "mcp", "terminal"],
-  "license": "MIT"
+  "keywords": [
+    "hakster",
+    "cli",
+    "ai",
+    "agent",
+    "pentest",
+    "mcp",
+    "terminal"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
 }

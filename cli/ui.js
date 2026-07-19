@@ -109,6 +109,16 @@ function thinkingAnimation(modelHint, phase) {
     CONSOLIDATE: '\x1b[38;5;220m',  // gold
     DEFAULT:     '\x1b[38;5;75m',
   };
+  // Phase-specific emojis for richer display
+  const PHASE_EMOJI = {
+    THINK:       '🧠',
+    PLAN:        '📋',
+    ACT:         '⚡',
+    OBSERVE:     '👁',
+    REFLECT:     '🪞',
+    CONSOLIDATE: '📦',
+    DEFAULT:     '◇',
+  };
 
   let frame = 0, shimF = 0, tick = 0;
   let phrases = (phase && PHRASES[phase]) || PHRASES.DEFAULT;
@@ -137,6 +147,7 @@ function thinkingAnimation(modelHint, phase) {
     const spinner = FRAMES[frame % FRAMES.length];
     const gradC   = `\x1b[38;5;${GRAD[frame % GRAD.length]}m`;
     const pcol    = PHASE_COL[currentPhase] || PHASE_COL.DEFAULT;
+    const emoji   = PHASE_EMOJI[currentPhase] || '◇';
     const phrase  = currentActivity || phrases[phraseIdx];
     const time    = fmtElapsed(elapsed);
     const mtag    = currentModel ? `\x1b[38;5;240m${currentModel} ` : '';
@@ -146,7 +157,7 @@ function thinkingAnimation(modelHint, phase) {
     const s2 = SHIMMER[(shimF + 2) % SHIMMER.length];
     const shimmer = `${s0}${s1}${s2}`;
 
-    const line = `  ${gradC}⟦${col}\x1b[1m${spinner}\x1b[0m${gradC}⟧\x1b[0m ${pcol}\x1b[1m${currentPhase}\x1b[0m \x1b[38;5;240mice\x1b[0m ${mtag}${col}${phrase}\x1b[0m  ${gradC}${shimmer}\x1b[0m  \x1b[38;5;240m${time}\x1b[0m`;
+    const line = `  ${gradC}⟦${col}\x1b[1m${spinner}\x1b[0m${gradC}⟧\x1b[0m ${pcol}${emoji} ${C.bold}${currentPhase}${C.reset} \x1b[38;5;240mice\x1b[0m ${mtag}${col}${phrase}\x1b[0m  ${gradC}${shimmer}\x1b[0m  \x1b[38;5;240m${time}\x1b[0m`;
 
     const visLen = line.replace(/\x1b\[[0-9;]*m/g, '').length;
     const clear  = '\r' + ' '.repeat(Math.max(lastLen, visLen) + 2) + '\r';
@@ -179,8 +190,8 @@ function thinkingAnimation(modelHint, phase) {
 }
 
 // ── Reasoning window renderer ────────────────────────────────────────────
-function renderReasoningWindow({ title, intro, cards, footer }) {
-  const border = '\x1b[38;5;99m';  // purple — matches banner
+function renderReasoningWindow({ title, intro, cards, footer, color, meta }) {
+  const border = color || '\x1b[38;5;99m';  // purple default, overridable
   const accent = '\x1b[38;5;118m';  // neon green
   const dim = '\x1b[2m\x1b[38;5;240m';
   const width = 66;
@@ -190,13 +201,18 @@ function renderReasoningWindow({ title, intro, cards, footer }) {
   };
 
   console.log(border + '\n  ╔══ 💭 ' + title + ' ' + '═'.repeat(Math.max(0, width - title.length - 4)) + C.reset);
+  if (meta) {
+    console.log(border + '  ║ ' + dim + box(meta) + C.reset);
+    console.log(border + '  ╟' + '─'.repeat(width + 1) + C.reset);
+  }
   if (intro) {
     console.log(border + '  ║ ' + dim + box(intro) + C.reset);
     console.log(border + '  ╟' + '─'.repeat(width + 1) + C.reset);
   }
   cards.forEach((card, idx) => {
     const label = card.label ? `[${card.label}]` : `[${idx + 1}]`;
-    console.log(border + '  ║ ' + accent + C.bold + label.padEnd(8) + C.reset + ' ' + box(card.text) + C.reset);
+    const cardColor = card.color || accent;
+    console.log(border + '  ║ ' + cardColor + C.bold + label.padEnd(8) + C.reset + ' ' + box(card.text) + C.reset);
     if (card.subtext) {
       console.log(border + '  ║   ' + dim + box(card.subtext) + C.reset);
     }
@@ -210,17 +226,36 @@ function renderReasoningWindow({ title, intro, cards, footer }) {
 
 function showThinkingGrid(thinking) {
   if (!thinking || !thinking.trim()) return;
-  const lines = thinking.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 8);
+  const lines = thinking.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 12);
+  // Classify each line by type for color coding
+  const classified = lines.map(line => {
+    let type = 'thought';
+    let color = '\x1b[38;5;75m'; // blue default
+    if (/^(?:checking|scanning|looking|reading|inspecting|examining)/i.test(line)) { type = 'inspect'; color = '\x1b[38;5;81m'; } // cyan
+    else if (/^(?:found|detected|identified|located|discovered)/i.test(line)) { type = 'find'; color = '\x1b[38;5;118m'; } // green
+    else if (/^(?:error|fail|issue|problem|bug|crash|exception)/i.test(line)) { type = 'error'; color = '\x1b[38;5;203m'; } // red
+    else if (/^(?:plan|step|approach|strategy|decide|will|should)/i.test(line)) { type = 'plan'; color = '\x1b[38;5;141m'; } // purple
+    else if (/^(?:conclusion|therefore|so |thus|result|means)/i.test(line)) { type = 'conclusion'; color = '\x1b[38;5;220m'; } // gold
+    else if (/^(?:root cause|the issue is|the problem is|hypothesis)/i.test(line)) { type = 'diagnosis'; color = '\x1b[38;5;214m'; } // orange
+    return { text: line, type, color };
+  });
   renderReasoningWindow({
     title: 'THINKING',
-    intro: 'Live reasoning cards',
-    cards: lines.map((line, i) => ({ label: String(i + 1), text: line })),
+    meta: `${classified.length} reasoning step${classified.length !== 1 ? 's' : ''} · live`,
+    cards: classified.map((c, i) => ({
+      label: String(i + 1),
+      text: c.text,
+      color: c.color,
+      subtext: `[${c.type}]`,
+    })),
+    footer: `Scrollable window — max ${lines.length} steps shown`,
+    color: '\x1b[38;5;75m', // blue border for thinking
   });
 }
 
 function showReasoningGrid(text) {
   if (!text || !text.trim()) return;
-  const raw = text.length > 2000 ? text.slice(0, 2000) : text;
+  const raw = text.length > 3000 ? text.slice(0, 3000) : text;
   const stepPat = /^(\s*(?:\d+[.\)]|step\s*\d+:?|-|\*|→|•)\s*)/i;
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
   const cards = [];
@@ -228,14 +263,25 @@ function showReasoningGrid(text) {
     const isStep = stepPat.test(line);
     const content = line.replace(stepPat, '').trim();
     if (!content) continue;
-    cards.push({ label: isStep ? String(cards.length + 1) : 'note', text: content });
-    if (cards.length >= 8) break;
+    // Classify for color
+    let type = 'note';
+    let color = '\x1b[38;5;244m'; // gray default
+    if (/^(?:checking|scanning|looking|reading|inspecting)/i.test(content)) { type = 'inspect'; color = '\x1b[38;5;81m'; }
+    else if (/^(?:found|detected|identified|located)/i.test(content)) { type = 'find'; color = '\x1b[38;5;118m'; }
+    else if (/^(?:error|fail|issue|problem)/i.test(content)) { type = 'error'; color = '\x1b[38;5;203m'; }
+    else if (/^(?:plan|approach|strategy|decide|will)/i.test(content)) { type = 'plan'; color = '\x1b[38;5;141m'; }
+    else if (/^(?:conclusion|therefore|so |thus|result)/i.test(content)) { type = 'conclusion'; color = '\x1b[38;5;220m'; }
+    else if (/^(?:root cause|the issue is|hypothesis)/i.test(content)) { type = 'diagnosis'; color = '\x1b[38;5;214m'; }
+    else if (isStep) { type = 'step'; color = '\x1b[38;5;75m'; }
+    cards.push({ label: isStep ? String(cards.length + 1) : '·', text: content, color, subtext: `[${type}]` });
+    if (cards.length >= 12) break;
   }
   renderReasoningWindow({
     title: 'REASONING',
-    intro: 'Single live window with step cards',
+    meta: `${cards.length} insight${cards.length !== 1 ? 's' : ''} extracted`,
     cards,
-    footer: `Showing ${cards.length} card${cards.length === 1 ? '' : 's'}`,
+    footer: `Auto-classified by reasoning pattern · ${raw.length} chars analyzed`,
+    color: '\x1b[38;5;141m', // purple border for reasoning
   });
 }
 
@@ -667,6 +713,55 @@ function renderAgentReasoningGrid(state = {}) {
   console.log(`${ac}  ╚${'═'.repeat(width + 2)}╝${R}`);
 }
 
+// ── Script/Plan step grid — phantom-style fixed checklist ─────────────────
+// Shows a plan's steps as a checklist with progress bar.
+// steps: [{ text, done }]
+// activeIdx: index of currently executing step (null = none active)
+function printScriptGrid(steps, activeIdx) {
+  const RST  = C.reset;
+  const BDR  = '\x1b[38;5;63m';   // soft indigo border
+
+  const C_DONE    = '\x1b[38;5;46m';   // green
+  const C_ACTV    = '\x1b[38;5;214m';  // amber
+  const C_PEND    = '\x1b[38;5;240m';  // dim gray
+  const C_DONE_BG = '\x1b[48;5;22m\x1b[38;5;46m\x1b[1m';   // dark green bg
+  const C_ACTV_BG = '\x1b[48;5;130m\x1b[38;5;214m\x1b[1m'; // dark amber bg
+  const C_PEND_BG = '\x1b[48;5;234m\x1b[38;5;240m';         // dark gray bg
+
+  if (!Array.isArray(steps) || steps.length === 0) return;
+
+  const done  = steps.filter(s => s.done).length;
+  const total = steps.length;
+  const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  // Progress bar
+  const BAR_W  = 36;
+  const filled = Math.round((done / Math.max(total, 1)) * BAR_W);
+  const barFill  = '\x1b[38;5;46m' + '━'.repeat(filled);
+  const barEmpty = '\x1b[38;5;238m' + '╌'.repeat(BAR_W - filled);
+  const pctColor = pct === 100 ? '\x1b[38;5;46m\x1b[1m' : '\x1b[38;5;214m\x1b[1m';
+  const header   = `${BDR}  ┌─ ⚡ plan  ${pctColor}${done}/${total} ${pct}%  ${BDR}${barFill}${barEmpty}${BDR} ─┐${RST}`;
+
+  console.log('');
+  console.log(header);
+
+  steps.forEach((s, i) => {
+    const isDone   = !!s.done;
+    const isActive = !isDone && i === activeIdx;
+    const icon  = isDone ? `${C_DONE}[x]` : isActive ? `${C_ACTV}[>]` : `${C_PEND}[ ]`;
+    const color = isDone ? C_DONE : isActive ? C_ACTV : C_PEND;
+    const num   = String(i + 1).padStart(2, ' ');
+    const label = String(s.text || '').slice(0, 70);
+    const stateLabel = isDone ? 'done' : isActive ? 'active' : 'todo';
+    console.log(`${BDR}  │ ${icon} ${RST}${color}${num}. ${label}${RST} ${C_PEND}${stateLabel}${RST}`);
+  });
+
+  const pending = Math.max(0, total - done);
+  console.log(`${BDR}  ├${'─'.repeat(60)}┤${RST}`);
+  console.log(`${BDR}  │ ${C_DONE}[x] ${done} complete${RST}  ${C_ACTV}[>] ${activeIdx == null ? 0 : 1} active${RST}  ${C_PEND}[ ] ${pending} todo${RST}`);
+  console.log(`${BDR}  └${'─'.repeat(60)}┘${RST}\n`);
+}
+
 // ── Agent Team — Hakster-branded specialist roster ────────────────────────
 const AGENT_TEAM = {
   'patch':    { emoji: '🔧', name: 'Patch Fixer',       callerId: 'HK-016-PATCH',    model: 'qwen/qwen3-235b-a22b:free', prompt: 'You are PATCH FIXER — a surgical bug-fix specialist. Given a bug report or error, you: 1) Identify the EXACT root cause (file, line, function), 2) Write a minimal precise patch (no refactoring), 3) Show before→after diff, 4) Verify the fix covers edge cases. Rules: Fix it dont remove. Minimal changes. No scope creep. After fix: "✅ PATCH (HK-016)"' },
@@ -995,8 +1090,21 @@ Do NOT say "done" until verify confirms the new text is present.
 `;
 
   // ── Inject persistent memory into system prompt ──
+  // CLI file-based memory (legacy .hakster-memory.json)
   const memText = getMemoryText();
   const memBlock = memText ? `\n\n🧠 MEMORY (cross-session facts — use these, don't re-ask):\n${memText}` : '';
+
+  // SQLite-backed memory from server (save_memory / recall_memory store)
+  // This is where real conversation memories live — the file-based system
+  // above is legacy and limited. Pulling both ensures maximum recall.
+  let sqliteMemBlock = '';
+  try {
+    const { getMemoryContext } = require('../server/src/memory');
+    const sqliteCtx = getMemoryContext(null, { maxMemories: 20, maxChars: 3000 });
+    if (sqliteCtx) {
+      sqliteMemBlock = `\n\n${sqliteCtx}`;
+    }
+  } catch (e) { /* SQLite memory not available in CLI mode — best-effort */ }
 
   if (isChat) return `${godmode}
 ${identityBlock}
@@ -1011,6 +1119,7 @@ Tools: <hak_read>/path</hak_read> · <hak_edit path="/p"><old>x</old><new>y</new
 🚫 NO HALLUCINATION: file not found → say so. 0 matches → say so. Never invent data.
 🔒 DANGER APPROVALS: When HAKSTER_DANGER_PASSWORD env var or config.dangerPassword is set, dangerous-command approvals require a hidden password instead of y/N. Warn the user before running sudo/destructive commands.
 ${memBlock}
+${sqliteMemBlock}
 ${knowledge}`;
 
   return `${godmode}
@@ -1063,6 +1172,7 @@ EDIT RULE: hak_read the exact target lines BEFORE hak_edit. Never guess old_str.
 22. **IF STUCK, READ MORE**: If an edit fails or you're unsure, the answer is always in the file. Read it.
 23. **DANGER APPROVALS**: When HAKSTER_DANGER_PASSWORD env var or config.dangerPassword is set, dangerous-command approvals require a hidden password instead of y/N. Warn the user before running sudo/destructive commands.
 ${memBlock}
+${sqliteMemBlock}
 ${knowledge}`;
 }
 
@@ -1072,6 +1182,7 @@ module.exports = {
   printBanner,
   renderAgentTodoBox,
   renderAgentReasoningGrid,
+  printScriptGrid,
 
   // Help
   showHelp,

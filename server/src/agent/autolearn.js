@@ -17,19 +17,30 @@ const {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const RAW_MEMORY_LIMIT = 100;
+const RAW_MEMORY_LIMIT = 500;   // consolidation room: store 5x more raw memories before evicting
 const TAG_OVERLAP_THRESHOLD = 0.5;
 const OBSERVATION_SIMILARITY_THRESHOLD = 0.6;
 const SKILL_RECURRENCE_THRESHOLD = 3;
 const SUMMARY_MAX_TOKENS = 1500;
 const SUMMARY_CHARS_BUDGET = 6000; // ~1500 tokens at 4 chars/token
+const BANK_CAP = 300;              // per-bank storage cap (each bank is its own "room")
 
+// Memory banks ("consolidation rooms"). Each bank persists to its own JSON file
+// under .hakster/memories/banks/<slug>.json so categories have dedicated,
+// higher-capacity storage that survives across consolidation runs (Hermes-style
+// per-store memory layout).
 const MEMORY_SECTIONS = [
   'Patterns',
   'Errors Encountered',
   'User Preferences',
   'Conventions',
-  'Project Facts'
+  'Project Facts',
+  'Tools & Commands',
+  'Recon & Targets',
+  'Vulnerabilities & Findings',
+  'Infrastructure & Network',
+  'Lessons & Anti-patterns',
+  'Playbooks & Workflows'
 ];
 
 const MEMORY_SECTION_KEYS = {
@@ -37,7 +48,20 @@ const MEMORY_SECTION_KEYS = {
   error: 'Errors Encountered',
   preference: 'User Preferences',
   convention: 'Conventions',
-  fact: 'Project Facts'
+  fact: 'Project Facts',
+  tool: 'Tools & Commands',
+  command: 'Tools & Commands',
+  recon: 'Recon & Targets',
+  target: 'Recon & Targets',
+  vuln: 'Vulnerabilities & Findings',
+  vulnerability: 'Vulnerabilities & Findings',
+  finding: 'Vulnerabilities & Findings',
+  infra: 'Infrastructure & Network',
+  network: 'Infrastructure & Network',
+  lesson: 'Lessons & Anti-patterns',
+  antipattern: 'Lessons & Anti-patterns',
+  playbook: 'Playbooks & Workflows',
+  workflow: 'Playbooks & Workflows'
 };
 
 // ---------------------------------------------------------------------------
@@ -122,6 +146,72 @@ function writeText(filePath, content) {
 // Creates .hakster/ directory structure and initial files.
 // Returns the cwd path.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Per-bank storage ("consolidation rooms") — Hermes-style structured memory
+// ---------------------------------------------------------------------------
+function bankSlug(section) {
+  return String(section).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function bankPath(cwd, section) {
+  return path.join(cwd, '.hakster', 'memories', 'banks', `${bankSlug(section)}.json`);
+}
+
+function readBank(cwd, section) {
+  return readJson(bankPath(cwd, section), []);
+}
+
+// Append deduped entries to a bank file, dedup by observation similarity, cap
+// to BANK_CAP (drop oldest). Returns the bank size after write.
+function persistBank(cwd, section, newEntries) {
+  if (!newEntries || newEntries.length === 0) return readBank(cwd, section).length;
+  ensureDir(path.join(cwd, '.hakster', 'memories', 'banks'));
+  const all = readBank(cwd, section).slice();
+  for (const entry of newEntries) {
+    let dup = false;
+    for (const e of all) {
+      if (substringSimilarity(entry.observation, e.observation) > OBSERVATION_SIMILARITY_THRESHOLD) {
+        e.confidence = Math.max(e.confidence || 0, entry.confidence || 0);
+        for (const t of (entry.tags || [])) if (!(e.tags || []).includes(t)) (e.tags = e.tags || []).push(t);
+        dup = true; break;
+      }
+    }
+    if (!dup) all.push({
+      id: entry.id || generateId(),
+      timestamp: entry.timestamp || new Date().toISOString(),
+      tags: entry.tags || [],
+      observation: entry.observation,
+      type: entry.type,
+      confidence: entry.confidence || 0.5,
+      bankedAt: new Date().toISOString()
+    });
+  }
+  while (all.length > BANK_CAP) all.shift();
+  writeJson(bankPath(cwd, section), all);
+  return all.length;
+}
+
+function bankTypeForSection(section) {
+  for (const [k, v] of Object.entries(MEMORY_SECTION_KEYS)) if (v === section) return k;
+  return 'pattern';
+}
+
+// Hermes-style direct memory add: write an observation straight into a named
+// bank without going through the raw -> consolidate pipeline.
+function addMemoryToBank(cwd, section, observation, tags = [], opts = {}) {
+  if (!section || !observation || typeof observation !== 'string') return false;
+  const sec = MEMORY_SECTIONS.includes(section) ? section : 'Patterns';
+  persistBank(cwd, sec, [{
+    id: opts.id || generateId(),
+    timestamp: opts.timestamp || new Date().toISOString(),
+    tags: Array.isArray(tags) ? tags : [tags].filter(Boolean),
+    observation,
+    type: opts.type || bankTypeForSection(sec),
+    confidence: typeof opts.confidence === 'number' ? opts.confidence : 0.7
+  }]);
+  return true;
+}
+
 function initMemory(cwd) {
   const haksterDir = path.join(cwd, '.hakster');
   const memoriesDir = path.join(haksterDir, 'memories');
@@ -189,7 +279,7 @@ function addRawMemory(entry, cwd) {
   }
 
   // Validate type
-  const validTypes = ['pattern', 'error', 'preference', 'convention', 'skill_candidate'];
+  const validTypes = ['pattern','error','preference','convention','skill_candidate','tool','command','recon','target','vuln','vulnerability','finding','infra','network','lesson','antipattern','playbook','workflow','fact'];
   if (!validTypes.includes(entry.type)) {
     return false;
   }
@@ -302,6 +392,12 @@ function consolidateMemories(cwd) {
     deduped[section] = kept;
   }
 
+  // ── Persist each bank to its own storage room (per-bank JSON) ──
+  for (const section of MEMORY_SECTIONS) {
+    const entries = deduped[section] || [];
+    if (entries.length > 0) persistBank(cwd, section, entries);
+  }
+
   // Read existing MEMORY.md content (if exists)
   let existingMd = readText(memoryMdPath);
   const timestamp = new Date().toISOString();
@@ -342,6 +438,15 @@ function consolidateMemories(cwd) {
 
       if (additions && rebuilt.match(sectionRegex)) {
         rebuilt = rebuilt.replace(sectionRegex, `$1$2${additions}\n`);
+      }
+    }
+
+    // Append any new banks that don't yet exist in MEMORY.md
+    for (const section of MEMORY_SECTIONS) {
+      const entries = deduped[section] || [];
+      const additions = entries.map(e => `- **[${e.tags.join(', ')}]** ${e.observation}`).join('\n');
+      if (additions && !rebuilt.includes(`### ${section}`)) {
+        rebuilt += `\n### ${section}\n${additions}\n`;
       }
     }
 
@@ -588,10 +693,14 @@ function autoInit(cwd) {
 module.exports = {
   initMemory,
   addRawMemory,
+  addMemoryToBank,
   consolidateMemories,
   extractSkill,
   loadLearnedLessons,
   autoInit,
+  readBank,
+  bankPath,
+  BANK_CAP,
 
   // Expose helpers for testing
   _jaccardSimilarity: jaccardSimilarity,

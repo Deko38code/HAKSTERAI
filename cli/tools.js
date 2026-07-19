@@ -160,13 +160,21 @@ function runCmdStream(cmd, cwd) {
       cwd: pshell.cwd(),
       stdio: ['inherit', 'pipe', 'pipe'],
       env: mergedEnv,
+      detached: true, // own process group -> timeout kills the whole tree, not just bash
     });
     let stdout = '', stderr = '';
+    const killGroup = (signal) => { try { process.kill(-child.pid, signal); } catch (_) { try { child.kill(signal); } catch {} } };
     child.stdout.on('data', d => { const s = d.toString(); stdout += s; process.stdout.write(s); });
     child.stderr.on('data', d => { const s = d.toString(); stderr += s; process.stderr.write(s); });
     child.on('close', code => resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: code ?? 0 }));
     child.on('error', e => resolve({ stdout: '', stderr: e.message, code: 1 }));
-    setTimeout(() => { try { child.kill(); } catch {} resolve({ stdout: stdout.trim(), stderr: 'timeout', code: 124 }); }, 120000);
+    // Hard backstop: group-kill (SIGTERM then SIGKILL) so descendants holding the
+    // pipe can't keep the promise alive. Resolves regardless -> CLI never hangs.
+    setTimeout(() => {
+      killGroup('SIGTERM');
+      setTimeout(() => killGroup('SIGKILL'), 1000);
+      resolve({ stdout: stdout.trim(), stderr: 'timeout', code: 124 });
+    }, 120000);
   });
 }
 

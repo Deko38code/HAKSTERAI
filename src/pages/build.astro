@@ -808,7 +808,7 @@ import Layout from '../layouts/Layout.astro';
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .thinking-body {
-      max-height: 220px;
+      max-height: 280px;
       overflow: auto;
       padding-right: 0.25rem;
       scrollbar-width: thin;
@@ -818,6 +818,38 @@ import Layout from '../layouts/Layout.astro';
     .thinking-body::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.35); border-radius: 999px; }
     .thinking-inline.collapsed .thinking-body { display: none; }
     .thinking-toggle { margin-left: auto; font-size: 0.58rem; color: rgba(125,211,252,0.55); }
+    /* Phase indicator badges for thinking blocks */
+    .thinking-phase-badge {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
+      border-radius: 0.25rem;
+      font-size: 0.55rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-left: 0.5rem;
+    }
+    .thinking-phase-badge.THINK { background: rgba(56,189,248,0.2); color: #38bdf8; }
+    .thinking-phase-badge.PLAN { background: rgba(168,85,247,0.2); color: #a855f7; }
+    .thinking-phase-badge.ACT { background: rgba(34,197,94,0.2); color: #22c55e; }
+    .thinking-phase-badge.OBSERVE { background: rgba(6,182,212,0.2); color: #06b6d4; }
+    .thinking-phase-badge.REFLECT { background: rgba(236,72,153,0.2); color: #ec4899; }
+    .thinking-phase-badge.CONSOLIDATE { background: rgba(234,179,8,0.2); color: #eab308; }
+    /* Classified reasoning cards in thinking blocks */
+    .reasoning-card {
+      display: block;
+      padding: 0.2rem 0.4rem;
+      margin: 0.15rem 0;
+      border-radius: 0.25rem;
+      border-left: 2px solid rgba(125,211,252,0.4);
+      font-size: 0.72rem;
+    }
+    .reasoning-card.inspect { border-left-color: rgba(6,182,212,0.6); }
+    .reasoning-card.find { border-left-color: rgba(34,197,94,0.6); }
+    .reasoning-card.error { border-left-color: rgba(239,68,68,0.6); }
+    .reasoning-card.plan { border-left-color: rgba(168,85,247,0.6); }
+    .reasoning-card.conclusion { border-left-color: rgba(234,179,8,0.6); }
+    .reasoning-card.diagnosis { border-left-color: rgba(251,146,60,0.6); }
     .agent-loop-inline {
       margin: 0.35rem 0 0.55rem;
       padding: 0.45rem 0.6rem;
@@ -871,6 +903,20 @@ import Layout from '../layouts/Layout.astro';
     .tool-work-icon { font-size: 0.75rem; flex: none; }
     .tool-work-name { color: rgba(165,180,252,0.9); font-weight: 600; flex: none; }
     .tool-work-arg { color: rgba(148,163,184,0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    /* Tool status badges */
+    .tool-work-status {
+      margin-left: auto;
+      font-size: 0.55rem;
+      font-weight: 700;
+      padding: 0.05rem 0.35rem;
+      border-radius: 0.2rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      flex: none;
+    }
+    .tool-work-status.running { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .tool-work-status.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .tool-work-status.error { background: rgba(239,68,68,0.15); color: #ef4444; }
     .msg-image { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); }
     .msg-script { background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.18); }
     .msg-script .tui-code-block { border-color: rgba(16,185,129,0.25); background: rgba(2,1,8,0.95); }
@@ -2149,8 +2195,44 @@ import Layout from '../layouts/Layout.astro';
     }
 
     // ===== Conversation History =====
-    const CONV_KEY = 'hakster-hack-conversations';
-    const ACTIVE_KEY = 'hakster-hack-active-id';
+    // BUGFIX: Namespace conversations by Google account ID so different
+    // Google logins don't see each other's chats. Falls back to 'shared'
+    // if no Google token is present (legacy behavior).
+    function _userNamespace(): string {
+      try {
+        const token = localStorage.getItem('hakster_google_token');
+        if (token) {
+          // Extract user ID from the token (it's the API key — use a hash of it)
+          // to keep it short and stable per-user
+          let hash = 0;
+          for (let i = 0; i < token.length; i++) {
+            hash = ((hash << 5) - hash) + token.charCodeAt(i);
+            hash |= 0;
+          }
+          return 'u' + Math.abs(hash).toString(36);
+        }
+      } catch {}
+      // Try to get user ID from the Google auth data stored on login
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const authData = urlParams.get('google_auth');
+        if (authData) {
+          const parsed = JSON.parse(decodeURIComponent(authData));
+          if (parsed.user?.id) return 'u' + parsed.user.id;
+        }
+      } catch {}
+      // Check if we have cached user data from login
+      try {
+        const userData = localStorage.getItem('hakster_user_data');
+        if (userData) {
+          const parsed = JSON.parse(userData);
+          if (parsed.id) return 'u' + parsed.id;
+        }
+      } catch {}
+      return 'shared';
+    }
+    const CONV_KEY = 'hakster-hack-conversations-' + _userNamespace();
+    const ACTIVE_KEY = 'hakster-hack-active-id-' + _userNamespace();
     interface Message { role: 'user' | 'assistant' | 'thinking' | 'image' | 'script' | 'search' | 'confirmation'; content: string; url?: string; prompt?: string; command?: string; toolCallId?: string; sessionId?: string; }
     interface Conversation { id: string; title: string; messages: Message[]; model: string; created: number; }
     interface UploadedImage { name: string; dataUrl: string; }

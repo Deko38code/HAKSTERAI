@@ -31,6 +31,12 @@ Hakster agent loop guidance:
 - [Phantom MD Brain](docs/agent/phantom-md-brain.md)
 - [Hakster Phantom Unified Brain](docs/agent/hakster-phantom-unified-brain.md)
 
+## Server & Runtime Guardrails
+
+- **Never restart the haksterAi server while a CLI session is active.** `pm2 restart/stop/reload haksterAi`, `systemctl restart pm2-root`, or killing the server PID drops the live SSE stream and kills the user's in-progress CLI/chat session. Only restart when the user explicitly asks AND you have confirmed no active CLI session is running.
+- If a server-side change needs a restart to take effect, tell the user, let them finish their CLI work, and restart only on their go-ahead (or apply on the next natural restart). `pm2 restart/stop/reload haksterAi` and `systemctl restart pm2-root` are confirmation-gated for this reason.
+- Shell commands must never hang the agent: every `exec_shell` is bounded by a timeout (default 15s, max 120s) with a hard process-group kill. Do not run interactive or long-lived foreground commands (`tail -f`, REPLs, `npm start`, `ssh` without a password, servers) in `exec_shell` — background them with PM2/nohup or use the browser terminal.
+
 ## Agent Loop Architecture
 
 The agent loop follows a 6-phase state machine:
