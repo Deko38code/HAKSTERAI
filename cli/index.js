@@ -1245,7 +1245,10 @@ program
       // before callbacks so connection errors can clean up safely.
       const GRID_H = 14; // 7 (todo box) + 7 (reasoning grid) — always fixed
       const termRows = process.stdout.rows || 24;
-      const useLiveGrid = process.stdout.isTTY && termRows > GRID_H + 5 && process.env.HAKSTER_LIVE_GRID !== '0';
+      // Live grid is OPT-IN: it jumps the cursor to row 1 and clears lines, which clobbers
+      // the readline prompt/scrollback and makes the session look like it 'stopped' when the
+      // agent starts. Enable with HAKSTER_LIVE_GRID=1 only if you want the top-of-screen grid.
+      const useLiveGrid = process.stdout.isTTY && termRows > GRID_H + 5 && process.env.HAKSTER_LIVE_GRID === '1';
       const useSpinner = process.stdout.isTTY && process.env.HAKSTER_SPINNER !== '0';
       let scrollTop = 0;
       let lastRenderTime = 0;

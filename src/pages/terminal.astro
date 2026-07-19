@@ -610,7 +610,9 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         totalTools: 0,
         completedTools: 0,
         detail: 'Crush terminal output will sync here.',
-        toolCounts: {}
+        toolCounts: {},
+        lastOutputTs: 0,
+        runActive: false
       };
 
       function stripAnsi(value) {
@@ -743,8 +745,40 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           crushLiveState.status = 'disconnected';
           crushLiveState.detail = text.split('\n').map(s => s.trim()).filter(Boolean).slice(-1)[0]?.slice(0, 160) || 'Terminal stream disconnected.';
         }
+        // ── Always reflect latest activity: if no specific pattern matched, show the
+        //    last meaningful line the agent printed so the user always sees what it's doing.
+        crushLiveState.lastOutputTs = Date.now();
+        if (!phaseMatch && !toolMatch && !doneMatch) {
+          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+          const last = lines[lines.length - 1];
+          if (last) {
+            crushLiveState.detail = last.slice(0, 160);
+            if (crushLiveState.status === 'idle' || crushLiveState.status === 'waiting' || crushLiveState.status === 'disconnected') {
+              crushLiveState.status = 'active';
+              if (crushLiveState.phase === 'IDLE') crushLiveState.phase = 'THINK';
+            }
+          }
+        }
+        if (crushLiveState.status === 'active' || crushLiveState.status === 'running tool' || crushLiveState.status === 'observing') {
+          crushLiveState.runActive = true;
+        } else if (crushLiveState.status === 'complete' || crushLiveState.status === 'disconnected') {
+          crushLiveState.runActive = false;
+        }
         renderCrushLiveState();
       }
+
+      // ── Heartbeat: keep the activity panel live between output bursts ──
+      setInterval(() => {
+        if (!crushLiveState.runActive) return;
+        const idleMs = Date.now() - (crushLiveState.lastOutputTs || 0);
+        if (idleMs > 4000) {
+          const sec = Math.round(idleMs / 1000);
+          const el = document.getElementById('cs-agent-detail');
+          if (el && !/still working/.test(el.textContent)) {
+            el.textContent = (crushLiveState.detail || 'Working') + ' … still working (' + sec + 's)';
+          }
+        }
+      }, 2000);
 
       window.addEventListener('hakster:pty-output', (event) => {
         if (event.detail?.mode !== 'crush') return;
