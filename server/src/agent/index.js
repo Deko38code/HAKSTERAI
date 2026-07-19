@@ -2106,11 +2106,15 @@ function tuiToolStart(emoji, name) {
   log(`  ${C.bgSubtle}${C.bold}╰${C.reset}${C.bgSubtle}${'─'.repeat(Math.min(calloutW, 60))}${C.reset}${C.bgSubtle}${C.bold}╯${C.reset}`);
 }
 function tuiToolDone(name, status, output) {
-  // Match by base name (fnName) since grid entries may include arg hints
+  // Match by base name (fnName). Grid entries are stored as "#<callNum> <fnName>"
+  // (optionally " → <argHint>"), so the bare fnName passed in here must be matched
+  // against the SUFFIX of the entry's base (e.g. fnName "read_file" matches
+  // entry base "#1 read_file"). The old `===` compare never matched, so tools
+  // stayed "running" (●) forever and the ✓ counter never climbed.
   const baseName = name.split(' → ')[0];
-  const t = _tuiToolGrid.find(t => {
+  const t = [..._tuiToolGrid].reverse().find(t => {
     const tBase = t.name.split(' → ')[0];
-    return tBase === baseName && t.status === 'running';
+    return (tBase === baseName || tBase.endsWith(' ' + baseName)) && t.status === 'running';
   });
   const emoji = (t && t.emoji) || '🛠️';
   const dur = t && t.startTime ? Date.now() - t.startTime : 0;
