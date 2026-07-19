@@ -777,6 +777,7 @@ function getHaksterRoots() {
 const MAX_TURNS_DEFAULT = Math.max(30, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '50', 10) || 50);
 const LOW_TOKEN_MAX_TURNS = Math.max(20, parseInt(process.env.HAKSTER_LOW_TOKEN_MAX_TURNS || '30', 10) || 30);
 const MAX_TURNS = MAX_TURNS_DEFAULT;
+let _currentMaxTurns = MAX_TURNS_DEFAULT;  // updated by agentLoop each run so tuiReset can read it
 const IDLE_TIMEOUT_MS = 120000; // 2 minutes idle → auto review
 
 // ── TUI Config (env-var tunable) ──────────────────────────────────────────
@@ -2129,7 +2130,7 @@ function tuiToolDone(name, status, output) {
 function tuiAddChain(desc, tag) { _tuiChains.push({ desc, tag: tag || '🎯' }); }
 function tuiReset() {
   _tuiPhase = 'Idle'; _tuiTarget = ''; _tuiPorts = ''; _tuiServices = '';
-  _tuiVulns = []; _tuiStep = 0; _tuiMaxSteps = _maxTurns;
+  _tuiVulns = []; _tuiStep = 0; _tuiMaxSteps = _currentMaxTurns || MAX_TURNS_DEFAULT;
   _tuiToolGrid = []; _tuiChains = []; _tuiThinkingStart = null;
   _tuiPhaseStart = Date.now();
   // Preserve session-level state across turns (not resetting):
@@ -5536,6 +5537,7 @@ function startSpinner(label) {
 async function agentLoop(userMessage, history, silent = false, opts = {}) {
   const _lowToken = opts.lowToken || false;
   const _maxTurns = _lowToken ? LOW_TOKEN_MAX_TURNS : MAX_TURNS;
+  _currentMaxTurns = _maxTurns;
   // Reset tool call counter for each new user request
   _toolCallCount = 0;
   // BUG FIX: Reset ALL module-level loop-detection state per-call, not just at REPL start.
