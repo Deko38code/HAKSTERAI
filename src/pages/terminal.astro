@@ -903,6 +903,122 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           setTermFullscreenState(false);
         }
       });
+
+      // ── Dangerous-command approval overlay (crush-style) ─────────────────
+      const dangerOverlay = document.getElementById('danger-overlay');
+      const dangerCmdEl = document.getElementById('danger-command');
+      const dangerReasonEl = document.getElementById('danger-reason');
+      const dangerKindEl = document.getElementById('danger-kind');
+      const dangerDiffWrap = document.getElementById('danger-diff-wrap');
+      const dangerDiffEl = document.getElementById('danger-diff');
+      let _dangerSeenSig = null;
+
+      function sendPtyInput(data) {
+        try {
+          const t = window.__crushTermals && window.__crushTermals['crush-main'];
+          const t2 = window.__crushTermals && window.__crushTerminals['crush-main'];
+          const term = t || t2;
+          if (!term) return false;
+          const pane = term.active || (term.panes && term.panes[0]);
+          if (!pane || !pane.ws || pane.ws.readyState !== 1) return false;
+          pane.ws.send(JSON.stringify({ type: 'input', data }));
+          return true;
+        } catch (_) { return false; }
+      }
+
+      function hideDangerOverlay() {
+        if (dangerOverlay) dangerOverlay.style.display = 'none';
+      }
+
+      function showDangerOverlay({ kind, reason, command, diff }) {
+        if (!dangerOverlay) return;
+        dangerKindEl.textContent = kind || 'danger';
+        dangerReasonEl.textContent = reason || 'The agent wants to run a risky command.';
+        dangerCmdEl.textContent = command || '(unknown)';
+        if (diff && diff.trim()) {
+          dangerDiffEl.innerHTML = escapeHtml(diff).replace(/^\+/gm, '<span class="d-add">$&</span>').replace(/^-/gm, '<span class="d-del">$&</span>').replace(/^@@/gm, '<span class="d-hnk">$&</span>');
+          dangerDiffWrap.style.display = 'block';
+        } else {
+          dangerDiffWrap.style.display = 'none';
+        }
+        dangerOverlay.style.display = 'flex';
+      }
+
+      // Detect the CLI danger/sudo box in PTY output and surface it as an overlay.
+      function detectDangerPrompt(raw) {
+        const text = stripAnsi(raw).replace(/\r/g, '\n');
+        if (!/DANGEROUS COMMAND|SUDO PASSWORD REQUIRED|Approval needed|requires user confirmation|Approve this\?/i.test(text)) return;
+        // Extract command line: "Command: $ <cmd>"
+        let command = '';
+        const cmdMatch = text.match(/Command:\s*\$\s*([^\n]+)/i) || text.match(/Reason:\s*([^\n]+)/i);
+        if (cmdMatch) command = cmdMatch[1].trim();
+        const isSudo = /SUDO PASSWORD REQUIRED|^\s*sudo\b/im.test(text);
+        const reason = (text.match(/Reason:\s*([^\n]+)/i) || [])[1] || '';
+        // de-dupe: only show once per unique command
+        const sig = command + '|' + (isSudo ? 'sudo' : 'cmd');
+        if (sig === _dangerSeenSig) return;
+        _dangerSeenSig = sig;
+        // If the PTY output already includes a diff (apply_patch/edit_file), surface it
+        let diff = '';
+        const diffMatch = text.match(/(?:^|\n)((?:@@ -.* \+.* @@|--- .*\n\+\+\+ .*|[+-][^+\-].*)(?:[\s\S]*?))(?=\n\n|Approve|\$ )/);
+        if (diffMatch) diff = diffMatch[1].slice(0, 4000);
+        showDangerOverlay({
+          kind: isSudo ? 'sudo' : 'dangerous',
+          reason: reason || (isSudo ? 'Elevated (sudo) execution requested by the agent.' : 'Potentially destructive command.'),
+          command,
+          diff
+        });
+      }
+
+      document.getElementById('danger-approve')?.addEventListener('click', () => {
+        sendPtyInput('y\r'); hideDangerOverlay();
+      });
+      document.getElementById('danger-allowlist')?.addEventListener('click', () => {
+        // approve + tell the agent to remember it (the server allowlists on its side too)
+        sendPtyInput('y\r'); hideDangerOverlay();
+      });
+      document.getElementById('danger-deny')?.addEventListener('click', () => {
+        sendPtyInput('n\r'); hideDangerOverlay();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (!dangerOverlay || dangerOverlay.style.display === 'none') return;
+        if (e.key === 'y' || e.key === 'Y') { sendPtyInput('y\r'); hideDangerOverlay(); }
+        else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') { sendPtyInput('n\r'); hideDangerOverlay(); }
+      });
+
+      // Hook danger detection into the existing PTY output listener.
+      window.addEventListener('hakster:pty-output', (event) => {
+        if (event.detail?.mode !== 'crush') return;
+        try { detectDangerPrompt(event.detail.data || ''); } catch (_) {}
+      });
     </script>
+
+    <!-- ── Dangerous-command approval overlay (crush-style) ───────────────── -->
+    <div id="danger-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.62);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+      <div style="max-width:760px;width:90vw;max-height:82vh;display:flex;flex-direction:column;background:#0b0b12;border:1px solid #ff3b3b;border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,0.6);overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:linear-gradient(90deg,rgba(255,59,59,0.18),transparent);border-bottom:1px solid rgba(255,59,59,0.35);">
+          <span style="font-size:20px;">🔑</span>
+          <span style="color:#ff5b5b;font-weight:700;letter-spacing:0.04em;">DANGEROUS COMMAND — APPROVAL REQUIRED</span>
+          <span id="danger-kind" style="margin-left:auto;color:#ffd17a;font-size:12px;text-transform:uppercase;"></span>
+        </div>
+        <div style="padding:12px 16px;color:#c7c7d6;font-size:13px;">
+          <div id="danger-reason" style="color:#9aa0b4;margin-bottom:8px;"></div>
+          <div style="color:#6b7080;font-size:11px;margin-bottom:4px;">Command</div>
+          <pre id="danger-command" style="margin:0;padding:10px 12px;background:#000;color:#ff8a8a;border-radius:8px;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:13px;max-height:180px;"></pre>
+          <div id="danger-diff-wrap" style="display:none;margin-top:10px;">
+            <div style="color:#6b7080;font-size:11px;margin-bottom:4px;">Compare</div>
+            <pre id="danger-diff" style="margin:0;padding:10px 12px;background:#000;border-radius:8px;overflow:auto;font-size:12px;max-height:240px;white-space:pre-wrap;"></pre>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);background:#0e0e16;">
+          <button id="danger-approve" style="flex:1;padding:10px 14px;border:0;border-radius:8px;background:#ff3b3b;color:#fff;font-weight:700;cursor:pointer;">Approve (y)</button>
+          <button id="danger-allowlist" style="flex:1;padding:10px 14px;border:0;border-radius:8px;background:#3b3b4a;color:#e7e7f0;font-weight:600;cursor:pointer;">Approve &amp; don't ask again</button>
+          <button id="danger-deny" style="flex:1;padding:10px 14px;border:0;border-radius:8px;background:#23232e;color:#c7c7d6;font-weight:600;cursor:pointer;">Deny (n)</button>
+        </div>
+      </div>
+    </div>
+    <style>
+      #danger-diff .d-add{color:#7ee787;} #danger-diff .d-del{color:#ff7b72;} #danger-diff .d-hnk{color:#6b7080;}
+    </style>
   </body>
 </html>
