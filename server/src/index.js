@@ -24,6 +24,7 @@ const stuckMonitor = require('./agent/stuckMonitor');
 // ── Autoflow: 6-phase loop + autolearn + approval modules ──
 const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName } = require('./agent/loop');
 const autolearn = require('./agent/autolearn');
+const taskState = require('./agent/task-state');
 
 // ── MCP Integration — merge MCP tools into the agent tool list ────────────
 let ALL_TOOLS = AGENT_TOOLS; // starts as built-in only; expanded after MCP loads
@@ -2464,6 +2465,10 @@ ${dirListing}
   const lastUserMsg = messages.filter(m => m.role === 'user').pop();
   const memoryContext = getMemoryContext(lastUserMsg?.content || '', { maxMemories: 15, maxChars: 3000 });
 
+  // ── Persistent task state: never forget what we're doing across turns/sessions ──
+  taskState.init({ userMessage: lastUserMsg?.content || '' });
+  const taskStateSummary = taskState.summary();
+
   // ── Preserve client-supplied system prompt (e.g. hack page pentest prompts) ──
   const clientSystemMsg = messages.find(m => m.role === 'system');
   const clientSystemContent = clientSystemMsg ? clientSystemMsg.content : '';
@@ -2501,6 +2506,9 @@ ${dirListing}
     { role: 'system', content: systemContent },
     ...messages.filter(m => m.role !== 'system'),
   ];
+
+  // ── Inject persistent task state so the agent never loses the thread ──
+  if (taskStateSummary) agentMessages[0].content += taskStateSummary;
 
   // ── Full-auto directive: instruct model to act autonomously without asking ──
   if (effectiveApprovalMode === 'full-auto') {
@@ -3254,6 +3262,13 @@ ${dirListing}
               res.write(`data: ${JSON.stringify({ type: 'file_created', path: fullPath, tool: toolName })}\n\n`);
             }
           }
+          // ── Record progress into the persistent task state (never forget) ──
+          try {
+            if (!/^Error[:\n]/i.test(String(result).trim()) && !/^\u274c/i.test(String(result).trim())) {
+              const _arg = toolArgs && (toolArgs.path || toolArgs.command || toolArgs.query || toolArgs.url || toolArgs.task || '');
+              taskState.addStep(`${toolName}${_arg ? ': ' + String(_arg).slice(0, 80) : ''}`);
+            }
+          } catch (_) { /* non-blocking */ }
           if (['write_file', 'edit_file'].includes(toolName) && toolArgs.path) {
             notifyWorkspaceChange(sessionId, toolArgs.path);
           }
@@ -3423,6 +3438,14 @@ ${dirListing}
         if (['write_file', 'edit_file'].includes(toolName) && toolArgs.path) {
           notifyWorkspaceChange(sessionId, toolArgs.path);
         }
+
+        // ── Record progress into the persistent task state (never forget) — sequential path ──
+        try {
+          if (!/^Error[:\n]/i.test(String(result).trim()) && !/^\u274c/i.test(String(result).trim())) {
+            const _arg = toolArgs && (toolArgs.path || toolArgs.command || toolArgs.query || toolArgs.url || toolArgs.task || '');
+            taskState.addStep(`${toolName}${_arg ? ': ' + String(_arg).slice(0, 80) : ''}`);
+          }
+        } catch (_) { /* non-blocking */ }
 
         // If generate_image returned image URLs, emit an image event for inline preview
         if (imageUrls && imageUrls.length > 0) {

@@ -477,6 +477,40 @@ configCmd
     }
   });
 
+// ── sudo: set the system/sudo password the agent uses for elevated commands ──
+configCmd
+  .command('sudo')
+  .description('Set the sudo/danger password the agent uses for elevated shell commands (input hidden).')
+  .option('-c, --clear', 'Remove the stored sudo/danger password')
+  .action((opts) => {
+    if (opts.clear) {
+      const cfg = loadConfig();
+      delete cfg.dangerPassword;
+      saveConfig(cfg);
+      console.log(`${C.green}✓ sudo/danger password cleared.${C.reset}`);
+      return;
+    }
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    // Hide the typed password
+    rl._writeToOutput = function (string) {
+      if (rl.stdoutMuted) rl.output.write('*');
+      else rl.output.write(string);
+    };
+    process.stdout.write(`${C.yellow}🔑 Enter the sudo/danger password for the agent${C.reset} (typed hidden, Enter to save): `);
+    rl.stdoutMuted = true;
+    rl.question('', (pwd) => {
+      rl.close();
+      process.stdout.write('\n');
+      const pw = (pwd || '').trim();
+      if (!pw) { console.log(`${C.red}✗ empty password — nothing saved.${C.reset}`); return; }
+      const cfg = loadConfig();
+      cfg.dangerPassword = pw;
+      saveConfig(cfg);
+      console.log(`${C.green}✓ sudo/danger password saved.${C.reset} ${C.gray}(stored in ~/.hakster/config.json as dangerPassword; the server pipes it via sudo -S for elevated commands. Also exportable as HAKSTER_DANGER_PASSWORD.)${C.reset}`);
+    });
+  });
+
 // ── ls ──────────────────────────────────────────────────────────────────
 program
   .command('ls [path]')

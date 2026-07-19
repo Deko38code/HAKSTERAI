@@ -1977,6 +1977,49 @@ function getDangerReason(command) {
   return null;
 }
 
+
+// ── Sudo password: read from CLI config (~/.hakster/config.json) or env, expose via SUDO_ASKPASS ──
+const _dangerConfigPath = require('path').join(process.env.HOME || '/home/ghost', '.hakster', 'config.json');
+let _dangerPwCache = null;
+let _dangerPwMtime = 0;
+function getDangerPassword() {
+  try {
+    if (process.env.HAKSTER_DANGER_PASSWORD) return process.env.HAKSTER_DANGER_PASSWORD;
+    const fs = require('fs');
+    const st = fs.statSync(_dangerConfigPath);
+    if (_dangerPwCache && st.mtimeMs === _dangerPwMtime) return _dangerPwCache;
+    const cfg = JSON.parse(fs.readFileSync(_dangerConfigPath, 'utf8'));
+    _dangerPwCache = (cfg && typeof cfg.dangerPassword === 'string') ? cfg.dangerPassword : null;
+    _dangerPwMtime = st.mtimeMs;
+    return _dangerPwCache;
+  } catch (_) { return null; }
+}
+const _askPassPath = require('path').join(process.env.HOME || '/home/ghost', '.hakster', '.sudo-askpass.sh');
+function ensureSudoAskpass() {
+  const pw = getDangerPassword();
+  if (!pw) return null;
+  try {
+    const fs = require('fs');
+    const script = `#!/bin/sh\necho '${pw.replace(/'/g, "'\\''")}'\n`;
+    fs.writeFileSync(_askPassPath, script, { mode: 0o700 });
+    return _askPassPath;
+  } catch (_) { return null; }
+}
+// Rewrite a bare "sudo ..." invocation to "sudo -A ..." so SUDO_ASKPASS supplies the password
+// (the password never appears in the command line / tool args / logs).
+function rewriteSudoWithAskpass(command) {
+  const pw = getDangerPassword();
+  if (!pw) return { command, askpass: null };
+  const m = command.match(/^\s*sudo(\s+(-\w+|\S+=\S+))*\s+/);
+  if (!m) return { command, askpass: null };
+  // already using -A (askpass) or -S (stdin) — leave alone
+  if (/\s-A\b|\s--askpass\b|\s-S\b/.test(m[0])) return { command, askpass: null };
+  const askpass = ensureSudoAskpass();
+  if (!askpass) return { command, askpass: null };
+  const rewritten = command.replace(/^(\s*)sudo\b/, `$1sudo -A`);
+  return { command: rewritten, askpass };
+}
+
 async function executeAgentTool(name, args, cwd, provider, model, onStream, allowedCommands, approvalMode) {
   const fs = require('fs');
   const path = require('path');
@@ -2179,6 +2222,11 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
           command = command + ' 2>/dev/null | head -n 300';
         }
 
+        // ── Sudo: pipe the configured danger password via SUDO_ASKPASS (sudo -A) ──
+        const _sudo = rewriteSudoWithAskpass(command);
+        command = _sudo.command;
+        const _askpassEnv = _sudo.askpass ? { SUDO_ASKPASS: _sudo.askpass } : null;
+
         // When a stream consumer is present, run via spawn so stdout/stderr can be
         // forwarded in real-time to the build terminal / UI.
         if (typeof onStream === 'function') {
@@ -2196,6 +2244,7 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
               cwd,
               env: {
                 ...process.env,
+                ...(_askpassEnv || {}),
                 HOME: process.env.HOME || '/home/ghost',
                 CI: process.env.CI || '1',
                 NO_COLOR: process.env.NO_COLOR || '1',
@@ -2290,6 +2339,7 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
               cwd,
               env: {
                 ...process.env,
+                ...(_askpassEnv || {}),
                 HOME: process.env.HOME || '/home/ghost',
                 CI: process.env.CI || '1',
                 NO_COLOR: process.env.NO_COLOR || '1',
