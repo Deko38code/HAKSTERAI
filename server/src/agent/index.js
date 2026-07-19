@@ -366,7 +366,7 @@ function loadCoreSkills() {
     'hakster-guardrails',         // CRITICAL safety & editing rules — prevents code corruption
     'pentest-agents/super-agent', // pentest orchestrator — 50+ agents, OWASP cheatsheets
   ];
-  const skillsDirs = getHaksterRoots().map(root => path.join(root, 'skills'));
+  const skillsDirs = getSkillDirs();
   const parts = [];
   for (const skillName of coreSkills) {
     for (const skillsDir of skillsDirs) {
@@ -771,6 +771,22 @@ function getHaksterRoots() {
     '/home/ghost/.hermes',            // hermes root
     '/home/ghost/haksterAi/pentest-agents', // pentest skills
   ]));
+}
+
+// Skill directories: <root>/skills for every hakster root, PLUS the master
+// library /home/ghost/skills (skills live directly there, NOT under /skills).
+// Using this everywhere skills are counted/loaded fixes the missing ~840+
+// master-library skills (the banner/self-check only saw <root>/skills and
+// thus /home/ghost/skills/skills, which doesn't exist).
+function getSkillDirs() {
+  const dirs = getHaksterRoots().map(root => path.join(root, 'skills'));
+  dirs.push('/home/ghost/skills');
+  // de-dup, drop non-existent
+  const out = [];
+  for (const d of Array.from(new Set(dirs))) {
+    try { if (fs.existsSync(d)) out.push(d); } catch (_) {}
+  }
+  return out;
 }
 
 // (Idle review prompt removed — health checks now run directly via shell, no model call)
@@ -2144,7 +2160,7 @@ function tuiReset() {
 // ── Banner — HaksterAI puff-letter header ────────────────────────────────
 function banner() {
   // Dynamically count skills from .hakster/skills/
-  const skillsDirs = getHaksterRoots().map(root => path.join(root, 'skills'));
+  const skillsDirs = getSkillDirs();
   let skillCount = 0;
   for (const skillsDir of skillsDirs) {
     try { skillCount += globSync(path.join(skillsDir, '**', '*.md')).length; } catch (_) {}
@@ -4526,7 +4542,7 @@ ${trunc(md, 12000)}`;
   },
 
   skill_load({ name }) {
-    const skillsDirs = getHaksterRoots().map(root => path.join(root, 'skills'));
+    const skillsDirs = getSkillDirs();
     // Search all categories
     let filepath = '';
     for (const skillsDir of skillsDirs) {
@@ -4559,7 +4575,7 @@ ${trunc(md, 12000)}`;
   },
 
   skill_list({ category } = {}) {
-    const skillsDirs = getHaksterRoots().map(root => path.join(root, 'skills'));
+    const skillsDirs = getSkillDirs();
     const files = skillsDirs.flatMap(skillsDir => {
       if (!fs.existsSync(skillsDir)) return [];
       const pattern = category ? path.join(skillsDir, category, '*.md') : path.join(skillsDir, '**', '*.md');
@@ -6597,7 +6613,7 @@ async function repl() {
 
   // ── Check skills ──────────────────────────────────────────────────────
   console.log(`${C.cyan}📋 Loading skills...${C.reset}`);
-  const skillsDirs = getHaksterRoots().map(root => path.join(root, 'skills'));
+  const skillsDirs = getSkillDirs();
   let skillCount = 0;
   const skillCategories = {};
   for (const skillsDir of skillsDirs) {
@@ -6856,27 +6872,31 @@ async function repl() {
     const load = await run('uptime');
     if (load) { const lm = load.match(/load average:\s*([\d.,]+)/); console.log(`  Load ${lm ? lm[1] : load}`); }
 
-    // 4. Skill hot-reload
+    // 4. Skill hot-reload — count EVERY .md skill across all roots (recursive, deduped)
     console.log(`${C.bold}${C.cyan}📚 Skills${C.reset}`);
     try {
       const roots = getHaksterRoots();
+      const seen = new Set();
       let skillCount = 0, newSkills = 0;
       for (const root of roots) {
         try {
-          const entries = fs.readdirSync(root, { withFileTypes: true });
-          for (const entry of entries) {
-            if (entry.isDirectory()) {
-              const skillFile = path.join(root, entry.name, 'SKILL.md');
-              if (fs.existsSync(skillFile)) {
-                skillCount++;
-                const stat = fs.statSync(skillFile);
-                if (Date.now() - stat.mtimeMs < 300000) { newSkills++; console.log(`  ${C.green}✦${C.reset} ${entry.name} ${C.dim}(updated)${C.reset}`); }
+          const files = globSync(path.join(root, '**', '*.md'));
+          for (const f of files) {
+            const key = path.resolve(f);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            skillCount++;
+            try {
+              const stat = fs.statSync(f);
+              if (Date.now() - stat.mtimeMs < 300000) {
+                newSkills++;
+                if (newSkills <= 12) console.log(`  ${C.green}✦${C.reset} ${path.relative(root, f)} ${C.dim}(updated)${C.reset}`);
               }
-            }
+            } catch (_) {}
           }
         } catch (_) {}
       }
-      console.log(`  ${skillCount} skills loaded${newSkills > 0 ? ` (${C.green}${newSkills} new/updated${C.reset})` : ''}`);
+      console.log(`  ${skillCount} skills loaded across ${roots.length} roots${newSkills > 0 ? ` (${C.green}${newSkills} new/updated${C.reset})` : ''}`);
     } catch (_) { console.log(`  ${C.yellow}⚠ skill scan error${C.reset}`); }
 
     // 5. Self-repair: own process health
@@ -7244,7 +7264,7 @@ async function repl() {
     }
 
     if (input === '/skills') {
-      const skillsDirs = getHaksterRoots().map(root => path.join(root, 'skills'));
+      const skillsDirs = getSkillDirs();
       let total = 0;
       const categories = [];
       for (const skillsDir of skillsDirs) {
