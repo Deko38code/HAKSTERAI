@@ -6189,7 +6189,16 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     for (const tc of msg.tool_calls) {
       _toolCallCount++;
       const fnName = tc.function?.name || tc.name;
-      const fnArgs = tc.function?.arguments || tc.arguments || {};
+      // CRITICAL: Ollama models (e.g. glm-5.2:cloud) return tool_call arguments as a
+      // JSON STRING, not a parsed object. If we pass the string straight to the
+      // executor, destructuring ({action, url, ...}) yields undefined for every
+      // field and every parameterized tool fails ("scrape requires url", "Error
+      // navigating to undefined", etc.). Parse to an object here, once.
+      let fnArgs = tc.function?.arguments || tc.arguments || {};
+      if (typeof fnArgs === 'string') {
+        try { fnArgs = JSON.parse(fnArgs); } catch (_) { fnArgs = {}; }
+      }
+      if (!fnArgs || typeof fnArgs !== 'object' || Array.isArray(fnArgs)) fnArgs = {};
       const tcId = tc.id || tc.function?.index?.toString() || '0';
       const callNum = _toolCallCount;
 
