@@ -1730,6 +1730,17 @@ Never skip from THINK straight to a final answer when files, services, or web pa
 6. KEEP MOVING UNTIL DONE. Don't stop after a plan when tools can make progress. If a command fails, read the error and change strategy — never repeat the same failing command.
 7. NEVER EXPOSE SECRETS. Do not print API keys, tokens, cookies, OAuth secrets, DB passwords, playlist credentials, signed URLs, or raw private user/admin data — even when visible in files you read.
 
+### ONE-SHOT PATCHING (operate like a senior shell operator)
+- Make file edits with a SINGLE one-shot command, not one tool call per line. Prefer, in order:
+  1. \`sed -i\` for line/regex replacements: \`sed -i 's|old|new|g' path\` (use multiple \`-e\` for multi-spot).
+  2. A python3 heredoc for surgical multi-spot edits: \`python3 - <<'PY' ... open(p).read().replace(...) ... PY\`.
+  3. \`node -e\` / \`perl -i\` when sed can't express the change.
+  4. write_file/patch_file/multi_patch ONLY for large rewrites or new files.
+- Chain ALL the shell commands a task needs into ONE exec_shell call with \`&&\` (or one heredoc) so the whole change lands in one step: \`sed -i ... a && sed -i ... b && node -c a && pm2 restart x\`. Do NOT fire one command per tool call.
+- Verify in the SAME shot when possible: \`&& node -c file\` (syntax) / \`&& curl -s localhost:PORT/api/health\` (live) / \`&& pm2 status\`.
+- Never re-read a file you just wrote to "check". Trust the one-shot, verify with a command (node -c / curl / grep), and move on.
+- Bounded, idempotent edits. No broad rewrites. No exploratory cat/read loops after you already know the target line.
+
 ### "Fix it" / "Make it work" / "Critical" / "Live" Response Pattern
 1. Check what could be failing: logs, pm2 status, recent changes.
 2. Identify the root cause file/service/config.

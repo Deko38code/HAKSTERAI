@@ -83,6 +83,17 @@ You should behave like a senior local coding agent:
 10. Final answer should be brief: changed files, verification result, live status, and any remaining risk.
 11. Never expose secrets, API keys, OAuth secrets, cookies, playlist credentials, signed URLs, DB passwords, raw user/admin data, tokens, or private logs.
 
+## ONE-SHOT PATCHING (operate like a senior shell operator)
+- Make file edits with a SINGLE one-shot command, not a tool call per line. Prefer, in order:
+  1. \`sed -i\` for line/regex replacements: \`sed -i 's|old|new|g' path\` (use \`|\n\` or multiple \`-e\` for multi-line).
+  2. A python3 heredoc for surgical multi-spot edits: \`python3 - <<'PY'\n...open(p).read().replace(...)...\nPY\`.
+  3. \`node -e\` / \`perl -i\` when sed can't express the change.
+  4. write_file/patch_file/multi_patch ONLY for large rewrites or brand-new files.
+- Chain ALL the shell commands a task needs into ONE exec_shell call with \`&&\` (or a single heredoc script) so the whole change lands in one step: \`sed -i ... a && sed -i ... b && node -c a && pm2 restart x\`. Do NOT fire one command per tool call.
+- Verify in the SAME shot when possible: \`&& node -c file\` (syntax) / \`&& curl -s localhost:PORT/api/health\` (live) / \`&& pm2 status\`.
+- Never re-read a file you just wrote to "check". Trust the one-shot, verify with a command (node -c / curl / grep), and move on.
+- Prefer bounded, idempotent edits. No broad rewrites. No exploratory cat/read loops after you already know the target line.
+
 ## VISIBLE REASONING STYLE
 - Think rigorously before acting, but do not dump long private scratchpad reasoning.
 - Show concise reasoning summaries the user can follow:
@@ -6931,14 +6942,32 @@ async function repl() {
     console.log(`  Heap ${heapUsed}MB  RSS ${rssColor}${rss}MB${C.reset}`);
     console.log(`  Uptime ${Math.floor(process.uptime() / 60)}m  History ${history.length} msgs  Tools ${_toolCallCount}`);
 
-    // 6. Ports
-    const portCheck = await run('ss -tlnp 2>/dev/null | grep -E "3579|8081|5555|4000|8082"');
-    if (portCheck) {
-      console.log(`${C.bold}${C.cyan}🔌 Ports${C.reset}`);
-      for (const p of portCheck.split('\n').filter(Boolean)) {
-        const m = p.match(/:(\d+)\s+.*"(.+?)"/);
-        if (m) console.log(`  :${m[1]} ${C.green}${m[2]}${C.reset}`);
+    // 6. Ports — list our known services UP TOP (up/down), not just bars.
+    const EXPECTED_PORTS = [
+      { port: 3579, name: 'haksterAi',  proto: 'http' },
+      { port: 8081, name: 'cinevault',  proto: 'http' },
+      { port: 4000, name: 'phantom',    proto: 'http' },
+      { port: 8082, name: 'claude-proxy', proto: 'http' },
+      { port: 5555, name: 'miniforge',  proto: 'http' },
+    ];
+    const portCheck = await run('ss -tlnp 2>/dev/null');
+    const openPorts = new Set();
+    const portProc = {};
+    for (const line of String(portCheck || '').split('\n')) {
+      const m = line.match(/:([0-9]{2,5})\s+\S+\s+.*users:\(\("([^"]+)"/);
+      if (m) { openPorts.add(Number(m[1])); portProc[m[1]] = m[2]; }
+      else {
+        const m2 = line.match(/:([0-9]{2,5})\s+\S+/);
+        if (m2) openPorts.add(Number(m2[1]));
       }
+    }
+    console.log(`${C.bold}${C.cyan}🔌 Ports${C.reset}`);
+    for (const svc of EXPECTED_PORTS) {
+      const up = openPorts.has(svc.port);
+      const proc = portProc[String(svc.port)] || (up ? 'listening' : '');
+      const tag = up ? `${C.green}●${C.reset} :${svc.port} ${C.fgBase}${svc.name}${C.reset}${proc ? C.dim + ' (' + proc + ')' + C.reset : ''}`
+                     : `${C.red}○${C.reset} :${svc.port} ${C.fgMuted}${svc.name}${C.reset} ${C.dim}down${C.reset}`;
+      console.log(`  ${tag}  ${C.fgMuted}${svc.proto}://localhost:${svc.port}${C.reset}`);
     }
 
     console.log(`${C.bgSubtle}${T.hashFill(50, C.fgMuted)}${C.reset}`);
