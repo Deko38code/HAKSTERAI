@@ -550,13 +550,25 @@ function getMachineContext() {
   return result;
 }
 
-// ── Knowledge library index — let the agent pull from ALL agent-doc .md files
-//    (phantom, kiro, claude/anthropic, codex/openai, gemini/hermes, etc.) ──
+// ── Knowledge library index — let the agent pull from ALL of the user's .md files
+//    (skills, firecrawl playbooks, repo docs, AGENTS/CLAUDE, MEMORY, pentest, etc.) ──
+// Broad scan: every .md under the repo (minus node_modules/.git/dist), the firecrawl
+// caches, the repo docs + pentest-agents, and the user's ~/.hakster + workspace .hakster.
+const _REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const _KNOWLEDGE_DIRS = [
-  path.join(__dirname, '..', '..', '..', '.firecrawl', 'cli-skills', '.firecrawl'),
-  path.join(__dirname, '..', '..', '..', '.firecrawl'),
-  path.join(__dirname, '..', '..', '..'), // repo root (HAKSTERAI-PHANTOM-MERGED.md, AGENTS.md)
+  path.join(_REPO_ROOT, '.firecrawl', 'cli-skills', '.firecrawl'),
+  path.join(_REPO_ROOT, '.firecrawl'),
+  path.join(_REPO_ROOT, 'docs'),
+  path.join(_REPO_ROOT, 'pentest-agents'),
+  path.join(_REPO_ROOT, '.hakster'),
+  path.join(_REPO_ROOT, 'tui-review'),
+  _REPO_ROOT,                                   // repo root .md (AGENTS/CLAUDE/HAKSTER-* etc.)
+  path.join(process.env.HOME || '/home/ghost', '.hakster'),
+  path.join(process.cwd(), '.hakster'),
 ];
+// Skip these anywhere in the path (noise / generated / huge)
+const _KNOWLEDGE_SKIP = /\/node_modules\/|\/\.git\/|\/dist\/|\/\.next\/|\/build\/|\/\.cache\//;
+// Group a file by its source + name
 const _KNOWLEDGE_GROUPS = [
   { re: /phantom|HAKSTERAI-PHANTOM/i, label: 'phantom' },
   { re: /kiro/i, label: 'kiro' },
@@ -567,39 +579,77 @@ const _KNOWLEDGE_GROUPS = [
   { re: /opencode/i, label: 'opencode' },
   { re: /aider/i, label: 'aider' },
   { re: /chatgpt|openai-help/i, label: 'chatgpt' },
+  { re: /pentest|guardian|cheatsheet|owasp|exploit|recon|nmap/i, label: 'pentest' },
+  { re: /MEMORY|memory_summary|skills\/index/i, label: 'memory/skills-meta' },
 ];
+const _KNOWLEDGE_PER_GROUP_CAP = 200;  // list up to 200 per group so "a lot of md's" all show
 function buildKnowledgeLibraryIndex() {
   try {
     const byGroup = {};
     const seen = new Set();
     for (const dir of _KNOWLEDGE_DIRS) {
       let files = [];
-      try { files = globSync(path.join(dir, '**', '*.md')); } catch (_) { continue; }
+      try { files = globSync(path.join(dir, '**', '*.md'), { ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**'] }); }
+      catch (_) { try { files = globSync(path.join(dir, '**', '*.md')); } catch (_) { continue; } }
       for (const f of files) {
-        if (seen.has(f)) continue;
-        seen.add(f);
-        const base = path.basename(f);
-        // skip repo-level noise (README/AGENTS handled elsewhere)
-        if (['README.md', 'AGENTS.md', 'CLAUDE.md'].includes(base) && dir === _KNOWLEDGE_DIRS[2]) continue;
+        const abs = path.resolve(f);
+        if (seen.has(abs) || _KNOWLEDGE_SKIP.test(abs)) continue;
+        seen.add(abs);
+        const base = path.basename(abs);
         let g = 'other';
-        for (const grp of _KNOWLEDGE_GROUPS) { if (grp.re.test(base)) { g = grp.label; break; } }
+        for (const grp of _KNOWLEDGE_GROUPS) { if (grp.re.test(base) || grp.re.test(abs)) { g = grp.label; break; } }
         if (!byGroup[g]) byGroup[g] = [];
-        let sz = 0; try { sz = fs.statSync(f).size; } catch (_) {}
-        byGroup[g].push({ path: f, kb: Math.max(1, Math.round(sz / 1024)) });
+        let sz = 0; try { sz = fs.statSync(abs).size; } catch (_) {}
+        byGroup[g].push({ path: abs, kb: Math.max(1, Math.round(sz / 1024)) });
       }
     }
-    const order = ['phantom','kiro','claude','codex','hermes','cursor','opencode','aider','chatgpt','other'];
+    // Order: skills/pentest/memory + agent-doc sources first
+    const order = ['memory/skills-meta','pentest','phantom','kiro','claude','codex','hermes','cursor','opencode','aider','chatgpt','other'];
     const lines = [];
+    let total = 0;
     for (const g of order) {
       const arr = byGroup[g]; if (!arr || !arr.length) continue;
-      lines.push(`### ${g} (${arr.length} docs)`);
-      // cap per group so the index stays small
-      for (const doc of arr.slice(0, 40)) lines.push(`- ${doc.path} (${doc.kb}KB)`);
-      if (arr.length > 40) lines.push(`- …and ${arr.length - 40} more`);
+      const shown = arr.slice(0, _KNOWLEDGE_PER_GROUP_CAP);
+      total += shown.length;
+      lines.push(`### ${g} (${arr.length} docs${arr.length > shown.length ? `, listing first ${shown.length}` : ''})`);
+      for (const doc of shown) lines.push(`- ${doc.path} (${doc.kb}KB)`);
+      if (arr.length > shown.length) lines.push(`- …and ${arr.length - shown.length} more — use list_dir/search_files to discover them`);
     }
     if (!lines.length) return '';
-    return `\n\n## 📚 Knowledge Library (agent-doc .md files)\nThe following agent documentation is available on disk. To "pull" from any of these, use read_file or skill_load on the path BEFORE you need it — do not guess, read the actual file.\n\n${lines.join('\n')}`;
+    return `\n\n## 📚 Knowledge Library (ALL your .md files — read_file/skill_load any path BEFORE guessing)\n${total} indexed docs across ${_KNOWLEDGE_DIRS.filter(d => { try { return fs.existsSync(d); } catch { return false; } }).length} roots.\n\n${lines.join('\n')}`;
   } catch (_) { return ''; }
+}
+
+// ── Phantom Brain: merge the phantom knowledge md into the agent's context ──
+// The system prompt itself says to load the first ~6000 chars of phantom-knowledge.md.
+// HAKSTERAI-PHANTOM-MERGED.md is the merged hakster+phantom brain (425KB) — we inject
+// a capped excerpt each session and point the agent at the full file to read on demand.
+let _phantomBrainCache = null; let _phantomBrainMtime = 0;
+function loadPhantomBrain() {
+  try {
+    const candidates = [
+      path.join(__dirname, '..', '..', '..', 'HAKSTERAI-PHANTOM-MERGED.md'),
+      '/home/ghost/phantom-knowledge.md',
+      path.join(__dirname, '..', '..', '..', 'phantom-knowledge.md'),
+    ];
+    for (const pth of candidates) {
+      try {
+        if (!fs.existsSync(pth)) continue;
+        const st = fs.statSync(pth);
+        if (_phantomBrainCache && st.mtimeMs === _phantomBrainMtime) return _phantomBrainCache;
+        const full = fs.readFileSync(pth, 'utf-8');
+        if (!full || !full.trim()) continue;
+        const CAP = 6000;
+        const excerpt = full.length > CAP
+          ? full.slice(0, CAP) + `\n\n... (phantom brain truncated at ${CAP} chars — full ${Math.round(full.length/1024)}KB at ${pth}; read_file it for more)`
+          : full;
+        _phantomBrainCache = `\n\n## 🧠 Phantom Brain (merged hakster + phantom knowledge)\nSource: ${pth} (${Math.round(full.length/1024)}KB). Excerpt baked into every session; read_file the full path when you need deeper phantom/IDE/server knowledge.\n\n${excerpt}`;
+        _phantomBrainMtime = st.mtimeMs;
+        return _phantomBrainCache;
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return '';
 }
 
 // ── Consolidated MEMORY.md from the user's project + home (read each session) ──
@@ -723,6 +773,8 @@ function buildSystemPrompt(clientContext) {
   // ── Inject AGENTS.md steering content ──
   const agentsMd = injectAgentsMd(process.cwd());
   if (agentsMd) prompt += '\n\n' + agentsMd;
+  // ── Merge the phantom knowledge brain into this session's context ──
+  prompt += loadPhantomBrain();
 
   // ── Inject learned lessons from auto-learn ──
   const lessons = injectLearnedLessons(process.cwd(), ['pentest', 'agent']);
@@ -1378,7 +1430,13 @@ const TOOL_TYPE = {
 
 // ── Confirmation system ──────────────────────────────────────────────────
 // _confirmFn is set by TUI/REPL; returns true (approved), false (denied), or a string (edited command)
-let _confirmFn = null; // (dangerMsg, tool, args) => Promise<boolean>
+let _confirmFn = null; // (dangerMsg, tool, args) => Promise<boolean|'allowlist'>
+let _localAllowlist = new Set(); // command signatures approved with "don't ask again" this REPL session
+function _cmdSig(tool, args) {
+  const c = (tool === 'shell' || tool === 'exec_shell') ? (args && args.command || '') : JSON.stringify(args || {});
+  return tool + ':' + String(c).replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+function _localAllowlisted(tool, args) { return _localAllowlist.has(_cmdSig(tool, args)); }
 let _approvalMode = process.env.HAKSTER_APPROVAL_MODE || SUGGEST;
 function setApprovalMode(mode) { _approvalMode = require('./approval').validateMode(mode); }
 
@@ -6331,16 +6389,21 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
 
       // ── Dangerous command confirmation ──
       const dangerReason = isDangerousCommand(fnName, fnArgs);
-      if (dangerReason && shouldConfirm(_approvalMode, fnName, fnArgs, dangerReason)) {
+      if (dangerReason && shouldConfirm(_approvalMode, fnName, fnArgs, dangerReason) && !_localAllowlisted(fnName, fnArgs)) {
         log(`${C.yellow}${C.bold}⚠️ DANGEROUS: ${dangerReason}${C.reset}`);
         if (_confirmFn) {
-          const approved = await _confirmFn(dangerReason, fnName, fnArgs);
-          if (!approved) {
+          const decision = await _confirmFn(dangerReason, fnName, fnArgs);  // true | 'allowlist' | false
+          if (!decision) {
             log(`${C.red}🚫 Denied by user${C.reset}`);
             history.push({ role: 'tool', name: fnName, content: 'User denied this dangerous operation.' });
             continue;
           }
-          log(`${C.green}✅ Approved${C.reset}`);
+          if (decision === 'allowlist') {
+            _localAllowlist.add(_cmdSig(fnName, fnArgs));
+            log(`${C.green}✅ Approved & allowlisted for this session${C.reset}`);
+          } else {
+            log(`${C.green}✅ Approved${C.reset}`);
+          }
         } else {
           // No confirmation function available (module mode) — block by default
           log(`${C.red}🚫 Blocked (no confirmation available in module mode)${C.reset}`);
@@ -6765,17 +6828,37 @@ async function repl() {
   // ── Wire danger confirm as readline prompt ────────────────────────────
   _confirmFn = (dangerMsg, tool, args) => {
     return new Promise((resolve) => {
-      _awaitingConfirm = true;   // Freeze status bar + stall guard so they don't overwrite the prompt
+      _awaitingConfirm = true;   // Freeze status bar + stall guard + panel re-render so they don't overwrite the prompt
       stopSpinner();
       process.stdout.write('\r' + ' '.repeat(120) + '\r');  // wipe any leftover status-bar text on this line
-      console.log(`\n${C.error}${C.bold}⚠  DANGEROUS OPERATION${C.reset}`);
-      console.log(`  ${dangerMsg}`);
-      console.log(`  Tool: ${tool}`);
-      console.log(`  Args: ${JSON.stringify(args).substring(0, 200)}`);
-      rl.question(`${C.bgError}${C.butter}${C.bold} y/N ${C.reset} Run this? `, (answer) => {
-        _awaitingConfirm = false;  // Resume status bar / stall guard
+      // ── Prominent popup box above the grids so the prompt is impossible to miss ──
+      const cols = Math.min(process.stdout.columns || 100, 100);
+      const inner = Math.max(40, cols - 6);
+      const argLine = (tool === 'shell' || tool === 'exec_shell') ? (args && args.command || '') : JSON.stringify(args || {});
+      const cmdStr = String(argLine).replace(/\s+/g, ' ').trim();
+      const isSudo = /^\s*sudo\b/i.test(cmdStr);
+      const bar = (l, r) => `${C.error}${C.bold}${l}${'═'.repeat(inner)}${r}${C.reset}`;
+      console.log('\n' + bar('╔', '╗'));
+      console.log(`${C.error}${C.bold}║${C.reset} ${isSudo ? '🔑 SUDO' : '⚠  DANGEROUS'} COMMAND — APPROVAL REQUIRED${' '.repeat(Math.max(0, inner - 47))} ${C.error}${C.bold}║${C.reset}`);
+      console.log(`${C.error}${C.bold}║${C.reset} ${C.yellow}${dangerMsg}${' '.repeat(Math.max(0, inner - 1 - dangerMsg.length))}${C.error}${C.bold}║${C.reset}`);
+      console.log(`${C.error}${C.bold}║${C.reset} ${C.gray}Tool: ${tool}${' '.repeat(Math.max(0, inner - 6 - tool.length))} ${C.error}${C.bold}║${C.reset}`);
+      const cmdPreview = cmdStr.length > inner - 9 ? cmdStr.slice(0, inner - 12) + '...' : cmdStr;
+      console.log(`${C.error}${C.bold}║${C.reset} ${C.bgBase}${C.fgBase} $ ${C.reset}${C.fgHalf}${cmdPreview}${' '.repeat(Math.max(0, inner - 5 - cmdPreview.length))} ${C.error}${C.bold}║${C.reset}`);
+      console.log(bar('╚', '╝'));
+      // List of choices + password prompt for sudo
+      console.log(`${C.fgSubtle}  Choices: ${C.reset}${C.green}y${C.reset}=approve  ${C.yellow}a${C.reset}=approve & don't ask again  ${C.red}n${C.reset}=deny${isSudo ? `  ${C.cyan}(sudo) type the password to approve${C.reset}` : ''}`);
+      const promptLabel = isSudo ? `${C.bgError}${C.butter}${C.bold} 🔑 sudo ${C.reset} password / y / a / n: `
+                                 : `${C.bgError}${C.butter}${C.bold} y/N ${C.reset} (or a=allowlist): `;
+      rl.question(promptLabel, (answer) => {
+        _awaitingConfirm = false;  // Resume status bar / stall guard / panels
         _lastActivityTime = Date.now();
-        resolve(answer.toLowerCase() === 'y');
+        const a = answer.trim().toLowerCase();
+        let decision = false;
+        if (a === 'a') decision = 'allowlist';
+        else if (a === 'n' || a === '') decision = false;
+        else if (isSudo) decision = answer.trim().length > 0 ? true : false;   // any non-empty (password or y) approves
+        else decision = a === 'y';
+        resolve(decision);
         if (!answer) rl.prompt();
       });
     });

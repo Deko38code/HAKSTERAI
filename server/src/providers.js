@@ -136,6 +136,61 @@ const PROVIDERS = {
   },
 };
 
+// ── Phantom-key waterfall (merge phantom's free cloud keys into our providers) ──
+// Reads /home/ghost/.phantom-ai-config.json once (cached) and exposes groq / sambanova /
+// cerebras / gemini / openrouter / pollinations / puter-* with the phantom keys so the
+// server can rotate across them to stretch tokens.
+let _phantomKeysCache = null; let _phantomKeysMtime = 0;
+function loadPhantomKeys() {
+  try {
+    const pth = '/home/ghost/.phantom-ai-config.json';
+    const st = fs.statSync(pth);
+    if (_phantomKeysCache && st.mtimeMs === _phantomKeysMtime) return _phantomKeysCache;
+    _phantomKeysCache = JSON.parse(fs.readFileSync(pth, 'utf8'));
+    _phantomKeysMtime = st.mtimeMs;
+    return _phantomKeysCache;
+  } catch (_) { _phantomKeysCache = {}; return _phantomKeysCache; }
+}
+function _pk(name, fld) { const e = loadPhantomKeys()[name]; return e && typeof e.key === 'string' ? e.key : ''; }
+function _pmodel(name, fallback) { const e = loadPhantomKeys()[name]; return (e && e.model) || fallback; }
+
+// Add the phantom cloud providers into PROVIDERS (merge, don't overwrite existing).
+Object.assign(PROVIDERS, {
+  groq:        { name: 'Groq',        baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq', 'llama-3.3-70b-versatile'), apiKey: _pk('groq')        || process.env.GROQ_API_KEY,        apiKeyEnv: 'GROQ_API_KEY',        type: 'openai-compat' },
+  groq2:       { name: 'Groq 2',      baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq2','llama-3.1-8b-instant'),   apiKey: _pk('groq2')       || process.env.GROQ_API_KEY2,      apiKeyEnv: 'GROQ_API_KEY2',       type: 'openai-compat' },
+  sambanova:   { name: 'SambaNova',   baseURL: 'https://api.sambanova.ai/v1',                    defaultModel: _pmodel('sambanova','Meta-Llama-3.3-70B-Instruct'), apiKey: _pk('sambanova') || process.env.SAMBANOVA_API_KEY,   apiKeyEnv: 'SAMBANOVA_API_KEY',   type: 'openai-compat' },
+  cerebras:    { name: 'Cerebras',    baseURL: 'https://api.cerebras.ai/v1',                      defaultModel: _pmodel('cerebras','llama3.1-8b'),          apiKey: _pk('cerebras')    || process.env.CEREBRAS_API_KEY,    apiKeyEnv: 'CEREBRAS_API_KEY',    type: 'openai-compat' },
+  gemini:      { name: 'Google Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: _pmodel('gemini','gemini-2.5-flash'), apiKey: _pk('gemini') || process.env.GEMINI_API_KEY,  apiKeyEnv: 'GEMINI_API_KEY',  type: 'gemini' },
+  'gemini-flash': { name: 'Gemini Flash', baseURL: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-2.0-flash-lite', apiKey: _pk('gemini') || process.env.GEMINI_API_KEY, apiKeyEnv: 'GEMINI_API_KEY', type: 'gemini' },
+  pollinations:{ name: 'Pollinations', baseURL: 'https://text.pollinations.ai/openai',             defaultModel: 'openai',                                    apiKey: _pk('pollinations')|| 'free',                          apiKeyEnv: 'POLLINATIONS_API_KEY',type: 'openai-compat' },
+  'puter-sonnet': { name: 'Puter Sonnet', baseURL: 'https://api.puter.com',                         defaultModel: 'claude-sonnet-4-20250514',                 apiKey: 'free',                                              apiKeyEnv: '',                     type: 'openai-compat' },
+  'puter-4o':  { name: 'Puter GPT-4o', baseURL: 'https://api.puter.com',                            defaultModel: 'gpt-4o',                                   apiKey: 'free',                                              apiKeyEnv: '',                     type: 'openai-compat' },
+});
+
+// Waterfall order: ollama 1st (the default, free+local), then sambanova + groq (cloud-free)
+// and on down — rotates to the next on rate-limit to stretch tokens across all free keys.
+const WATERFALL_ORDER = ['ollama','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o'];
+const _rateLimited = new Map(); // provider -> until ms
+function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
+function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }
+function providerHasKey(name) {
+  const cfg = PROVIDERS[name]; if (!cfg) return false;
+  if (cfg.type === 'gemini') return !!(cfg.apiKey);
+  return !!cfg.apiKey || cfg.apiKey === 'free';
+}
+// Pick the best provider from the waterfall (skip rate-limited / keyless). Returns {provider, model}.
+function getWaterfallProvider(prefer) {
+  const order = prefer ? [prefer, ...WATERFALL_ORDER] : WATERFALL_ORDER;
+  for (const name of order) {
+    if (!PROVIDERS[name]) continue;
+    if (isProviderRateLimited(name)) continue;
+    if (!providerHasKey(name)) continue;
+    return { provider: name, model: PROVIDERS[name].defaultModel };
+  }
+  // fallback to ollama (local, keyless) — always usable
+  return { provider: 'ollama', model: PROVIDERS.ollama.defaultModel };
+}
+
 // ── Image Gen providers ────────────────────────────────────────────
 const IMAGE_PROVIDERS = {
   pollinations: {
@@ -3098,4 +3153,4 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
   }
 }
 
-module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch };
+module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER };

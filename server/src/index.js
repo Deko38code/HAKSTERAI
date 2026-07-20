@@ -17,7 +17,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys } = require('./providers');
+const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
 const stuckMonitor = require('./agent/stuckMonitor');
@@ -2075,12 +2075,23 @@ app.delete('/api/agent/allowlist/:id', (req, res) => {
 app.post('/api/agent/run', async (req, res) => {
   const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false } = req.body;
   const savedAgent = getHaksterModelConfig();
-  const requestedProvider = req.body.provider || savedAgent.provider || 'ollama';
-  const requestedModel = req.body.model || savedAgent.model;
-  const provider = fastMode ? (savedAgent.provider || requestedProvider || 'ollama') : requestedProvider;
-  const model = fastMode && (!req.body.model || req.body.model === 'gpt-oss:120b-cloud')
-    ? (savedAgent.model || requestedModel)
-    : requestedModel;
+  const requestedProvider = req.body.provider || savedAgent.provider || null;
+  const requestedModel = req.body.model || savedAgent.model || null;
+  // Waterfall: if no explicit provider/model was requested, pick from the waterfall
+  // (ollama 1st → sambanova → groq → cerebras → gemini → ...), skipping rate-limited ones
+  // so the run lands on a healthy provider and tokens stretch across all free keys.
+  let provider, model;
+  if (requestedProvider) {
+    provider = requestedProvider;
+    model = requestedModel || (PROVIDERS[provider] && PROVIDERS[provider].defaultModel);
+  } else {
+    const wf = getWaterfallProvider();          // respects rate-limit cooldowns
+    provider = wf.provider;
+    model = requestedModel || wf.model;
+  }
+  if (fastMode && (!req.body.model || req.body.model === 'gpt-oss:120b-cloud') && savedAgent.model) {
+    model = savedAgent.model;
+  }
   const thinking = fastMode ? thinkingParam === true : thinkingParam !== false;
   const effectiveApprovalMode = approvalMode || (fastMode ? 'full-auto' : undefined);
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
@@ -2096,8 +2107,13 @@ app.post('/api/agent/run', async (req, res) => {
     return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   }
 
-  const cfg = PROVIDERS[provider];
-  if (!cfg) return res.status(400).json({ error: `Unknown provider: ${provider}` });
+  let cfg = PROVIDERS[provider];
+  if (!cfg) {
+    // Unknown provider — fast-bypass to the waterfall rather than 400.
+    const _wf = getWaterfallProvider();
+    provider = _wf.provider; cfg = PROVIDERS[provider]; model = _wf.model;
+    if (!cfg) return res.status(400).json({ error: `Unknown provider and no waterfall fallback` });
+  }
 
   // Prefer real project roots when the request names one. Fall back to the
   // isolated per-session workspace only for generic scratch work.
@@ -2112,7 +2128,31 @@ app.post('/api/agent/run', async (req, res) => {
     : fastMode
     ? Math.min(Math.max(8, configuredMaxTurns), 24)
     : Math.max(25, configuredMaxTurns);
-  const agentModel = model || cfg.defaultModel;
+  let agentModel = model || cfg.defaultModel;
+  let client = null;
+  let isAnthropicAgentProvider = false;
+  // (re)build the model client for the current provider. Called on startup and on
+  // fast-bypass rotations (429 / 5xx / rate-limit) so the same turn retries on the
+  // next waterfall provider instead of failing out.
+  function buildAgentClient() {
+    cfg = PROVIDERS[provider];
+    if (!cfg) return false;
+    agentModel = model || cfg.defaultModel;
+    isAnthropicAgentProvider = cfg.type === 'anthropic' || cfg.type === 'claude-proxy';
+    if (isAnthropicAgentProvider) {
+      client = new AnthropicClient({
+        apiKey: cfg.type === 'claude-proxy' ? (process.env.ANTHROPIC_API_KEY || 'proxy') : process.env.ANTHROPIC_API_KEY,
+        ...(cfg.type === 'claude-proxy' ? { baseURL: cfg.baseURL } : {}),
+      });
+    } else if (cfg.type === 'openai-compat') {
+      client = new OpenAIClient({ apiKey: cfg.apiKey || 'ollama', baseURL: `${cfg.baseURL.replace(/\/$/, '')}/v1` });
+    } else {
+      client = new OpenAIClient({ apiKey: cfg.apiKey, baseURL: cfg.baseURL });
+    }
+    return true;
+  }
+  buildAgentClient();
+  let _waterfallTried = new Set([provider]);  // providers attempted this run (for fast-bypass cap)
 
   // ── Session-start activity logging ───────────────────
   try {
@@ -2274,25 +2314,7 @@ app.post('/api/agent/run', async (req, res) => {
     return;
   }
 
-  // Build the OpenAI-compatible client for the chosen provider
-  let client;
-  const isAnthropicAgentProvider = cfg.type === 'anthropic' || cfg.type === 'claude-proxy';
-  if (isAnthropicAgentProvider) {
-    client = new AnthropicClient({
-      apiKey: cfg.type === 'claude-proxy' ? (process.env.ANTHROPIC_API_KEY || 'proxy') : process.env.ANTHROPIC_API_KEY,
-      ...(cfg.type === 'claude-proxy' ? { baseURL: cfg.baseURL } : {}),
-    });
-  } else if (cfg.type === 'openai-compat') {
-    client = new OpenAIClient({
-      apiKey: cfg.apiKey || 'ollama',
-      baseURL: `${cfg.baseURL.replace(/\/$/, '')}/v1`,
-    });
-  } else {
-    client = new OpenAIClient({
-      apiKey: cfg.apiKey,
-      baseURL: cfg.baseURL,
-    });
-  }
+  // (client built above by buildAgentClient; rebuilt on waterfall rotations)
 
   function anthropicToolsFromAgentTools(tools) {
     return tools.map(tool => ({
@@ -2860,6 +2882,30 @@ ${dirListing}
         clearTimeout(streamTimeout);
         if (streamErr.name === 'AbortError') {
           res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (300s). Try again.' })}\n\n`);
+          break;
+        }
+        // ── FAST BYPASS: on 429 / rate-limit / quota / 5xx, rotate to the next
+        //    waterfall provider and RETRY THIS TURN immediately (don't fail the run).
+        const _em = String(streamErr && (streamErr.message || streamErr.status || streamErr) || '').toLowerCase();
+        const _bypassable = /429|rate.?limit|too many requests|quota|insufficient|balance|credit|exceeded|50[0-9]|service unavailable|internal server error|bad gateway|gateway timeout|upstream|econnreset|socket hang up/.test(_em);
+        if (_bypassable) {
+          markProviderRateLimited(provider, 120000);
+          // find the next waterfall provider we haven't tried yet this run
+          let _next = null;
+          for (const _n of [provider, ...WATERFALL_ORDER]) {
+            if (_waterfallTried.has(_n) || isProviderRateLimited(_n)) continue;
+            if (!PROVIDERS[_n]) continue;
+            _next = _n; break;
+          }
+          if (_next) {
+            _waterfallTried.add(_next);
+            res.write(`data: ${JSON.stringify({ type: 'provider_rotate', from: provider, to: _next, reason: 'rate-limit/5xx fast bypass' })}\n\n`);
+            provider = _next;
+            if (!buildAgentClient()) { res.write(`data: ${JSON.stringify({ type: 'error', message: `Provider ${provider} unavailable — cannot build client.` })}\n\n`); break; }
+            turn--;            // retry the SAME turn on the new provider
+            continue;          // fast-bypass: immediately retry
+          }
+          res.write(`data: ${JSON.stringify({ type: 'error', message: `All waterfall providers rate-limited/unavailable (last: ${provider}).` })}\n\n`);
           break;
         }
         throw streamErr;
