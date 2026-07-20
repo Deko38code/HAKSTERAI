@@ -86,6 +86,14 @@ You should behave like a senior local coding agent:
 ## FULL MACHINE TOOL ACCESS
 You have exec_shell and it runs ANY command on Ghost's real machine as Ghost — every installed build, data, and dev tool is yours. Use what's listed in the MACHINE CONTEXT below (gcc/g++/clang/make/cmake/ninja, node/npm/python3/pip, cargo/go, docker, jq, ffmpeg, sqlite3, nmap, etc.). If a tool isn't listed, check with 'command -v <tool>' or 'which <tool>' before assuming it's missing. Install missing tools with apt/pip/npm only when the user asks.
 
+## REQUEST ECONOMY (you have a limited request budget per session)
+Every model turn = one request. Treat requests as scarce: do MORE per turn, use FEWER turns.
+- Batch ALL independent tool calls in ONE turn — emit multiple tool_calls together (the loop runs them in parallel) instead of one tool per turn.
+- Chain shell steps with && into a single exec_shell call (inspect → edit → node -c → curl health) so one turn does the whole change + verification.
+- Don't re-read files you just wrote. Don't narrate then act in separate turns — act in the same turn you decide.
+- Prefer the cheapest path: one read + one chained edit/verify turn beats 5 turns of listing/reading.
+Goal: finish a task in as few turns as possible (ideally <8). This keeps sessions alive longer.
+
 ## ONE-SHOT PATCHING (operate like a senior shell operator)
 - Make file edits with a SINGLE one-shot command, not a tool call per line. Prefer, in order:
   1. \`sed -i\` for line/regex replacements: \`sed -i 's|old|new|g' path\` (use \`|\n\` or multiple \`-e\` for multi-line).
@@ -3734,19 +3742,34 @@ const toolExecutors = {
   },
 
   async firecrawl({ action = 'scrape', url, query, limit, formats }) {
-    const key = process.env.FIRECRAWL_API_KEY;
-    if (!key) return 'Error: FIRECRAWL_API_KEY not configured (set it in .env).';
+    // Rotating firecrawl keys: FIRECRAWL_API_KEY + FIRECRAWL_API_KEY_1..4 (and beyond).
+    // On 401/403/429/5xx we fall through to the next key so one rate-limited key
+    // doesn't kill the call. Falls back to providers.firecrawlScrape/firecrawlSearch
+    // (which also rotate) when available.
+    const _fcKeys = [];
+    if (process.env.FIRECRAWL_API_KEY) _fcKeys.push(process.env.FIRECRAWL_API_KEY);
+    for (let i = 1; i <= 8; i++) { const k = process.env[`FIRECRAWL_API_KEY_${i}`] || process.env[`FIRECRAWL_API_KEY${i}`]; if (k) _fcKeys.push(k); }
+    const _fcUnique = [...new Set(_fcKeys)].filter(k => k && k.trim().length > 10);
+    if (_fcUnique.length === 0) return 'Error: FIRECRAWL_API_KEY not configured (set FIRECRAWL_API_KEY or FIRECRAWL_API_KEY_1..4 in .env).';
+    let _fcIdx = 0;
     const base = process.env.FIRECRAWL_BASE_URL || 'https://api.firecrawl.dev/v1';
-    const hdrs = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
     const fetchJson = async (path, body, timeoutMs = 30000) => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), timeoutMs);
-      try {
-        const r = await fetch(base + path, { method: 'POST', headers: hdrs, body: JSON.stringify(body), signal: ctrl.signal });
-        const txt = await r.text();
-        let data; try { data = JSON.parse(txt); } catch (_) { data = { raw: txt }; }
-        return { ok: r.ok, status: r.status, data };
-      } finally { clearTimeout(t); }
+      // try each key until one works (rotate on auth/rate-limit/5xx)
+      for (let attempt = 0; attempt < _fcUnique.length; attempt++) {
+        const key = _fcUnique[(_fcIdx + attempt) % _fcUnique.length];
+        const hdrs = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeoutMs);
+        try {
+          const r = await fetch(base + path, { method: 'POST', headers: hdrs, body: JSON.stringify(body), signal: ctrl.signal });
+          const txt = await r.text();
+          let data; try { data = JSON.parse(txt); } catch (_) { data = { raw: txt }; }
+          if ([401, 403, 429].includes(r.status) || r.status >= 500) { _fcIdx++; continue; }  // rotate to next key
+          return { ok: r.ok, status: r.status, data };
+        } catch (e) { _fcIdx++; continue; }
+        finally { clearTimeout(t); }
+      }
+      return { ok: false, status: 0, data: { error: 'all firecrawl keys failed (rate-limited/unauthorized)' } };
     };
     const trunc = (str, n) => str.length > n ? str.slice(0, n) + '\n... (truncated)' : str;
     try {

@@ -11,7 +11,10 @@ const path = require('path');
 const { exec } = require('child_process');
 const http = require('http');
 const readline = require('readline');
-const { chat } = require('./providers');
+const { chat, firecrawlScrape } = require('./providers');
+let _autolearn = null, _memoryEngine = null;
+try { _autolearn = require('./agent/autolearn'); } catch (_) {}
+try { _memoryEngine = require('./agent/memory-engine'); } catch (_) {}
 
 const ENV_ROOT = path.join(__dirname, '..');
 const SERVER_PORT = parseInt(process.env.PORT || '3579', 10);
@@ -264,11 +267,12 @@ function initBots() {
   startCoderReport();
   startReconReport();
   startDebuggerReport();
+  startDocsScraper();
 
   // ── Immediate startup broadcast: every bot announces its job so you see all 6 are live ──
   const JOBS = {
     TELEGRAM_BOT_TOKEN_1: '🤖 command bot online — send me a task',
-    TELEGRAM_BOT_TOKEN_2: '💻 coder bot online — reports git/build status every 30m',
+    TELEGRAM_BOT_TOKEN_2: '💻 coder bot online — git/build status every 30m + daily docs scrape',
     TELEGRAM_BOT_TOKEN_3: '🔍 recon bot online — wifi + port + iface sweep every 30m',
     TELEGRAM_BOT_TOKEN_4: '🐞 debugger bot online — scans crashed services + error logs every 15m',
     TELEGRAM_BOT_TOKEN_5: '🛡 uptime watchdog online — uptime checks every 15m',
@@ -468,6 +472,69 @@ function startDebuggerReport() {
     const down = !/all online/.test(pm2 || '');
     await sendToRole('TELEGRAM_BOT_TOKEN_4', `🐞 *Debugger sweep* ${down ? '⚠ issues' : '✓ clean'}\n\n*Services:*\n\`\`\`\n${(pm2 || '').slice(0, 600)}\n\`\`\`\n*Recent errors:*\n\`\`\`\n${(errs || '').slice(0, 1000)}\n\`\`\``, { parse_mode: 'Markdown' });
   }, MS);
+}
+
+// ── Docs scraper: daily firecrawl-scrape of codex/hermes/crush/kiro/claude docs → md cache + memory + consolidate ──
+const DOC_SOURCES = [
+  { name: 'codex',  url: 'https://developers.openai.com/codex/cli' },
+  { name: 'codex-quickstart', url: 'https://developers.openai.com/codex/cli/quickstart' },
+  { name: 'claude', url: 'https://docs.anthropic.com/en/docs/claude-code/overview' },
+  { name: 'claude-cli-usage', url: 'https://docs.anthropic.com/en/docs/claude-code/cli-usage' },
+  { name: 'kiro',   url: 'https://kiro.dev/docs/cli' },
+  { name: 'kiro-custom-agents', url: 'https://kiro.dev/docs/cli/custom-agents' },
+  { name: 'crush',  url: 'https://docs.crush.ai/' },
+  { name: 'hermes', url: 'https://docs.nousresearch.com/' },
+];
+function startDocsScraper() {
+  const MS = 24 * 60 * 60 * 1000;   // daily
+  const cacheDir = path.join(ENV_ROOT, '.firecrawl', 'cli-skills', '.firecrawl');
+  const fsSync = fs, pth = path;
+  async function scrapeAndIngest() {
+    if (!firecrawlScrape) { await sendToRole('TELEGRAM_BOT_TOKEN_2', '📄 docs scraper: firecrawl not available'); return; }
+    try { fsSync.mkdirSync(cacheDir, { recursive: true }); } catch (_) {}
+    const summary = [];
+    for (const src of DOC_SOURCES) {
+      try {
+        const md = await firecrawlScrape(src.url);
+        const ok = md && !/^Error/i.test(String(md)) && String(md).length > 200;
+        if (ok) {
+          const file = pth.join(cacheDir, `daily-${src.name}.md`);
+          fsSync.writeFileSync(file, `<!-- daily scrape: ${src.url} — ${new Date().toISOString()} -->\n${String(md).slice(0, 60000)}\n`);
+          summary.push(`✓ ${src.name} (${Math.round(String(md).length / 1024)}KB)`);
+          // add to memory so the agent consolidates the freshest docs
+          try {
+            if (_autolearn && _autolearn.addRawMemory) _autolearn.addRawMemory({
+              id: `doc_${src.name}_${Date.now()}`, timestamp: new Date().toISOString(),
+              type: 'pattern', tags: ['docs', src.name, 'daily-scrape'],
+              observation: `Daily doc scrape: ${src.name} (${src.url}). Cached to ${file}.`,
+              confidence: 0.7,
+            }, ENV_ROOT);
+          } catch (_) {}
+          try {
+            if (_memoryEngine && _memoryEngine.addMemory) _memoryEngine.addMemory({
+              type: 'observation',
+              observation: `Daily docs scrape refreshed ${src.name} (${src.url}) → ${file}`,
+              context: { source: 'docs-scraper', tool: src.name },
+              tags: ['docs', src.name, 'daily-scrape'],
+              timestamp: new Date().toISOString(),
+            }, ENV_ROOT);
+          } catch (_) {}
+        } else {
+          summary.push(`✗ ${src.name} (scrape failed)`);
+        }
+      } catch (e) {
+        summary.push(`✗ ${src.name} (${String(e.message || e).slice(0, 60)})`);
+      }
+    }
+    // consolidate memory after the batch
+    try { if (_memoryEngine && _memoryEngine.consolidate) _memoryEngine.consolidate(ENV_ROOT); } catch (_) {}
+    try { if (_autolearn && _autolearn.consolidateMemories) _autolearn.consolidateMemories(ENV_ROOT); } catch (_) {}
+    await sendToRole('TELEGRAM_BOT_TOKEN_2',
+      `📄 *Daily docs scrape + memory*\nScraped ${DOC_SOURCES.length} sources:\n${summary.join('\n')}\n\nCached to .firecrawl/cli-skills/.firecrawl/daily-*.md and ingested into memory (consolidated).`,
+      { parse_mode: 'Markdown' });
+  }
+  setTimeout(scrapeAndIngest, 90000);   // first run ~90s after startup
+  setInterval(scrapeAndIngest, MS);     // then daily
 }
 
 function startWatchdog() {

@@ -23,54 +23,63 @@
     <!-- Install cards -->
     <div class="space-y-4 mb-12">
 
-      <!-- curl install -->
+      <!-- 1. clone -->
       <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
         <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
-          <span class="text-xs text-[#64748b] font-mono">macOS / Linux</span>
-          <button
-            class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none"
-            data-copy="curl -fsSL https://cli.hakster.ai/install | bash"
-          >
-            copy
-          </button>
+          <span class="text-xs text-[#64748b] font-mono">1 · clone</span>
+          <button class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none" data-copy="git clone https://github.com/Deko38code/haksterAi.git && cd haksterAi">copy</button>
         </div>
         <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
           <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
-          <span class="text-[#e2e8f0] whitespace-nowrap">curl -fsSL https://cli.hakster.ai/install | bash</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">git clone https://github.com/Deko38code/haksterAi.git && cd haksterAi</span>
         </div>
       </div>
 
-      <!-- npm install -->
+      <!-- 2. install deps + build -->
       <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
         <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
-          <span class="text-xs text-[#64748b] font-mono">npm (global)</span>
-          <button
-            class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none"
-            data-copy="npm install -g hakster-ai"
-          >
-            copy
-          </button>
+          <span class="text-xs text-[#64748b] font-mono">2 · install + build</span>
+          <button class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none" data-copy="npm install && npm run build">copy</button>
         </div>
-        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm">
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
           <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
-          <span class="text-[#e2e8f0]">npm install -g hakster-ai</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">npm install && npm run build</span>
         </div>
       </div>
 
-      <!-- winget -->
+      <!-- 3. start the server (pm2) -->
       <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
         <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
-          <span class="text-xs text-[#64748b] font-mono">Windows (winget)</span>
-          <button
-            class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none"
-            data-copy="winget install haksterAi"
-          >
-            copy
-          </button>
+          <span class="text-xs text-[#64748b] font-mono">3 · start server</span>
+          <button class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none" data-copy="pm2 start 'npm run server' --name haksterAi">copy</button>
         </div>
-        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm">
-          <span class="text-[#7c3aed] font-bold flex-shrink-0">❯</span>
-          <span class="text-[#e2e8f0]">winget install haksterAi</span>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">pm2 start 'npm run server' --name haksterAi</span>
+        </div>
+      </div>
+
+      <!-- 4. init + run the CLI -->
+      <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
+          <span class="text-xs text-[#64748b] font-mono">4 · init + run</span>
+          <button class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none" data-copy="node cli/index.js init && node cli/index.js chat">copy</button>
+        </div>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">node cli/index.js init && node cli/index.js chat</span>
+        </div>
+      </div>
+
+      <!-- global install (optional) -->
+      <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
+          <span class="text-xs text-[#64748b] font-mono">optional · global `haksterai`</span>
+          <button class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none" data-copy="npm install -g .">copy</button>
+        </div>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">npm install -g .  # puts `haksterai` on your PATH</span>
         </div>
       </div>
 

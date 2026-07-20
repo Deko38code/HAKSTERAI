@@ -132,7 +132,7 @@ function getDangerPassword() {
 // ── Default AI provider + model (config first, env override, sensible fallback) ──
 const _cfgDefaults = (() => { try { return loadConfig(); } catch { return {}; } })();
 const DEFAULT_AI_PROVIDER = process.env.HAKSTER_PROVIDER || process.env.DEFAULT_PROVIDER || _cfgDefaults.provider || 'ollama';
-const DEFAULT_MODEL = process.env.HAKSTER_MODEL || _cfgDefaults.model || 'glm-5.2:cloud';
+const DEFAULT_MODEL = process.env.HAKSTER_MODEL || _cfgDefaults.model || 'gpt-oss:120b-cloud';
 
 // ── HTTP helper (preserved with timeoutMs support) ───────────────────────
 function fetchUrl(url, { method = 'GET', headers = {}, body = null, timeoutMs = 0 } = {}) {

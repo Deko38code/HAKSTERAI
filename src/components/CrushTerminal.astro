@@ -349,9 +349,13 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
       // the viewport locked to wherever the cursor ended up.
       try {
         const buf = pane.term.buffer.active;
-        const bottom = buf.baseY + pane.term.rows;
-        // If cursor is near/at the bottom of the viewport, keep it pinned
-        if (buf.cursorY >= pane.term.rows - 3) {
+        // Pin the viewport to the latest output so the agent's working output
+        // is always visible up front. If the user has scrolled UP to read history
+        // (cursor well above the bottom), don't yank them down — but the moment
+        // output resumes near the bottom, re-pin. This keeps streaming tool/shell
+        // output from hiding below the fold while the agent works.
+        const nearBottom = buf.cursorY >= pane.term.rows - 3;
+        if (nearBottom || pane._agentActive) {
           pane.term.scrollToBottom();
         }
       } catch {}
