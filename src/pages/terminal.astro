@@ -912,6 +912,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       const dangerDiffWrap = document.getElementById('danger-diff-wrap');
       const dangerDiffEl = document.getElementById('danger-diff');
       let _dangerSeenSig = null;
+      let _dangerCommand = '';
 
       function sendPtyInput(data) {
         try {
@@ -932,6 +933,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
       function showDangerOverlay({ kind, reason, command, diff }) {
         if (!dangerOverlay) return;
+        _dangerCommand = command || '';
         dangerKindEl.textContent = kind || 'danger';
         dangerReasonEl.textContent = reason || 'The agent wants to run a risky command.';
         dangerCmdEl.textContent = command || '(unknown)';
@@ -970,16 +972,18 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         });
       }
 
-      document.getElementById('danger-approve')?.addEventListener('click', () => {
+      function dangerApprove(scope) {
+        // scope: 'once' | 'session' | 'permanent'
+        if (scope !== 'once' && _dangerCommand) {
+          fetch('/api/agent/allowlist', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: _dangerCommand, permanent: scope === 'permanent' }) }).catch(() => {});
+        }
         sendPtyInput('y\r'); hideDangerOverlay();
-      });
-      document.getElementById('danger-allowlist')?.addEventListener('click', () => {
-        // approve + tell the agent to remember it (the server allowlists on its side too)
-        sendPtyInput('y\r'); hideDangerOverlay();
-      });
-      document.getElementById('danger-deny')?.addEventListener('click', () => {
-        sendPtyInput('n\r'); hideDangerOverlay();
-      });
+      }
+      document.getElementById('danger-once')?.addEventListener('click', () => dangerApprove('once'));
+      document.getElementById('danger-session')?.addEventListener('click', () => dangerApprove('session'));
+      document.getElementById('danger-allowlist')?.addEventListener('click', () => dangerApprove('permanent'));
+      document.getElementById('danger-deny')?.addEventListener('click', () => { sendPtyInput('n\r'); hideDangerOverlay(); });
       document.addEventListener('keydown', (e) => {
         if (!dangerOverlay || dangerOverlay.style.display === 'none') return;
         if (e.key === 'y' || e.key === 'Y') { sendPtyInput('y\r'); hideDangerOverlay(); }
@@ -1146,9 +1150,10 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           </div>
         </div>
         <div style="display:flex;gap:10px;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);background:#0e0e16;">
-          <button id="danger-approve" style="flex:1;padding:10px 14px;border:0;border-radius:8px;background:#ff3b3b;color:#fff;font-weight:700;cursor:pointer;">Approve (y)</button>
-          <button id="danger-allowlist" style="flex:1;padding:10px 14px;border:0;border-radius:8px;background:#3b3b4a;color:#e7e7f0;font-weight:600;cursor:pointer;">Approve &amp; don't ask again</button>
-          <button id="danger-deny" style="flex:1;padding:10px 14px;border:0;border-radius:8px;background:#23232e;color:#c7c7d6;font-weight:600;cursor:pointer;">Deny (n)</button>
+          <button id="danger-once" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#ff3b3b;color:#fff;font-weight:700;cursor:pointer;">One time (y)</button>
+          <button id="danger-session" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#b45309;color:#fff;font-weight:600;cursor:pointer;">This session</button>
+          <button id="danger-allowlist" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;">Allow list</button>
+          <button id="danger-deny" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#23232e;color:#c7c7d6;font-weight:600;cursor:pointer;">Deny (n)</button>
         </div>
       </div>
     </div>

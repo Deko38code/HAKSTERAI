@@ -2041,6 +2041,27 @@ app.post('/api/agent/allow', (req, res) => {
 });
 
 // ── Interactive confirmation: client POSTs the user's y/N answer here ──
+// ── Allowlist a command permanently or for the session (used by the web danger popup) ──
+app.post('/api/agent/allowlist', (req, res) => {
+  try {
+    const { command, permanent, sessionId } = req.body || {};
+    const cmd = String(command || '').trim();
+    if (!cmd) return res.status(400).json({ error: 'command required' });
+    const sid = sessionId || 'default';
+    if (!sessionAllowedCommands.has(sid)) sessionAllowedCommands.set(sid, new Set());
+    sessionAllowedCommands.get(sid).add(cmd);
+    let persisted = false;
+    if (permanent !== false) {
+      try {
+        const db = getDb();
+        db.prepare('INSERT OR IGNORE INTO command_allowlist (command, source, session_id) VALUES (?, ?, ?)').run(cmd, 'user', permanent === true ? 'default' : sid);
+        persisted = true;
+      } catch (_) {}
+    }
+    res.json({ ok: true, command: cmd, permanent: permanent !== false, persisted, scope: permanent === false ? 'session' : 'permanent' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/agent/confirm', (req, res) => {
   const { sessionId, toolCallId, approved, command, permanent } = req.body || {};
   const sid = sessionId || 'default';
