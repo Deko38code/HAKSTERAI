@@ -107,12 +107,12 @@ async function safeSendMarkdown(bot, chatId, text) {
 
 
 const ROLES = {
-  TELEGRAM_BOT_TOKEN_1: { name: 'haksterAi command', username: null, bot: null, chatIds: new Set() },
-  TELEGRAM_BOT_TOKEN_2: { name: 'deploy/status', username: null, bot: null, chatIds: new Set() },
-  TELEGRAM_BOT_TOKEN_3: { name: 'recon/pentest', username: null, bot: null, chatIds: new Set() },
-  TELEGRAM_BOT_TOKEN_4: { name: 'personal companion', username: null, bot: null, chatIds: new Set() },
-  TELEGRAM_BOT_TOKEN_5: { name: 'uptime watchdog', username: null, bot: null, chatIds: new Set() },
-  TELEGRAM_BOT_TOKEN_6: { name: 'system health', username: null, bot: null, chatIds: new Set() },
+  TELEGRAM_BOT_TOKEN_1: { name: 'command',      job: 'main agent (on-demand)',         username: null, bot: null, chatIds: new Set() },
+  TELEGRAM_BOT_TOKEN_2: { name: 'coder',        job: 'code/build/git status reporter', username: null, bot: null, chatIds: new Set() },
+  TELEGRAM_BOT_TOKEN_3: { name: 'recon',        job: 'wifi + port + recon scanner',    username: null, bot: null, chatIds: new Set() },
+  TELEGRAM_BOT_TOKEN_4: { name: 'debugger',     job: 'error-log / crashed-service hunter', username: null, bot: null, chatIds: new Set() },
+  TELEGRAM_BOT_TOKEN_5: { name: 'uptime watchdog', job: 'uptime monitor',              username: null, bot: null, chatIds: new Set() },
+  TELEGRAM_BOT_TOKEN_6: { name: 'system health',   job: 'system health reporter',       username: null, bot: null, chatIds: new Set() },
 };
 
 const CHAT_IDS_FILE = path.join(ENV_ROOT, 'data', 'telegram_chat_ids.json');
@@ -126,6 +126,16 @@ function loadChatIds() {
     }
   } catch {
     // no file yet
+  }
+  // Seed EVERY bot with the owner chat so they all have a place to send
+  // (otherwise role bots with no /start say "no known chats" and never fire).
+  const owner = process.env.TELEGRAM_OWNER_CHAT ? Number(process.env.TELEGRAM_OWNER_CHAT) : null;
+  if (owner) {
+    let added = false;
+    for (const key of Object.keys(ROLES)) {
+      if (!ROLES[key].chatIds.has(owner)) { ROLES[key].chatIds.add(owner); added = true; }
+    }
+    if (added) saveChatIds();
   }
 }
 
@@ -251,6 +261,24 @@ function initBots() {
 
   startWatchdog();
   startHealthReporter();
+  startCoderReport();
+  startReconReport();
+  startDebuggerReport();
+
+  // ── Immediate startup broadcast: every bot announces its job so you see all 6 are live ──
+  const JOBS = {
+    TELEGRAM_BOT_TOKEN_1: '🤖 command bot online — send me a task',
+    TELEGRAM_BOT_TOKEN_2: '💻 coder bot online — reports git/build status every 30m',
+    TELEGRAM_BOT_TOKEN_3: '🔍 recon bot online — wifi + port + iface sweep every 30m',
+    TELEGRAM_BOT_TOKEN_4: '🐞 debugger bot online — scans crashed services + error logs every 15m',
+    TELEGRAM_BOT_TOKEN_5: '🛡 uptime watchdog online — uptime checks every 15m',
+    TELEGRAM_BOT_TOKEN_6: '🏥 system health bot online — health report every 30m',
+  };
+  setTimeout(() => {
+    for (const [key, msg] of Object.entries(JOBS)) {
+      sendToRole(key, msg).catch(() => {});
+    }
+  }, 5000);
 }
 
 async function handleMessage(roleKey, msg) {
@@ -406,6 +434,40 @@ async function runSystemHealth() {
   if (memInfo) report += `\n*Memory:*\n\`\`\`\n${memInfo}\n\`\`\``;
   if (cpuInfo) report += `\n*CPU:*\n\`\`\`\n${cpuInfo}\n\`\`\``;
   return report;
+}
+
+// ── Coder bot: periodic code/build/git status of the repo ──
+function startCoderReport() {
+  const MS = 30 * 60 * 1000;
+  setInterval(async () => {
+    const root = ENV_ROOT;
+    const git = await shellExec(`cd ${root} && git status -s 2>/dev/null | head -20 && echo "---" && git log --oneline -3 2>/dev/null`);
+    const lint = await shellExec(`cd ${root} && node -c server/src/agent/index.js 2>&1 | head -5`);
+    const dirty = (git || '').split('\n').filter(l => l && !l.startsWith('---') && !l.match(/^[0-9a-f]{7} /)).length;
+    await sendToRole('TELEGRAM_BOT_TOKEN_2', `💻 *Coder report*\n${dirty} dirty file(s)\n\n\`\`\`\n${(git || '').slice(0, 1200)}\n\`\`\``, { parse_mode: 'Markdown' });
+  }, MS);
+}
+
+// ── Recon bot: periodic wifi + listening-port + local recon sweep ──
+function startReconReport() {
+  const MS = 30 * 60 * 1000;
+  setInterval(async () => {
+    const wifi = await shellExec(`(command -v nmcli >/dev/null && nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | head -12) || (command -v iwlist >/dev/null && iwlist wlan0 scan 2>/dev/null | grep -E 'ESSID|Quality' | head -20) || echo 'no wifi tools'`);
+    const ports = await shellExec(`ss -tlnp 2>/dev/null | grep LISTEN | awk '{print $4}' | sort -u | head -15`);
+    const ifaces = await shellExec(`ip -br addr 2>/dev/null | head -8`);
+    await sendToRole('TELEGRAM_BOT_TOKEN_3', `🔍 *Recon sweep*\n\n*WiFi:*\n\`\`\`\n${(wifi || '').slice(0, 800)}\n\`\`\`\n*Listening:*\n\`\`\`\n${(ports || '').slice(0, 400)}\n\`\`\`\n*Ifaces:*\n\`\`\`\n${(ifaces || '').slice(0, 400)}\n\`\`\``, { parse_mode: 'Markdown' });
+  }, MS);
+}
+
+// ── Debugger bot: hunt for crashed services + recent error logs ──
+function startDebuggerReport() {
+  const MS = 15 * 60 * 1000;
+  setInterval(async () => {
+    const pm2 = await shellExec(`pm2 jlist 2>/dev/null | node -e 'let a=[];try{a=JSON.parse(require("fs").readFileSync(0,"utf8"))}catch{};console.log(a.filter(p=>p.pm2_env&&p.pm2_env.status!=="online").map(p=>p.name+":"+p.pm2_env.status).join("\n")||"all online")' 2>/dev/null`);
+    const errs = await shellExec(`grep -iE 'error|fatal|unhandled|crash' /home/ghost/haksterAi/server/logs/*.log 2>/dev/null | tail -8 || (pm2 logs haksterAi --nostream --lines 50 --err 2>/dev/null | grep -iE 'error|fatal' | tail -8) || echo 'no recent errors'`);
+    const down = !/all online/.test(pm2 || '');
+    await sendToRole('TELEGRAM_BOT_TOKEN_4', `🐞 *Debugger sweep* ${down ? '⚠ issues' : '✓ clean'}\n\n*Services:*\n\`\`\`\n${(pm2 || '').slice(0, 600)}\n\`\`\`\n*Recent errors:*\n\`\`\`\n${(errs || '').slice(0, 1000)}\n\`\`\``, { parse_mode: 'Markdown' });
+  }, MS);
 }
 
 function startWatchdog() {

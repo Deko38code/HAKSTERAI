@@ -5366,10 +5366,15 @@ const LOW_TOKEN_CONTEXT_WINDOW = 16384;
 const LOW_TOKEN_MIN_MESSAGES = 6;
 const LOW_TOKEN_MAX_MESSAGES = 30;
 
-const MAX_CONTEXT_CHARS = 50000;  // proactive compact threshold (leave headroom)
-const ABSOLUTE_CONTEXT_CHARS = 70000; // hard ceiling — matches server/index.js
-const CONTEXT_WINDOW = 131072;    // gpt-oss:120b-cloud context window (for % display)
-const MIN_MESSAGES_TO_KEEP = 10;  // Keep last 5 exchanges (10 messages)
+// ── Auto-compact calibration (not too fast, not too slow) ──
+// Reference the model's context window. ~4 chars/token is a safe estimate for
+// mixed code/prose. Proactive compact at ~70% of the window (leaves real headroom
+// but doesn't nuke context early), hard ceiling at ~88% (prevents overflow without
+// waiting until the model errors). Tunable via env.
+const CONTEXT_WINDOW = parseInt(process.env.HAKSTER_CONTEXT_WINDOW || '131072', 10) || 131072;
+const MAX_CONTEXT_CHARS = parseInt(process.env.HAKSTER_COMPACT_CHARS || String(Math.floor(CONTEXT_WINDOW * 4 * 0.70)), 10) || Math.floor(CONTEXT_WINDOW * 4 * 0.70);   // proactive ~70%
+const ABSOLUTE_CONTEXT_CHARS = parseInt(process.env.HAKSTER_COMPACT_CEILING || String(Math.floor(CONTEXT_WINDOW * 4 * 0.88)), 10) || Math.floor(CONTEXT_WINDOW * 4 * 0.88); // hard ~88%
+const MIN_MESSAGES_TO_KEEP = 12;  // Keep last ~6 exchanges (12 messages)
 
 function estimateChars(history) {
   return history.reduce((sum, m) => sum + (m.content?.length || 0), 0);
@@ -5554,7 +5559,7 @@ function compactHistory(history, lowToken = false) {
 
   const ctxMax = lowToken ? LOW_TOKEN_MAX_CONTEXT_CHARS : MAX_CONTEXT_CHARS;
   const ctxAbs = lowToken ? LOW_TOKEN_ABSOLUTE_CONTEXT_CHARS : ABSOLUTE_CONTEXT_CHARS;
-  const maxMsgs = lowToken ? LOW_TOKEN_MAX_MESSAGES : 60;
+  const maxMsgs = lowToken ? LOW_TOKEN_MAX_MESSAGES : 140;  // char-based compact is the primary driver; count cap is a safety net
   const minMsgs = lowToken ? LOW_TOKEN_MIN_MESSAGES : MIN_MESSAGES_TO_KEEP;
   const msgStartLimit = lowToken ? 300 : 1000;
   const msgFloor = lowToken ? 60 : 100;
@@ -5822,7 +5827,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
             }
           }
           // Trim oldest non-system messages if still too large
-          while (history.length > MIN_MESSAGES_TO_KEEP + 1 && estimateChars(history) > MAX_CONTEXT_CHARS * 0.5) {
+          while (history.length > MIN_MESSAGES_TO_KEEP + 1 && estimateChars(history) > ABSOLUTE_CONTEXT_CHARS) {
             // Remove the oldest non-system message (index 1)
             history.splice(1, 1);
           }
