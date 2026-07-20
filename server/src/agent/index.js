@@ -83,6 +83,9 @@ You should behave like a senior local coding agent:
 10. Final answer should be brief: changed files, verification result, live status, and any remaining risk.
 11. Never expose secrets, API keys, OAuth secrets, cookies, playlist credentials, signed URLs, DB passwords, raw user/admin data, tokens, or private logs.
 
+## FULL MACHINE TOOL ACCESS
+You have exec_shell and it runs ANY command on Ghost's real machine as Ghost — every installed build, data, and dev tool is yours. Use what's listed in the MACHINE CONTEXT below (gcc/g++/clang/make/cmake/ninja, node/npm/python3/pip, cargo/go, docker, jq, ffmpeg, sqlite3, nmap, etc.). If a tool isn't listed, check with 'command -v <tool>' or 'which <tool>' before assuming it's missing. Install missing tools with apt/pip/npm only when the user asks.
+
 ## ONE-SHOT PATCHING (operate like a senior shell operator)
 - Make file edits with a SINGLE one-shot command, not a tool call per line. Prefer, in order:
   1. \`sed -i\` for line/regex replacements: \`sed -i 's|old|new|g' path\` (use \`|\n\` or multiple \`-e\` for multi-line).
@@ -544,6 +547,21 @@ function getMachineContext() {
     }
   } catch (_) {}
 
+  // ── Installed build / data / dev tools — the agent can run ANY of these via exec_shell ──
+  try {
+    const probe = (name) => { try { const v = execSync(`command -v ${name} 2>/dev/null`, { encoding: 'utf-8', timeout: 2000 }).trim(); return v || null; } catch { return null; } };
+    const versionOf = (name) => { try { return execSync(`${name} --version 2>&1 | head -1`, { encoding: 'utf-8', timeout: 4000 }).trim(); } catch { return ''; } };
+    const tools = ['gcc','g++','clang','make','cmake','ninja','node','npm','npx','pnpm','yarn','python3','python','pip3','pip','cargo','rustc','go','java','mvn','gradle','docker','podman','git','jq','curl','wget','ripgrep','rg','fd','fzf','tmux','htop','sqlite3','psql','mysql','redis-cli','ffmpeg','imagemagick','convert','tesseract','nmap','masscan','sqlmap','nikto'];
+    const found = [];
+    for (const t of tools) { const p = probe(t); if (p) { let v = ''; try { v = versionOf(t).slice(0, 60); } catch {} found.push(`  - ${t}: ${v || p}`); } }
+    if (found.length > 0) lines.push(`- Installed tools (use via exec_shell — you have full access):\n${found.join('\n')}`);
+    // Python data/sci libs
+    try {
+      const py = execSync(`python3 -c "import importlib;mods=['numpy','pandas','sklearn','matplotlib','tensorflow','torch','requests','bs4','aiohttp','fastapi','flask'];print('\\n'.join(m for m in mods if importlib.util.find_spec(m)))" 2>/dev/null`, { encoding: 'utf-8', timeout: 6000 }).trim();
+      if (py) lines.push(`- Python data/web libs:\n  ${py.split('\n').map(m=>'• '+m).join('  \n')}`);
+    } catch (_) {}
+  } catch (_) {}
+
   const result = lines.join('\n');
   _machineCtxCache = result;
   _machineCtxTime = now;
@@ -582,7 +600,7 @@ const _KNOWLEDGE_GROUPS = [
   { re: /pentest|guardian|cheatsheet|owasp|exploit|recon|nmap/i, label: 'pentest' },
   { re: /MEMORY|memory_summary|skills\/index/i, label: 'memory/skills-meta' },
 ];
-const _KNOWLEDGE_PER_GROUP_CAP = 200;  // list up to 200 per group so "a lot of md's" all show
+const _KNOWLEDGE_PER_GROUP_CAP = 6;  // compact: a few examples per group + counts (full list via list_dir/search_files) — keeps the prompt small for fast responses
 function buildKnowledgeLibraryIndex() {
   try {
     const byGroup = {};
@@ -610,10 +628,7 @@ function buildKnowledgeLibraryIndex() {
     for (const g of order) {
       const arr = byGroup[g]; if (!arr || !arr.length) continue;
       const shown = arr.slice(0, _KNOWLEDGE_PER_GROUP_CAP);
-      total += shown.length;
-      lines.push(`### ${g} (${arr.length} docs${arr.length > shown.length ? `, listing first ${shown.length}` : ''})`);
-      for (const doc of shown) lines.push(`- ${doc.path} (${doc.kb}KB)`);
-      if (arr.length > shown.length) lines.push(`- …and ${arr.length - shown.length} more — use list_dir/search_files to discover them`);
+      lines.push(`### ${g} — ${arr.length} docs (e.g. ${shown.map(d => path.basename(d.path)).join(', ')}${arr.length > shown.length ? `, +${arr.length - shown.length} more` : ''})`);
     }
     if (!lines.length) return '';
     return `\n\n## 📚 Knowledge Library (ALL your .md files — read_file/skill_load any path BEFORE guessing)\n${total} indexed docs across ${_KNOWLEDGE_DIRS.filter(d => { try { return fs.existsSync(d); } catch { return false; } }).length} roots.\n\n${lines.join('\n')}`;
@@ -639,7 +654,7 @@ function loadPhantomBrain() {
         if (_phantomBrainCache && st.mtimeMs === _phantomBrainMtime) return _phantomBrainCache;
         const full = fs.readFileSync(pth, 'utf-8');
         if (!full || !full.trim()) continue;
-        const CAP = 6000;
+        const CAP = 3000;
         const excerpt = full.length > CAP
           ? full.slice(0, CAP) + `\n\n... (phantom brain truncated at ${CAP} chars — full ${Math.round(full.length/1024)}KB at ${pth}; read_file it for more)`
           : full;
