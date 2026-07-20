@@ -8,6 +8,47 @@ import { EventEmitter } from 'events';
 const SERVER_URL = process.env.HAKSTER_URL || 'ws://localhost:3579/ws';
 const API_URL = process.env.HAKSTER_API_URL || 'http://localhost:3579';
 
+// Rough context-window map so the TUI token bar reflects the actual ceiling.
+const MODEL_CONTEXT = {
+  'glm-5.2:cloud': 128000,
+  'thudm/glm-5.2:cloud': 128000,
+  'thudm/glm-5.1:cloud-ctx': 128000,
+  'thudm/glm-5.1:cloud': 128000,
+  'gpt-oss:120b-cloud': 131072,
+  'openai/gpt-oss-120b': 131072,
+  'claude-sonnet-4-5': 200000,
+  'claude-opus-4-5': 200000,
+  'claude-haiku-3-5': 200000,
+  'gpt-4o': 128000,
+  'openai/gpt-5.5': 128000,
+  'gemini-2.5-flash': 1000000,
+  'gemini-2.0-flash-lite': 1000000,
+};
+function getContextMax(model) {
+  if (!model) return 128000;
+  if (MODEL_CONTEXT[model]) return MODEL_CONTEXT[model];
+  if (model.includes('claude')) return 200000;
+  if (model.includes('gpt-oss') || model.includes('120b')) return 131072;
+  if (model.includes('glm')) return 128000;
+  return parseInt(process.env.HAKSTER_CONTEXT_MAX || '128000', 10) || 128000;
+}
+function estimateContextChars(msgs) {
+  // O(N) but only called when the message window actually changes (see getContextInfo cache).
+  let chars = 0;
+  for (const m of msgs) {
+    chars += (m.content?.length || 0);
+    if (m.tool_calls) {
+      for (const tc of m.tool_calls) {
+        // Cheap size estimate: name + serialized args length. Avoids a full JSON.stringify
+        // of the whole tool_calls array every poll, which burned cycles (and thus CPU
+        // "tokens") every second while idle.
+        chars += (tc?.function?.name?.length || 0) + (tc?.function?.arguments?.length || 0) + 16;
+      }
+    }
+  }
+  return chars;
+}
+
 class HaksterAgent extends EventEmitter {
   constructor() {
     super();
@@ -16,8 +57,14 @@ class HaksterAgent extends EventEmitter {
     this.sessionId = null;
     this.connected = false;
     this.lowToken = process.env.HAKSTER_LOW_TOKEN === '1' || process.env.HAKSTER_LOW_TOKEN === 'true';
-    this.contextMax = 0;
+    this.contextMax = getContextMax(this.model);
     this._messages = [];
+    this._ctxSig = '';
+    this._ctxChars = 0;
+    this._pendingContent = '';
+    this._pendingThinking = '';
+    this._pendingToolCalls = [];
+    this._pendingToolResults = [];
     this._usePolling = false;
 
     // Callbacks
@@ -102,6 +149,69 @@ class HaksterAgent extends EventEmitter {
     });
   }
 
+  // ── Accumulate assistant/tool messages for history ────
+  _accumulateMessage(msg) {
+    const { type, content, ...rest } = msg;
+    switch (type) {
+      case 'token':
+      case 'content':
+      case 'delta':
+        if (content) this._pendingContent += content;
+        break;
+      case 'thinking':
+        if (content) this._pendingThinking += content;
+        break;
+      case 'tool_call_start':
+        this._pendingToolCalls.push({
+          id: rest.tool_call_id || `call_${this._pendingToolCalls.length}`,
+          type: 'function',
+          function: {
+            name: rest.tool_name || rest.tool || rest.name || 'tool',
+            arguments: typeof rest.tool_args === 'object' ? JSON.stringify(rest.tool_args || {}) : String(rest.tool_args || '{}'),
+          },
+        });
+        break;
+      case 'tool_call_result':
+      case 'tool_result':
+        this._pendingToolResults.push({
+          tool_call_id: rest.tool_call_id || rest.tool_call_id,
+          name: rest.tool_name || rest.tool || rest.name || 'tool',
+          content: rest.tool_result || rest.result || content || '',
+        });
+        break;
+      case 'done':
+      case 'complete':
+        this._flushPendingMessages();
+        break;
+    }
+  }
+
+  _flushPendingMessages() {
+    if (!this._pendingContent && !this._pendingThinking && this._pendingToolCalls.length === 0 && this._pendingToolResults.length === 0) return;
+    const toolCalls = this._pendingToolCalls.length ? this._pendingToolCalls : undefined;
+    this._messages.push({
+      role: 'assistant',
+      content: this._pendingContent.trim() || (this._pendingThinking ? `${this._pendingThinking.trim()}` : ''),
+      ...(toolCalls ? { tool_calls: toolCalls } : {}),
+    });
+    for (const tr of this._pendingToolResults) {
+      this._messages.push({
+        role: 'tool',
+        tool_call_id: tr.tool_call_id,
+        name: tr.name,
+        content: tr.content,
+      });
+    }
+    // Keep a bounded rolling window so we don't burn tokens on ancient history
+    if (this._messages.length > 60) {
+      this._messages = this._messages.slice(-60);
+    }
+    this._pendingContent = '';
+    this._pendingThinking = '';
+    this._pendingToolCalls = [];
+    this._pendingToolResults = [];
+  }
+
   // ── Handle incoming messages ──────────────────────────
   _handleMessage(msg) {
     const { type, content, ...rest } = msg;
@@ -157,6 +267,8 @@ class HaksterAgent extends EventEmitter {
       default:
         if (content && this._tokenCb) this._tokenCb(content);
     }
+    // Accumulate assistant/tool context for history tracking
+    this._accumulateMessage(msg);
   }
 
   // ── Send message to server ────────────────────────────
@@ -208,16 +320,37 @@ class HaksterAgent extends EventEmitter {
           }
         }
       }
+      this._flushPendingMessages();
     } catch (e) {
       if (this._errorCb) this._errorCb(e.message || 'Request failed');
     }
   }
 
   // ── Model selection ──────────────────────────────────
-  setModel(model) { this.model = model; }
+  setModel(model) {
+    this.model = model;
+    this.contextMax = getContextMax(model);
+  }
   setProvider(p) { this.provider = p; }
   setTrust(lvl) { this.trust = lvl; }
   getModel() { return this.model; }
+  getContextInfo() {
+    // Cache by message-window signature so the TUI's periodic poll does NOT recompute
+    // (and re-render) when nothing changed. Recompute only when length, last content
+    // size, or tool-call count changes.
+    const m = this._messages;
+    const last = m[m.length - 1];
+    const sig = `${m.length}:${last ? (last.content?.length || 0) : 0}:${last ? (last.tool_calls?.length || 0) : 0}`;
+    if (this._ctxSig !== sig) {
+      this._ctxSig = sig;
+      this._ctxChars = estimateContextChars(m);
+    }
+    return {
+      chars: this._ctxChars,
+      max: this.contextMax,
+      messages: m.length,
+    };
+  }
 
   // ── Session management ───────────────────────────────
   setSession(id) {
@@ -260,6 +393,10 @@ class HaksterAgent extends EventEmitter {
       try { this.ws.close(); } catch {}
     }
     this._messages = [];
+    this._pendingContent = '';
+    this._pendingThinking = '';
+    this._pendingToolCalls = [];
+    this._pendingToolResults = [];
   }
 }
 

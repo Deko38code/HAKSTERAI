@@ -52,6 +52,7 @@ export default function App() {
   const [phase, setPhase] = useState('IDLE');
   const [queue, setQueue] = useState([]);
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [blink, setBlink] = useState(false);  // toggles ~2Hz while the agent is working
 
   // ─── Overlay/UI State ───
   const [showHelp, setShowHelp] = useState(false);
@@ -64,15 +65,21 @@ export default function App() {
   const [sessions, setSessions] = useState([]);
   const [approval, setApproval] = useState(null); // { action, command, risk, onApprove, onDeny }
   const [contextMax, setContextMax] = useState(128000);
+  const [contextChars, setContextChars] = useState(0);
 
   const inputRef = useRef('');
   const batchRef = useRef({ timer: null, text: '' });
 
   const maxScroll = Math.max(0, output.length - outputHeight);
   const effectiveOffset = Math.min(maxScroll, scrollOffset);
+  // Highlighted-scroll indicators: how many lines are hidden above/below the view.
+  const olderAbove = maxScroll - effectiveOffset;   // older lines hidden above
+  const newerBelow = effectiveOffset;               // newer lines hidden below (scrolled up)
+  const scrollIndicators = (olderAbove > 0 ? 1 : 0) + (newerBelow > 0 ? 1 : 0);
+  const visCount = Math.max(1, outputHeight - scrollIndicators);
   const visible = output.slice(
-    Math.max(0, output.length - outputHeight - effectiveOffset),
-    output.length - effectiveOffset
+    Math.max(0, output.length - newerBelow - visCount),
+    output.length - newerBelow
   );
 
   // ─── Token batching ───
@@ -99,6 +106,14 @@ export default function App() {
   }, [flushTokens]);
 
   // ─── Agent event wiring ───
+  // Blink the focus bar while the agent is working (thinking / executing).
+  const _working = thinking || ['PLAN','ACT','OBSERVE','REFLECT','CONSOLIDATE','THINK'].includes(phase);
+  useEffect(() => {
+    if (!_working) { setBlink(false); return; }
+    const id = setInterval(() => setBlink(b => !b), 480);
+    return () => clearInterval(id);
+  }, [_working]);
+
   useEffect(() => {
     if (showSplash) return; // wait for splash done
 
@@ -170,8 +185,19 @@ export default function App() {
       setStatus(p => ({ ...p, phase: 'done' }));
     });
     if (agent.contextMax) setContextMax(agent.contextMax);
+    // Poll context size lazily: getContextInfo() is cached by message-window signature,
+    // and we only setState when the value actually changes so React bails out of the
+    // re-render while idle — no pointless token-bar repaints burning CPU every tick.
+    const ctxInterval = setInterval(() => {
+      try {
+        const info = agent.getContextInfo?.();
+        if (!info) return;
+        setContextChars(prev => (prev === info.chars ? prev : info.chars));
+      } catch {}
+    }, 2000);
 
     return () => {
+      clearInterval(ctxInterval);
       // agent events are additive; no cleanup API
     };
   }, [showSplash, appendToken]);
@@ -187,7 +213,7 @@ export default function App() {
         setShowHelp(true);
         break;
       case '/status':
-        setOutput(p => [...p, { type: 'system', text: `Model: ${status.model} | Provider: ${status.provider || 'ollama'} | Phase: ${phase} | Trust: ${status.trust} | Tokens: ${status.tokens}` }].slice(-MAX_OUTPUT));
+        setOutput(p => [...p, { type: 'system', text: `Model: ${status.model} | Provider: ${status.provider || 'ollama'} | Phase: ${phase} | Trust: ${status.trust} | Tokens: ${status.tokens} | Context chars: ${contextChars.toLocaleString()}` }].slice(-MAX_OUTPUT));
         break;
       case '/model':
         if (arg) { agent.setModel?.(arg); setStatus(p => ({ ...p, model: arg })); }
@@ -346,6 +372,9 @@ export default function App() {
 
       {/* Output area */}
       <Box flexDirection="column" height={outputHeight + 1} width={cols} overflow="hidden">
+        {olderAbove > 0 && (
+          <Text color={theme.primary} bold reverse> ↑ {olderAbove} line(s) above (older) — Shift+↑ for more </Text>
+        )}
         {visible.map((line, i) => {
           if (line.type === 'user') {
             return <Text key={i} color="green" bold>{'> ' + line.text}</Text>;
@@ -363,6 +392,9 @@ export default function App() {
           }
           return <Text key={i} color="white">{line.text}</Text>;
         })}
+        {newerBelow > 0 && (
+          <Text color={theme.secondary} bold reverse> ↓ {newerBelow} line(s) below (newer) — ↓ to return to bottom </Text>
+        )}
         {thinking && <Spinner label="thinking..." color={theme.primary} />}
       </Box>
 
@@ -384,7 +416,7 @@ export default function App() {
       )}
 
       {/* Token bar */}
-      <TokenBar used={status.tokens} max={contextMax} cols={cols} />
+      <TokenBar used={status.tokens} chars={contextChars} max={contextMax} cols={cols} />
 
       {/* Diff preview */}
       {showDiff && diffData && (
@@ -415,12 +447,13 @@ export default function App() {
       {/* Slash menu */}
       {showSlashMenu && <SlashMenu input={input} cols={cols} />}
 
-      {/* Input line */}
-      <Box width={cols} borderStyle="single" borderColor={theme.border} paddingX={1}>
-        <Text color={phase === 'ACT' ? theme.warning : theme.primary} bold>
-          {phase === 'ACT' ? '◆' : '>'}{' '}
+      {/* Input line — highlighted focus bar (bold primary border + reverse marker,
+          matches the highlighted scroll indicators so the focus point stands out) */}
+      <Box width={cols} borderStyle="bold" borderColor={_working ? (blink ? theme.secondary : theme.primary) : theme.primary} paddingX={1}>
+        <Text color={phase === 'ACT' ? theme.warning : theme.primary} bold reverse>
+          {_working ? (blink ? '◆' : '◇') : (phase === 'ACT' ? '◆' : '>')}{' '}
         </Text>
-        <Text color="white">{input}</Text>
+        <Text color="white" bold>{input}{_working ? (blink ? '▍' : ' ') : ''}</Text>
         <Text color="gray" dim>{showSlashMenu ? '' : '  (/help, Tab for commands, Ctrl+C to exit)'}</Text>
       </Box>
     </Box>

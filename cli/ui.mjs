@@ -12,6 +12,41 @@ import { Box as Box10, Text as Text11, useInput as useInput2, useApp, useStdout 
 import { EventEmitter } from "events";
 var SERVER_URL = process.env.HAKSTER_URL || "ws://localhost:3579/ws";
 var API_URL = process.env.HAKSTER_API_URL || "http://localhost:3579";
+var MODEL_CONTEXT = {
+  "glm-5.2:cloud": 128e3,
+  "thudm/glm-5.2:cloud": 128e3,
+  "thudm/glm-5.1:cloud-ctx": 128e3,
+  "thudm/glm-5.1:cloud": 128e3,
+  "gpt-oss:120b-cloud": 131072,
+  "openai/gpt-oss-120b": 131072,
+  "claude-sonnet-4-5": 2e5,
+  "claude-opus-4-5": 2e5,
+  "claude-haiku-3-5": 2e5,
+  "gpt-4o": 128e3,
+  "openai/gpt-5.5": 128e3,
+  "gemini-2.5-flash": 1e6,
+  "gemini-2.0-flash-lite": 1e6
+};
+function getContextMax(model) {
+  if (!model) return 128e3;
+  if (MODEL_CONTEXT[model]) return MODEL_CONTEXT[model];
+  if (model.includes("claude")) return 2e5;
+  if (model.includes("gpt-oss") || model.includes("120b")) return 131072;
+  if (model.includes("glm")) return 128e3;
+  return parseInt(process.env.HAKSTER_CONTEXT_MAX || "128000", 10) || 128e3;
+}
+function estimateContextChars(msgs) {
+  let chars = 0;
+  for (const m of msgs) {
+    chars += m.content?.length || 0;
+    if (m.tool_calls) {
+      for (const tc of m.tool_calls) {
+        chars += (tc?.function?.name?.length || 0) + (tc?.function?.arguments?.length || 0) + 16;
+      }
+    }
+  }
+  return chars;
+}
 var HaksterAgent = class extends EventEmitter {
   constructor() {
     super();
@@ -20,8 +55,14 @@ var HaksterAgent = class extends EventEmitter {
     this.sessionId = null;
     this.connected = false;
     this.lowToken = process.env.HAKSTER_LOW_TOKEN === "1" || process.env.HAKSTER_LOW_TOKEN === "true";
-    this.contextMax = 0;
+    this.contextMax = getContextMax(this.model);
     this._messages = [];
+    this._ctxSig = "";
+    this._ctxChars = 0;
+    this._pendingContent = "";
+    this._pendingThinking = "";
+    this._pendingToolCalls = [];
+    this._pendingToolResults = [];
     this._usePolling = false;
     this._tokenCb = null;
     this._thinkingCb = null;
@@ -136,6 +177,66 @@ var HaksterAgent = class extends EventEmitter {
       }
     });
   }
+  // ── Accumulate assistant/tool messages for history ────
+  _accumulateMessage(msg) {
+    const { type, content, ...rest } = msg;
+    switch (type) {
+      case "token":
+      case "content":
+      case "delta":
+        if (content) this._pendingContent += content;
+        break;
+      case "thinking":
+        if (content) this._pendingThinking += content;
+        break;
+      case "tool_call_start":
+        this._pendingToolCalls.push({
+          id: rest.tool_call_id || `call_${this._pendingToolCalls.length}`,
+          type: "function",
+          function: {
+            name: rest.tool_name || rest.tool || rest.name || "tool",
+            arguments: typeof rest.tool_args === "object" ? JSON.stringify(rest.tool_args || {}) : String(rest.tool_args || "{}")
+          }
+        });
+        break;
+      case "tool_call_result":
+      case "tool_result":
+        this._pendingToolResults.push({
+          tool_call_id: rest.tool_call_id || rest.tool_call_id,
+          name: rest.tool_name || rest.tool || rest.name || "tool",
+          content: rest.tool_result || rest.result || content || ""
+        });
+        break;
+      case "done":
+      case "complete":
+        this._flushPendingMessages();
+        break;
+    }
+  }
+  _flushPendingMessages() {
+    if (!this._pendingContent && !this._pendingThinking && this._pendingToolCalls.length === 0 && this._pendingToolResults.length === 0) return;
+    const toolCalls = this._pendingToolCalls.length ? this._pendingToolCalls : void 0;
+    this._messages.push({
+      role: "assistant",
+      content: this._pendingContent.trim() || (this._pendingThinking ? `${this._pendingThinking.trim()}` : ""),
+      ...toolCalls ? { tool_calls: toolCalls } : {}
+    });
+    for (const tr of this._pendingToolResults) {
+      this._messages.push({
+        role: "tool",
+        tool_call_id: tr.tool_call_id,
+        name: tr.name,
+        content: tr.content
+      });
+    }
+    if (this._messages.length > 60) {
+      this._messages = this._messages.slice(-60);
+    }
+    this._pendingContent = "";
+    this._pendingThinking = "";
+    this._pendingToolCalls = [];
+    this._pendingToolResults = [];
+  }
   // ── Handle incoming messages ──────────────────────────
   _handleMessage(msg) {
     const { type, content, ...rest } = msg;
@@ -191,6 +292,7 @@ var HaksterAgent = class extends EventEmitter {
       default:
         if (content && this._tokenCb) this._tokenCb(content);
     }
+    this._accumulateMessage(msg);
   }
   // ── Send message to server ────────────────────────────
   async send(message) {
@@ -241,6 +343,7 @@ var HaksterAgent = class extends EventEmitter {
           }
         }
       }
+      this._flushPendingMessages();
     } catch (e) {
       if (this._errorCb) this._errorCb(e.message || "Request failed");
     }
@@ -248,6 +351,7 @@ var HaksterAgent = class extends EventEmitter {
   // ── Model selection ──────────────────────────────────
   setModel(model) {
     this.model = model;
+    this.contextMax = getContextMax(model);
   }
   setProvider(p) {
     this.provider = p;
@@ -257,6 +361,20 @@ var HaksterAgent = class extends EventEmitter {
   }
   getModel() {
     return this.model;
+  }
+  getContextInfo() {
+    const m = this._messages;
+    const last = m[m.length - 1];
+    const sig = `${m.length}:${last ? last.content?.length || 0 : 0}:${last ? last.tool_calls?.length || 0 : 0}`;
+    if (this._ctxSig !== sig) {
+      this._ctxSig = sig;
+      this._ctxChars = estimateContextChars(m);
+    }
+    return {
+      chars: this._ctxChars,
+      max: this.contextMax,
+      messages: m.length
+    };
   }
   // ── Session management ───────────────────────────────
   setSession(id) {
@@ -301,6 +419,10 @@ var HaksterAgent = class extends EventEmitter {
       }
     }
     this._messages = [];
+    this._pendingContent = "";
+    this._pendingThinking = "";
+    this._pendingToolCalls = [];
+    this._pendingToolResults = [];
   }
 };
 var agent = new HaksterAgent();
@@ -777,13 +899,14 @@ function SplashScreen({ onDone, version = "0.1.0" }) {
 import React10 from "react";
 import { Box as Box9, Text as Text10 } from "ink";
 import { jsx as jsx9, jsxs as jsxs10 } from "react/jsx-runtime";
-function TokenBar({ used = 0, max = 128e3, cols = 80 }) {
+function TokenBar({ used = 0, chars = 0, max = 128e3, cols = 80 }) {
   const pct = Math.min(100, Math.round(used / max * 100));
   const barWidth = Math.max(10, cols - 30);
   const filled = Math.floor(pct / 100 * barWidth);
   const bar = "\u2588".repeat(filled).padEnd(barWidth, "\u2591");
   const color = pct > 85 ? "red" : pct > 60 ? "yellow" : "green";
   const label = `${(used / 1e3).toFixed(1)}K/${(max / 1e3).toFixed(0)}K`;
+  const charLabel = chars > 0 ? ` \xB7 ${(chars / 1e3).toFixed(1)}k chars` : "";
   return /* @__PURE__ */ jsxs10(Box9, { width: cols, paddingX: 1, children: [
     /* @__PURE__ */ jsx9(Text10, { color: "gray", dim: true, children: "tokens " }),
     /* @__PURE__ */ jsxs10(Text10, { color, children: [
@@ -798,7 +921,8 @@ function TokenBar({ used = 0, max = 128e3, cols = 80 }) {
     ] }),
     /* @__PURE__ */ jsxs10(Text10, { color: "gray", dim: true, children: [
       " ",
-      label
+      label,
+      charLabel
     ] })
   ] });
 }
@@ -963,6 +1087,7 @@ function App() {
   const [phase, setPhase] = useState4("IDLE");
   const [queue, setQueue] = useState4([]);
   const [scrollOffset, setScrollOffset] = useState4(0);
+  const [blink, setBlink] = useState4(false);
   const [showHelp, setShowHelp] = useState4(false);
   const [showSlashMenu, setShowSlashMenu] = useState4(false);
   const [showPlan, setShowPlan] = useState4(false);
@@ -973,20 +1098,19 @@ function App() {
   const [sessions, setSessions] = useState4([]);
   const [approval, setApproval] = useState4(null);
   const [contextMax, setContextMax] = useState4(128e3);
+  const [contextChars, setContextChars] = useState4(0);
   const inputRef = useRef("");
   const batchRef = useRef({ timer: null, text: "" });
   const maxScroll = Math.max(0, output.length - outputHeight);
   const effectiveOffset = Math.min(maxScroll, scrollOffset);
+  const olderAbove = maxScroll - effectiveOffset;
+  const newerBelow = effectiveOffset;
+  const scrollIndicators = (olderAbove > 0 ? 1 : 0) + (newerBelow > 0 ? 1 : 0);
+  const visCount = Math.max(1, outputHeight - scrollIndicators);
   const visible = output.slice(
-    Math.max(0, output.length - outputHeight - effectiveOffset),
-    output.length - effectiveOffset
+    Math.max(0, output.length - newerBelow - visCount),
+    output.length - newerBelow
   );
-  // Shared render clock: streamed tokens are flushed AND the thinking spinner
-  // advances on the SAME tick, so output + spinner always render in sync
-  // (no more disconnected spinner frame that makes the TUI "disappear").
-  const [renderTick, setRenderTick] = useState4(0);
-  const thinkingRef = useRef(false);
-  const renderClockRef = useRef(null);
   const flushTokens = useCallback(() => {
     const b = batchRef.current;
     if (!b.text) return;
@@ -1001,21 +1125,21 @@ function App() {
       return [...prev, { type: "assistant", text }].slice(-MAX_OUTPUT);
     });
   }, []);
-  const startRenderClock = useCallback(() => {
-    if (renderClockRef.current) return;
-    renderClockRef.current = setInterval(() => {
-      flushTokens();
-      setRenderTick((t) => (t + 1) % 1000000000);
-      if (!batchRef.current.text && !thinkingRef.current) {
-        clearInterval(renderClockRef.current);
-        renderClockRef.current = null;
-      }
-    }, 50);
-  }, [flushTokens]);
   const appendToken = useCallback((token) => {
     batchRef.current.text += token;
-    startRenderClock();
-  }, [startRenderClock]);
+    if (!batchRef.current.timer) {
+      batchRef.current.timer = setTimeout(flushTokens, 30);
+    }
+  }, [flushTokens]);
+  const _working = thinking || ["PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE", "THINK"].includes(phase);
+  useEffect3(() => {
+    if (!_working) {
+      setBlink(false);
+      return;
+    }
+    const id = setInterval(() => setBlink((b) => !b), 480);
+    return () => clearInterval(id);
+  }, [_working]);
   useEffect3(() => {
     if (showSplash) return;
     agent_default.onToken((token) => appendToken(token));
@@ -1089,15 +1213,18 @@ function App() {
       setStatus((p) => ({ ...p, phase: "done" }));
     });
     if (agent_default.contextMax) setContextMax(agent_default.contextMax);
+    const ctxInterval = setInterval(() => {
+      try {
+        const info = agent_default.getContextInfo?.();
+        if (!info) return;
+        setContextChars((prev) => prev === info.chars ? prev : info.chars);
+      } catch {
+      }
+    }, 2e3);
     return () => {
+      clearInterval(ctxInterval);
     };
   }, [showSplash, appendToken]);
-  // ── Thinking spinner sync: keep the shared render clock alive while the
-  // agent is thinking so the spinner advances in lockstep with output. ──
-  useEffect3(() => {
-    thinkingRef.current = thinking;
-    if (thinking) startRenderClock();
-  }, [thinking, startRenderClock]);
   const handleSlashCommand = useCallback((cmd) => {
     const parts = cmd.trim().split(/\s+/);
     const command = parts[0];
@@ -1107,7 +1234,7 @@ function App() {
         setShowHelp(true);
         break;
       case "/status":
-        setOutput((p) => [...p, { type: "system", text: `Model: ${status.model} | Provider: ${status.provider || "ollama"} | Phase: ${phase} | Trust: ${status.trust} | Tokens: ${status.tokens}` }].slice(-MAX_OUTPUT));
+        setOutput((p) => [...p, { type: "system", text: `Model: ${status.model} | Provider: ${status.provider || "ollama"} | Phase: ${phase} | Trust: ${status.trust} | Tokens: ${status.tokens} | Context chars: ${contextChars.toLocaleString()}` }].slice(-MAX_OUTPUT));
         break;
       case "/model":
         if (arg) {
@@ -1339,6 +1466,11 @@ function App() {
       }
     ),
     /* @__PURE__ */ jsxs11(Box10, { flexDirection: "column", height: outputHeight + 1, width: cols, overflow: "hidden", children: [
+      olderAbove > 0 && /* @__PURE__ */ jsxs11(Text11, { color: theme.primary, bold: true, reverse: true, children: [
+        " \u2191 ",
+        olderAbove,
+        " line(s) above (older) \u2014 Shift+\u2191 for more "
+      ] }),
       visible.map((line, i) => {
         if (line.type === "user") {
           return /* @__PURE__ */ jsx10(Text11, { color: "green", bold: true, children: "> " + line.text }, i);
@@ -1359,7 +1491,12 @@ function App() {
         }
         return /* @__PURE__ */ jsx10(Text11, { color: "white", children: line.text }, i);
       }),
-      thinking && /* @__PURE__ */ jsxs11(Text11, { color: theme.primary, children: [FRAMES[renderTick % FRAMES.length], " thinking..."] })
+      newerBelow > 0 && /* @__PURE__ */ jsxs11(Text11, { color: theme.secondary, bold: true, reverse: true, children: [
+        " \u2193 ",
+        newerBelow,
+        " line(s) below (newer) \u2014 \u2193 to return to bottom "
+      ] }),
+      thinking && /* @__PURE__ */ jsx10(Spinner, { label: "thinking...", color: theme.primary })
     ] }),
     tools.length > 0 && /* @__PURE__ */ jsxs11(Box10, { width: cols, flexDirection: "row", overflow: "hidden", children: [
       /* @__PURE__ */ jsx10(Text11, { color: "gray", dim: true, children: "tools: " }),
@@ -1371,7 +1508,7 @@ function App() {
       ] }, i))
     ] }),
     showPlan && plan && /* @__PURE__ */ jsx10(PlanDisplay, { plan, cols }),
-    /* @__PURE__ */ jsx10(TokenBar, { used: status.tokens, max: contextMax, cols }),
+    /* @__PURE__ */ jsx10(TokenBar, { used: status.tokens, chars: contextChars, max: contextMax, cols }),
     showDiff && diffData && /* @__PURE__ */ jsx10(DiffPreview, { diff: diffData.text || diffData, cols, onApprove: diffData.onApprove, onDeny: diffData.onDeny }),
     approval && /* @__PURE__ */ jsx10(
       ApprovalPrompt,
@@ -1400,12 +1537,15 @@ function App() {
     } }),
     showHelp && /* @__PURE__ */ jsx10(HelpOverlay, { onDismiss: () => setShowHelp(false) }),
     showSlashMenu && /* @__PURE__ */ jsx10(SlashMenu, { input, cols }),
-    /* @__PURE__ */ jsxs11(Box10, { width: cols, borderStyle: "single", borderColor: theme.border, paddingX: 1, children: [
-      /* @__PURE__ */ jsxs11(Text11, { color: phase === "ACT" ? theme.warning : theme.primary, bold: true, children: [
-        phase === "ACT" ? "\u25C6" : ">",
+    /* @__PURE__ */ jsxs11(Box10, { width: cols, borderStyle: "bold", borderColor: _working ? blink ? theme.secondary : theme.primary : theme.primary, paddingX: 1, children: [
+      /* @__PURE__ */ jsxs11(Text11, { color: phase === "ACT" ? theme.warning : theme.primary, bold: true, reverse: true, children: [
+        _working ? blink ? "\u25C6" : "\u25C7" : phase === "ACT" ? "\u25C6" : ">",
         " "
       ] }),
-      /* @__PURE__ */ jsx10(Text11, { color: "white", children: input }),
+      /* @__PURE__ */ jsxs11(Text11, { color: "white", bold: true, children: [
+        input,
+        _working ? blink ? "\u258D" : " " : ""
+      ] }),
       /* @__PURE__ */ jsx10(Text11, { color: "gray", dim: true, children: showSlashMenu ? "" : "  (/help, Tab for commands, Ctrl+C to exit)" })
     ] })
   ] });

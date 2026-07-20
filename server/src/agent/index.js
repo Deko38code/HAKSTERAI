@@ -158,60 +158,8 @@ Goal: finish a task in as few turns as possible (ideally <8). This keeps session
     - **CRITICAL**: Use analyze_image/read_image/ocr_text for image tasks — don't guess what's in an image.
     - **CRITICAL**: Use generate_image for creating icons, logos, mockups — don't just describe them.
 
-## 🔧 TOOL QUICK REFERENCE (29 tools — USE THEM ALL)
-
-⚠️ NEVER solve a problem using only shell/read_file when a better tool exists. Pick the RIGHT tool:
-- Editing? → patch_file or multi_patch (NOT shell sed)
-- Searching? → search_files or web_search (NOT shell grep on huge dirs)
-- Looking up docs? → web_fetch (NOT guessing)
-- Need a second opinion? → claude_proxy or sub_agent
-- Need to remember something? → memory (NOT hoping you'll remember)
-- New task type? → skill_list first, then skill_load
-- Showing code? → code_grid (NOT raw code dumps)
-- Checking a service? → service_check (NOT shell curl)
-- Git operations? → git_op (NOT shell git)
-
-| Category | Tool | When to use |
-|---|---|---|
-| **📂 File Edit** | \`patch_file\` | ⭐ BEST for editing. 3-tier fuzzy match. Always prefer over shell sed. |
-| | \`multi_patch\` | Multiple edits in one call. Same fuzzy match. Faster than repeated patch_file. |
-| | \`write_file\` | Create new files or rewrite small files (<200 lines). |
-| | \`insert_lines\` | Insert at a line number (imports, functions). |
-| | \`delete_lines\` | Delete a line range by number. |
-| | \`replace_regex\` | Bulk regex find-replace. flags="g" for global. |
-| | \`append_file\` | Append to end of file. Fast for logs/configs. |
-| **📄 File Read** | \`read_file\` | Read file with line numbers. ALWAYS read before editing. |
-| **🖼️ Images** | \`generate_image\` | Create, edit, and enhance app icons, logos, mockups, project assets via Pollinations by default; OpenAI remains available. |
-| | \`read_image\` | Read/analyze an image file. Returns metadata + base64 data URI. |
-| | \`analyze_image\` | Deep image analysis via vision model. Describe content, detect objects, read text, answer questions about an image. |
-| | \`ocr_text\` | Extract text from images/screenshots. Returns structured text with confidence scores. |
-| | \`compare_images\` | Compare two images pixel-by-pixel. Highlights diffs, reports % match. |
-| **🔍 Search** | \`search_files\` | Find by name (mode="files") or grep content (mode="content"). |
-| | \`list_dir\` | List directory. Use ONCE per dir — don't browse repeatedly. |
-| | \`shell\` | For targeted lookups: \`rg -n\`, \`rg --files\`, \`find /path -name\`. FASTER than search_files. |
-| **🖥️ Execution** | \`shell\` | Run any command. 30s default timeout. git, npm, pip, curl, builds, tests. |
-| | \`parallel_shell\` | Run multiple commands simultaneously. Independent tasks only. |
-| | \`run_background\` | Start long processes (servers, watchers). Returns PID immediately. |
-| | \`kill_process\` | Kill by name or PID. Safer than shell kill. |
-| **🌐 Web** | \`web_fetch\` | HTTP requests. APIs, endpoints, downloading docs. USE THIS for looking up docs. |
-| | \`web_search\` | Search the web for answers. Uses DuckDuckGo API. ALWAYS search before guessing. |
-| | \`browser_navigate\` | Open URLs, take snapshots. Test web UIs, check deployments. |
-| | \`browser_click/type\` | Interact with pages. Form fills, button clicks. |
-| | \`browser_screenshot\` | Capture page state. Verify UI changes visually. |
-| | \`snapshot\` | Headless page analysis. Title, links, forms. Faster than browser. |
-| **🤖 AI & Agents** | \`claude_proxy\` | Route to Claude/GPT models. Second opinions, complex reasoning. |
-| | \`sub_agent\` | Spawn parallel sub-agents. Independent tasks simultaneously. |
-| | \`crush\` | Agentic coding tool. Refactoring, debugging, different model. |
-| | \`run_agent\` | Run a named agent script from /home/ghost/claude_agents/agents/. |
-| **📦 Services** | \`service_check\` | Health-check hakster, cinevault, miniforge. Before/after restarts. |
-| | \`pm2\` | Manage PM2: list, restart, stop, logs. Always check pm2 list first. |
-| | \`git_op\` | Git commands (status, log, diff, add, commit, push). |
-| **🧠 Memory & Skills** | \`memory\` | Save/recall notes across sessions. Project structure, gotchas, IPs. |
-| | \`skill_list\` | Discover skills. USE FIRST for new task types. |
-| | \`skill_load\` | Load skill instructions. ALWAYS load before unfamiliar tasks. |
-| | \`skill_save\` | Save new repeatable workflows. |
-| | \`notify\` | Push messages to user's notification queue. Async updates. |
-| **🎨 Display** | \`code_grid\` | Show code with line numbers, syntax color, diff highlights. ALWAYS use for showing code. |
+## 🔧 TOOLS
+Full tool schemas are provided via the tools parameter — call them directly. Prefer patch_file/multi_patch over sed; read_file before editing; search_files or rg for lookups; skill_list then skill_load for unfamiliar tasks; web_search before guessing.
 
 ## ⚡ ANTI-HANG RULES (CRITICAL)
 When running ANY shell command or tool that could hang:
@@ -639,7 +587,7 @@ function buildKnowledgeLibraryIndex() {
       lines.push(`### ${g} — ${arr.length} docs (e.g. ${shown.map(d => path.basename(d.path)).join(', ')}${arr.length > shown.length ? `, +${arr.length - shown.length} more` : ''})`);
     }
     if (!lines.length) return '';
-    return `\n\n## 📚 Knowledge Library (ALL your .md files — read_file/skill_load any path BEFORE guessing)\n${total} indexed docs across ${_KNOWLEDGE_DIRS.filter(d => { try { return fs.existsSync(d); } catch { return false; } }).length} roots.\n\n${lines.join('\n')}`;
+    return `\n\n## 📚 Knowledge Library\n${total} indexed .md docs across knowledge roots. Use search_files / read_file / skill_load to find a doc BEFORE guessing — don't list them all here.`;
   } catch (_) { return ''; }
 }
 
@@ -772,11 +720,16 @@ function buildSystemPrompt(clientContext) {
       const cat = s.includes('/') ? s.split('/').slice(0, -1).join('/') : 'root';
       byCategory[cat] = (byCategory[cat] || 0) + 1;
     }
-    const categories = Object.entries(byCategory)
-      .sort((a, b) => b[1] - a[1])
+    // Trim to the TOP categories only — listing all ~hundreds of nested category
+    // paths was ~23k chars (~5.5k tokens) of bloat in EVERY system prompt, slowing
+    // every model turn. The agent uses skill_list to discover the rest on demand.
+    const catEntries = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
+    const TOP_CATS = 15;
+    const categories = catEntries.slice(0, TOP_CATS)
       .map(([cat, count]) => `${cat}/ (${count})`)
       .join(', ');
-    prompt += `\n\n## 📋 ${uniqueSkills.length} Skills Available\nCategories: ${categories}\nUse skill_load to read a skill before following its steps.`;
+    const moreCats = catEntries.length > TOP_CATS ? ` …(+${catEntries.length - TOP_CATS} more categories)` : '';
+    prompt += `\n\n## 📋 ${uniqueSkills.length} Skills Available (top categories)\nCategories: ${categories}${moreCats}\nUse skill_list to browse all, then skill_load to read a skill before following its steps.`;
   }
 
   // Auto-inject core Claude Code skill content (cached, refreshed every 60s)
@@ -876,7 +829,7 @@ function getSkillDirs() {
 }
 
 // (Idle review prompt removed — health checks now run directly via shell, no model call)
-const MAX_TURNS_DEFAULT = Math.max(30, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '50', 10) || 50);
+const MAX_TURNS_DEFAULT = Math.max(15, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '25', 10) || 25);  // was 50 — fewer turns = fewer model calls = fewer tokens
 const LOW_TOKEN_MAX_TURNS = Math.max(20, parseInt(process.env.HAKSTER_LOW_TOKEN_MAX_TURNS || '30', 10) || 30);
 const MAX_TURNS = MAX_TURNS_DEFAULT;
 let _currentMaxTurns = MAX_TURNS_DEFAULT;  // updated by agentLoop each run so tuiReset can read it
@@ -887,6 +840,7 @@ const IDLE_TIMEOUT_MS = 120000; // 2 minutes idle → auto review
 // Use IIFE to handle both empty strings and explicit zero values correctly.
 const REFRESH_MS    = (() => { const v = process.env.REFRESH_MS;    return v !== undefined && v !== '' ? parseInt(v, 10) || 200 : 200; })();
 const SCROLL_SPEED  = (() => { const v = process.env.SCROLL_SPEED;  return v !== undefined && v !== '' ? parseInt(v, 10) || 1   : 1;   })();
+const HAKSTER_SHELL_MAX_TIMEOUT = (() => { const v = process.env.HAKSTER_SHELL_MAX_TIMEOUT; return v !== undefined && v !== '' ? (parseInt(v, 10) || 60) : 60; })();  // cap any single shell command (was 300)
 const MAX_LOG_LINES = (() => { const v = process.env.MAX_LOG_LINES; return v !== undefined && v !== '' ? parseInt(v, 10) || 12  : 12;  })();
 
 // ── Module-level state for stuck-loop detection (shared with agentLoop) ──
@@ -1012,13 +966,37 @@ let _toolCallCount = 0;
 // ── Action tracker: what was done in this task ──
 let _actionsTaken = [];  // [{emoji, text}] — tracks every tool call + result summary
 
-function _recordAction(emoji, text) {
-  _actionsTaken.push({ emoji, text: String(text).substring(0, 120) });
+function _recordAction(emoji, text, resultPreview) {
+  _actionsTaken.push({
+    emoji,
+    text: String(text).substring(0, 120),
+    result: resultPreview ? String(resultPreview).substring(0, 200) : '',
+  });
+}
+
+// Build a single-line, ANSI-stripped, whitespace-collapsed preview of a tool
+// result so the "What was done" checklist can show REAL output instead of just
+// the command. Multi-line output is joined with " ⏐ " so it fits one row.
+function _resultPreview(result, maxLen) {
+  maxLen = maxLen || 100;
+  let r = String(result ?? '');
+  // Strip ANSI escape sequences (e.g. lm-sensors / colored shell output)
+  r = r.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  // Drop trailing whitespace per line and collapse runs of spaces
+  r = r.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ⏐ ');
+  r = r.replace(/\s+/g, ' ').trim();
+  if (r.length > maxLen) r = r.substring(0, maxLen - 1) + '…';
+  return r;
 }
 
 function _printDoneChecklist() {
   if (_actionsTaken.length === 0) return;
-  const lines = _actionsTaken.map((a, i) => `  ${a.emoji} ${a.text}`).join('\n');
+  // Two-line entries: call on top, indented "⇒ <real output>" below when present.
+  const lines = _actionsTaken.map(a => {
+    const head = `  ${a.emoji} ${a.text}`;
+    if (!a.result) return head;
+    return `${head}\n     ${C.fgSubtle}⇒ ${a.result}${C.reset}`;
+  }).join('\n');
   // Count total lines in main project file
   let projectLineCount = 0;
   try { projectLineCount = fs.readFileSync(__filename, 'utf-8').split('\n').length; } catch (_) {}
@@ -1700,6 +1678,11 @@ let _lastPanelName = null;  // Track which panel was written last
 // Returns the number of lines written.
 const _panelDebounce = {};   // { name: { timer, text } }
 function _writePanel(name, text) {
+  // While a dangerous-command approval prompt is open, suppress ALL panel
+  // renders (including deferred/debounced ones whose timer fires during the
+  // await) so the sudo/y-N box stays the last thing on screen and isn't
+  // buried under a stale REASONING/TOOL GRID/CHAIN TABLE redraw.
+  if (_awaitingConfirm) return;
   const now = Date.now();
   const lastRender = _panelLines[name + '_ts'] || 0;
   const elapsed = now - lastRender;
@@ -1728,7 +1711,17 @@ function _writePanel(name, text) {
   }
   _panelLines[name + '_ts'] = now;
   const lines = text.split('\n');
-  const count = lines.length;
+  // Count actual SCREEN ROWS (accounting for line wrapping at the REAL
+  // terminal width), not logical lines. The dashboard box can render wider
+  // than the terminal on narrow displays; counting wrapped rows keeps the
+  // cursor-up / \x1b[0J clear accurate so stale box-drawing fragments
+  // (the "black grids" / stuck-output artifacts) don't remain on redraw.
+  const realCols = (process.stdout.columns && process.stdout.columns > 0) ? process.stdout.columns : 91;
+  let count = 0;
+  for (const ln of lines) {
+    const vl = (typeof _visLen === 'function') ? _visLen(ln) : ln.length;
+    count += Math.max(1, Math.ceil(vl / realCols));
+  }
   const prev = _panelLines[name] || 0;
   // Only scroll UP if this panel was the VERY LAST thing written to stdout.
   // If other log() output came after the previous render, we can't safely
@@ -1742,6 +1735,17 @@ function _writePanel(name, text) {
   _panelLines[name] = count;
   _lastPanelName = name;
   return count;
+}
+
+// Render the combined DASHBOARD ONLY when it can scroll in-place over the previous
+// DASHBOARD (i.e. nothing has been log()'d since). Used by intermediate phase
+// renders (PLAN / ACT / OBSERVE) that only change the phase ring — emitting a full
+// REASONING+TOOL GRID+CHAIN TABLE block (~20+ lines) on every phase when log()
+// interleaved is what burned scrollback/"tokens" each turn. Meaningful renders
+// (THINK with new thinking content, CONSOLIDATE final state) still append.
+function _writeDashboardInPlace(text) {
+  if (_lastPanelName !== 'DASHBOARD') return; // would append — skip to avoid burn
+  _writePanel('DASHBOARD', text);
 }
 
 // ── ANSI-aware string helpers (used by all panels) ──
@@ -3336,7 +3340,7 @@ function asyncShell(command, opts = {}) {
           resolve({ ok: false, stdout: stdout.trim(), stderr: stderr.trim(), exitCode: -1, killed: true, output: out + `\n[timeout after ${timeout}s, force-resolved]` });
         }
       }, 2000);  // 2s grace after SIGKILL for close to fire
-    }, Math.min(timeout, 300) * 1000);
+    }, Math.min(timeout, HAKSTER_SHELL_MAX_TIMEOUT) * 1000);
 
     child.stdout.on('data', (d) => {
       if (stdout.length < maxBuffer) stdout += d.toString('utf8').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
@@ -4235,7 +4239,7 @@ ${trunc(md, 12000)}`;
 
   async crush({ prompt, model, cwd, timeout = 120 }) {
     // Run Charm Crush agentic coding tool in non-interactive mode
-    const maxTimeout = Math.min(timeout, 300);
+    const maxTimeout = Math.min(timeout, HAKSTER_SHELL_MAX_TIMEOUT);
     const cmdParts = ['crush', 'run', '--quiet'];
     if (model) cmdParts.push('-m', model);
     if (cwd) cmdParts.push('-c', cwd);
@@ -4256,7 +4260,7 @@ ${trunc(md, 12000)}`;
   },
 
   async parallel_shell({ commands, timeout = 30 }) {
-    const maxTimeout = Math.min(timeout, 300);
+    const maxTimeout = Math.min(timeout, HAKSTER_SHELL_MAX_TIMEOUT);
     const results = commands.map(cmd => {
       return asyncShell(cmd, { timeout: maxTimeout }).then(result => ({
         cmd,
@@ -5201,7 +5205,7 @@ function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
   return new Promise((resolve, reject) => {
     const numPredict = lowToken
       ? Math.max(1024, parseInt(process.env.HAKSTER_LOW_TOKEN_NUM_PREDICT || '4096', 10) || 4096)
-      : 16384;
+      : Math.max(1024, parseInt(process.env.HAKSTER_NUM_PREDICT || '4096', 10) || 4096);  // was 16384 — cap generation to stop runaway token burn
     const body = JSON.stringify({
       model: MODEL,
       messages,
@@ -5395,7 +5399,7 @@ const LOW_TOKEN_MAX_MESSAGES = 30;
 // but doesn't nuke context early), hard ceiling at ~88% (prevents overflow without
 // waiting until the model errors). Tunable via env.
 const CONTEXT_WINDOW = parseInt(process.env.HAKSTER_CONTEXT_WINDOW || '131072', 10) || 131072;
-const MAX_CONTEXT_CHARS = parseInt(process.env.HAKSTER_COMPACT_CHARS || String(Math.floor(CONTEXT_WINDOW * 4 * 0.70)), 10) || Math.floor(CONTEXT_WINDOW * 4 * 0.70);   // proactive ~70%
+const MAX_CONTEXT_CHARS = parseInt(process.env.HAKSTER_COMPACT_CHARS || String(Math.floor(CONTEXT_WINDOW * 4 * 0.25)), 10) || Math.floor(CONTEXT_WINDOW * 4 * 0.25);   // proactive ~25% (was 70%) — keep history small so each turn resends far fewer tokens
 const ABSOLUTE_CONTEXT_CHARS = parseInt(process.env.HAKSTER_COMPACT_CEILING || String(Math.floor(CONTEXT_WINDOW * 4 * 0.88)), 10) || Math.floor(CONTEXT_WINDOW * 4 * 0.88); // hard ~88%
 const MIN_MESSAGES_TO_KEEP = 12;  // Keep last ~6 exchanges (12 messages)
 
@@ -5735,7 +5739,10 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       const costInfo = _sessionCost > 0 ? C.fgSubtle + '│' + C.reset + ' ' + C.butter + C.bold + '💰' + C.reset + C.fgBase + costStr + C.reset : C.fgSubtle + '│' + C.reset + ' ' + C.fgSubtle + '💰' + C.reset + C.fgSubtle + '$0' + C.reset;
       const turnInfo = C.fgSubtle + 'Step' + C.reset + ' ' + C.fgBase + _toolCallCount + C.reset + C.fgSubtle + '/' + C.reset + C.fgMuted + _maxTurns + C.reset;
       const pendingStr = _pendingTools.length > 0 ? ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.mustard + '🔍' + C.reset + C.fgBase + _pendingTools.length + C.reset + C.mustard + ' pending' + C.reset + ' ' + C.fgMuted + _pendingTools.map(p => p.name).join(',').substring(0, 40) + C.reset : '';
-      process.stdout.write('\r' + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + _agentActivity + C.reset + detail + ' ' + C.fgSubtle + frame + C.reset + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + ' ' + C.reset + '   ');
+      // Blinking haksterAI ❯ prompt marker while working (toggles each status tick ~1Hz).
+      const _blinkOn = (sbarIdx & 1) === 0;
+      const _blinkPrompt = C.fgMuted + ' haksterAI ' + C.reset + (_blinkOn ? (C.primary + C.bold + '❯' + C.reset) : (C.fgSubtle + '❯' + C.reset)) + ' ' + C.fgSubtle + '│' + C.reset + ' ';
+      process.stdout.write('\r' + _blinkPrompt + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + _agentActivity + C.reset + detail + ' ' + C.fgSubtle + frame + C.reset + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + ' ' + C.reset + '   ');
     }, 500);
     // Clear status bar on exit
     process.on('SIGINT', () => { if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; } process.stdout.write('\r' + ' '.repeat(120) + '\r'); });
@@ -6278,13 +6285,16 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     const stepNum = turn + 1;
     // 6-phase: PLAN before executing tools
     tuiSetPhase('PLAN');
-    // ── TUI dashboard: render ALL panels at each step (in-place scroll) ──
+    // ── TUI dashboard: render ALL panels at each step (in-place scroll only) ──
+    // Gated: only redraw in-place; never append a fresh multi-panel block here
+    // (the step marker log() below would null _lastPanelName anyway, and the
+    // next meaningful render carries the real state).
     if (!silent) {
       const dashParts = [];
       if (_tuiPhase !== 'Idle') dashParts.push(renderReasoningPanel());
       if (_tuiToolGrid.length > 0) dashParts.push(renderToolPanel());
       if (_tuiChains.length > 0) dashParts.push(renderChainPanel());
-      if (dashParts.length > 0) _writePanel('DASHBOARD', dashParts.join('\n'));
+      if (dashParts.length > 0) _writeDashboardInPlace(dashParts.join('\n'));
       log(`${C.magenta}${T.thick.repeat(3)}${C.reset} ${C.magenta}Step ${stepNum}/${_maxTurns}${C.reset} ${C.magenta}${T.thick.repeat(3)}${C.reset}`);
     }
     tuiSetPhase('ACT');
@@ -6420,7 +6430,8 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       // ── TUI dashboard: mark tool as running ──
       tuiToolStart(emoji, argHint ? `#${callNum} ${fnName} → ${argHint}` : `#${callNum} ${fnName}`);
       log(`${C.cyan}${T.arrow} ${emoji} ${C.bold}#${callNum}${C.reset} ${C.cyan}${fnName}${C.reset} ${C.fgSubtle}${T.thin.repeat(3)}${C.reset} ${C.gray}${JSON.stringify(fnArgs).substring(0, 120)}${C.reset}`);
-      _recordAction(emoji, `#${callNum} ${fnName} ${argHint ? '→ ' + argHint.substring(0, 60) : ''}`);
+      // NOTE: _recordAction is now called AFTER execution so the "What was done"
+      // checklist can include the real tool output, not just the command.
       if (_statusFn) _statusFn(`${emoji} #${callNum} ${fnName}`);
 
       // ── Idle review safety: block ANY tool that modifies state ──
@@ -6529,26 +6540,38 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
           } catch (e) { /* non-blocking */ }
 
           // ── Memory Engine v2: consolidate + extract entities ──
-          try {
-            const hDir = path.join(process.env.HOME || '/home/ghost', '.hakster');
-            memoryEngine.consolidate(hDir);
-          } catch (e) { /* non-blocking */ }
+          // Deferred: consolidate is a synchronous disk-heavy op; run it off the
+          // shell-result critical path so quick shell commands don't hiccup.
+          setImmediate(() => {
+            try {
+              const hDir = path.join(process.env.HOME || '/home/ghost', '.hakster');
+              memoryEngine.consolidate(hDir);
+            } catch (e) { /* non-blocking */ }
+          });
         }
 
         // ── Memory Engine v2: record tool result as memory ──
-        try {
-          const toolName = (result && result.name) || fnName || 'unknown';
-          const toolContent = typeof (result && result.content) === 'string'
-            ? result.content.substring(0, 500)
-            : JSON.stringify(result).substring(0, 500);
-          memoryEngine.addMemory({
-            type: 'observation',
-            observation: `[${toolName}] ${toolContent}`,
-            context: { source: 'tool', tool: toolName },
-            tags: [toolName, 'tool-result'],
-            timestamp: new Date().toISOString()
-          }, process.cwd());
-        } catch (e) { /* non-blocking */ }
+        // DEFERRED: addMemory does loadStore (disk read) + O(N) cosine similarity
+        // + saveStore (disk write) on EVERY tool call. Running it synchronously
+        // here blocks the shell-result -> next-model-call path, causing hiccups
+        // after each shell command. Defer to setImmediate so the shell result is
+        // processed and the next callOllama (network I/O) kicks off immediately;
+        // the memory write then overlaps with the network wait instead of gating it.
+        setImmediate(() => {
+          try {
+            const toolName = (result && result.name) || fnName || 'unknown';
+            const toolContent = typeof (result && result.content) === 'string'
+              ? result.content.substring(0, 500)
+              : JSON.stringify(result).substring(0, 500);
+            memoryEngine.addMemory({
+              type: 'observation',
+              observation: `[${toolName}] ${toolContent}`,
+              context: { source: 'tool', tool: toolName },
+              tags: [toolName, 'tool-result'],
+              timestamp: new Date().toISOString()
+            }, process.cwd());
+          } catch (e) { /* non-blocking */ }
+        });
 
         // ── Auto-learn: REFLECT phase ──
         if (shouldReflect(_noProgressCount, _recentResponsePrefixes)) {
@@ -6574,10 +6597,16 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       const tuiStatus = isErr ? 'error' : 'ok';
       // Pass result summary to grid (truncated to 80 chars inside tuiToolDone)
       tuiToolDone(fnName, tuiStatus, String(result).substring(0, 200));
+      const resultStr = String(result);
+      // ── Record the REAL action with its actual output for the "What was done"
+      //    checklist — shows the user what each tool actually returned, not just
+      //    the command that was run. (Must run AFTER `const resultStr` to avoid
+      //    the temporal-dead-zone "Cannot access 'resultStr' before initialization".)
+      const _callLabel = `#${callNum} ${fnName} ${argHint ? '→ ' + argHint.substring(0, 60) : ''}`;
+      const _outPreview = _resultPreview(resultStr, 100);
+      _recordAction(emoji, _callLabel, _outPreview || (isErr ? '(error)' : '(no output)'));
       // ── Remove completed tool from pending list ──
       _pendingTools = _pendingTools.filter(p => p.name !== fnName);
-
-      const resultStr = String(result);
       const display = resultStr.length > 2000 ? resultStr.substring(0, 2000) + '\n... (truncated)' : resultStr;
       const lines = display.split('\n');
       if (lines.length <= 10) {
@@ -6588,9 +6617,11 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       }
       log(`${isErr ? C.red : C.green}└${C.reset}`);
 
-      // ── TUI dashboard: render ALL panels as ONE unified block AFTER log output ──
-      // This MUST come after all log() calls so the dashboard is the LAST thing
-      // written to stdout, enabling in-place scroll (grid-to-grid overwrite).
+      // ── TUI dashboard: in-place redraw only after tool log output ──
+      // Tool output above was log()'d, so _lastPanelName is null here — a full
+      // _writePanel would APPEND a fresh block (burn). Use the in-place guard so
+      // we only redraw when safe; otherwise the tool grid is already shown in
+      // the log output above and the next OBSERVE/THINK render carries state.
       if (!silent) {
         const dashParts = [];
         if (_tuiPhase !== 'Idle') dashParts.push(renderReasoningPanel());
@@ -6598,12 +6629,12 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         if (toolPanel) dashParts.push(toolPanel);
         const chainPanel = renderChainPanel();
         if (chainPanel) dashParts.push(chainPanel);
-        if (dashParts.length > 0) _writePanel('DASHBOARD', dashParts.join('\n'));
+        if (dashParts.length > 0) _writeDashboardInPlace(dashParts.join('\n'));
       }
 
       // Add tool result to history — cap to reduce context bloat
       // (display already shows 2000 chars; history only needs enough for the LLM to understand)
-      const HISTORY_RESULT_CAP = 4000;
+      const HISTORY_RESULT_CAP = parseInt(process.env.HAKSTER_HISTORY_RESULT_CAP || '800', 10) || 800;  // was 4000 — tiny tool-result history — smaller tool-result history = fewer tokens resent per turn
       const historyContent = resultStr.length > HISTORY_RESULT_CAP
         ? resultStr.substring(0, HISTORY_RESULT_CAP) + '\n[truncated]'
         : resultStr;
@@ -6618,9 +6649,9 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     // 6-phase: OBSERVE after tool results
     tuiSetPhase('OBSERVE');
 
-    // ── TUI dashboard: render ALL panels after each step ──
-    // All dashboard panels render as ONE combined block so they scroll
-    // in-place together (grid-to-grid, not printing new boxes each time).
+    // ── TUI dashboard: in-place redraw after OBSERVE (no append) ──
+    // Gated to avoid appending a fresh multi-panel block on every step; the
+    // status bar already reflects phase/turn/tokens live via \r in-place writes.
     if (!silent) {
       const dashParts = [];
       if (_tuiPhase !== 'Idle') dashParts.push(renderReasoningPanel());
@@ -6628,7 +6659,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       if (toolPanel) dashParts.push(toolPanel);
       const chainPanel = renderChainPanel();
       if (chainPanel) dashParts.push(chainPanel);
-      if (dashParts.length > 0) _writePanel('DASHBOARD', dashParts.join('\n'));
+      if (dashParts.length > 0) _writeDashboardInPlace(dashParts.join('\n'));
     }
   }
 
@@ -6721,13 +6752,11 @@ function loadSession() {
       }
     }
     
-    // If the cleaned history is mostly stuck-loop debris, keep only the last 4 turns
-    // to give the model a fresh start while preserving recent context
-    if (final.length > 20) {
-      const recentSlice = final.slice(-8); // last 4 turns (user/assistant pairs)
-      log(`${C.yellow}📦 Session too long (${final.length} msgs), trimming to last 4 turns${C.reset}`);
-      return [{ role: 'system', content: buildSystemPrompt() }, ...recentSlice];
-    }
+    // NOTE: do NOT trim here — trimming before the user has chosen to resume
+    // both (a) discards history they might want and (b) makes the resume prompt
+    // show a misleading post-trim msg count + "(none)" last-user. Return the full
+    // cleaned session; the resume block trims (with a turn-safe slice) only after
+    // the user says yes.
     return [{ role: 'system', content: buildSystemPrompt() }, ...final];
   } catch (_) { return null; }
 }
@@ -6871,28 +6900,47 @@ async function repl() {
   // ── Wire danger confirm as readline prompt ────────────────────────────
   _confirmFn = (dangerMsg, tool, args) => {
     return new Promise((resolve) => {
-      _awaitingConfirm = true;   // Freeze status bar + stall guard + panel re-render so they don't overwrite the prompt
+      _awaitingConfirm = true;   // Freeze status bar + stall guard + panel re-render
       stopSpinner();
-      process.stdout.write('\r' + ' '.repeat(120) + '\r');  // wipe any leftover status-bar text on this line
-      // ── Prominent popup box above the grids so the prompt is impossible to miss ──
-      const cols = Math.min(process.stdout.columns || 100, 100);
-      const inner = Math.max(40, cols - 6);
       const argLine = (tool === 'shell' || tool === 'exec_shell') ? (args && args.command || '') : JSON.stringify(args || {});
       const cmdStr = String(argLine).replace(/\s+/g, ' ').trim();
       const isSudo = /^\s*sudo\b/i.test(cmdStr);
-      const bar = (l, r) => `${C.error}${C.bold}${l}${'═'.repeat(inner)}${r}${C.reset}`;
-      console.log('\n' + bar('╔', '╗'));
-      console.log(`${C.error}${C.bold}║${C.reset} ${isSudo ? '🔑 SUDO' : '⚠  DANGEROUS'} COMMAND — APPROVAL REQUIRED${' '.repeat(Math.max(0, inner - 47))} ${C.error}${C.bold}║${C.reset}`);
-      console.log(`${C.error}${C.bold}║${C.reset} ${C.yellow}${dangerMsg}${' '.repeat(Math.max(0, inner - 1 - dangerMsg.length))}${C.error}${C.bold}║${C.reset}`);
-      console.log(`${C.error}${C.bold}║${C.reset} ${C.gray}Tool: ${tool}${' '.repeat(Math.max(0, inner - 6 - tool.length))} ${C.error}${C.bold}║${C.reset}`);
-      const cmdPreview = cmdStr.length > inner - 9 ? cmdStr.slice(0, inner - 12) + '...' : cmdStr;
-      console.log(`${C.error}${C.bold}║${C.reset} ${C.bgBase}${C.fgBase} $ ${C.reset}${C.fgHalf}${cmdPreview}${' '.repeat(Math.max(0, inner - 5 - cmdPreview.length))} ${C.error}${C.bold}║${C.reset}`);
-      console.log(bar('╚', '╝'));
-      // List of choices + password prompt for sudo
-      console.log(`${C.fgSubtle}  Choices: ${C.reset}${C.green}y${C.reset}=approve  ${C.yellow}a${C.reset}=approve & don't ask again  ${C.red}n${C.reset}=deny${isSudo ? `  ${C.cyan}(sudo) type the password to approve${C.reset}` : ''}`);
-      const promptLabel = isSudo ? `${C.bgError}${C.butter}${C.bold} 🔑 sudo ${C.reset} password / y / a / n: `
-                                 : `${C.bgError}${C.butter}${C.bold} y/N ${C.reset} (or a=allowlist): `;
-      rl.question(promptLabel, (answer) => {
+      // Category accent colors copied from crush's theme palette:
+      // coding = hacker #00ff88 · sudo = sunset #ff6b6b · other dangerous = gold #ffd700
+      const _codingTools = new Set(['patch_file','write_file','multi_patch','apply_patch','edit_file','replace_in_file','create_file','write_code','str_replace_editor','insert_text','edit']);
+      let accent, titleTag;
+      if (_codingTools.has(tool))      { accent = _CRUSH.green; titleTag = '✎ CODE CHANGE'; }
+      else if (isSudo)                 { accent = _CRUSH.red;   titleTag = '🔑 SUDO COMMAND'; }
+      else                             { accent = _CRUSH.gold;  titleTag = '⚠  DANGEROUS COMMAND'; }
+      // Wrap long commands across multiple rows.
+      const cols = Math.max(60, (process.stdout.columns || 100) - 2);
+      const wrapW = Math.max(40, cols - 2 - 6);
+      const cmdLines = [];
+      if (cmdStr.length <= wrapW) {
+        cmdLines.push(cmdStr);
+      } else {
+        const words = cmdStr.split(' ');
+        let cur = '';
+        for (const w of words) {
+          if ((cur + ' ' + w).trim().length > wrapW) { if (cur) cmdLines.push(cur); cur = w; }
+          else { cur = (cur + ' ' + w).trim(); }
+        }
+        if (cur) cmdLines.push(cur);
+        if (cmdLines.length > 4) { cmdLines.length = 4; cmdLines[3] = cmdLines[3].slice(0, wrapW - 3) + '...'; }
+      }
+      const accentBg = accent === _CRUSH.green ? _CRUSH.bgGreen : accent === _CRUSH.red ? _CRUSH.bgRed : _CRUSH.bgGold;
+      const bodyLines = [
+        `${_CRUSH.muted}${dangerMsg}${C.reset}`,
+        '',
+        `${_CRUSH.muted}Tool:${C.reset} ${_CRUSH.text}${tool}${C.reset}`,
+        '',
+        ...cmdLines.map((cl, i) => (i === 0 ? `${_CRUSH.text}$ ${cl}${C.reset}` : `${_CRUSH.text}  ${cl}${C.reset}`)),
+        '',
+        `${_CRUSH.muted}Choices:${C.reset}  ${_CRUSH.green}y${C.reset}=approve   ${_CRUSH.gold}a${C.reset}=allowlist   ${_CRUSH.red}n${C.reset}=deny${isSudo ? `   ${_CRUSH.purple}(sudo) password${C.reset}` : ''}`,
+      ];
+      const promptLabel = isSudo ? `${accentBg}${_CRUSH.dark}${C.bold} 🔑 sudo ${C.reset} password / y / a / n: `
+                                 : `${accentBg}${_CRUSH.dark}${C.bold} y/N ${C.reset} (or a=allowlist): `;
+      _crushPanel({ accent, title: `${titleTag} — APPROVAL REQUIRED`, bodyLines, promptLabel, mask: isSudo }).then((answer) => {
         _awaitingConfirm = false;  // Resume status bar / stall guard / panels
         _lastActivityTime = Date.now();
         const a = answer.trim().toLowerCase();
@@ -6937,15 +6985,138 @@ async function repl() {
   }
 
   // ── History & state ──────────────────────────────────────────────────
-  // Load previous session if available, otherwise start fresh
-  const savedSession = loadSession();
-  const history = savedSession || [{ role: 'system', content: buildSystemPrompt() }];
-  if (savedSession) {
-    // Show session resume summary with last few messages
+  // Load previous session if available — but ASK before resuming instead of
+  // auto-starting back where we left off. Default is a fresh session (n);
+  // the user must explicitly choose to resume.
+  // Reusable pop-out window prompt (mirrors the crush terminal's overlay style):
+  // switches to the alt-screen buffer so the working output is hidden behind a
+  // dark "backdrop", draws a centered bordered modal with a purple accent, asks
+  // one question, then restores the main screen on answer.
+  // ── crush-exact overlay specs (copied verbatim from src/components/CrushTerminal.astro) ──
+  // container: background rgba(13,13,20,0.95) #0D0D14 · color #e2e8f0 · labels #64748b
+  // border-bottom 1px solid rgba(30,30,46,0.6) #1E1E2E · max-height 200px · padding 8px 12px
+  // backdrop-filter blur(8px) (= alt-screen "covers work") · accents: default #7c3aed · hacker #00ff88 · sunset #ff6b6b · gold #ffd700
+  const _CRUSH = {
+    bg:       '\x1b[48;2;13;13;20m',     // #0D0D14  rgba(13,13,20,0.95)
+    text:     '\x1b[38;2;226;232;240m',  // #e2e8f0  main text
+    muted:    '\x1b[38;2;100;116;139m',  // #64748b  labels
+    border:   '\x1b[38;2;30;30;46m',     // #1E1E2E  rgba(30,30,46,0.6)
+    purple:   '\x1b[38;2;124;58;237m',   // #7c3aed  default accent
+    green:    '\x1b[38;2;0;255;136m',    // #00ff88  hacker
+    red:      '\x1b[38;2;255;107;107m',  // #ff6b6b  sunset
+    gold:     '\x1b[38;2;255;215;0m',    // #ffd700  gold
+    bgPurple: '\x1b[48;2;124;58;237m',
+    bgGreen:  '\x1b[48;2;0;255;136m',
+    bgRed:    '\x1b[48;2;255;107;107m',
+    bgGold:   '\x1b[48;2;255;215;0m',
+    dark:     '\x1b[38;2;13;13;20m',     // text on bright accent chips
+  };
+  const _keepBg = (s) => String(s).replace(/\x1b\[0m/g, '\x1b[39m\x1b[22m');  // reset fg+bold, KEEP bg
+  const _vlen = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, '').length;
+
+  // Plain (echoed) and masked (password) readline questions as Promises.
+  const askPlain = (q) => new Promise((resolve) => rl.question(q, (a) => resolve(a)));
+  const askMasked = (q) => new Promise((resolve) => {
+    const origWrite = rl._writeToOutput ? rl._writeToOutput.bind(rl) : null;
+    let promptWritten = false;
+    if (origWrite) {
+      rl._writeToOutput = function (chunk) {
+        if (!promptWritten) { promptWritten = true; return origWrite(chunk); }   // write prompt verbatim
+        const s = String(chunk);
+        if (s === '\r\n' || s === '\n' || s === '\r') return origWrite(s);
+        if (/[\b\x1b]/.test(s)) return origWrite(s);   // backspace / escape controls pass through
+        let out = '';
+        for (const ch of s) out += (ch >= ' ' && ch !== '\u007f') ? '•' : ch;
+        return origWrite(out);
+      };
+    }
+    rl.question(q, (answer) => { if (origWrite) rl._writeToOutput = origWrite; resolve(answer); });
+  });
+
+  // Crush-style popout panel: full terminal width, #0D0D14 bg, bottom border #1E1E2E,
+  // max-height ~200px (15 rows), padding 8px/12px, vertically centered. Covers the
+  // working output via the alt-screen buffer (crush's blur backdrop equivalent).
+  // `mask: true` hides typed input (sudo password) with bullets.
+  // Crush-style popout panel with a nice accent-colored frame around the #0D0D14
+  // box: full top/sides/bottom border (rounded) in the category accent, crush-exact
+  // bg/text/labels inside, max-height ~200px (15 rows), padding 8px/12px, centered.
+  // Covers the working output via the alt-screen buffer (crush's blur backdrop).
+  // `mask: true` hides typed input (sudo password) with bullets.
+  const _crushPanel = ({ accent, title, bodyLines, promptLabel, mask = false }) => new Promise((resolve) => {
+    const termCols = process.stdout.columns || 100;
+    const termRows = process.stdout.rows || 30;
+    const cols = Math.max(60, termCols - 2);
+    const PAD_L = 2;            // 12px horizontal ≈ 2 cols (inner padding)
+    const MAX_ROWS = 15;        // 200px ≈ 15 rows (crush max-height)
+    const innerW = cols - 2;    // width between the side borders
+    const content = [`${accent}${C.bold}${title}${C.reset}`, ''];
+    for (const l of bodyLines) content.push(l);
+    while (content.length < MAX_ROWS - 3) content.push('');
+    while (content.length > MAX_ROWS - 3) content.pop();
+    process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H');
+    const panelH = content.length + 2 + 2;   // content rows + top/bottom frame
+    const topPad = Math.max(0, Math.floor((termRows - panelH) / 2));
+    for (let i = 0; i < topPad; i++) process.stdout.write('\n');
+    // Top frame (accent, rounded)
+    process.stdout.write(accent + C.bold + '╭' + '─'.repeat(innerW) + '╮' + C.reset + '\n');
+    // Content rows: │ (accent) + #0D0D14 bg interior + │ (accent)
+    const row = (text) => {
+      const t = _keepBg(text);
+      const padR = Math.max(0, innerW - PAD_L - _vlen(t));
+      return accent + C.bold + '│' + C.reset + _CRUSH.bg + ' '.repeat(PAD_L) + t + ' '.repeat(padR) + C.reset + accent + C.bold + '│' + C.reset + '\n';
+    };
+    for (const line of content) process.stdout.write(row(line));
+    // Bottom frame (accent, rounded)
+    process.stdout.write(accent + C.bold + '╰' + '─'.repeat(innerW) + '╯' + C.reset + '\n');
+    // Centered prompt chip under the framed window.
+    const lead = Math.max(0, Math.floor((cols - _vlen(promptLabel)) / 2));
+    process.stdout.write('\n' + ' '.repeat(lead));
+    (mask ? askMasked : askPlain)(promptLabel).then((answer) => {
+      process.stdout.write('\x1b[?1049l');
+      resolve(answer);
+    });
+  });
+  const savedSession = loadSession();   // full cleaned history incl. leading system msg
+  let history;
+  if (savedSession && savedSession.length > 1) {
+    // Show the REAL size + REAL last user message from the full saved session.
     const userMsgs = savedSession.filter(m => m.role === 'user');
-    const lastUser = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content.substring(0, 80) : '(none)';
-    console.log(`  ${C.green}✓ Resumed session${C.reset} ${C.fgMuted}(${history.length - 1} msgs)${C.reset} ${C.dim}last: "${lastUser}"${C.reset}`);
-    console.log(`  ${C.fgSubtle}Type /clear to start fresh${C.reset}`);
+    const lastUser = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content.substring(0, 70) : '(none)';
+    const realCount = savedSession.length - 1;   // exclude the leading system msg
+    const ans = (await _crushPanel({
+      accent: _CRUSH.purple,
+      title: '↻ RESUME SESSION',
+      bodyLines: [
+        `${_CRUSH.text}A saved session was found on disk.${C.reset}`,
+        '',
+        `${_CRUSH.muted}Messages saved:${C.reset}   ${_CRUSH.text}${realCount}${C.reset}`,
+        `${_CRUSH.muted}Last user message:${C.reset} ${_CRUSH.text}"${lastUser}"${C.reset}`,
+        '',
+        `${_CRUSH.green}y${C.reset} = resume   ${_CRUSH.red}n${C.reset} / Enter = start fresh`,
+      ],
+      promptLabel: `${_CRUSH.bgPurple}${_CRUSH.dark}${C.bold} y/N ${C.reset} `,
+    })).trim().toLowerCase();
+    if (ans === 'y' || ans === 'yes') {
+      // Trim to recent turns ONLY on resume, logged here (after the choice), and
+      // orphan-safe: drop any leading `tool` messages in the slice.
+      if (realCount > 20) {
+        const slice = savedSession.slice(-8);
+        let k = 0;
+        while (k < slice.length && slice[k].role === 'tool') k++;
+        const kept = slice.slice(k);
+        history = [{ role: 'system', content: buildSystemPrompt() }, ...kept];
+        log(`${C.yellow}📦 Session long (${realCount} msgs) — resuming with last ${kept.length} msgs${C.reset}`);
+      } else {
+        history = savedSession;
+      }
+      console.log(`  ${C.green}✓ Resumed session${C.reset} ${C.fgMuted}(${history.length - 1} msgs)${C.reset} ${C.dim}last: "${lastUser}"${C.reset}`);
+      console.log(`  ${C.fgSubtle}Type /clear to start fresh${C.reset}`);
+    } else {
+      history = [{ role: 'system', content: buildSystemPrompt() }];
+      console.log(`  ${C.dim}Starting fresh session (saved session kept on disk).${C.reset}`);
+    }
+  } else {
+    history = [{ role: 'system', content: buildSystemPrompt() }];
   }
   let idleTimer = null;
   let processing = false;
