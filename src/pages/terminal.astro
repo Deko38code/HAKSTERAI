@@ -991,6 +991,141 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         if (event.detail?.mode !== 'crush') return;
         try { detectDangerPrompt(event.detail.data || ''); } catch (_) {}
       });
+
+      // ── "/" command palette — Commands / Models / Skills / Memories / Agents / All ──
+      const SLASH_COMMANDS = [
+        { cmd: '/status',   desc: 'health & provider grid' },
+        { cmd: '/memory',   desc: 'persistent facts' },
+        { cmd: '/help',     desc: 'command matrix' },
+        { cmd: '/clear',    desc: 'clear output buffer' },
+        { cmd: '/skills',   desc: 'list available skills' },
+        { cmd: '/tools',    desc: 'list agent tools' },
+        { cmd: '/models',   desc: 'list models' },
+        { cmd: '/sessions', desc: 'list saved sessions' },
+        { cmd: '/consolidate', desc: 'consolidate memory now' },
+        { cmd: '/model',    desc: 'switch model' },
+        { cmd: '/exit',     desc: 'exit the agent' },
+      ];
+      const AGENT_COMMANDS = [
+        { cmd: 'team fix "describe bug"', desc: 'run an agent team fix workflow' },
+        { cmd: 'agent "one-shot task"',   desc: 'one-shot non-interactive agent' },
+        { cmd: 'sub_agent: spawn parallel sub-agents', desc: 'delegate via the sub_agent tool' },
+        { cmd: 'spawn_agent: delegate a single sub-task', desc: 'delegate via spawn_agent tool' },
+      ];
+      const palette = document.getElementById('cmd-palette');
+      const paletteList = document.getElementById('cmd-palette-list');
+      const paletteFilter = document.getElementById('cmd-palette-filter');
+      const paletteTabs = document.getElementById('cmd-palette-tabs');
+      let _palItems = [];     // {kind, cat, label, desc?, cmd?, provider?, model?, name?}
+      let _palIdx = 0; let _palCat = 'all';
+      let _palLoaded = { skills: false, models: false, memories: false };
+
+      function sendPtyInputData(d) {
+        try { const t = window.__crushTerminals && window.__crushTerminals['crush-main'];
+          const p = t && (t.active || (t.panes && t.panes[0]));
+          if (p && p.ws && p.ws.readyState === 1) { p.ws.send(JSON.stringify({ type: 'input', data: d })); return true; } } catch (_) {}
+        return false;
+      }
+      function applyModelSelection(provider, model) {
+        const provSel = document.getElementById('sb-provider'); const modSel = document.getElementById('sb-model');
+        if (provSel) { provSel.value = provider; provSel.dispatchEvent(new Event('change')); }
+        const setModel = () => { if (modSel) { if (Array.from(modSel.options).some(o => o.value === model)) { modSel.value = model; modSel.dispatchEvent(new Event('change')); } else { fetch('/api/crush/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, model }) }).catch(() => {}); } } };
+        if (modSel && Array.from(modSel.options).some(o => o.value === model)) setModel(); else setTimeout(setModel, 350);
+      }
+      const CATS = [['all','All'],['cmd','Commands'],['model','Models'],['skill','Skills'],['mem','Memories'],['agent','Agents']];
+      function renderTabs() {
+        paletteTabs.innerHTML = CATS.map(([id,label]) => {
+          const sel = id === _palCat;
+          return '<button data-cat="' + id + '" style="padding:5px 10px;border:0;border-radius:6px;cursor:pointer;font-size:12px;background:' + (sel ? 'rgba(167,139,250,0.25)' : '#1a1a24') + ';color:' + (sel ? '#fff' : '#9aa0b4') + ';border:1px solid ' + (sel ? '#a78bfa' : '#2a2a38') + ';">' + label + '</button>';
+        }).join('');
+        paletteTabs.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { _palCat = b.dataset.cat; _palIdx = 0; renderTabs(); renderPalette(); }));
+      }
+      function visibleItems() {
+        const q = (paletteFilter.value || '').trim().toLowerCase();
+        return _palItems.filter(it => (_palCat === 'all' || it.cat === _palCat) && (!q || it.label.toLowerCase().includes(q) || (it.desc || '').toLowerCase().includes(q)));
+      }
+      function renderPalette() {
+        const filtered = visibleItems();
+        _palIdx = Math.min(_palIdx, Math.max(0, filtered.length - 1));
+        paletteList.innerHTML = filtered.map((it, i) => {
+          const sel = i === _palIdx;
+          const bg = sel ? 'background:rgba(167,139,250,0.18);border-left:3px solid #a78bfa;' : 'border-left:3px solid transparent;';
+          const tag = it.cat === 'model' ? '<span style="margin-left:auto;color:#a78bfa;font-size:10px;">model</span>'
+                   : it.cat === 'skill' ? '<span style="margin-left:auto;color:#7ee787;font-size:10px;">skill</span>'
+                   : it.cat === 'mem' ? '<span style="margin-left:auto;color:#fbbf24;font-size:10px;">memory</span>'
+                   : it.cat === 'agent' ? '<span style="margin-left:auto;color:#38bdf8;font-size:10px;">agent</span>'
+                   : '<span style="margin-left:auto;color:#6b7080;font-size:10px;">cmd</span>';
+          const left = it.cat === 'model' ? '<span style="color:#6b7080;font-size:11px;min-width:90px;">' + escapeHtml(it.provider || '') + '</span><span style="color:' + (sel ? '#fff' : '#c7c7d6') + ';font-weight:' + (sel ? '600' : '400') + ';">' + escapeHtml(it.model) + '</span>'
+                    : it.cat === 'skill' ? '<span style="color:#7ee787;font-weight:600;min-width:160px;">' + escapeHtml(it.name) + '</span><span style="color:#6b7080;font-size:12px;">' + escapeHtml((it.path || '').replace('/home/ghost','~')) + '</span>'
+                    : it.cat === 'mem' ? '<span style="color:#fbbf24;font-weight:600;min-width:140px;">' + escapeHtml(it.label) + '</span><span style="color:#9aa0b4;font-size:12px;">' + escapeHtml((it.value || '').slice(0, 60)) + '</span>'
+                    : '<span style="color:#7ee787;font-weight:600;min-width:160px;">' + escapeHtml(it.cmd) + '</span><span style="color:#6b7080;font-size:12px;">' + escapeHtml(it.desc || '') + '</span>';
+          return '<div data-i="' + i + '" style="' + bg + 'padding:8px 12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:10px;">' + left + tag + '</div>';
+        }).join('') || '<div style="padding:16px;color:#6b7080;text-align:center;">No matches.</div>';
+      }
+      function loadPalModels() {
+        if (_palLoaded.models) return; _palLoaded.models = true;
+        fetch('/api/providers').then(r => r.json()).then(async (data) => {
+          const providers = (data && (data.providers || data)) || [];
+          for (const p of (Array.isArray(providers) ? providers : Object.values(providers))) {
+            const pid = p.id || p.name || p;
+            try { const md = await fetch('/api/providers/' + encodeURIComponent(pid) + '/models').then(r => r.json()).catch(() => ({}));
+              const models = (md && (md.models || md.data)) || [];
+              for (const m of models.slice(0, 40)) { const mn = typeof m === 'string' ? m : (m.id || m.name || m.model);
+                _palItems.push({ cat: 'model', kind: 'model', provider: pid, model: mn, label: pid + ' / ' + mn, desc: 'switch model' }); }
+            } catch (_) {}
+          }
+          renderPalette();
+        }).catch(() => {});
+      }
+      function loadPalSkills() {
+        if (_palLoaded.skills) return; _palLoaded.skills = true;
+        fetch('/api/agent/skills').then(r => r.json()).then(d => {
+          (d.skills || []).slice(0, 800).forEach(s => _palItems.push({ cat: 'skill', kind: 'skill', name: s.name, path: s.path, label: s.name, desc: 'skill_load' }));
+          renderPalette();
+        }).catch(() => {});
+      }
+      function loadPalMemories() {
+        if (_palLoaded.memories) return; _palLoaded.memories = true;
+        fetch('/api/agent/memory?limit=200').then(r => r.json()).then(d => {
+          (d.memories || d.results || []).forEach(m => _palItems.push({ cat: 'mem', kind: 'mem', label: m.key || m.title || (m.value || '').slice(0, 30), value: m.value || m.content || '', desc: m.category || 'memory' }));
+          renderPalette();
+        }).catch(() => {});
+      }
+      function openPalette() {
+        if (!palette) return;
+        _palItems = [];
+        SLASH_COMMANDS.forEach(c => _palItems.push({ cat: 'cmd', kind: 'cmd', cmd: c.cmd, desc: c.desc, label: c.cmd }));
+        AGENT_COMMANDS.forEach(c => _palItems.push({ cat: 'agent', kind: 'agent', cmd: c.cmd, desc: c.desc, label: c.cmd }));
+        _palCat = 'all'; _palIdx = 0; _palLoaded = { skills: false, models: false, memories: false };
+        paletteFilter.value = ''; palette.style.display = 'flex'; paletteFilter.focus();
+        renderTabs(); renderPalette();
+        loadPalModels(); loadPalSkills(); loadPalMemories();
+      }
+      function closePalette() { if (palette) palette.style.display = 'none'; }
+      function runPalItem(it) {
+        if (!it) return;
+        if (it.kind === 'cmd' || it.kind === 'agent') { sendPtyInputData((it.cmd || it.label) + '\r'); }
+        else if (it.kind === 'model') { applyModelSelection(it.provider, it.model); }
+        else if (it.kind === 'skill') { sendPtyInputData('skill_load ' + it.name + '\r'); }
+        else if (it.kind === 'mem') { sendPtyInputData('/memory\r'); }
+        closePalette();
+      }
+      paletteFilter?.addEventListener('input', renderPalette);
+      paletteFilter?.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { closePalette(); e.preventDefault(); return; }
+        if (e.key === 'ArrowDown') { _palIdx++; renderPalette(); e.preventDefault(); }
+        else if (e.key === 'ArrowUp') { _palIdx = Math.max(0, _palIdx - 1); renderPalette(); e.preventDefault(); }
+        else if (e.key === 'Enter') { runPalItem(visibleItems()[_palIdx] || visibleItems()[0]); e.preventDefault(); }
+      });
+      paletteList?.addEventListener('click', (e) => { const row = e.target.closest('[data-i]'); if (row) runPalItem(visibleItems()[Number(row.dataset.i)]); });
+      palette?.addEventListener('click', (e) => { if (e.target === palette) closePalette(); });
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+        const dangerOpen = document.getElementById('danger-overlay') && document.getElementById('danger-overlay').style.display !== 'none';
+        if (dangerOpen || (palette && palette.style.display !== 'none')) return;
+        const tag = e.target.tagName; if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault(); openPalette();
+      });
     </script>
 
     <!-- ── Dangerous-command approval overlay (crush-style) ───────────────── -->
@@ -1020,5 +1155,19 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
     <style>
       #danger-diff .d-add{color:#7ee787;} #danger-diff .d-del{color:#ff7b72;} #danger-diff .d-hnk{color:#6b7080;}
     </style>
+
+    <!-- ── "/" command palette — Commands / Models / Skills / Memories / Agents / All ── -->
+    <div id="cmd-palette" style="display:none;position:fixed;inset:0;z-index:10000;align-items:flex-start;justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;padding-top:10vh;">
+      <div style="width:94vw;max-width:720px;max-height:76vh;display:flex;flex-direction:column;background:#0b0b12;border:1px solid #3b3b4a;border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,0.6);overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.08);background:#0e0e16;">
+          <span style="color:#a78bfa;">⌘</span>
+          <span style="color:#e7e7f0;font-weight:700;letter-spacing:0.03em;">Menu</span>
+          <span style="margin-left:auto;color:#6b7080;font-size:11px;">↑↓ navigate · ⏎ select · esc close · / open</span>
+        </div>
+        <div id="cmd-palette-tabs" style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap;border-bottom:1px solid rgba(255,255,255,0.05);"></div>
+        <input id="cmd-palette-filter" type="text" placeholder="Filter…  (/status, /model, glm-5.2, nmap, memory…) " style="margin:10px 14px;padding:9px 12px;background:#000;color:#e7e7f0;border:1px solid #2a2a38;border-radius:8px;font-size:13px;outline:none;" autocomplete="off" spellcheck="false" />
+        <div id="cmd-palette-list" style="flex:1;overflow:auto;padding:0 8px 10px;"></div>
+      </div>
+    </div>
   </body>
 </html>

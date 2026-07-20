@@ -1577,6 +1577,41 @@ app.get('/api/agent/memory', (req, res) => {
   res.json({ memories, results: memories });
 });
 
+// ── Skills list for the command palette / dashboard ──
+app.get('/api/agent/skills', (_req, res) => {
+  try {
+    const path = require('path');
+    const { globSync } = require('glob');
+    const roots = Array.from(new Set([
+      path.join(process.env.HOME || '/home/ghost', '.hakster'),
+      '/home/ghost/.hakster',
+      path.join(process.cwd(), '.hakster'),
+      path.join(__dirname, '..', 'server', 'src', 'agent', '..', '..', '.hakster'),
+      '/home/ghost/haksterAi/.hakster',
+      '/home/ghost/.agents',
+      '/home/ghost/skills',
+      '/home/ghost/.hermes/hermes-agent',
+      '/home/ghost/.hermes',
+      '/home/ghost/haksterAi/pentest-agents',
+    ]));
+    const dirs = [];
+    for (const r of roots) { dirs.push(path.join(r, 'skills')); if (r.endsWith('/skills')) dirs.push(r); }
+    const seen = new Set();
+    const skills = [];
+    for (const d of Array.from(new Set(dirs))) {
+      try {
+        for (const f of globSync(path.join(d, '**', '*.md'), { ignore: ['**/node_modules/**', '**/.git/**'] })) {
+          const a = path.resolve(f);
+          if (seen.has(a)) continue; seen.add(a);
+          const rel = path.relative(d, a).replace(/\.md$/, '');
+          skills.push({ name: rel, path: a });
+        }
+      } catch (_) {}
+    }
+    res.json({ total: skills.length, skills });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/memory/stats', (_req, res) => {
   res.json(getMemoryStats());
 });
