@@ -18,10 +18,53 @@
       <p class="text-[#64748b] text-lg">
         One command to install. Zero config to get started.
       </p>
+      <p class="mt-3 inline-flex flex-wrap items-center gap-2 text-sm">
+        <span class="rounded-md border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-2 py-0.5 text-xs font-bold tracking-widest text-[#7c3aed] uppercase">Pro</span>
+        <span class="text-[#94a3b8]">Run HP-1000 on <span class="text-[#e2e8f0] font-semibold">your own machine</span> — full local file &amp; process access. Not a sandbox.</span>
+      </p>
     </div>
 
     <!-- Install cards -->
     <div class="space-y-4 mb-12">
+
+      <!-- 0. one-line install (curl) -->
+      <div class="rounded-xl border border-[#7c3aed]/40 bg-[#111118] overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
+          <span class="text-xs text-[#7c3aed] font-mono">fastest · one-line install</span> <span class="ml-1 rounded border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-[#7c3aed] uppercase">Pro</span>
+          <button class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none" data-copy="curl -fsSL https://haksterai.com/install.sh | bash">copy</button>
+        </div>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">curl -fsSL https://haksterai.com/install.sh | bash</span>
+        </div>
+        <div class="px-6 pb-3 text-xs text-[#64748b]">Clones, installs deps, builds, starts the server under pm2, and puts <code class="text-[#a855f7]">haksterai</code> on your PATH. Then run <code class="text-[#a855f7]">haksterai chat</code>.</div>
+      </div>
+
+      <!-- npx (run without installing) -->
+      <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
+          <span class="text-xs text-[#64748b] font-mono">or · run once with npx</span> <span class="ml-1 rounded border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-[#7c3aed] uppercase">Pro</span>
+          <button class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none" data-copy="npx github:Deko38code/haksterAi chat">copy</button>
+        </div>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">npx github:Deko38code/haksterAi chat</span>
+        </div>
+        <div class="px-6 pb-3 text-xs text-[#64748b]">No install — runs HP-1000 straight from GitHub. (Requires the repo to be public.)</div>
+      </div>
+
+      <!-- npm global install -->
+      <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e1e2e] bg-[#0d0d14]">
+          <span class="text-xs text-[#64748b] font-mono">or · global npm install</span> <span class="ml-1 rounded border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-[#7c3aed] uppercase">Pro</span>
+          <button class="copy-btn text-xs text-[#64748b] hover:text-[#a855f7] transition-colors cursor-pointer select-none" data-copy="npm install -g github:Deko38code/haksterAi">copy</button>
+        </div>
+        <div class="flex items-center gap-3 px-6 py-5 font-mono text-sm overflow-x-auto">
+          <span class="text-[#7c3aed] font-bold flex-shrink-0">$</span>
+          <span class="text-[#e2e8f0] whitespace-nowrap">npm install -g github:Deko38code/haksterAi</span>
+        </div>
+        <div class="px-6 pb-3 text-xs text-[#64748b]">Puts <code class="text-[#a855f7]">haksterai</code> on your PATH, then run <code class="text-[#a855f7]">haksterai chat</code>. (Requires the repo to be public.)</div>
+      </div>
 
       <!-- 1. clone -->
       <div class="rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">

@@ -791,6 +791,30 @@ async function cliExecuteTool(name, args, trustCfg) {
         }
       }
 
+      case 'firecrawl':
+      case 'firecrawl_scrape':
+      case 'firecrawl_search': {
+        const http = require('http');
+        const isSearch = name === 'firecrawl_search' || (args.action === 'search');
+        const body = JSON.stringify(isSearch
+          ? { action: 'search', query: args.query || args.q || '' }
+          : { action: 'scrape', url: args.url || '' });
+        const raw = await new Promise(resolve => {
+          const req = http.request({ hostname: '127.0.0.1', port: 3579, path: '/api/agent/firecrawl', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, res => {
+            let d = ''; res.on('data', c => d += c); res.on('end', () => resolve({ status: res.statusCode, body: d }));
+          });
+          req.on('error', e => resolve({ status: 0, body: JSON.stringify({ ok: false, error: e.message }) }));
+          req.write(body); req.end();
+        });
+        try {
+          const parsed = JSON.parse(raw.body || '{}');
+          if (parsed.ok) return { ok: true, output: parsed.output || 'No content', error: null };
+          return { ok: false, output: '', error: parsed.error || `Firecrawl request failed (${raw.status})` };
+        } catch (e) {
+          return { ok: false, output: '', error: `Firecrawl proxy error: ${e.message}` };
+        }
+      }
+
       case 'save_memory': {
         // Save to server memory API
         const http = require('http');
@@ -1024,8 +1048,9 @@ async function cliExecuteTool(name, args, trustCfg) {
         // Fetch from server DB if available, otherwise return empty
         const http = require('http');
         const url = args.name ? `/api/agent-skills?name=${encodeURIComponent(args.name)}` : '/api/agent-skills';
+        const serverUrl = new URL(process.env.HAKSTER_SERVER || process.env.HAKSTER_API || 'http://127.0.0.1:3579');
         const raw = await new Promise(resolve => {
-          const req = http.request({ hostname: 'localhost', port: 4000, path: url, method: 'GET' }, res => {
+          const req = http.request({ hostname: serverUrl.hostname, port: serverUrl.port || 80, path: url, method: 'GET' }, res => {
             let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
           });
           req.on('error', () => resolve('{}')); req.end();

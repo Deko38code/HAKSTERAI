@@ -364,8 +364,13 @@ function initSchema(db) {
       db.prepare("ALTER TABLE users ADD COLUMN token_balance INTEGER NOT NULL DEFAULT 0").run();
       console.log('  [migration] Added token_balance column to users');
     }
+    if (!userCols.includes('telegram_id')) {
+      db.prepare("ALTER TABLE users ADD COLUMN telegram_id TEXT").run();
+      console.log('  [migration] Added telegram_id column to users');
+    }
     // Create google_id index after column is added
     db.prepare("CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)").run();
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram_id_unique ON users(telegram_id) WHERE telegram_id IS NOT NULL").run();
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code_unique ON users(referral_code) WHERE referral_code IS NOT NULL").run();
     db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)").run();
     db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by)").run();

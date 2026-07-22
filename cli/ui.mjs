@@ -1,12 +1,12 @@
 // Built by esbuild — do not edit. Run: node build.mjs
 
 // src/index.jsx
-import React12 from "react";
+import React15 from "react";
 import { render } from "ink";
 
 // src/App.jsx
-import React11, { useState as useState4, useEffect as useEffect3, useRef, useCallback, useMemo as useMemo2 } from "react";
-import { Box as Box10, Text as Text11, useInput as useInput2, useApp, useStdout } from "ink";
+import React14, { useState as useState7, useEffect as useEffect4, useRef, useCallback, useMemo as useMemo4 } from "react";
+import { Box as Box13, Text as Text14, useInput as useInput4, useApp, useStdout } from "ink";
 
 // src/agent.jsx
 import { EventEmitter } from "events";
@@ -331,13 +331,17 @@ var HaksterAgent = class extends EventEmitter {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
+        let nl;
+        while ((nl = buffer.indexOf("\n")) !== -1) {
+          let line = buffer.slice(0, nl);
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          if (line[0] === "d" && line.startsWith("data:")) {
+            const payload = line[5] === " " ? line.slice(6) : line.slice(5);
+            if (!payload) continue;
             try {
-              const data = JSON.parse(line.slice(6));
-              this._handleMessage(data);
+              this._handleMessage(JSON.parse(payload));
             } catch {
             }
           }
@@ -394,7 +398,7 @@ var HaksterAgent = class extends EventEmitter {
     return [];
   }
   // ── Approval response ────────────────────────────────
-  async respondApproval(toolCallId, approved, permanent = false) {
+  async respondApproval(toolCallId, approved, permanent = false, session = false, password = "") {
     try {
       await fetch(`${API_URL}/api/agent/confirm`, {
         method: "POST",
@@ -404,7 +408,9 @@ var HaksterAgent = class extends EventEmitter {
           toolCallId,
           approved,
           command: "",
-          permanent
+          permanent,
+          session,
+          password
         })
       });
     } catch {
@@ -507,6 +513,7 @@ var COMMANDS = [
   "/fast",
   "/health",
   "/undo",
+  "/commands",
   "/exit"
 ];
 var DESCRIPTIONS = {
@@ -529,6 +536,7 @@ var DESCRIPTIONS = {
   "/skills": "List skills",
   "/theme": "Switch theme",
   "/fast": "Toggle fast mode",
+  "/commands": "Open commands palette popup",
   "/health": "Server health",
   "/undo": "Undo last edit",
   "/exit": "Exit CLI"
@@ -638,97 +646,555 @@ function HelpOverlay({ cols = 80, rows = 24, onDismiss }) {
   );
 }
 
-// src/components/ApprovalPrompt.jsx
-import React4 from "react";
+// src/components/ModelDialog.jsx
+import React4, { useState as useState2, useMemo as useMemo2, useEffect } from "react";
 import { Box as Box4, Text as Text4, useInput } from "ink";
-import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
-function ApprovalPrompt({
-  action = "",
-  command = "",
-  risk = "medium",
-  // low, medium, high, critical
-  reason = "",
-  onApprove,
-  onDeny,
-  onAllowlist
+import { Fragment, jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
+var PROVIDERS = [
+  {
+    id: "glm",
+    name: "GLM / Charm Cloud",
+    needsKey: false,
+    models: [
+      { id: "glm-5.2:cloud", name: "GLM 5.2 Cloud" },
+      { id: "thudm/glm-5.1:cloud", name: "GLM 5.1 Cloud" },
+      { id: "thudm/glm-5.1:cloud-ctx", name: "GLM 5.1 Cloud (ctx)" }
+    ]
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic / Claude",
+    needsKey: true,
+    models: [
+      { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+      { id: "claude-opus-4-5", name: "Claude Opus 4.5" },
+      { id: "claude-haiku-3-5", name: "Claude Haiku 3.5" }
+    ]
+  },
+  {
+    id: "openai",
+    name: "OpenAI / Codex",
+    needsKey: true,
+    models: [
+      { id: "gpt-4o", name: "GPT-4o" },
+      { id: "openai/gpt-5.5", name: "GPT-5.5" },
+      { id: "gpt-5.1-codex", name: "GPT-5.1 Codex" },
+      { id: "codex-mini-latest", name: "Codex Mini" },
+      { id: "gpt-oss:120b-cloud", name: "GPT-OSS 120B Cloud" },
+      { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B" }
+    ]
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter / Nous",
+    needsKey: true,
+    models: [
+      { id: "nousresearch/hermes-3-llama-3.1-405b:free", name: "Nous Hermes 3 405B" },
+      { id: "nousresearch/hermes-3-llama-3.1-70b", name: "Nous Hermes 3 70B" },
+      { id: "openrouter/free", name: "OpenRouter Auto (free)" }
+    ]
+  },
+  {
+    id: "gemini",
+    name: "Gemini",
+    needsKey: true,
+    models: [
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+      { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash Lite" }
+    ]
+  },
+  {
+    id: "ollama",
+    name: "Ollama (local)",
+    needsKey: false,
+    models: [
+      { id: "llama3.2:latest", name: "Llama 3.2 (local)" },
+      { id: "hermes3", name: "Nous Hermes 3 (local)" },
+      { id: "qwen2.5:32b", name: "Qwen 2.5 32B (local)" }
+    ]
+  }
+];
+var ALL_OPTIONS = PROVIDERS.flatMap(
+  (p) => p.models.map((m) => ({ model: m.id, name: m.name, provider: p.id, providerName: p.name, needsKey: p.needsKey }))
+);
+var WIDTH = 62;
+var VISIBLE_ROWS = 9;
+var SPIN_FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
+function gridLine(width) {
+  return Array.from({ length: Math.max(1, Math.floor(width / 2)) }, () => "\xB7").join(" ");
+}
+function buildRows(matches) {
+  const rows = [];
+  let lastProvider = null;
+  matches.forEach((o, matchIndex) => {
+    if (o.provider !== lastProvider) {
+      rows.push({ type: "header", label: o.providerName, key: "h:" + o.provider + ":" + matchIndex });
+      lastProvider = o.provider;
+    }
+    rows.push({ type: "item", option: o, matchIndex, key: o.model + ":" + o.provider });
+  });
+  return rows;
+}
+function ModelDialog({
+  cols = 80,
+  rows = 24,
+  currentModel = "",
+  onSelect,
+  onDismiss,
+  onSetProviderKey
 }) {
-  const isSudo = typeof risk === "string" && risk === "critical";
-  const riskConfig = {
-    low: { color: "green", icon: "\u2713", label: "LOW" },
-    medium: { color: "yellow", icon: "\u26A0\uFE0F", label: "MEDIUM" },
-    high: { color: "red", icon: "\u26A0\uFE0F", label: "HIGH" },
-    critical: { color: "red", icon: "\u{1F511}", label: "SUDO" }
-  };
-  const rc = riskConfig[risk] || riskConfig.medium;
+  const [filter, setFilter] = useState2("");
+  const [idx, setIdx] = useState2(0);
+  const [offset, setOffset] = useState2(0);
+  const [modelType, setModelType] = useState2("large");
+  const [needsAPIKey, setNeedsAPIKey] = useState2(false);
+  const [selected, setSelected] = useState2(null);
+  const [apiKey, setApiKey] = useState2("");
+  const [reveal, setReveal] = useState2(false);
+  const [keyError, setKeyError] = useState2("");
+  const [saving, setSaving] = useState2(false);
+  const [saved, setSaved] = useState2(false);
+  const [spinFrame, setSpinFrame] = useState2(0);
+  const matches = useMemo2(() => {
+    const q = filter.toLowerCase();
+    if (!q) return ALL_OPTIONS;
+    return ALL_OPTIONS.filter(
+      (o) => o.name.toLowerCase().includes(q) || o.model.toLowerCase().includes(q) || o.providerName.toLowerCase().includes(q)
+    );
+  }, [filter]);
+  const displayRows = useMemo2(() => buildRows(matches), [matches]);
+  const totalRows = displayRows.length;
+  const selectedRow = useMemo2(
+    () => displayRows.findIndex((r) => r.type === "item" && r.matchIndex === idx),
+    [displayRows, idx]
+  );
+  useEffect(() => {
+    if (selectedRow < 0) return;
+    setOffset((o) => {
+      if (selectedRow < o) return selectedRow;
+      if (selectedRow > o + VISIBLE_ROWS - 1) return selectedRow - VISIBLE_ROWS + 1;
+      return o;
+    });
+  }, [selectedRow]);
+  useEffect(() => {
+    if (!saving) return;
+    const t = setInterval(() => setSpinFrame((f) => (f + 1) % SPIN_FRAMES.length), 80);
+    return () => clearInterval(t);
+  }, [saving]);
   useInput((raw, key) => {
-    if (key.escape || raw === "n" || raw === "N") {
-      onDeny?.();
+    if (needsAPIKey) {
+      if (saving || saved) return;
+      if (key.escape) {
+        setNeedsAPIKey(false);
+        setSelected(null);
+        setApiKey("");
+        setKeyError("");
+        return;
+      }
+      if (key.tab) {
+        setReveal((r) => !r);
+        return;
+      }
+      if (key.return) {
+        if (!apiKey.trim()) {
+          setKeyError("API key cannot be empty");
+          return;
+        }
+        setKeyError("");
+        setSaving(true);
+        setTimeout(() => {
+          const ok = onSetProviderKey ? onSetProviderKey(selected.provider, apiKey.trim()) : true;
+          setSaving(false);
+          if (ok === false) {
+            setKeyError("Could not save key \u2014 try again");
+            return;
+          }
+          setSaved(true);
+          setTimeout(() => onSelect?.(selected.model, selected.provider, modelType), 450);
+        }, 380);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setApiKey((p) => p.slice(0, -1));
+        setKeyError("");
+        return;
+      }
+      if (raw && !key.ctrl && !key.meta && raw.length === 1) {
+        setApiKey((p) => p + raw);
+        setKeyError("");
+        return;
+      }
       return;
     }
-    if (raw === "y" || raw === "Y") {
-      onApprove?.();
+    if (key.escape) {
+      onDismiss?.();
       return;
     }
-    if (raw === "a" || raw === "A") {
-      onAllowlist?.();
+    if (key.return) {
+      const opt = matches[idx];
+      if (!opt) return;
+      if (opt.needsKey && onSetProviderKey) {
+        setSelected(opt);
+        setNeedsAPIKey(true);
+        setApiKey("");
+        setReveal(false);
+        setKeyError("");
+        setSaved(false);
+        return;
+      }
+      onSelect?.(opt.model, opt.provider, modelType);
+      return;
+    }
+    if (key.tab) {
+      setModelType((t) => t === "large" ? "small" : "large");
+      return;
+    }
+    if (key.upArrow) {
+      setIdx((i) => Math.max(0, i - 1));
+      return;
+    }
+    if (key.downArrow) {
+      setIdx((i) => Math.min(matches.length - 1, i + 1));
+      return;
+    }
+    if (key.pageUp) {
+      setIdx((i) => Math.max(0, i - VISIBLE_ROWS));
+      return;
+    }
+    if (key.pageDown) {
+      setIdx((i) => Math.min(matches.length - 1, i + VISIBLE_ROWS));
+      return;
+    }
+    if (key.backspace || key.delete) {
+      setFilter((p) => p.slice(0, -1));
+      setIdx(0);
+      return;
+    }
+    if (raw && !key.ctrl && !key.meta && raw.length === 1) {
+      setFilter((p) => p + raw);
+      setIdx(0);
       return;
     }
   });
-  const displayCommand = (command || "").slice(0, 120) + ((command || "").length > 120 ? "\u2026" : "");
-  const displayReason = (reason || (isSudo ? "SUDO ELEVATED COMMAND" : "Dangerous command detected")).slice(0, 90);
-  return /* @__PURE__ */ jsxs4(
-    Box4,
-    {
-      flexDirection: "column",
-      borderStyle: "double",
-      borderColor: rc.color,
-      paddingX: 2,
-      paddingY: 1,
-      width: Math.min(90, 48),
-      children: [
-        /* @__PURE__ */ jsxs4(Box4, { justifyContent: "space-between", children: [
-          /* @__PURE__ */ jsxs4(Text4, { color: rc.color, bold: true, children: [
-            rc.icon,
-            " ",
-            rc.label,
-            " \u2014 Approval Required"
-          ] }),
-          /* @__PURE__ */ jsx4(Text4, { color: "gray", dim: true, children: "[ Esc = deny ]" })
+  const radio = modelType === "large" ? "\u25C9 Large Task  \u25CB Small Task" : "\u25CB Large Task  \u25C9 Small Task";
+  const showScrollbar = totalRows > VISIBLE_ROWS;
+  let thumbStart = 0, thumbSize = VISIBLE_ROWS;
+  if (showScrollbar) {
+    thumbSize = Math.max(1, Math.round(VISIBLE_ROWS / totalRows * VISIBLE_ROWS));
+    thumbStart = Math.round(offset / Math.max(1, totalRows - VISIBLE_ROWS) * (VISIBLE_ROWS - thumbSize));
+  }
+  const visible = displayRows.slice(offset, offset + VISIBLE_ROWS);
+  return /* @__PURE__ */ jsxs4(Box4, { flexDirection: "column", borderStyle: "round", borderColor: "cyan", width: WIDTH, paddingX: 2, paddingY: 1, children: [
+    /* @__PURE__ */ jsxs4(Box4, { justifyContent: "space-between", children: [
+      /* @__PURE__ */ jsx4(Text4, { color: "cyan", bold: true, children: "Switch Model" }),
+      /* @__PURE__ */ jsx4(Text4, { color: "gray", dim: true, children: radio })
+    ] }),
+    needsAPIKey ? /* @__PURE__ */ jsxs4(Fragment, { children: [
+      /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsxs4(Text4, { color: "yellow", bold: true, children: [
+        "\u{1F511} ",
+        selected?.providerName,
+        " API key"
+      ] }) }),
+      /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsxs4(Text4, { color: "cyan", dim: true, children: [
+        "\u250C",
+        gridLine(WIDTH - 8),
+        "\u2510"
+      ] }) }),
+      /* @__PURE__ */ jsxs4(Box4, { borderStyle: "round", borderColor: keyError ? "red" : saved ? "green" : "yellow", paddingX: 1, children: [
+        /* @__PURE__ */ jsxs4(Text4, { color: "gray", dim: true, children: [
+          saving ? SPIN_FRAMES[spinFrame] : saved ? "\u2713" : "\u276F",
+          " "
         ] }),
-        /* @__PURE__ */ jsx4(Box4, { marginTop: 0, children: /* @__PURE__ */ jsxs4(Text4, { color: "white", children: [
-          isSudo ? "\u{1F511} SUDO " : "\u26A0\uFE0F ",
-          displayReason
-        ] }) }),
-        command && /* @__PURE__ */ jsx4(Box4, { marginTop: 0, children: /* @__PURE__ */ jsxs4(Text4, { color: "gray", children: [
-          "$ ",
-          displayCommand
-        ] }) }),
-        /* @__PURE__ */ jsxs4(Box4, { marginTop: 1, children: [
-          /* @__PURE__ */ jsx4(Text4, { color: "green", bold: true, children: "[Y]" }),
-          /* @__PURE__ */ jsx4(Text4, { color: "gray", children: " Approve this run \u2502 " }),
-          /* @__PURE__ */ jsx4(Text4, { color: "red", bold: true, children: "[N]" }),
-          /* @__PURE__ */ jsx4(Text4, { color: "gray", children: " Deny \u2502 " }),
-          /* @__PURE__ */ jsx4(Text4, { color: "yellow", bold: true, children: "[A]" }),
-          /* @__PURE__ */ jsx4(Text4, { color: "gray", children: " Approve & Add to allowlist" })
-        ] })
-      ]
+        /* @__PURE__ */ jsx4(Text4, { color: saved ? "green" : "white", children: apiKey ? reveal ? apiKey : "\u2022".repeat(apiKey.length) : /* @__PURE__ */ jsx4(Text4, { color: "gray", dim: true, children: "paste or type your key\u2026" }) })
+      ] }),
+      /* @__PURE__ */ jsx4(Box4, { children: /* @__PURE__ */ jsxs4(Text4, { color: "cyan", dim: true, children: [
+        "\u2514",
+        gridLine(WIDTH - 8),
+        "\u2518"
+      ] }) }),
+      keyError ? /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsxs4(Text4, { color: "red", bold: true, children: [
+        "\u2717 ",
+        keyError
+      ] }) }) : saving ? /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsx4(Text4, { color: "gray", dim: true, children: "Saving key locally\u2026" }) }) : saved ? /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsx4(Text4, { color: "green", bold: true, children: "\u2713 Saved \u2014 switching model\u2026" }) }) : /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsx4(Text4, { color: "gray", dim: true, children: "Stored in your local hakster config, never sent anywhere else." }) }),
+      /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsxs4(Text4, { color: "gray", dim: true, children: [
+        "Enter save \xB7 Tab ",
+        reveal ? "hide" : "show",
+        " \xB7 Esc back"
+      ] }) })
+    ] }) : /* @__PURE__ */ jsxs4(Fragment, { children: [
+      /* @__PURE__ */ jsxs4(Box4, { marginTop: 1, children: [
+        /* @__PURE__ */ jsxs4(Text4, { color: "gray", dim: true, children: [
+          ">".padEnd(2),
+          " "
+        ] }),
+        /* @__PURE__ */ jsx4(Text4, { color: "green", children: filter || "<filter models>" })
+      ] }),
+      /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: matches.length === 0 ? /* @__PURE__ */ jsx4(Box4, { flexDirection: "column", children: /* @__PURE__ */ jsxs4(Text4, { color: "gray", dim: true, children: [
+        'No models match "',
+        filter,
+        '"'
+      ] }) }) : /* @__PURE__ */ jsxs4(Box4, { flexDirection: "row", children: [
+        /* @__PURE__ */ jsx4(Box4, { flexDirection: "column", width: WIDTH - (showScrollbar ? 8 : 5), children: visible.map(
+          (r) => r.type === "header" ? /* @__PURE__ */ jsx4(Text4, { color: "magenta", dim: true, bold: true, children: r.label }, r.key) : /* @__PURE__ */ jsxs4(Box4, { children: [
+            /* @__PURE__ */ jsxs4(Text4, { color: r.matchIndex === idx ? "green" : "gray", bold: r.matchIndex === idx, children: [
+              r.matchIndex === idx ? "\u276F " : "  ",
+              r.option.name.padEnd(26).slice(0, 26)
+            ] }),
+            r.option.model === currentModel ? /* @__PURE__ */ jsx4(Text4, { color: "cyan", bold: true, children: " \u2713" }) : null,
+            r.option.needsKey ? /* @__PURE__ */ jsx4(Text4, { color: "yellow", dim: true, children: " \u{1F511}" }) : null
+          ] }, r.key)
+        ) }),
+        showScrollbar && /* @__PURE__ */ jsx4(Box4, { flexDirection: "column", marginLeft: 1, children: Array.from({ length: VISIBLE_ROWS }).map((_, i) => /* @__PURE__ */ jsx4(Text4, { color: i >= thumbStart && i < thumbStart + thumbSize ? "cyan" : "gray", dim: !(i >= thumbStart && i < thumbStart + thumbSize), children: i >= thumbStart && i < thumbStart + thumbSize ? "\u2588" : "\u2502" }, i)) })
+      ] }) }),
+      /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsx4(Text4, { color: "gray", dim: true, children: "\u2191\u2193 navigate \xB7 PgUp/PgDn jump \xB7 Enter select \xB7 Tab toggle task \xB7 Esc close" }) })
+    ] })
+  ] });
+}
+
+// src/components/CommandsDialog.jsx
+import React5, { useState as useState3, useMemo as useMemo3 } from "react";
+import { Box as Box5, Text as Text5, useInput as useInput2 } from "ink";
+import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
+var SYSTEM_COMMANDS = [
+  { id: "new_session", title: "New Session", desc: "Start a fresh session", shortcut: "ctrl+n" },
+  { id: "switch_session", title: "Switch Session", desc: "List and resume a session", shortcut: "ctrl+s" },
+  { id: "switch_model", title: "Switch Model", desc: "Open the model selector popup", shortcut: "" },
+  { id: "summarize", title: "Summarize Session", desc: "Compact context into a summary", shortcut: "" },
+  { id: "toggle_thinking", title: "Toggle Thinking", desc: "Show/hide reasoning stream", shortcut: "" },
+  { id: "toggle_diff", title: "Toggle Diff Preview", desc: "Preview edits before applying", shortcut: "" },
+  { id: "toggle_plan", title: "Toggle Plan Panel", desc: "Show/hide the plan display", shortcut: "" },
+  { id: "toggle_help", title: "Toggle Help", desc: "Show the help overlay", shortcut: "ctrl+g" },
+  { id: "file_picker", title: "Open File Picker", desc: "Attach a file to the prompt", shortcut: "ctrl+f" },
+  { id: "toggle_yolo", title: "Toggle Yolo Mode", desc: "Auto-approve all tool calls", shortcut: "" },
+  { id: "review", title: "Code Review", desc: "Review current changes", shortcut: "" },
+  { id: "health", title: "Health Check", desc: "Check server + services", shortcut: "" },
+  { id: "init", title: "Initialize Project", desc: "Create/Update CRUSH.md memory", shortcut: "" },
+  { id: "quit", title: "Quit", desc: "Exit haksterAi CLI", shortcut: "ctrl+c" }
+];
+var USER_COMMANDS = [
+  { id: "/help", title: "/help", desc: "Show help overlay" },
+  { id: "/status", title: "/status", desc: "Server status" },
+  { id: "/model", title: "/model", desc: "Switch model" },
+  { id: "/provider", title: "/provider", desc: "Switch provider" },
+  { id: "/trust", title: "/trust", desc: "Set trust level" },
+  { id: "/approve", title: "/approve", desc: "Approve pending" },
+  { id: "/deny", title: "/deny", desc: "Deny pending" },
+  { id: "/clear", title: "/clear", desc: "Clear output" },
+  { id: "/compact", title: "/compact", desc: "Compact context" },
+  { id: "/diff", title: "/diff", desc: "Toggle diff preview" },
+  { id: "/review", title: "/review", desc: "Code review" },
+  { id: "/plan", title: "/plan", desc: "Show/hide plan" },
+  { id: "/sessions", title: "/sessions", desc: "List sessions" },
+  { id: "/resume", title: "/resume", desc: "Resume session" },
+  { id: "/save", title: "/save", desc: "Save session" },
+  { id: "/memory", title: "/memory", desc: "Memory summary" },
+  { id: "/skills", title: "/skills", desc: "List skills" },
+  { id: "/theme", title: "/theme", desc: "Switch theme" },
+  { id: "/fast", title: "/fast", desc: "Toggle fast mode" },
+  { id: "/health", title: "/health", desc: "Server health" },
+  { id: "/undo", title: "/undo", desc: "Undo last edit" },
+  { id: "/exit", title: "/exit", desc: "Exit CLI" }
+];
+var WIDTH2 = 70;
+function CommandsDialog({ cols = 80, rows = 24, onSelect, onDismiss }) {
+  const [filter, setFilter] = useState3("");
+  const [idx, setIdx] = useState3(0);
+  const [tab, setTab] = useState3("system");
+  const list = tab === "system" ? SYSTEM_COMMANDS : USER_COMMANDS;
+  const matches = useMemo3(() => {
+    const q = filter.toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (c) => c.title.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q)
+    );
+  }, [filter, list]);
+  useInput2((raw, key) => {
+    if (key.escape) {
+      onDismiss?.();
+      return;
     }
-  );
+    if (key.return) {
+      const c = matches[idx];
+      if (c) onSelect?.(c.id);
+      return;
+    }
+    if (key.tab) {
+      setTab((t) => t === "system" ? "user" : "system");
+      setFilter("");
+      setIdx(0);
+      return;
+    }
+    if (key.upArrow) {
+      setIdx((i) => Math.max(0, i - 1));
+      return;
+    }
+    if (key.downArrow) {
+      setIdx((i) => Math.min(matches.length - 1, i + 1));
+      return;
+    }
+    if (key.backspace || key.delete) {
+      setFilter((p) => p.slice(0, -1));
+      setIdx(0);
+      return;
+    }
+    if (raw && !key.ctrl && !key.meta && raw.length === 1) {
+      setFilter((p) => p + raw);
+      setIdx(0);
+      return;
+    }
+  });
+  const radio = tab === "system" ? "\u25C9 System  \u25CB User" : "\u25CB System  \u25C9 User";
+  return /* @__PURE__ */ jsxs5(Box5, { flexDirection: "column", borderStyle: "round", borderColor: "magenta", width: WIDTH2, paddingX: 2, paddingY: 1, children: [
+    /* @__PURE__ */ jsxs5(Box5, { justifyContent: "space-between", children: [
+      /* @__PURE__ */ jsx5(Text5, { color: "magenta", bold: true, children: "Commands" }),
+      /* @__PURE__ */ jsx5(Text5, { color: "gray", dim: true, children: radio })
+    ] }),
+    /* @__PURE__ */ jsxs5(Box5, { marginTop: 1, children: [
+      /* @__PURE__ */ jsxs5(Text5, { color: "gray", dim: true, children: [
+        ">".padEnd(2),
+        " "
+      ] }),
+      /* @__PURE__ */ jsx5(Text5, { color: "green", children: filter || "<filter commands>" })
+    ] }),
+    /* @__PURE__ */ jsx5(Box5, { flexDirection: "column", marginTop: 1, children: matches.length === 0 ? /* @__PURE__ */ jsxs5(Text5, { color: "gray", dim: true, children: [
+      'No commands match "',
+      filter,
+      '"'
+    ] }) : matches.map((c, i) => /* @__PURE__ */ jsxs5(Box5, { children: [
+      /* @__PURE__ */ jsxs5(Text5, { color: i === idx ? "green" : "gray", bold: i === idx, children: [
+        i === idx ? "\u276F " : "  ",
+        c.title.padEnd(22).slice(0, 22)
+      ] }),
+      /* @__PURE__ */ jsx5(Text5, { color: "gray", dim: true, children: c.desc.padEnd(36).slice(0, 36) }),
+      c.shortcut ? /* @__PURE__ */ jsxs5(Text5, { color: "cyan", dim: true, children: [
+        " ",
+        c.shortcut
+      ] }) : null
+    ] }, c.id)) }),
+    /* @__PURE__ */ jsx5(Box5, { marginTop: 1, children: /* @__PURE__ */ jsx5(Text5, { color: "gray", dim: true, children: "\u2191\u2193 navigate \xB7 Enter run \xB7 Tab system/user \xB7 Esc close" }) })
+  ] });
+}
+
+// src/components/ApprovalPrompt.jsx
+import React6, { useState as useState4 } from "react";
+import { Box as Box6, Text as Text6, useInput as useInput3 } from "ink";
+import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+var BUTTONS = [
+  { key: "r", label: "Allow this run", color: "green" },
+  { key: "s", label: "Allow this session", color: "cyan" },
+  { key: "a", label: "Add to allowlist", color: "yellow" },
+  { key: "d", label: "Deny", color: "red" }
+];
+var RISK_CONFIG = {
+  low: { color: "green", icon: "\u2713", label: "LOW" },
+  medium: { color: "yellow", icon: "\u26A0", label: "MEDIUM" },
+  high: { color: "red", icon: "\u26A0", label: "HIGH" },
+  critical: { color: "red", icon: "\u{1F511}", label: "SUDO" }
+};
+function ApprovalPrompt({
+  command = "",
+  risk = "high",
+  reason = "",
+  isSudo = false,
+  onApprove,
+  onApproveSession,
+  onAllowlist,
+  onDeny
+}) {
+  const sudo = !!isSudo || risk === "critical";
+  const rc = RISK_CONFIG[risk] || RISK_CONFIG.high;
+  const [focus, setFocus] = useState4(0);
+  const [pw, setPw] = useState4("");
+  const actions = [onApprove, onApproveSession, onAllowlist, onDeny];
+  useInput3((raw, key) => {
+    if (key.escape) {
+      onDeny?.(pw);
+      return;
+    }
+    if (key.leftArrow) {
+      setFocus((f) => (f - 1 + BUTTONS.length) % BUTTONS.length);
+      return;
+    }
+    if (key.rightArrow || key.tab) {
+      setFocus((f) => (f + 1) % BUTTONS.length);
+      return;
+    }
+    if (key.return) {
+      actions[focus]?.(pw);
+      return;
+    }
+    if (key.backspace || key.delete) {
+      if (sudo) {
+        setPw((p) => p.slice(0, -1));
+      }
+      return;
+    }
+    if (sudo && raw && raw.length === 1 && !key.ctrl && !key.meta) {
+      setPw((p) => p + raw);
+      return;
+    }
+    if (!sudo && raw && raw.length === 1 && !key.ctrl && !key.meta) {
+      const idx = BUTTONS.findIndex((b) => b.key === raw.toLowerCase());
+      if (idx >= 0) {
+        actions[idx]?.(pw);
+      }
+    }
+  });
+  const displayCommand = (command || "").slice(0, 120) + ((command || "").length > 120 ? "\u2026" : "");
+  const displayReason = (reason || (sudo ? "SUDO ELEVATED COMMAND" : "Dangerous command detected")).slice(0, 90);
+  return /* @__PURE__ */ jsxs6(Box6, { flexDirection: "column", borderStyle: "double", borderColor: rc.color, paddingX: 2, paddingY: 1, width: Math.min(92, 58), children: [
+    /* @__PURE__ */ jsxs6(Box6, { justifyContent: "space-between", children: [
+      /* @__PURE__ */ jsxs6(Text6, { color: rc.color, bold: true, children: [
+        rc.icon,
+        " ",
+        rc.label,
+        " \u2014 Approval Required"
+      ] }),
+      /* @__PURE__ */ jsx6(Text6, { color: "gray", dim: true, children: "[ Esc = deny ]" })
+    ] }),
+    /* @__PURE__ */ jsx6(Box6, { marginTop: 0, children: /* @__PURE__ */ jsxs6(Text6, { color: "white", children: [
+      sudo ? "\u{1F511} SUDO " : "\u26A0 ",
+      displayReason
+    ] }) }),
+    command && /* @__PURE__ */ jsx6(Box6, { marginTop: 0, children: /* @__PURE__ */ jsxs6(Text6, { color: "gray", children: [
+      "$ ",
+      displayCommand
+    ] }) }),
+    sudo && /* @__PURE__ */ jsxs6(Box6, { marginTop: 1, children: [
+      /* @__PURE__ */ jsx6(Text6, { color: "cyan", bold: true, children: "sudo password: " }),
+      /* @__PURE__ */ jsx6(Text6, { color: "white", children: "*".repeat(pw.length) }),
+      /* @__PURE__ */ jsx6(Text6, { color: "gray", dim: true, children: pw ? "" : " (type to enter)" })
+    ] }),
+    /* @__PURE__ */ jsx6(Box6, { marginTop: 1, flexDirection: "row", flexWrap: "wrap", children: BUTTONS.map((b, i) => {
+      const focused = i === focus;
+      return /* @__PURE__ */ jsx6(Box6, { marginRight: 1, children: /* @__PURE__ */ jsxs6(Text6, { backgroundColor: focused ? b.color : void 0, color: focused ? "black" : b.color, bold: true, children: [
+        focused ? "\u276F" : " ",
+        "[",
+        b.key,
+        "] ",
+        b.label
+      ] }) }, b.key);
+    }) }),
+    /* @__PURE__ */ jsx6(Box6, { marginTop: 1, children: /* @__PURE__ */ jsxs6(Text6, { color: "gray", dim: true, children: [
+      "\u2190/\u2192/Tab focus \xB7 Enter select",
+      sudo ? " \xB7 letters type password" : " \xB7 r/s/a/d hotkeys"
+    ] }) })
+  ] });
 }
 
 // src/components/DiffPreview.jsx
-import React5 from "react";
-import { Box as Box5, Text as Text5 } from "ink";
-import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
+import React7 from "react";
+import { Box as Box7, Text as Text7 } from "ink";
+import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 function DiffPreview({ diff, cols = 80, onApprove, onDeny }) {
   if (!diff) return null;
   const lines = diff.split("\n").slice(0, 20);
-  return /* @__PURE__ */ jsxs5(Box5, { flexDirection: "column", borderStyle: "round", borderColor: "yellow", paddingX: 1, children: [
-    /* @__PURE__ */ jsxs5(Box5, { justifyContent: "space-between", children: [
-      /* @__PURE__ */ jsx5(Text5, { color: "yellow", bold: true, children: "\u26A0 Diff Preview \u2014 Review Before Apply" }),
-      /* @__PURE__ */ jsx5(Text5, { color: "gray", dim: true, children: "Y=approve \u2502 N=deny \u2502 V=view more" })
+  return /* @__PURE__ */ jsxs7(Box7, { flexDirection: "column", borderStyle: "round", borderColor: "yellow", paddingX: 1, children: [
+    /* @__PURE__ */ jsxs7(Box7, { justifyContent: "space-between", children: [
+      /* @__PURE__ */ jsx7(Text7, { color: "yellow", bold: true, children: "\u26A0 Diff Preview \u2014 Review Before Apply" }),
+      /* @__PURE__ */ jsx7(Text7, { color: "gray", dim: true, children: "Y=approve \u2502 N=deny \u2502 V=view more" })
     ] }),
-    /* @__PURE__ */ jsxs5(Box5, { flexDirection: "column", marginTop: 0, children: [
+    /* @__PURE__ */ jsxs7(Box7, { flexDirection: "column", marginTop: 0, children: [
       lines.map((line, i) => {
         let color = "gray";
         let prefix = " ";
@@ -745,55 +1211,55 @@ function DiffPreview({ diff, cols = 80, onApprove, onDeny }) {
           color = "magenta";
           prefix = " ";
         }
-        return /* @__PURE__ */ jsxs5(Text5, { color, wrap: "truncate", children: [
+        return /* @__PURE__ */ jsxs7(Text7, { color, wrap: "truncate", children: [
           prefix,
           " ",
           line.slice(0, cols - 4)
         ] }, i);
       }),
-      diff.split("\n").length > 20 && /* @__PURE__ */ jsxs5(Text5, { color: "gray", dim: true, children: [
+      diff.split("\n").length > 20 && /* @__PURE__ */ jsxs7(Text7, { color: "gray", dim: true, children: [
         "... ",
         diff.split("\n").length - 20,
         " more lines (press V to view)"
       ] })
     ] }),
-    /* @__PURE__ */ jsxs5(Box5, { marginTop: 0, children: [
-      /* @__PURE__ */ jsx5(Text5, { color: "green", bold: true, children: "[Y]" }),
-      /* @__PURE__ */ jsx5(Text5, { color: "gray", children: " approve \u2502 " }),
-      /* @__PURE__ */ jsx5(Text5, { color: "red", bold: true, children: "[N]" }),
-      /* @__PURE__ */ jsx5(Text5, { color: "gray", children: " deny \u2502 " }),
-      /* @__PURE__ */ jsx5(Text5, { color: "blue", bold: true, children: "[V]" }),
-      /* @__PURE__ */ jsx5(Text5, { color: "gray", children: " view full" })
+    /* @__PURE__ */ jsxs7(Box7, { marginTop: 0, children: [
+      /* @__PURE__ */ jsx7(Text7, { color: "green", bold: true, children: "[Y]" }),
+      /* @__PURE__ */ jsx7(Text7, { color: "gray", children: " approve \u2502 " }),
+      /* @__PURE__ */ jsx7(Text7, { color: "red", bold: true, children: "[N]" }),
+      /* @__PURE__ */ jsx7(Text7, { color: "gray", children: " deny \u2502 " }),
+      /* @__PURE__ */ jsx7(Text7, { color: "blue", bold: true, children: "[V]" }),
+      /* @__PURE__ */ jsx7(Text7, { color: "gray", children: " view full" })
     ] })
   ] });
 }
 
 // src/components/PlanDisplay.jsx
-import React6 from "react";
-import { Box as Box6, Text as Text6 } from "ink";
-import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+import React8 from "react";
+import { Box as Box8, Text as Text8 } from "ink";
+import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 function PlanDisplay({ plan = null, cols = 80 }) {
   if (!plan) return null;
   const { goal, steps = [], files = [] } = plan;
-  return /* @__PURE__ */ jsxs6(
-    Box6,
+  return /* @__PURE__ */ jsxs8(
+    Box8,
     {
       flexDirection: "column",
       borderStyle: "single",
       borderColor: "blue",
       paddingX: 1,
       children: [
-        /* @__PURE__ */ jsx6(Text6, { color: "blue", bold: true, underline: true, children: "\u{1F4CB} Plan" }),
-        goal && /* @__PURE__ */ jsxs6(Text6, { color: "white", children: [
+        /* @__PURE__ */ jsx8(Text8, { color: "blue", bold: true, underline: true, children: "\u{1F4CB} Plan" }),
+        goal && /* @__PURE__ */ jsxs8(Text8, { color: "white", children: [
           "Goal: ",
-          /* @__PURE__ */ jsx6(Text6, { color: "cyan", children: goal })
+          /* @__PURE__ */ jsx8(Text8, { color: "cyan", children: goal })
         ] }),
-        steps.length > 0 && /* @__PURE__ */ jsx6(Box6, { flexDirection: "column", marginTop: 0, children: steps.map((step, i) => {
+        steps.length > 0 && /* @__PURE__ */ jsx8(Box8, { flexDirection: "column", marginTop: 0, children: steps.map((step, i) => {
           const done = step.status === "done";
           const active = step.status === "active";
           const icon = done ? "\u2713" : active ? "\u25C9" : "\u25CB";
           const color = done ? "green" : active ? "yellow" : "gray";
-          return /* @__PURE__ */ jsxs6(Text6, { color, children: [
+          return /* @__PURE__ */ jsxs8(Text8, { color, children: [
             icon,
             " [",
             i + 1,
@@ -801,7 +1267,7 @@ function PlanDisplay({ plan = null, cols = 80 }) {
             step.text || step.desc || step
           ] }, i);
         }) }),
-        files.length > 0 && /* @__PURE__ */ jsx6(Box6, { marginTop: 0, children: /* @__PURE__ */ jsxs6(Text6, { color: "magenta", dim: true, children: [
+        files.length > 0 && /* @__PURE__ */ jsx8(Box8, { marginTop: 0, children: /* @__PURE__ */ jsxs8(Text8, { color: "magenta", dim: true, children: [
           "Files: ",
           files.join(", ")
         ] }) })
@@ -811,31 +1277,31 @@ function PlanDisplay({ plan = null, cols = 80 }) {
 }
 
 // src/components/SessionList.jsx
-import React7 from "react";
-import { Box as Box7, Text as Text7 } from "ink";
-import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+import React9 from "react";
+import { Box as Box9, Text as Text9 } from "ink";
+import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 function SessionList({ sessions = [], cols = 80, onSelect }) {
   if (sessions.length === 0) {
-    return /* @__PURE__ */ jsx7(Box7, { borderStyle: "round", borderColor: "gray", paddingX: 1, children: /* @__PURE__ */ jsx7(Text7, { color: "gray", dim: true, children: "No saved sessions. Use /save to save current session." }) });
+    return /* @__PURE__ */ jsx9(Box9, { borderStyle: "round", borderColor: "gray", paddingX: 1, children: /* @__PURE__ */ jsx9(Text9, { color: "gray", dim: true, children: "No saved sessions. Use /save to save current session." }) });
   }
-  return /* @__PURE__ */ jsxs7(Box7, { flexDirection: "column", borderStyle: "round", borderColor: "cyan", paddingX: 1, children: [
-    /* @__PURE__ */ jsx7(Text7, { color: "cyan", bold: true, underline: true, children: "Saved Sessions" }),
+  return /* @__PURE__ */ jsxs9(Box9, { flexDirection: "column", borderStyle: "round", borderColor: "cyan", paddingX: 1, children: [
+    /* @__PURE__ */ jsx9(Text9, { color: "cyan", bold: true, underline: true, children: "Saved Sessions" }),
     sessions.map((s, i) => {
       const date = s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : "?";
       const time = s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString() : "";
-      return /* @__PURE__ */ jsxs7(Box7, { children: [
-        /* @__PURE__ */ jsxs7(Text7, { color: "green", bold: true, children: [
+      return /* @__PURE__ */ jsxs9(Box9, { children: [
+        /* @__PURE__ */ jsxs9(Text9, { color: "green", bold: true, children: [
           "[",
           (i + 1).toString().padStart(2),
           "]"
         ] }),
-        /* @__PURE__ */ jsx7(Text7, { color: "cyan", children: " " + (s.id || "").slice(0, 12) }),
-        /* @__PURE__ */ jsx7(Text7, { color: "gray", children: " " + (s.provider || "").padEnd(8) }),
-        /* @__PURE__ */ jsx7(Text7, { color: "magenta", children: " " + (s.model || "").padEnd(16) }),
-        /* @__PURE__ */ jsx7(Text7, { color: "gray", dim: true, children: " " + date + " " + time })
+        /* @__PURE__ */ jsx9(Text9, { color: "cyan", children: " " + (s.id || "").slice(0, 12) }),
+        /* @__PURE__ */ jsx9(Text9, { color: "gray", children: " " + (s.provider || "").padEnd(8) }),
+        /* @__PURE__ */ jsx9(Text9, { color: "magenta", children: " " + (s.model || "").padEnd(16) }),
+        /* @__PURE__ */ jsx9(Text9, { color: "gray", dim: true, children: " " + date + " " + time })
       ] }, s.id || i);
     }),
-    /* @__PURE__ */ jsxs7(Text7, { color: "gray", dim: true, marginTop: 0, children: [
+    /* @__PURE__ */ jsxs9(Text9, { color: "gray", dim: true, marginTop: 0, children: [
       "Use /resume ",
       "<id>",
       " to resume a session"
@@ -843,20 +1309,52 @@ function SessionList({ sessions = [], cols = 80, onSelect }) {
   ] });
 }
 
+// src/components/QueueBox.jsx
+import React10 from "react";
+import { Box as Box10, Text as Text10 } from "ink";
+import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+function QueueBox({ items = [], cols = 80 }) {
+  if (!items.length) return null;
+  const list = Array.isArray(items) ? items : [items];
+  return /* @__PURE__ */ jsxs10(Box10, { flexDirection: "column", borderStyle: "single", borderColor: "cyan", paddingX: 1, width: cols, children: [
+    /* @__PURE__ */ jsxs10(Box10, { justifyContent: "space-between", children: [
+      /* @__PURE__ */ jsxs10(Text10, { color: "cyan", bold: true, children: [
+        "\u23F3 Queued messages (",
+        list.length,
+        ")"
+      ] }),
+      /* @__PURE__ */ jsx10(Text10, { color: "gray", dim: true, children: "waiting\u2026" })
+    ] }),
+    list.slice(0, 4).map((it, i) => {
+      const text = String(typeof it === "string" ? it : it?.text || it?.content || it?.message || JSON.stringify(it));
+      const last = i === list.length - 1;
+      return /* @__PURE__ */ jsxs10(Box10, { children: [
+        /* @__PURE__ */ jsx10(Text10, { color: last ? "cyan" : "gray", dim: !last, children: last ? "\u25B8 " : "  " }),
+        /* @__PURE__ */ jsx10(Text10, { color: "white", children: text.slice(0, Math.max(10, cols - 6)) })
+      ] }, i);
+    }),
+    list.length > 4 && /* @__PURE__ */ jsxs10(Text10, { color: "gray", dim: true, children: [
+      "\u2026and ",
+      list.length - 4,
+      " more"
+    ] })
+  ] });
+}
+
 // src/components/Spinner.jsx
-import React8, { useState as useState2, useEffect } from "react";
-import { Text as Text8 } from "ink";
-import { jsxs as jsxs8 } from "react/jsx-runtime";
+import React11, { useState as useState5, useEffect as useEffect2 } from "react";
+import { Text as Text11 } from "ink";
+import { jsxs as jsxs11 } from "react/jsx-runtime";
 var FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
 var FRAMES_DOTS = ["\u28FE", "\u28FD", "\u28FB", "\u28BF", "\u287F", "\u28DF", "\u28EF", "\u28F7"];
 function Spinner({ type = "braille", label = "", color = "yellow" }) {
-  const [frame, setFrame] = useState2(0);
+  const [frame, setFrame] = useState5(0);
   const frames = type === "dots" ? FRAMES_DOTS : FRAMES;
-  useEffect(() => {
+  useEffect2(() => {
     const id = setInterval(() => setFrame((f) => (f + 1) % frames.length), 80);
     return () => clearInterval(id);
   }, [frames.length]);
-  return /* @__PURE__ */ jsxs8(Text8, { color, children: [
+  return /* @__PURE__ */ jsxs11(Text11, { color, children: [
     frames[frame],
     " ",
     label
@@ -864,17 +1362,17 @@ function Spinner({ type = "braille", label = "", color = "yellow" }) {
 }
 
 // src/components/SplashScreen.jsx
-import React9, { useState as useState3, useEffect as useEffect2 } from "react";
-import { Box as Box8, Text as Text9 } from "ink";
-import { jsx as jsx8, jsxs as jsxs9 } from "react/jsx-runtime";
+import React12, { useState as useState6, useEffect as useEffect3 } from "react";
+import { Box as Box11, Text as Text12 } from "ink";
+import { jsx as jsx11, jsxs as jsxs12 } from "react/jsx-runtime";
 var LOGO = [
   " \u2554\u2550\u2557 \u2566 \u2566 \u2554\u2550\u2557 \u2566\u2554\u2550 \u2554\u2550\u2557 \u2566   \u2554\u2566\u2557 \u2554\u2550\u2557 \u2566 \u2566",
   " \u2551   \u2551 \u2551 \u2560\u2550\u255D \u2560\u2569\u2557 \u2551   \u2551    \u2551  \u2551 \u2551 \u2551 \u2551",
   " \u255A\u2550\u255D \u255A\u2550\u255D \u2569   \u2569 \u2569 \u255A\u2550\u255D \u255A\u2550\u255D  \u2569  \u255A\u2550\u255D \u255A\u2550\u255D"
 ];
 function SplashScreen({ onDone, version = "0.1.0" }) {
-  const [frame, setFrame] = useState3(0);
-  useEffect2(() => {
+  const [frame, setFrame] = useState6(0);
+  useEffect3(() => {
     if (frame >= LOGO.length + 2) {
       onDone && onDone();
       return;
@@ -882,23 +1380,23 @@ function SplashScreen({ onDone, version = "0.1.0" }) {
     const id = setTimeout(() => setFrame((f) => f + 1), 120);
     return () => clearTimeout(id);
   }, [frame, onDone]);
-  return /* @__PURE__ */ jsxs9(Box8, { flexDirection: "column", alignItems: "center", justifyContent: "center", children: [
-    LOGO.slice(0, frame).map((line, i) => /* @__PURE__ */ jsx8(Text9, { color: "green", bold: true, children: line }, i)),
-    frame >= LOGO.length && /* @__PURE__ */ jsxs9(Box8, { flexDirection: "column", marginTop: 1, children: [
-      /* @__PURE__ */ jsxs9(Text9, { color: "cyan", bold: true, children: [
+  return /* @__PURE__ */ jsxs12(Box11, { flexDirection: "column", alignItems: "center", justifyContent: "center", children: [
+    LOGO.slice(0, frame).map((line, i) => /* @__PURE__ */ jsx11(Text12, { color: "green", bold: true, children: line }, i)),
+    frame >= LOGO.length && /* @__PURE__ */ jsxs12(Box11, { flexDirection: "column", marginTop: 1, children: [
+      /* @__PURE__ */ jsxs12(Text12, { color: "cyan", bold: true, children: [
         "HaksterAI CLI v",
         version
       ] }),
-      /* @__PURE__ */ jsx8(Text9, { color: "gray", dim: true, children: "Pentester AI Agent \xB7 Autonomous Coding \xB7 IPTV Ops" }),
-      /* @__PURE__ */ jsx8(Text9, { color: "magenta", dim: true, children: "Type ? for help \xB7 Enter to start \xB7 Ctrl+C to exit" })
+      /* @__PURE__ */ jsx11(Text12, { color: "gray", dim: true, children: "Pentester AI Agent \xB7 Autonomous Coding \xB7 IPTV Ops" }),
+      /* @__PURE__ */ jsx11(Text12, { color: "magenta", dim: true, children: "Type ? for help \xB7 Enter to start \xB7 Ctrl+C to exit" })
     ] })
   ] });
 }
 
 // src/components/TokenBar.jsx
-import React10 from "react";
-import { Box as Box9, Text as Text10 } from "ink";
-import { jsx as jsx9, jsxs as jsxs10 } from "react/jsx-runtime";
+import React13 from "react";
+import { Box as Box12, Text as Text13 } from "ink";
+import { jsx as jsx12, jsxs as jsxs13 } from "react/jsx-runtime";
 function TokenBar({ used = 0, chars = 0, max = 128e3, cols = 80 }) {
   const pct = Math.min(100, Math.round(used / max * 100));
   const barWidth = Math.max(10, cols - 30);
@@ -907,19 +1405,19 @@ function TokenBar({ used = 0, chars = 0, max = 128e3, cols = 80 }) {
   const color = pct > 85 ? "red" : pct > 60 ? "yellow" : "green";
   const label = `${(used / 1e3).toFixed(1)}K/${(max / 1e3).toFixed(0)}K`;
   const charLabel = chars > 0 ? ` \xB7 ${(chars / 1e3).toFixed(1)}k chars` : "";
-  return /* @__PURE__ */ jsxs10(Box9, { width: cols, paddingX: 1, children: [
-    /* @__PURE__ */ jsx9(Text10, { color: "gray", dim: true, children: "tokens " }),
-    /* @__PURE__ */ jsxs10(Text10, { color, children: [
+  return /* @__PURE__ */ jsxs13(Box12, { width: cols, paddingX: 1, children: [
+    /* @__PURE__ */ jsx12(Text13, { color: "gray", dim: true, children: "tokens " }),
+    /* @__PURE__ */ jsxs13(Text13, { color, children: [
       "[",
       bar,
       "]"
     ] }),
-    /* @__PURE__ */ jsxs10(Text10, { color, bold: true, children: [
+    /* @__PURE__ */ jsxs13(Text13, { color, bold: true, children: [
       " ",
       pct,
       "%"
     ] }),
-    /* @__PURE__ */ jsxs10(Text10, { color: "gray", dim: true, children: [
+    /* @__PURE__ */ jsxs13(Text13, { color: "gray", dim: true, children: [
       " ",
       label,
       charLabel
@@ -1053,16 +1551,23 @@ var THEMES = {
 var THEME_NAMES = Object.keys(THEMES);
 
 // src/App.jsx
-import { jsx as jsx10, jsxs as jsxs11 } from "react/jsx-runtime";
+import { jsx as jsx13, jsxs as jsxs14 } from "react/jsx-runtime";
 var MAX_OUTPUT = 500;
 var MAX_TOOLS = 50;
 var REASONING_TYPES = [
-  { pattern: /^(?:checking|scanning|looking|reading|inspecting)/i, type: "inspect", color: "blue" },
-  { pattern: /^(?:found|detected|identified|located)/i, type: "find", color: "green" },
-  { pattern: /^(?:error|fail|issue|problem|bug|crash|exception)/i, type: "error", color: "red" },
-  { pattern: /^(?:plan|step|approach|strategy|decide|will|should)/i, type: "plan", color: "yellow" },
-  { pattern: /^(?:conclusion|therefore|so |thus|result)/i, type: "conclusion", color: "yellow" },
-  { pattern: /^(?:root cause|the issue is|the problem is)/i, type: "diagnosis", color: "orange" }
+  { pattern: /^(?:checking|scanning|looking|reading|inspecting|examining|reviewing|verifying|testing|validating)/i, type: "inspect", color: "blue" },
+  { pattern: /^(?:found|detected|identified|located|discovered|spotted|noticed)/i, type: "find", color: "green" },
+  { pattern: /^(?:error|fail|issue|problem|bug|crash|exception|broken|invalid|unable|cannot|can't)/i, type: "error", color: "red" },
+  { pattern: /^(?:plan|step|approach|strategy|decide|will|should|going to|next|i'll|i will)/i, type: "plan", color: "yellow" },
+  { pattern: /^(?:conclusion|therefore|so |thus|result|hence|meaning|in short|tl;dr)/i, type: "conclusion", color: "yellow" },
+  { pattern: /^(?:root cause|the issue is|the problem is|caused by|because|due to)/i, type: "diagnosis", color: "orange" },
+  { pattern: /^(?:running|executing|calling|invoking|launching|starting)/i, type: "action", color: "magenta" },
+  { pattern: /^(?:searching|querying|grepping|finding files|listing)/i, type: "search", color: "cyan" },
+  { pattern: /^(?:analyzing|parsing|thinking|considering|wondering|pondering|maybe|perhaps|hmm|let me)/i, type: "think", color: "gray" },
+  { pattern: /^(?:creating|writing|editing|modifying|updating|building|adding|removing|deleting)/i, type: "edit", color: "magenta" },
+  { pattern: /^(?:connecting|fetching|loading|downloading|uploading|sending)/i, type: "io", color: "blue" },
+  { pattern: /^(?:waiting|ready|done|complete|success|finished)/i, type: "status", color: "green" },
+  { pattern: /^(?:warning|caution|careful|risky|danger|unsafe)/i, type: "warn", color: "yellow" }
 ];
 function classifyReasoning(text) {
   for (const r of REASONING_TYPES) {
@@ -1076,29 +1581,31 @@ function App() {
   const cols = stdout?.columns || 80;
   const rows = stdout?.rows || 24;
   const outputHeight = Math.max(5, rows - 10);
-  const [showSplash, setShowSplash] = useState4(true);
-  const [themeName, setThemeName] = useState4("default");
-  const theme = useMemo2(() => THEMES[themeName] || THEMES.default, [themeName]);
-  const [output, setOutput] = useState4([]);
-  const [tools, setTools] = useState4([]);
-  const [input, setInput] = useState4("");
-  const [thinking, setThinking] = useState4(false);
-  const [status, setStatus] = useState4({ task: "idle", model: agent_default.model || "unknown", phase: "IDLE", tokens: 0, trust: 0, provider: "ollama" });
-  const [phase, setPhase] = useState4("IDLE");
-  const [queue, setQueue] = useState4([]);
-  const [scrollOffset, setScrollOffset] = useState4(0);
-  const [blink, setBlink] = useState4(false);
-  const [showHelp, setShowHelp] = useState4(false);
-  const [showSlashMenu, setShowSlashMenu] = useState4(false);
-  const [showPlan, setShowPlan] = useState4(false);
-  const [showSessions, setShowSessions] = useState4(false);
-  const [showDiff, setShowDiff] = useState4(false);
-  const [diffData, setDiffData] = useState4(null);
-  const [plan, setPlan] = useState4(null);
-  const [sessions, setSessions] = useState4([]);
-  const [approval, setApproval] = useState4(null);
-  const [contextMax, setContextMax] = useState4(128e3);
-  const [contextChars, setContextChars] = useState4(0);
+  const [showSplash, setShowSplash] = useState7(true);
+  const [themeName, setThemeName] = useState7("default");
+  const theme = useMemo4(() => THEMES[themeName] || THEMES.default, [themeName]);
+  const [output, setOutput] = useState7([]);
+  const [tools, setTools] = useState7([]);
+  const [input, setInput] = useState7("");
+  const [thinking, setThinking] = useState7(false);
+  const [status, setStatus] = useState7({ task: "idle", model: agent_default.model || "unknown", phase: "IDLE", tokens: 0, trust: 0, provider: "ollama" });
+  const [phase, setPhase] = useState7("IDLE");
+  const [queue, setQueue] = useState7([]);
+  const [scrollOffset, setScrollOffset] = useState7(0);
+  const [blink, setBlink] = useState7(false);
+  const [showHelp, setShowHelp] = useState7(false);
+  const [showModelDialog, setShowModelDialog] = useState7(false);
+  const [showCommandsDialog, setShowCommandsDialog] = useState7(false);
+  const [showSlashMenu, setShowSlashMenu] = useState7(false);
+  const [showPlan, setShowPlan] = useState7(false);
+  const [showSessions, setShowSessions] = useState7(false);
+  const [showDiff, setShowDiff] = useState7(false);
+  const [diffData, setDiffData] = useState7(null);
+  const [plan, setPlan] = useState7(null);
+  const [sessions, setSessions] = useState7([]);
+  const [approval, setApproval] = useState7(null);
+  const [contextMax, setContextMax] = useState7(128e3);
+  const [contextChars, setContextChars] = useState7(0);
   const inputRef = useRef("");
   const batchRef = useRef({ timer: null, text: "" });
   const maxScroll = Math.max(0, output.length - outputHeight);
@@ -1132,15 +1639,11 @@ function App() {
     }
   }, [flushTokens]);
   const _working = thinking || ["PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE", "THINK"].includes(phase);
-  useEffect3(() => {
-    if (!_working) {
-      setBlink(false);
-      return;
-    }
+  useEffect4(() => {
     const id = setInterval(() => setBlink((b) => !b), 480);
     return () => clearInterval(id);
-  }, [_working]);
-  useEffect3(() => {
+  }, []);
+  useEffect4(() => {
     if (showSplash) return;
     agent_default.onToken((token) => appendToken(token));
     agent_default.onThinking((text) => {
@@ -1189,16 +1692,20 @@ function App() {
         risk: isSudo ? "critical" : req.risk || "high",
         reason: req.reason || "Approval needed",
         isSudo,
-        onApprove: () => {
-          agent_default.respondApproval(toolCallId, true);
+        onApprove: (pw) => {
+          agent_default.respondApproval(toolCallId, true, false, false, pw || "");
           setOutput((p) => [...p, { type: "system", text: `\u2705 Approved${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
         },
-        onAllowlist: () => {
-          agent_default.respondApproval(toolCallId, true, true);
+        onApproveSession: (pw) => {
+          agent_default.respondApproval(toolCallId, true, false, true, pw || "");
+          setOutput((p) => [...p, { type: "system", text: `\u2705 Approved for session${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
+        },
+        onAllowlist: (pw) => {
+          agent_default.respondApproval(toolCallId, true, true, false, pw || "");
           setOutput((p) => [...p, { type: "system", text: `\u2705 Approved & allowlisted${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
         },
-        onDeny: () => {
-          agent_default.respondApproval(toolCallId, false);
+        onDeny: (pw) => {
+          agent_default.respondApproval(toolCallId, false, false, false, pw || "");
           setOutput((p) => [...p, { type: "system", text: `\u{1F6AB} Denied${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
         }
       });
@@ -1240,7 +1747,12 @@ function App() {
         if (arg) {
           agent_default.setModel?.(arg);
           setStatus((p) => ({ ...p, model: arg }));
+        } else {
+          setShowModelDialog(true);
         }
+        break;
+      case "/commands":
+        setShowCommandsDialog(true);
         break;
       case "/provider":
         if (arg) {
@@ -1334,8 +1846,9 @@ function App() {
         setOutput((p) => [...p, { type: "system", text: `Unknown command: ${command}` }].slice(-MAX_OUTPUT));
     }
   }, [approval, status, phase, exit]);
-  useInput2((raw, key) => {
+  useInput4((raw, key) => {
     if (showSplash) return;
+    if (showModelDialog || showCommandsDialog) return;
     if (showHelp && (key.escape || raw === "q")) {
       setShowHelp(false);
       return;
@@ -1345,21 +1858,6 @@ function App() {
       return;
     }
     if (approval) {
-      if (raw === "y" || raw === "Y") {
-        approval.onApprove?.();
-        setApproval(null);
-        return;
-      }
-      if (raw === "n" || raw === "N") {
-        approval.onDeny?.();
-        setApproval(null);
-        return;
-      }
-      if (raw === "a" || raw === "A") {
-        approval.onAllowlist?.();
-        setApproval(null);
-        return;
-      }
       return;
     }
     if (showDiff && diffData) {
@@ -1381,12 +1879,14 @@ function App() {
       return;
     }
     if (raw === "/" && !input) {
+      setInput("/");
       setShowSlashMenu(true);
       return;
     }
     if (showSlashMenu) {
       if (key.escape) {
         setShowSlashMenu(false);
+        setInput("");
         return;
       }
       if (key.return) {
@@ -1396,7 +1896,9 @@ function App() {
         return;
       }
       if (key.backspace || key.delete) {
-        setInput((p) => p.slice(0, -1));
+        const n = input.slice(0, -1);
+        setInput(n);
+        if (!n) setShowSlashMenu(false);
         return;
       }
       if (raw && !key.ctrl && !key.meta && raw.length === 1) {
@@ -1448,10 +1950,10 @@ function App() {
     }
   });
   if (showSplash) {
-    return /* @__PURE__ */ jsx10(SplashScreen, { version: "0.1.0", onDone: () => setShowSplash(false) });
+    return /* @__PURE__ */ jsx13(SplashScreen, { version: "0.1.0", onDone: () => setShowSplash(false) });
   }
-  return /* @__PURE__ */ jsxs11(Box10, { flexDirection: "column", height: rows, width: cols, children: [
-    /* @__PURE__ */ jsx10(
+  return /* @__PURE__ */ jsxs14(Box13, { flexDirection: "column", height: rows, width: cols, children: [
+    /* @__PURE__ */ jsx13(
       StatusBar,
       {
         model: status.model,
@@ -1465,99 +1967,166 @@ function App() {
         sessionId: agent_default.sessionId || ""
       }
     ),
-    /* @__PURE__ */ jsxs11(Box10, { flexDirection: "column", height: outputHeight + 1, width: cols, overflow: "hidden", children: [
-      olderAbove > 0 && /* @__PURE__ */ jsxs11(Text11, { color: theme.primary, bold: true, reverse: true, children: [
+    /* @__PURE__ */ jsxs14(Box13, { flexDirection: "column", height: outputHeight + 1, width: cols, overflow: "hidden", children: [
+      olderAbove > 0 && /* @__PURE__ */ jsxs14(Text14, { color: theme.primary, bold: true, reverse: true, children: [
         " \u2191 ",
         olderAbove,
         " line(s) above (older) \u2014 Shift+\u2191 for more "
       ] }),
       visible.map((line, i) => {
         if (line.type === "user") {
-          return /* @__PURE__ */ jsx10(Text11, { color: "green", bold: true, children: "> " + line.text }, i);
+          return /* @__PURE__ */ jsx13(Text14, { color: "green", bold: true, children: "> " + line.text }, i);
         }
         if (line.type === "assistant") {
-          return /* @__PURE__ */ jsx10(Text11, { color: "white", children: line.text }, i);
+          return /* @__PURE__ */ jsx13(Text14, { color: "white", children: line.text }, i);
         }
         if (line.type === "thinking") {
           const cls = classifyReasoning(line.text);
           const color = cls ? cls.color : theme.dim;
-          return /* @__PURE__ */ jsxs11(Text11, { color, dim: true, children: [
+          return /* @__PURE__ */ jsxs14(Text14, { color, dim: true, children: [
             "  ",
             line.text
           ] }, i);
         }
         if (line.type === "system") {
-          return /* @__PURE__ */ jsx10(Text11, { color: "cyan", dim: true, children: "[sys] " + line.text }, i);
+          return /* @__PURE__ */ jsx13(Text14, { color: "cyan", dim: true, children: "[sys] " + line.text }, i);
         }
-        return /* @__PURE__ */ jsx10(Text11, { color: "white", children: line.text }, i);
+        return /* @__PURE__ */ jsx13(Text14, { color: "white", children: line.text }, i);
       }),
-      newerBelow > 0 && /* @__PURE__ */ jsxs11(Text11, { color: theme.secondary, bold: true, reverse: true, children: [
+      newerBelow > 0 && /* @__PURE__ */ jsxs14(Text14, { color: theme.secondary, bold: true, reverse: true, children: [
         " \u2193 ",
         newerBelow,
         " line(s) below (newer) \u2014 \u2193 to return to bottom "
       ] }),
-      thinking && /* @__PURE__ */ jsx10(Spinner, { label: "thinking...", color: theme.primary })
+      thinking && /* @__PURE__ */ jsx13(Spinner, { label: "thinking...", color: theme.primary })
     ] }),
-    tools.length > 0 && /* @__PURE__ */ jsxs11(Box10, { width: cols, flexDirection: "row", overflow: "hidden", children: [
-      /* @__PURE__ */ jsx10(Text11, { color: "gray", dim: true, children: "tools: " }),
-      tools.slice(-6).map((t, i) => /* @__PURE__ */ jsxs11(Text11, { color: t.status === "running" ? "yellow" : theme.success, children: [
+    tools.length > 0 && /* @__PURE__ */ jsxs14(Box13, { width: cols, flexDirection: "row", overflow: "hidden", children: [
+      /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: "tools: " }),
+      tools.slice(-6).map((t, i) => /* @__PURE__ */ jsxs14(Text14, { color: t.status === "running" ? "yellow" : theme.success, children: [
         t.status === "running" ? "\u25C9" : "\u2713",
         t.name,
         t.duration ? `(${t.duration})` : "",
         " "
       ] }, i))
     ] }),
-    showPlan && plan && /* @__PURE__ */ jsx10(PlanDisplay, { plan, cols }),
-    /* @__PURE__ */ jsx10(TokenBar, { used: status.tokens, chars: contextChars, max: contextMax, cols }),
-    showDiff && diffData && /* @__PURE__ */ jsx10(DiffPreview, { diff: diffData.text || diffData, cols, onApprove: diffData.onApprove, onDeny: diffData.onDeny }),
-    approval && /* @__PURE__ */ jsx10(
+    queue && queue.length > 0 && /* @__PURE__ */ jsx13(QueueBox, { items: queue, cols }),
+    showPlan && plan && /* @__PURE__ */ jsx13(PlanDisplay, { plan, cols }),
+    /* @__PURE__ */ jsx13(TokenBar, { used: status.tokens, chars: contextChars, max: contextMax, cols }),
+    showDiff && diffData && /* @__PURE__ */ jsx13(DiffPreview, { diff: diffData.text || diffData, cols, onApprove: diffData.onApprove, onDeny: diffData.onDeny }),
+    approval && /* @__PURE__ */ jsx13(
       ApprovalPrompt,
       {
         action: approval.action,
         command: approval.command,
         reason: approval.reason || "",
         risk: approval.risk || "medium",
-        onApprove: () => {
-          approval.onApprove?.();
+        isSudo: approval.isSudo,
+        onApprove: (pw) => {
+          approval.onApprove?.(pw);
           setApproval(null);
         },
-        onAllowlist: () => {
-          approval.onAllowlist?.();
+        onApproveSession: (pw) => {
+          approval.onApproveSession?.(pw);
           setApproval(null);
         },
-        onDeny: () => {
-          approval.onDeny?.();
+        onAllowlist: (pw) => {
+          approval.onAllowlist?.(pw);
+          setApproval(null);
+        },
+        onDeny: (pw) => {
+          approval.onDeny?.(pw);
           setApproval(null);
         }
       }
     ),
-    showSessions && /* @__PURE__ */ jsx10(SessionList, { sessions, cols, onSelect: (s) => {
+    showSessions && /* @__PURE__ */ jsx13(SessionList, { sessions, cols, onSelect: (s) => {
       agent_default.resume?.(s.id);
       setShowSessions(false);
     } }),
-    showHelp && /* @__PURE__ */ jsx10(HelpOverlay, { onDismiss: () => setShowHelp(false) }),
-    showSlashMenu && /* @__PURE__ */ jsx10(SlashMenu, { input, cols }),
-    /* @__PURE__ */ jsxs11(Box10, { width: cols, borderStyle: "bold", borderColor: _working ? blink ? theme.secondary : theme.primary : theme.primary, paddingX: 1, children: [
-      /* @__PURE__ */ jsxs11(Text11, { color: phase === "ACT" ? theme.warning : theme.primary, bold: true, reverse: true, children: [
+    showHelp && /* @__PURE__ */ jsx13(HelpOverlay, { onDismiss: () => setShowHelp(false) }),
+    showSlashMenu && /* @__PURE__ */ jsx13(SlashMenu, { input, cols }),
+    showModelDialog && /* @__PURE__ */ jsx13(
+      ModelDialog,
+      {
+        cols,
+        rows,
+        currentModel: status.model,
+        onDismiss: () => setShowModelDialog(false),
+        onSetProviderKey: (provider, key) => {
+          agent_default._apiKeys = agent_default._apiKeys || {};
+          agent_default._apiKeys[provider] = key;
+          return true;
+        },
+        onSelect: (model, provider, modelType) => {
+          agent_default.setModel?.(model);
+          agent_default.setProvider?.(provider);
+          setStatus((p) => ({ ...p, model, provider }));
+          setOutput((p) => [...p, { type: "system", text: `Model \u2192 ${model} (${provider}) [${modelType}]` }].slice(-MAX_OUTPUT));
+          setShowModelDialog(false);
+        }
+      }
+    ),
+    showCommandsDialog && /* @__PURE__ */ jsx13(
+      CommandsDialog,
+      {
+        cols,
+        rows,
+        onDismiss: () => setShowCommandsDialog(false),
+        onSelect: (id) => {
+          setShowCommandsDialog(false);
+          const map = {
+            switch_model: () => setShowModelDialog(true),
+            toggle_help: () => setShowHelp(true),
+            toggle_diff: () => handleSlashCommand("/diff"),
+            toggle_plan: () => handleSlashCommand("/plan"),
+            toggle_thinking: () => agent_default.toggleThinking?.(),
+            toggle_yolo: () => handleSlashCommand("/trust 30"),
+            summarize: () => handleSlashCommand("/compact"),
+            review: () => handleSlashCommand("/review"),
+            health: () => handleSlashCommand("/health"),
+            switch_session: () => handleSlashCommand("/sessions"),
+            new_session: () => {
+              setOutput([]);
+              setTools([]);
+              agent_default.newSession?.();
+            },
+            file_picker: () => setOutput((p) => [...p, { type: "system", text: "File picker not available in TUI." }].slice(-MAX_OUTPUT)),
+            init: () => agent_default.send?.("initialize project \u2014 create/update CRUSH.md memory file"),
+            quit: () => exit()
+          };
+          if (map[id]) {
+            map[id]();
+            return;
+          }
+          if (id.startsWith("/")) {
+            handleSlashCommand(id);
+            return;
+          }
+          setOutput((p) => [...p, { type: "system", text: `Unknown command: ${id}` }].slice(-MAX_OUTPUT));
+        }
+      }
+    ),
+    /* @__PURE__ */ jsxs14(Box13, { width: cols, borderStyle: "bold", borderColor: _working ? blink ? theme.secondary : theme.primary : theme.primary, paddingX: 1, children: [
+      /* @__PURE__ */ jsxs14(Text14, { color: phase === "ACT" ? theme.warning : theme.primary, bold: true, reverse: true, children: [
         _working ? blink ? "\u25C6" : "\u25C7" : phase === "ACT" ? "\u25C6" : ">",
         " "
       ] }),
-      /* @__PURE__ */ jsxs11(Text11, { color: "white", bold: true, children: [
+      /* @__PURE__ */ jsxs14(Text14, { color: "white", bold: true, children: [
         input,
-        _working ? blink ? "\u258D" : " " : ""
+        blink ? "\u258D" : " "
       ] }),
-      /* @__PURE__ */ jsx10(Text11, { color: "gray", dim: true, children: showSlashMenu ? "" : "  (/help, Tab for commands, Ctrl+C to exit)" })
+      /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: showSlashMenu ? "" : "  (/help, Tab for commands, Ctrl+C to exit)" })
     ] })
   ] });
 }
 
 // src/index.jsx
-import { jsx as jsx11 } from "react/jsx-runtime";
+import { jsx as jsx14 } from "react/jsx-runtime";
 var rendered = false;
 function start() {
   if (rendered) return;
   rendered = true;
-  render(/* @__PURE__ */ jsx11(App, {}));
+  render(/* @__PURE__ */ jsx14(App, {}));
 }
 export {
   start

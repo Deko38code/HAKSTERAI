@@ -12,6 +12,7 @@ const { exec } = require('child_process');
 const http = require('http');
 const readline = require('readline');
 const { chat, firecrawlScrape } = require('./providers');
+const { getDb } = require('./db');
 let _autolearn = null, _memoryEngine = null;
 try { _autolearn = require('./agent/autolearn'); } catch (_) {}
 try { _memoryEngine = require('./agent/memory-engine'); } catch (_) {}
@@ -24,19 +25,51 @@ function loadHaksterConfig() {
     const raw = fs.readFileSync(path.join(ENV_ROOT, 'hakster-config.json'), 'utf8');
     return JSON.parse(raw);
   } catch {
-    return { provider: process.env.DEFAULT_PROVIDER || 'nous', model: process.env.DEFAULT_MODEL || 'deepseek/deepseek-v4-flash' };
+    return { provider: process.env.DEFAULT_PROVIDER || 'ollama', model: process.env.DEFAULT_MODEL || 'glm-5.2:cloud' };
   }
 }
 
 /**
  * Call the internal /api/agent/run endpoint and collect the streamed agent output.
  */
+// Loads prior turns for this session from the shared sessions/messages tables
+// (same store /api/agent/run writes to — see persistUserTurn in index.js) so
+// a Telegram conversation has memory across messages, and so it shares history
+// with a website chat tab pointed at the same sessionId. Read-only here: the
+// server persists the user turn itself when this request hits /api/agent/run.
+function loadSessionHistory(sessionId, limit = 20) {
+  try {
+    const db = getDb();
+    const rows = db.prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ?').all(sessionId, limit);
+    return rows.map(r => ({ role: r.role, content: r.content }));
+  } catch (e) {
+    console.error('[telegram] session history load failed:', e.message);
+    return [];
+  }
+}
+
+// Persists the assistant's reply so the next loadSessionHistory() call (and
+// anything else reading this sessionId, e.g. GET /api/sessions/:id/messages)
+// sees a complete back-and-forth, not just the user's side.
+function persistAssistantTurn(sessionId, content) {
+  try {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
+    db.prepare('INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(require('crypto').randomBytes(12).toString('hex'), sessionId, 'assistant', content, now);
+  } catch (e) {
+    console.error('[telegram] assistant turn persist failed:', e.message);
+  }
+}
+
 function runAgent(prompt, sessionId) {
   const cfg = loadHaksterConfig();
+  const history = loadSessionHistory(sessionId);
   const body = JSON.stringify({
-    provider: cfg.provider || process.env.DEFAULT_PROVIDER || 'nous',
+    provider: cfg.provider || process.env.DEFAULT_PROVIDER || 'ollama',
     model: cfg.model || undefined,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [...history, { role: 'user', content: prompt }],
     sessionId,
     thinking: false,
     approvalMode: 'full-auto', // telegram bots can't show confirmation dialogs
@@ -91,6 +124,64 @@ function runAgent(prompt, sessionId) {
     req.write(body);
     req.end();
   });
+}
+
+// Small in-process JSON API helper — same 127.0.0.1:SERVER_PORT pattern as
+// runAgent(), for calling the pricing/checkout endpoints.
+function apiJson(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : null;
+    const req = http.request({
+      hostname: '127.0.0.1', port: SERVER_PORT, path, method,
+      headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
+      timeout: 15000,
+    }, res => {
+      let d = ''; res.on('data', c => d += c); res.on('end', () => {
+        try { resolve(JSON.parse(d)); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('request timed out')); });
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+// /subscribe — fetch live plans and show them as inline "Pay" buttons.
+async function sendPlanPicker(bot, chatId) {
+  try {
+    const data = await apiJson('GET', '/api/pricing');
+    const paidPrices = (data.plans || []).flatMap(plan => plan.prices.filter(pr => pr.amount > 0).map(pr => ({ plan, price: pr })));
+    if (paidPrices.length === 0) return bot.sendMessage(chatId, 'No paid plans configured yet.');
+    const keyboard = paidPrices.map(({ plan, price }) => ([{
+      text: `${plan.name} — ${price.name} ($${(price.amount / 100).toFixed(2)}/${price.billingCycle === 'yearly' ? 'yr' : 'mo'})`,
+      callback_data: `sub:${plan.id}:${price.id}`,
+    }]));
+    await bot.sendMessage(chatId, '💳 *Choose a plan:*', { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
+  } catch (e) {
+    await bot.sendMessage(chatId, `❌ Couldn't load plans: ${e.message}`);
+  }
+}
+
+// Handles the "sub:<planId>:<priceId>" button tap — creates a real Stripe
+// checkout session (same dynamic price_data flow as the website) tied to this
+// Telegram user's account, and sends back a Pay button with the real URL.
+async function handleSubscribeCallback(bot, query) {
+  const chatId = query.message.chat.id;
+  const [, planId, priceId] = query.data.split(':');
+  try {
+    await bot.answerCallbackQuery(query.id, { text: 'Creating checkout…' });
+    const result = await apiJson('POST', '/api/stripe/checkout', {
+      planId, priceId,
+      telegramUser: { id: query.from.id, first_name: query.from.first_name, last_name: query.from.last_name, username: query.from.username },
+    });
+    if (!result.ok) return bot.sendMessage(chatId, `❌ Checkout failed: ${result.error}`);
+    await bot.sendMessage(chatId, '✅ Tap below to complete payment:', {
+      reply_markup: { inline_keyboard: [[{ text: '💳 Pay with Stripe', url: result.url }]] },
+    });
+  } catch (e) {
+    await bot.sendMessage(chatId, `❌ Checkout error: ${e.message}`);
+  }
 }
 
 async function safeSendMarkdown(bot, chatId, text) {
@@ -189,7 +280,31 @@ async function sendToRole(roleKey, text, options = {}) {
       try {
         await role.bot.sendMessage(chatId, chunk, options);
       } catch (e) {
-        console.error(`[telegram:${role.name}] send failed to ${chatId}:`, e.message);
+        const emsg = e?.message || String(e);
+        // 400 "chat not found" / "forbidden" — the bot can't message a chat that
+        // never pressed /start on it. Prune the stale id so we stop spamming errors;
+        // rememberChat() re-adds it the moment the owner /start's this bot.
+        if (/chat not found|forbidden|deactivated|chat_id_not_found|PEER_ID_INVALID/i.test(emsg)) {
+          if (role.chatIds.has(chatId)) {
+            role.chatIds.delete(chatId);
+            saveChatIds();
+            console.warn(`[telegram:${role.name}] pruned unreachable chat ${chatId} (not /start'd) — re-adds on next /start`);
+          }
+          continue;
+        }
+        // 400 "can't parse entities" — unmatched markdown in the report payload.
+        // Retry the SAME chunk once as plain text (strip parse_mode) so the report
+        // still lands instead of being silently dropped.
+        if (/parse entities|can't parse|entity starting at|CHARACTER_*|MARKDOWN_/i.test(emsg)) {
+          try {
+            const { parse_mode, ...plainOpts } = options;
+            await role.bot.sendMessage(chatId, chunk, plainOpts);
+          } catch (e2) {
+            console.error(`[telegram:${role.name}] send failed to ${chatId}:`, (e2?.message || e2));
+          }
+          continue;
+        }
+        console.error(`[telegram:${role.name}] send failed to ${chatId}:`, emsg);
       }
     }
   }
@@ -241,13 +356,23 @@ function initBots() {
     }).catch(e => console.error(`[telegram] ${ROLES[key].name} getMe failed:`, e.message));
 
     // Handle polling errors gracefully instead of crashing
+    // 409 fix: the old 2s restart was SHORTER than the long-poll timeout (10s),
+    // so the stale getUpdates connection was still alive when we restarted →
+    // instant 409 → infinite loop (see log spam). Now back off 12s (> timeout),
+    // dedupe concurrent restarts, and clear any webhook first.
+    let _poll409Busy = false;
     bot.on('polling_error', (error) => {
       const msg = error?.message || String(error);
       if (msg.includes('409') || msg.includes('terminated by other')) {
-        console.warn(`[telegram] ${ROLES[key].name}: 409 conflict (stale polling) — stopping and restarting polling`);
-        bot.stopPolling().then(() => {
-          setTimeout(() => bot.startPolling().catch(() => {}), 2000);
-        }).catch(() => {});
+        if (_poll409Busy) return;  // already mid-backoff — don't pile on more restarts
+        _poll409Busy = true;
+        console.warn(`[telegram] ${ROLES[key].name}: 409 conflict (stale polling) — backing off 12s before restart`);
+        bot.stopPolling().catch(() => {});
+        setTimeout(async () => {
+          try { await bot.deleteWebHook(); } catch {}
+          try { await bot.startPolling(); } catch {}
+          _poll409Busy = false;
+        }, 12000);
       } else if (msg.includes('EFATAL') || msg.includes('fetch failed')) {
         console.warn(`[telegram] ${ROLES[key].name}: network error — will auto-retry`);
       } else {
@@ -260,6 +385,14 @@ function initBots() {
       rememberChat(key, msg.chat.id);
       handleMessage(key, msg);
     });
+
+    if (key === 'TELEGRAM_BOT_TOKEN_1') {
+      bot.on('callback_query', query => {
+        if (typeof query.data === 'string' && query.data.startsWith('sub:')) {
+          handleSubscribeCallback(bot, query).catch(e => console.error('[telegram] subscribe callback error:', e.message));
+        }
+      });
+    }
   }
 
   startWatchdog();
@@ -292,10 +425,13 @@ async function handleMessage(roleKey, msg) {
 
   // ── Role 1: haksterAi command bot ──
   if (roleKey === 'TELEGRAM_BOT_TOKEN_1') {
+    if (/^\/(?:subscribe|pay|plans)\b/i.test(text)) {
+      return sendPlanPicker(bot, chatId);
+    }
     const match = text.match(/^\/(?:ask|hakster)\s+([\s\S]+)$/i);
     if (!match) {
       return bot.sendMessage(chatId,
-        '⚡ *HaksterAi Command Bot*\n\nUsage:\n`/ask <prompt>` — ask the agent\n`/status` — server status',
+        '⚡ *HaksterAi Command Bot*\n\nUsage:\n`/ask <prompt>` — ask the agent\n`/subscribe` — pick a plan and pay\n`/status` — server status',
         { parse_mode: 'Markdown' });
     }
     await bot.sendChatAction(chatId, 'typing');
@@ -304,7 +440,9 @@ async function handleMessage(roleKey, msg) {
       try { bot.sendChatAction(chatId, 'typing'); } catch {}
     }, 4000);
     try {
-      const response = await runAgent(prompt, `telegram-${chatId}`);
+      const sessionId = `telegram-${chatId}`;
+      const response = await runAgent(prompt, sessionId);
+      persistAssistantTurn(sessionId, response);
       clearInterval(typingInterval);
       await safeSendMarkdown(bot, chatId, response);
     } catch (e) {
@@ -346,8 +484,8 @@ async function handleMessage(roleKey, msg) {
     try {
       const cfg = loadHaksterConfig();
       const response = await chat({
-        provider: cfg.provider || process.env.DEFAULT_PROVIDER || 'nous',
-        model: cfg.model || process.env.DEFAULT_MODEL || 'deepseek/deepseek-v4-flash',
+        provider: cfg.provider || process.env.DEFAULT_PROVIDER || 'ollama',
+        model: cfg.model || process.env.DEFAULT_MODEL || 'glm-5.2:cloud',
         messages: [{ role: 'user', content: text }],
         system: 'You are a helpful AI companion. Keep responses short and practical.',
       });
@@ -455,22 +593,51 @@ function startCoderReport() {
 // ── Recon bot: periodic wifi + listening-port + local recon sweep ──
 function startReconReport() {
   const MS = 30 * 60 * 1000;
+  let _lastSig = '';
   setInterval(async () => {
     const wifi = await shellExec(`(command -v nmcli >/dev/null && nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | head -12) || (command -v iwlist >/dev/null && iwlist wlan0 scan 2>/dev/null | grep -E 'ESSID|Quality' | head -20) || echo 'no wifi tools'`);
     const ports = await shellExec(`ss -tlnp 2>/dev/null | grep LISTEN | awk '{print $4}' | sort -u | head -15`);
     const ifaces = await shellExec(`ip -br addr 2>/dev/null | head -8`);
-    await sendToRole('TELEGRAM_BOT_TOKEN_3', `🔍 *Recon sweep*\n\n*WiFi:*\n\`\`\`\n${(wifi || '').slice(0, 800)}\n\`\`\`\n*Listening:*\n\`\`\`\n${(ports || '').slice(0, 400)}\n\`\`\`\n*Ifaces:*\n\`\`\`\n${(ifaces || '').slice(0, 400)}\n\`\`\``, { parse_mode: 'Markdown' });
+    // Dedupe: only send the recon sweep when the SECURITY-relevant part CHANGED
+    // (a new listening port or an interface change). WiFi signal fluctuates every
+    // scan, so it's included in the report but NOT the trigger — otherwise the ghost
+    // bot would dump the identical network script every 30 min forever.
+    const sig = `${ports || ''}|${ifaces || ''}`;
+    if (sig === _lastSig) return;          // unchanged — stay quiet (no noti spam)
+    _lastSig = sig;
+    await sendToRole('TELEGRAM_BOT_TOKEN_3', `🔍 *Recon sweep* (changed since last)\n\n*WiFi:*\n\`\`\`\n${(wifi || '').slice(0, 800)}\n\`\`\`\n*Listening:*\n\`\`\`\n${(ports || '').slice(0, 400)}\n\`\`\`\n*Ifaces:*\n\`\`\`\n${(ifaces || '').slice(0, 400)}\n\`\`\``, { parse_mode: 'Markdown' });
   }, MS);
 }
 
 // ── Debugger bot: hunt for crashed services + recent error logs ──
 function startDebuggerReport() {
   const MS = 15 * 60 * 1000;
+  let _lastSig = '';
+  // Filter the bot fleet's OWN chatter out of "Recent errors" — telegram polling /
+  // no-known-chat / 409 / deprecation noise isn't an app error, but it matched the
+  // old 'error' grep and made the debugger re-send the same "error" sweep every 15 min.
+  const _noiseRe = /\[telegram[:\] ].*(no known chats|pruned unreachable|409 conflict|stale polling|network error.*auto-retry|deleteWebHook)|node-telegram-bot-api|DeprecationWarning/i;
+  const _filterErrs = (raw) => {
+    const f = String(raw || '').split('\n').filter(l => l.trim() && !_noiseRe.test(l)).join('\n').trim();
+    return f || 'no recent errors';
+  };
   setInterval(async () => {
     const pm2 = await shellExec(`pm2 jlist 2>/dev/null | node -e 'let a=[];try{a=JSON.parse(require("fs").readFileSync(0,"utf8"))}catch{};console.log(a.filter(p=>p.pm2_env&&p.pm2_env.status!=="online").map(p=>p.name+":"+p.pm2_env.status).join("\n")||"all online")' 2>/dev/null`);
-    const errs = await shellExec(`grep -iE 'error|fatal|unhandled|crash' /home/ghost/haksterAi/server/logs/*.log 2>/dev/null | tail -8 || (pm2 logs haksterAi --nostream --lines 50 --err 2>/dev/null | grep -iE 'error|fatal' | tail -8) || echo 'no recent errors'`);
+    const errsRaw = await shellExec(`grep -iE 'error|fatal|unhandled|crash' /home/ghost/haksterAi/server/logs/*.log 2>/dev/null | tail -8 || (pm2 logs haksterAi --nostream --lines 50 --err 2>/dev/null | grep -iE 'error|fatal' | tail -8) || echo 'no recent errors'`);
+    const errs = _filterErrs(errsRaw);
     const down = !/all online/.test(pm2 || '');
-    await sendToRole('TELEGRAM_BOT_TOKEN_4', `🐞 *Debugger sweep* ${down ? '⚠ issues' : '✓ clean'}\n\n*Services:*\n\`\`\`\n${(pm2 || '').slice(0, 600)}\n\`\`\`\n*Recent errors:*\n\`\`\`\n${(errs || '').slice(0, 1000)}\n\`\`\``, { parse_mode: 'Markdown' });
+    const hasRealErr = !/no recent errors/.test(errs);
+    // Dedupe: only send on CHANGE. Stops the bot re-sending the identical error
+    // message every 15 min — it now alerts once when an error appears, again only
+    // when it clears or a new one shows up.
+    const sig = `${down ? 'DOWN' : 'up'}|${hasRealErr ? errs : 'clean'}`;
+    if (sig === _lastSig) return;        // unchanged since last sweep — stay quiet
+    _lastSig = sig;
+    if (!down && !hasRealErr) {
+      await sendToRole('TELEGRAM_BOT_TOKEN_4', `🐞 *Debugger sweep* ✓ clean — all services online, no new errors. (next alert only on change)`, { parse_mode: 'Markdown' });
+      return;
+    }
+    await sendToRole('TELEGRAM_BOT_TOKEN_4', `🐞 *Debugger sweep* ${down ? '⚠ issues' : '⚠ errors'}\n\n*Services:*\n\`\`\`\n${(pm2 || '').slice(0, 600)}\n\`\`\`\n*Recent errors:*\n\`\`\`\n${errs.slice(0, 1000)}\n\`\`\``, { parse_mode: 'Markdown' });
   }, MS);
 }
 
@@ -548,9 +715,34 @@ function startWatchdog() {
 
 function startHealthReporter() {
   const HEALTH_MS = 30 * 60 * 1000;
+  const cpus = require('os').cpus().length || 4;
+  let _lastAlert = '';
+  // The health report (load/uptime/temp/mem) fluctuates EVERY run, so the old code
+  // dumped a full stats "script" every 30 min forever. Now: only ALERT on actionable
+  // thresholds (temp >= 80°C, RAM >= 90%, load >= cpus*2), deduped by state — one
+  // alert per breach, one "all clear" on recovery, quiet otherwise.
   setInterval(async () => {
+    let maxTemp = 0;
+    try {
+      const t = await shellExec('sensors 2>/dev/null | grep -oE "[0-9]+\\.[0-9]" | head -20; for f in /sys/class/hwmon/*/temp*_input; do cat $f 2>/dev/null; done 2>/dev/null | head -20');
+      maxTemp = Math.max(0, ...String(t || '').split(/[\s\n]+/).map(Number).filter(n => n > 0 && n < 200).map(n => n > 1000 ? n / 1000 : n));
+    } catch (_) {}
+    let memPct = 0;
+    try { const f = await shellExec("free | awk '/Mem:/ {printf \"%d\", $3/$2*100}'"); memPct = parseInt(f, 10) || 0; } catch (_) {}
+    const load1 = require('os').loadavg()[0] || 0;
+    const issues = [];
+    if (maxTemp && maxTemp >= 80) issues.push(`🌡 TEMP ${maxTemp.toFixed(0)}°C ≥ 80`);
+    if (memPct >= 90) issues.push(`💾 RAM ${memPct}% ≥ 90`);
+    if (load1 >= cpus * 2) issues.push(`📈 Load ${load1.toFixed(2)} ≥ ${cpus * 2}`);
+    const sig = issues.join('|') || 'ok';
+    if (sig === _lastAlert) return;            // same state as last sweep — stay quiet
+    _lastAlert = sig;
+    if (!issues.length) {
+      await sendToRole('TELEGRAM_BOT_TOKEN_6', `✅ *System health OK* — temp/RAM/load within thresholds. (next ping only on a breach)`, { parse_mode: 'Markdown' });
+      return;
+    }
     const report = await runSystemHealth();
-    await sendToRole('TELEGRAM_BOT_TOKEN_6', report, { parse_mode: 'Markdown' });
+    await sendToRole('TELEGRAM_BOT_TOKEN_6', `⚠️ *Health Alert*: ${issues.join(', ')}\n\n${report}`, { parse_mode: 'Markdown' });
   }, HEALTH_MS);
 }
 

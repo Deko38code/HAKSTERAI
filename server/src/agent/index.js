@@ -5,7 +5,7 @@
  */
 
 const http = require('http');
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, spawnSync } = require('child_process');
 const fmtBytes = b => b < 1024 ? `${b}B` : b < 1048576 ? `${(b/1024).toFixed(1)}KB` : b < 1073741824 ? `${(b/1048576).toFixed(1)}MB` : `${(b/1073741824).toFixed(1)}GB`;
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +13,93 @@ const readline = require('readline');
 const { globSync } = require('glob');
 const os = require('os');
 const crypto = require('crypto');
+const net = require('net');
+// ── Service health: lightweight TCP connect check on the main ports, cached
+//    and refreshed every 20s. Shown as a compact \u2705/\u274c chip in the
+//    status bar so you always know which services are up at a glance.
+const SERVICE_PORTS = [
+  { port: 3579, name: 'haksterai' },
+  { port: 8081, name: 'cinevault' },
+  { port: 5555, name: 'miniforge' },
+];
+let _serviceHealth = {};
+for (const s of SERVICE_PORTS) _serviceHealth[s.port] = false;
+function checkServiceHealth() {
+  for (const svc of SERVICE_PORTS) {
+    const sock = new net.Socket();
+    sock.setTimeout(1500);
+    sock.on('connect', () => { _serviceHealth[svc.port] = true; sock.destroy(); });
+    sock.on('error', () => { _serviceHealth[svc.port] = false; sock.destroy(); });
+    sock.on('timeout', () => { _serviceHealth[svc.port] = false; sock.destroy(); });
+    sock.connect(svc.port, '127.0.0.1');
+  }
+}
+checkServiceHealth();
+setInterval(checkServiceHealth, 20000);
+function mcpChip() {
+  try {
+    const info = mcpStatus(); const total = info.length;
+    const live = info.filter(s => s.initialized).length;
+    const col = live === total ? C.success : live > 0 ? C.mustard : C.error;
+    return C.fgSubtle + '\u2502' + C.reset + ' ' + col + '\ud83d\udd0c' + C.reset + C.fgBase + live + '/' + total + C.reset + ' ';
+  } catch (_) { return ''; }
+}
+function servicesChip() {
+  const icons = SERVICE_PORTS.map(svc => _serviceHealth[svc.port] ? C.success + '\u2705' + C.reset : C.error + '\u274c' + C.reset).join('');
+  const up = SERVICE_PORTS.filter(svc => _serviceHealth[svc.port]).length;
+  const col = up === SERVICE_PORTS.length ? C.success : (up > 0 ? C.mustard : C.error);
+  return C.fgSubtle + '\u2502' + C.reset + ' ' + col + '\ud83c\udfe0' + C.reset + icons + ' ' + C.fgMuted + up + '/' + SERVICE_PORTS.length + C.reset + ' ';
+}
+
+// ── Native module self-heal: if node upgraded and native modules (better-sqlite3,
+//    sharp) are mismatched (NODE_MODULE_VERSION / ERR_DLOPEN_FAILED), auto-rebuild
+//    them before continuing. Keeps hakster working across node version changes.
+const HAKSTER_ROOT = path.join(__dirname, '..', '..', '..');
+const SERVER_ROOT = path.join(__dirname, '..', '..');   // server/ — where better-sqlite3 is installed
+function ensureNativeModule(name) {
+  try { require(name); return true; }
+  catch (e) {
+    if (/NODE_MODULE_VERSION|ERR_DLOPEN_FAILED|Module version mismatch|was compiled against a different/i.test(e.message)) {
+      console.error(`[hakster] ⚠ native module '${name}' mismatch under node ${process.version} — auto-rebuilding...`);
+      try {
+        try { execSync(`npm rebuild ${name} --quiet`, { stdio: 'inherit', timeout: 120000, cwd: SERVER_ROOT }); } catch (_) { execSync(`npm rebuild ${name} --quiet`, { stdio: 'inherit', timeout: 120000, cwd: HAKSTER_ROOT }); }
+        require(name);  // retry — fresh load of the rebuilt .node binary
+        console.error(`[hakster] ✓ '${name}' rebuilt successfully under node ${process.version}`);
+        return true;
+      } catch (e2) {
+        console.error(`[hakster] ✗ '${name}' rebuild failed: ${e2.message}`);
+        console.error(`[hakster]   Run manually: cd ${SERVER_ROOT} && npm rebuild ${name}`);
+        return false;
+      }
+    }
+    throw e;  // not a version mismatch (e.g. not installed) — let it fail normally
+  }
+}
+ensureNativeModule('better-sqlite3');
+ensureNativeModule('sharp');
+
+// ── Crash-loop detector + auto-fix: if the agent crashes 3+ times in 5 min,
+//    auto-rebuild native modules before exiting so the next boot succeeds.
+const CRASH_LOG = path.join(os.homedir(), '.hakster', 'crash_log.json');
+function recordCrash(err) {
+  try {
+    const dir = path.dirname(CRASH_LOG); if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    let crashes = []; try { crashes = JSON.parse(fs.readFileSync(CRASH_LOG, 'utf-8')) || []; } catch (_) {}
+    const now = Date.now();
+    crashes.push({ ts: now, msg: String((err && err.message) || err).slice(0, 300) });
+    crashes = crashes.filter(c => now - c.ts < 300000);
+    fs.writeFileSync(CRASH_LOG, JSON.stringify(crashes, null, 2));
+    if (crashes.length >= 3) {
+      console.error('[hakster] \ud83d\udd27 Crash-loop detected (' + crashes.length + ' crashes in 5min) — auto-rebuilding...');
+      try { execSync('npm rebuild better-sqlite3 --quiet', { stdio: 'inherit', timeout: 120000, cwd: path.join(__dirname, '..', '..') }); } catch (_) {}
+      try { execSync('npm rebuild sharp --quiet', { stdio: 'inherit', timeout: 120000, cwd: path.join(__dirname, '..', '..', '..') }); } catch (_) {}
+      console.error('[hakster] \u2705 Auto-fix applied — next restart should succeed.');
+    }
+  } catch (_) {}
+}
+process.on('uncaughtException', (err) => { console.error('[hakster] CRASH:', err.message); console.error(err.stack); recordCrash(err); process.exit(1); });
+process.on('unhandledRejection', (err) => { console.error('[hakster] \ud83d\udca5 REJECTION:', String(err)); recordCrash(err); });
+
 
 // ── Pentester fingerprint (stable device identity) ──
 const { fingerprint: getFingerprint } = require('../fingerprint');
@@ -24,7 +111,7 @@ function getPentesterFingerprint() {
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn } = require('./mcp');
 const { generateImage } = require('../providers');
 const { SUGGEST, AUTO_EDIT, FULL_AUTO, shouldConfirm } = require('./approval');
-const { AgentLoopPhase, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition } = require('./loop');
+const { AgentLoopPhase, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition , claudePreCompactGuard, codexSandboxPolicy, reactCycleValidator, hermesMemoryConsolidation } = require('./loop');
 const autolearn = require('./autolearn');
 const session = require('./session');
 const git = require('./git');
@@ -59,12 +146,14 @@ async function getPage() {
 // ── Config ──────────────────────────────────────────────────────────────
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
 const HAKSTER_HOST = process.env.HAKSTER_HOST || 'http://localhost:3579';
-const MODEL = process.env.HAKSTER_MODEL || (() => {
+let MODEL = process.env.HAKSTER_MODEL || (() => {
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'hakster-config.json'), 'utf8'));
-    return cfg.model || 'gpt-oss:120b-cloud';
-  } catch { return 'gpt-oss:120b-cloud'; }
+    return cfg.model || 'hp-1000';
+  } catch { return 'hp-1000'; }
 })();
+// Brand label for the TUI (ollama forces lowercase handles; show the proper name).
+function modelLabel() { return /^hp-1000$/i.test(MODEL) ? 'HP-1000' : MODEL; }
 const CLAUDE_PROXY_URL = process.env.CLAUDE_PROXY_URL || 'http://localhost:8082';
 const WORK_DIR = process.cwd();
 const SYSTEM_PROMPT = `You are haksterAI, an expert AI coding and ops agent running on the user's machine. When you run shell or CLI commands, you are executing them directly on the user's physical machine — this is NOT a sandbox or container. Every command runs with the machine owner's permissions on their real hardware. You have direct access to shell commands, file operations, processes, and networking. You are bold, concise, and get things done. Prefer action over explanation. When writing code, just write it — no unnecessary framing.
@@ -120,7 +209,8 @@ Goal: finish a task in as few turns as possible (ideally <8). This keeps session
 - When you are unsure, inspect or verify instead of guessing.
 
 ## CRITICAL RULES
-1. DANGEROUS COMMANDS REQUIRE CONFIRMATION. If you use shell, kill_process, pm2 (stop/restart), or write to critical system paths, the user will be asked to approve. Plan accordingly.
+1. DANGEROUS COMMANDS REQUIRE CONFIRMATION. If you use shell, kill_process, pm2 (stop/restart), or write to critical system paths, the user will be asked to approve via a popout window. Plan accordingly.
+1a. SUDO WORKS HEADLESSLY. When a command needs root, just RUN it with sudo ... (e.g. sudo chown -R ghost:ghost /path). A popout prompt appears, the user types the sudo password (masked), and it is fed to sudo -S automatically — sudo executes and returns output like any other command. DO NOT stop midway to ask the user for the password in chat, and DO NOT give up after a failed sudo attempt that said "a terminal is required" (that was a fixed bug). Chain the whole fix in one go: sudo chown ... && cd /path && npm install --prefer-offline && pm2 restart X && curl health and keep going until the service is verified online.
 2. ALWAYS use the code_grid tool when showing code, file contents, diffs, or config to the user. Never dump raw code without line numbers and color grid.
 3. When showing file contents with read_file, the output already has line numbers — use code_grid for any code you write or modify to give the user a clear before/after view with highlighted changes (use diff_lines with + for additions, - for deletions).
 4. Sub-agents (sub_agent tool) run tasks in parallel — use them when multiple independent tasks need doing simultaneously (e.g. check 3 services, edit 3 files).
@@ -160,6 +250,24 @@ Goal: finish a task in as few turns as possible (ideally <8). This keeps session
 
 ## 🔧 TOOLS
 Full tool schemas are provided via the tools parameter — call them directly. Prefer patch_file/multi_patch over sed; read_file before editing; search_files or rg for lookups; skill_list then skill_load for unfamiliar tasks; web_search before guessing.
+
+## 🚀 SERVICE OPERATIONS PLAYBOOK (use these exact patterns — don't thrash)
+FIRST: call project_map({path: '/path/to/project'}) to get a line-level map of key files (routes, PORT, app.listen, requires, env vars). Go DIRECTLY to the line you need — do NOT call rg/search_files/read_file more than 2× for the same question. Chain the whole fix in ONE shell command with && (diagnose → fix → restart → verify). 15 turns max — act, don't explore.
+Start a Node service with pm2 — ALWAYS set --cwd so .env loads + node_modules resolves:
+  pm2 start server.js --name SVC --cwd /path/to/svc && pm2 save
+  pm2 restart SVC --update-env          # restart after code/dep/env changes
+Native module rebuild (better-sqlite3 etc. fails with NODE_MODULE_VERSION mismatch or EACCES on root-owned node_modules — the #1 cause of "server won't start"):
+  sudo chown -R $USER:$USER /path/to/svc/node_modules && cd /path/to/svc && npm install --prefer-offline && pm2 restart SVC
+  (run the sudo — a popout collects the password masked; do NOT ask in chat, do NOT give up)
+Verify a service is up (one shot, then STOP if it returns 200):
+  curl -s -o /dev/null -w "%{http}" http://localhost:PORT/api/health ; ss -tnlp | grep PORT
+Known services on this box: haksterai :3579 · cinevault :8081 · miniforge :5555
+If it won't bind: pm2 logs SVC --lines 50 --nostream  -> read the FIRST error -> fix it (chown+rebuild, missing env var, port conflict) -> pm2 restart -> re-curl. Do NOT loop on grep/app.get. Do NOT overwrite .env with dummy keys.
+Tunnels (expose a local service):
+  cloudflared tunnel --url http://localhost:PORT
+  ngrok http PORT
+  ssh -R 80:localhost:PORT serveo.net   (or: ssh -R REMOTE:localhost:PORT user@host)
+Sub-agents: when starting 2+ independent services, use sub_agent to do them in parallel.
 
 ## ⚡ ANTI-HANG RULES (CRITICAL)
 When running ANY shell command or tool that could hang:
@@ -321,6 +429,8 @@ Use \`skill_load({name: "hakster-iptv"})\` or \`skill_load({name: "hakster-movie
 let _coreSkillCache = null;
 let _coreSkillCacheTime = 0;
 const CORE_SKILL_TTL = 60000; // refresh every 60s
+let _docsIndexCache = null;
+let _docsIndexTime = 0;
 
 function loadCoreSkills() {
   const now = Date.now();
@@ -355,6 +465,23 @@ function loadCoreSkills() {
   _coreSkillCache = parts.join('');
   _coreSkillCacheTime = now;
   return _coreSkillCache;
+}
+
+// 📚 Compact index of project docs (.md under docs/ + top-level) so the agent KNOWS they
+// exist and can read_file them on demand. Content is NOT injected (would blow the budget) —
+// only grouped paths. Cached 60s.
+function loadDocsIndex() {
+  const now = Date.now();
+  if (_docsIndexCache && (now - _docsIndexTime) < CORE_SKILL_TTL) return _docsIndexCache;
+  const root = (typeof _REPO_ROOT !== 'undefined' && _REPO_ROOT) || process.cwd();
+  let paths = [];
+  try { paths = globSync(path.join(root, 'docs', '**', '*.md')); } catch (_) {}
+  try { paths = paths.concat(globSync(path.join(root, '*.md'))); } catch (_) {}
+  if (!paths.length) { _docsIndexCache = ''; _docsIndexTime = now; return ''; }
+  const rel = paths.map(p => path.relative(root, p)).filter(Boolean).sort();
+  _docsIndexCache = '\n\n## 📚 Project Docs (read_file the relevant one BEFORE unfamiliar tasks — do NOT grep blind)\n' + rel.map(p => '• ' + p).join('\n') + '\nUse read_file on any of these when relevant to the task; they are curated reference material.';
+  _docsIndexTime = now;
+  return _docsIndexCache;
 }
 
 // ── Dynamic machine context (live OS/hardware/folders — cached 5 min) ──
@@ -648,6 +775,104 @@ function buildProjectMemoryBlock(cwd) {
   return '';
 }
 
+// Auto-build a compact Table of Contents for all projects on the machine.
+// Scans /home/ghost for dirs with package.json, extracts: name, main file,
+// .env var names, and key lines (requires, routes, app.listen, PORT) from the
+// main JS file. Injected into the system prompt so the agent ALWAYS knows where
+// Build a section-by-section line-range map of a JS file: detects comment headers
+// (// \u2500 Title \u2500), route defs (app.get/post/...), and function defs, then
+// groups them into Lstart-Lend: title sections. Gives the agent a structural TOC
+// so it goes directly to the right section instead of searching 20 times.
+function _buildSectionMap(filePath, maxSections = 25) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n');
+    const sections = [];
+    let curStart = 1, curTitle = '(top)';
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      const h = l.match(/^\/\/\s*[\u2500\u2501\u2550=]{2,}\s*(.+?)\s*[\u2500\u2501\u2550=]*\s*$/)
+             || l.match(/^\/\/\s*={2,}\s*(.+?)\s*={2,}\s*$/)
+             || l.match(/^\/\*\*\s*(.+?)\s*\*\//)
+             || l.match(/^\/\/\s*([A-Z][A-Za-z\s\-]{4,}):\s*$/);
+      if (h) {
+        if (i > 0 && curTitle !== '(top)') sections.push({s: curStart, e: i, t: curTitle});
+        curStart = i + 1; curTitle = h[1].trim().substring(0, 60);
+        continue;
+      }
+      const rt = l.match(/^\s*app\.(get|post|put|delete|patch|use)\s*\(\s*['"]([^'"]{1,40})['"]/);
+      if (rt) {
+        const title = `${rt[1].toUpperCase()} ${rt[2]}`;
+        if (curTitle && i - curStart > 3) sections.push({s: curStart, e: i, t: curTitle});
+        curStart = i + 1; curTitle = title;
+        continue;
+      }
+      const fn = l.match(/^(?:async\s+)?function\s+(\w+)\s*\(/) || l.match(/^const\s+(\w+)\s*=\s*(?:async\s*)?\(/);
+      if (fn && !l.includes('require(')) {
+        if (curTitle && i - curStart > 8) sections.push({s: curStart, e: i, t: curTitle});
+        curStart = i + 1; curTitle = `fn ${fn[1]}`;
+      }
+    }
+    if (curTitle !== '(top)') sections.push({s: curStart, e: lines.length, t: curTitle});
+    return sections.slice(0, maxSections).map(x => `  L${x.s}-${x.e}: ${x.t}`).join('\n');
+  } catch (_) { return ''; }
+}
+
+
+// things are — no searching required.
+function _buildProjectTOC() {
+  const home = process.env.HOME || '/home/ghost';
+  const toc = [];
+  try {
+    const entries = fs.readdirSync(home, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue;
+      const dir = path.join(home, e.name);
+      const pjPath = path.join(dir, 'package.json');
+      if (!fs.existsSync(pjPath)) continue;
+      try {
+        const pj = JSON.parse(fs.readFileSync(pjPath, 'utf-8'));
+        const mainFile = pj.main || 'index.js';
+        const port = pj.port || '';
+        let line = `${e.name} (${dir})`;
+        if (port) line += ` :${port}`;
+        // .env var names
+        try {
+          const env = fs.readFileSync(path.join(dir, '.env'), 'utf-8');
+          const vars = env.split('\n').map(l => l.match(/^(\w+)=/)).filter(Boolean).map(m => m[1]).filter(v => v);
+          if (vars.length) line += `\n  .env: ${vars.join(', ').substring(0, 100)}`;
+        } catch (_) {}
+        // Section map from main JS file (line ranges -> what each section does)
+        // Fall back: package.json main -> server.js -> app.js -> index.js
+        try {
+          const candidates = [mainFile, 'server.js', 'app.js', 'index.js', 'main.js'];
+          let mainPath = null, mainName = null;
+          for (const c of candidates) {
+            const p = path.join(dir, c);
+            if (fs.existsSync(p)) { mainPath = p; mainName = c; break; }
+          }
+          if (mainPath) {
+            const sm = _buildSectionMap(mainPath, 20);
+            if (sm) line += `\n  ${mainName}:\n${sm}`;
+          }
+        } catch (_) {}
+        // ecosystem.config.js (pm2)
+        try {
+          const eco = fs.readFileSync(path.join(dir, 'ecosystem.config.js'), 'utf-8');
+          const pm2Name = eco.match(/name\s*:\s*['"]([^'"]+)['"]/);
+          if (pm2Name) line += `\n  ecosystem: ${pm2Name[1]}`;
+        } catch (_) {}
+        toc.push(line);
+      } catch (_) {}
+    }
+  } catch (_) {}
+  if (toc.length === 0) return '';
+  // Cap total size to ~2k chars
+  let result = toc.join('\n\n');
+  if (result.length > 6000) result = result.substring(0, 6000) + '\n... (more projects truncated)';
+  return `\n\n## 📑 Table of Contents (projects on this machine — line-level map)\n${result}`;
+}
+
 function buildSystemPrompt(clientContext) {
   let prompt = SYSTEM_PROMPT.replace('${DYNAMIC_MACHINE_CONTEXT}', getMachineContext());
 
@@ -749,6 +974,7 @@ function buildSystemPrompt(clientContext) {
   // ── Inject AGENTS.md steering content ──
   const agentsMd = injectAgentsMd(process.cwd());
   if (agentsMd) prompt += '\n\n' + agentsMd;
+  prompt += loadDocsIndex();  // 📚 surface docs/ + top-level .md so the agent knows they exist (reads on demand)
   // ── Merge the phantom knowledge brain into this session's context ──
   prompt += loadPhantomBrain();
 
@@ -795,6 +1021,8 @@ function buildSystemPrompt(clientContext) {
   // ── Knowledge library index: phantom / kiro / claude / codex / hermes ──
   prompt += buildKnowledgeLibraryIndex();
 
+  // Auto-inject a Table of Contents for all projects on the machine
+  prompt += _buildProjectTOC();
   return prompt;
 }
 
@@ -829,7 +1057,7 @@ function getSkillDirs() {
 }
 
 // (Idle review prompt removed — health checks now run directly via shell, no model call)
-const MAX_TURNS_DEFAULT = Math.max(15, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '25', 10) || 25);  // was 50 — fewer turns = fewer model calls = fewer tokens
+const MAX_TURNS_DEFAULT = Math.max(10, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '120', 10) || 120);  // 120-round single-use budget; guardrails (loop/timeout/redundant-modify) prevent the exploration loops that the old 15-cap was meant to force
 const LOW_TOKEN_MAX_TURNS = Math.max(20, parseInt(process.env.HAKSTER_LOW_TOKEN_MAX_TURNS || '30', 10) || 30);
 const MAX_TURNS = MAX_TURNS_DEFAULT;
 let _currentMaxTurns = MAX_TURNS_DEFAULT;  // updated by agentLoop each run so tuiReset can read it
@@ -846,14 +1074,306 @@ const MAX_LOG_LINES = (() => { const v = process.env.MAX_LOG_LINES; return v !==
 // ── Module-level state for stuck-loop detection (shared with agentLoop) ──
 let _lastAssistantResponse = '';   // Tracks last model response for loop detection
 let _noProgressCount = 0;          // Counts consecutive responses without tool calls
+let _diagCount = 0;               // Consecutive read-only/diagnostic tool calls without a state-modifying action
+let _diagFires = 0;               // How many times the diagnosis-timeout has fired for this task (escalation)
+let _modifyingSigs = {};          // sig -> count of state-modifying commands this task (catches redundant re-runs)
+// ── Smartness meter — trends up on real progress, down on loops / redundant
+//    re-runs / empty retries / wandering. Starts at his current rated level
+//    (62%) and re-baselines per task. Shown as 🧠 % in the reasoning panel +
+//    a compact chip in the status bar. ▲/▼ = last change, ◆ = steady.
+let _smartScore = 98;
+let _smartDelta = 0;
+let _smartTrendDrops = 0;   // consecutive negative smartness deltas — an early stall signal
+function bumpSmart(delta, why) {
+  const before = _smartScore;
+  _smartScore = Math.max(0, Math.min(100, _smartScore + delta));
+  _smartDelta = _smartScore - before;
+  if (delta < 0) _smartTrendDrops++; else if (delta > 0) _smartTrendDrops = 0;
+  recordPerf(why, delta);                       // session perf meter (points + mistake tally)
+  if (_smartScore > _sessionPerf.smartnessPeak) _sessionPerf.smartnessPeak = _smartScore;
+  if (why === 'clean-finish' && _sessionPerf.convergenceRound == null) _sessionPerf.convergenceRound = _sessionPerf.roundsUsed;
+  if (process.env.HAKSTER_DEBUG_AGENT === '1' && delta !== 0) {
+    log(C.dim + '[smart] ' + (delta > 0 ? '+' : '') + delta + ' -> ' + _smartScore + '%' + (why ? ' (' + why + ')' : '') + (delta < 0 ? ' [trend:' + _smartTrendDrops + ']' : '') + C.reset);
+  }
+}
+function smartBar() {
+  const s = _smartScore, barLen = 20, filled = Math.round(s / 100 * barLen);
+  const col = s >= 66 ? C.success : s >= 33 ? C.mustard : C.error;
+  const arrow = _smartDelta > 0 ? C.success + '▲' : _smartDelta < 0 ? C.error + '▼' : C.fgSubtle + '◆';
+  return col + '█'.repeat(filled) + C.fgSubtle + '░'.repeat(barLen - filled) + C.reset + ' ' + C.bold + C.fgBase + s + '%' + C.reset + ' ' + arrow + C.reset;
+}
+function smartCompact() {
+  const s = _smartScore;
+  const col = s >= 66 ? C.success : s >= 33 ? C.mustard : C.error;
+  const arrow = _smartDelta > 0 ? '▲' : _smartDelta < 0 ? '▼' : '◆';
+  const pts = _sessionPerf.points;
+  const ptsCol = pts > 0 ? C.success : pts < 0 ? C.error : C.fgMuted;
+  return col + '\ud83e\udde0' + C.reset + C.fgBase + s + '%' + C.reset + col + arrow + C.reset + ' ' + ptsCol + C.bold + pts + 'p' + C.reset;
+}
+// Autolearn meter -- the session's cumulative points/reward score, shown as a
+// bar under Smartness. Unlike smartness (capped 0-100, re-baselines per task),
+// points are the same unbounded reward-system total from recordPerf(), so this
+// can read well past 100% -- that tracks total learning reward earned this
+// session, not a capped percentage.
+function autolearnBar() {
+  const pts = _sessionPerf.points;
+  const barLen = 20;
+  const clamped = Math.max(0, Math.min(100, pts));
+  const filled = Math.round(clamped / 100 * barLen);
+  const col = pts >= 150 ? C.accent : pts >= 66 ? C.success : pts >= 33 ? C.mustard : C.error;
+  const arrow = _smartDelta > 0 ? C.success + '\u25b2' : _smartDelta < 0 ? C.error + '\u25bc' : C.fgSubtle + '\u25c6';
+  const overflow = pts > 100 ? ' ' + C.accent + '\u2726' : '';
+  return col + '\u2588'.repeat(filled) + C.fgSubtle + '\u2591'.repeat(barLen - filled) + C.reset + ' ' + C.bold + C.fgBase + pts + '%' + C.reset + ' ' + arrow + C.reset + overflow;
+}
+
+// Important files whose presence tracks project integrity. Missing one (esp. a
+// .md / config / source) means he lost real work -> smartness drops.
+const IMPORTANT_FILES = ['AGENTS.md','package.json','cli/index.js','cli/memory.js','server/src/index.js','server/src/agent/index.js','server/src/agent/loop.js','server/src/agent/autolearn.js','server/hakster-config.json','server/src/hakster-config.json','scripts/hakster-guardrails.sh','HAKSTERAI-PHANTOM-MERGED.md','.env'];
+let _smartMissedFiles = new Set();   // tracked-missing files already penalized this task
+function fileIntegrity() {
+  const root = path.join(__dirname, '..', '..', '..');
+  const present = [], missing = [];
+  for (const f of IMPORTANT_FILES) {
+    try { if (fs.existsSync(path.join(root, f))) present.push(f); else missing.push(f); }
+    catch (_) { missing.push(f); }
+  }
+  const pct = Math.round(present.length / IMPORTANT_FILES.length * 100);
+  return { pct, present: present.length, missing, total: IMPORTANT_FILES.length };
+}
+// Per-call outcome scoring: real success climbs, real failure / lost files drop.
+function scoreToolCall(fnName, fnArgs, ok, out) {
+  const cmd = String((fnArgs && fnArgs.command) || '');
+  const o = String(out || '').toLowerCase();
+  let d = 0;
+  if (ok === false) {
+    d -= 5;  // command failed
+    if (/(eaddrinuse|err_dlopen_failed|npm error|syntaxerror|cannot find module|enoent|eacces|permission denied|module not found)/.test(o)) d -= 5;  // failed WITH a known error signature — only on real failures (a green ✓ command whose text merely contains 'enoent' no longer loses points)
+  }
+  if (/\brm\s+-[rf]/i.test(cmd) || /\bgit\s+(reset\s+--hard|checkout\s+--|clean)\b/i.test(cmd)) {
+    if (/\.(md|json|env|js|ts|astro|sh|py)$|(agents\.md|package\.json|config|\.env)/i.test(cmd)) d -= 10;  // lost an important file/md
+    else d -= 5;  // rm non-important — by 5s
+  }
+  if (ok !== false) {
+    if (/(http\/1\.1\s+200|\b200\s+ok\b|\bok\b|rebuilt|\bbuilt\b|success|✓|applied)/.test(o)) d += 2;
+    else d += 1;  // successful-action baseline — acting earns a small reward, never a penalty (was 0, which let error-word false-positives push green commands negative)
+    if (['write_file','patch_file','multi_patch','edit_file','insert_lines','replace_regex','append_file'].includes(fnName)) {
+      const content = String((fnArgs && (fnArgs.content || fnArgs.patch || fnArgs.text || fnArgs.new_string || '')) || '');
+      const fp = String((fnArgs && (fnArgs.path || fnArgs.file || '')) || '');
+      const isDataDoc = /\.(md|json|ya?ml|txt|csv|py|js|ts|astro|sh)$/i.test(fp);
+      const len = content.length;
+      // Proportional: break the data into points equal to the amount.
+      // ~1 pt per 200 chars of doc/data, ~1 pt per 300 chars of code. Cap 10/call
+      // (smartness bar is 0-100); session points accumulate the same deltas unbounded.
+      let pts = isDataDoc ? Math.min(10, Math.round(len / 200)) : Math.min(8, Math.round(len / 300));
+      d += Math.max(2, pts);   // any successful write is at least +2
+    }
+    if (/scrape|firecrawl/i.test(fnName) || /firecrawl|scrape/.test(cmd)) d += 3;    // scraped data -> smarter
+    if (/\b(npm\s+install|npm\s+rebuild|pip\s+install|chown|chmod|pm2\s+(restart|start))\b/i.test(cmd)) d += 1;
+  }
+  return Math.max(-12, Math.min(10, d));   // cap raised: big data/doc writes can score up to +10
+}
+const HAKSTER_GUARDRAILS = process.env.HAKSTER_GUARDRAILS || path.join(__dirname, '..', '..', '..', 'scripts', 'hakster-guardrails.sh');
 const NO_PROGRESS_LIMIT = 15;      // Break loop after sustained no-progress (was 6)
 
 // ── Stuck-state debug logging (persistent alerts) ─────────────────────────
 // Writes structured alerts to data/stuck-alerts.log so they survive terminal scroll.
+// ── Session performance meter — cumulative session score + stats, tied to the
+//    round budget (120), persisted across sessions so the agent learns from
+//    recurring mistakes. Points accrue from every smartness delta; rounds /
+//    efficiency / speed track how he spends the budget.
+const PERF_HISTORY_FILE = path.join(os.homedir(), '.hakster', 'perf_history.json');
+const PERF_POINTS_LOG   = path.join(os.homedir(), '.hakster', 'perf_points.log');  // append-only log: where+when points were earned, with session id
+let _perfLessonsInjected = false;
+const LIVE_LESSON_INTERVAL = 5;   // inject the live point map every N turns so the agent learns mid-run, not just next session
+let _liveLessonSeen = new Set();     // loss categories already surfaced into context this run (avoids repetition)
+let _mistakeMemorySeen = new Set();   // loss categories already written to memory this run (avoids duplicate memory writes)
+function newSessionPerf() {
+  return { started: Date.now(), elapsedMs: 0, roundsUsed: 0, maxRounds: MAX_TURNS_DEFAULT,
+           actions: 0, successes: 0, failures: 0, points: 0,
+           loopsFired: 0, diagTimeouts: 0, redundantModifies: 0, fsWanders: 0, emptyRetries: 0, filesLost: 0,
+           smartnessPeak: _smartScore, smartnessEnd: _smartScore, convergenceRound: null, mistakes: [], pointMap: {}, pointLog: [] };
+}
+let _sessionPerf = newSessionPerf();
+let _agentSessionId = null;  // set from fp.session_uid each agentLoop run — stamped into the point log
+function recordPerf(why, delta) {
+  if (!why) return;
+  const d = delta || 0;
+  _sessionPerf.points += d;
+  // 📍 Point-source map: WHERE (which behavior) + WHEN (turn/timestamp) points came from, stamped with the session id.
+  if (!_sessionPerf.pointMap) _sessionPerf.pointMap = {};
+  const _pm = _sessionPerf.pointMap[why] || { n: 0, pts: 0 };
+  _pm.n++; _pm.pts += d; _sessionPerf.pointMap[why] = _pm;
+  if (!_sessionPerf.pointLog) _sessionPerf.pointLog = [];
+  const _evt = { ts: Date.now(), turn: _sessionPerf.roundsUsed || 0, why, delta: d, session: _agentSessionId || null };
+  _sessionPerf.pointLog.push(_evt);
+  if (_sessionPerf.pointLog.length > 120) _sessionPerf.pointLog = _sessionPerf.pointLog.slice(-120);
+  try { fs.appendFileSync(PERF_POINTS_LOG, JSON.stringify(_evt) + '\n'); } catch (_) {}
+    // Learn FAST: persist each NEW loss category to memory immediately (deferred, deduped) so
+    // consolidation happens during the run — not just at session end.
+    if (d < 0 && !_mistakeMemorySeen.has(why)) {
+      _mistakeMemorySeen.add(why);
+      setImmediate(() => { try {
+        memoryEngine.addMemory({ type: 'observation', observation: `Mistake this run: ${why} (${d}p). Avoid this pattern — it is costing points.`, context: { source: 'live-point-map', session: _agentSessionId, why }, tags: ['live-lesson','mistake', String(why).split(':')[0] || 'unknown'], timestamp: new Date().toISOString() }, process.cwd());
+      } catch (_) {} });
+    }
+  if (why === 'loop-detected' || why === 'fs-wandering' || why === 'redundant-modify-final') { _hadLoopBreak = true; _forcedFinish = true; }  // loop/stall break fired — recovery is rewardable, but a finish right after is forced
+  if (why === 'loop-detected') _sessionPerf.loopsFired++;
+  else if (why === 'diagnosis-timeout') _sessionPerf.diagTimeouts++;
+  else if (why === 'redundant-modify' || why === 'redundant-modify-final') _sessionPerf.redundantModifies++;
+  else if (why === 'fs-wandering') _sessionPerf.fsWanders++;
+  else if (why === 'empty-retry') _sessionPerf.emptyRetries++;
+  else if (why.startsWith && why.startsWith('file-missing')) _sessionPerf.filesLost++;
+  if ((delta || 0) < 0) { _sessionPerf.mistakes.push(why.split(':')[0]); if (_sessionPerf.mistakes.length > 80) _sessionPerf.mistakes = _sessionPerf.mistakes.slice(-80); }
+}
+function loadPerfHistory() { try { return JSON.parse(fs.readFileSync(PERF_HISTORY_FILE, 'utf-8')) || []; } catch (_) { return []; } }
+function recentSmartnessAnchor() {
+  // Pull the most-recent session's smartness from the perf logs (the "50 most
+  // recent") so a new session STARTS at the level he last achieved — sticks.
+  const hist = loadPerfHistory();
+  if (!hist.length) return 98;
+  const last = hist[hist.length - 1];
+  return Math.max(50, Math.min(100, last.smartnessEnd || last.smartnessPeak || 98));
+}
+function savePerfHistory() {
+  try {
+    const dir = path.dirname(PERF_HISTORY_FILE); if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    _sessionPerf.smartnessEnd = _smartScore; _sessionPerf.elapsedMs = Date.now() - _sessionPerf.started;
+    const hist = loadPerfHistory(); hist.push({ ts: new Date().toISOString(), ..._sessionPerf, mistakes: undefined, pointLog: (_sessionPerf.pointLog || []).slice(-40) });
+    fs.writeFileSync(PERF_HISTORY_FILE, JSON.stringify(hist.slice(-50), null, 2));
+  } catch (_) {}
+}
+// 📍 Format a point-source map (which behaviors earned/lost points) for display + learning.
+function summarizePointMap(map, topN) {
+  if (!map || !Object.keys(map).length) return '';
+  const entries = Object.entries(map).map(([k,v]) => ({ k, n: v.n||0, pts: v.pts||0 }));
+  const gainers = entries.filter(e => e.pts > 0).sort((a,b) => b.pts - a.pts).slice(0, topN || 3);
+  const losers  = entries.filter(e => e.pts < 0).sort((a,b) => a.pts - b.pts).slice(0, topN || 3);
+  const fmt = e => `${e.k} (${e.pts>=0?'+':''}${e.pts}p ×${e.n})`;
+  const parts = [];
+  if (gainers.length) parts.push('gainers: ' + gainers.map(fmt).join(', '));
+  if (losers.length)  parts.push('losers: '  + losers.map(fmt).join(', '));
+  return parts.join(' | ');
+}
+// 📝 Review the transcript after every session (and on idle): summarize what was
+// done, WHERE + WHEN points came from (the point map), and persist it as a learned
+// memory so it's consolidated and injected into the next session's system prompt.
+// 📍 Build a SHORT live point-map lesson from the current run's pointMap.
+// Surfaces ONLY loss categories not yet shown this run → cheap + non-repetitive.
+function livePointLesson() {
+  try {
+    const pm = _sessionPerf.pointMap || {};
+    const newLosers = Object.entries(pm)
+      .filter(([k,v]) => v.pts < 0 && !_liveLessonSeen.has(k))
+      .sort((a,b) => a[1].pts - b[1].pts)
+      .slice(0,3)
+      .map(([k,v]) => `${k} (${v.pts}p ×${v.n})`);
+    if (!newLosers.length) return '';
+    Object.keys(pm).forEach(k => { if (pm[k].pts < 0 && !_liveLessonSeen.has(k)) _liveLessonSeen.add(k); });
+    const gainers = Object.entries(pm).filter(([k,v]) => v.pts > 0).sort((a,b) => b[1].pts - a[1].pts).slice(0,2).map(([k,v]) => `${k} (+${v.pts}p)`);
+    return '📍 Live point map (learn NOW — adjust this turn): losers so far: ' + newLosers.join(', ') + (gainers.length ? ' | keep doing: ' + gainers.join(', ') : '') + '. Avoid repeating the losers — they are costing you points right now.';
+  } catch (_) { return ''; }
+}
+function reviewTranscript(history, opts) {
+  try {
+    opts = opts || {};
+    const _pm = summarizePointMap(_sessionPerf.pointMap, 5);
+    const _topic = (_currentTopic || (history[1] && history[1].content) || 'task').toString().slice(0, 80);
+    const _nRounds = _sessionPerf.roundsUsed || 0;
+    const _nActions = _sessionPerf.actions || 0;
+    const _pts = _sessionPerf.points || 0;
+    const _mistakes = (_sessionPerf.mistakes || []).slice(-8).join(', ');
+    const _pl = _sessionPerf.pointLog || [];
+    const _when = _pl.length ? `${new Date(_pl[0].ts).toLocaleTimeString()}→${new Date(_pl[_pl.length-1].ts).toLocaleTimeString()}` : '—';
+    const _sid = _agentSessionId ? _agentSessionId.slice(0, 8) : '?';
+    const summary = `Session review [${_sid}]: task="${_topic}", rounds=${_nRounds}, actions=${_nActions}, points=${_pts}, smartnessEnd=${_smartScore}%. Where points came from: ${_pm || '—'}. When: ${_when}. Mistakes: ${_mistakes || 'none'}.`;
+    // Log the where+when point map for this session to the append-only perf points log.
+    try { fs.appendFileSync(PERF_POINTS_LOG, JSON.stringify({ ts: Date.now(), kind: 'session-review', session: _agentSessionId, topic: _topic, points: _pts, rounds: _nRounds, pointMap: _sessionPerf.pointMap || {}, when: _when }) + '\n'); } catch (_) {}
+    // Persist as a learned memory → consolidated by memoryEngine + injected next session via perfLessonsNudge/transcriptLessonsNudge.
+    try {
+      memoryEngine.addMemory({
+        type: 'observation',
+        observation: summary,
+        context: { source: 'transcript-review', topic: _topic, session: _agentSessionId, points: _pts, rounds: _nRounds },
+        tags: ['session-review', 'transcript', 'point-map', String(_topic).split(' ')[0] || 'task'],
+        timestamp: new Date().toISOString()
+      }, process.cwd());
+    } catch (_) {}
+    if (opts.verbose) log(`${C.dim}📝 Transcript reviewed + point map logged (session ${_sid}, ${_nRounds} rounds, ${_pts}pts).${C.reset}`);
+    return summary;
+  } catch (_) { return ''; }
+}
+function transcriptLessonsNudge() {
+  // Scan recent session transcripts for recurring errors + fixes that worked,
+  // so the agent learns from its own past debugging / auto-heal patterns.
+  try {
+    if (!fs.existsSync(TRANSCRIPT_DIR)) return '';
+    const files = fs.readdirSync(TRANSCRIPT_DIR).filter(f => f.startsWith('transcript_'))
+      .map(f => ({ name: f, mtime: fs.statSync(path.join(TRANSCRIPT_DIR, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime).slice(0, 10);
+    if (!files.length) return '';
+    const errors = {}, fixes = {};
+    for (const f of files) {
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(TRANSCRIPT_DIR, f.name), 'utf-8'));
+        const msgs = data.messages || [];
+        for (let i = 0; i < msgs.length; i++) {
+          const c = String(msgs[i].content || '').toLowerCase();
+          if (/(eaddrinuse|err_dlopen_failed|node_module_version|eacces|cannot find module)/.test(c)) {
+            const m = c.match(/(eaddrinuse|err_dlopen_failed|node_module_version|eacces|cannot find module[^.\n]*)/);
+            if (m) errors[m[1].trim()] = (errors[m[1].trim()] || 0) + 1;
+          }
+          for (let j = i + 1; j < Math.min(i + 4, msgs.length); j++) {
+            const fc = String(msgs[j].content || '').toLowerCase();
+            if (/(npm rebuild|chown -r|pm2 restart|fuser -k|npm install)/.test(fc)) {
+              const fm = fc.match(/(npm rebuild \S+|chown -r[^&\n]*|pm2 restart \S+|fuser -k \S+|npm install[^&\n]*)/);
+              if (fm) fixes[fm[1].trim()] = (fixes[fm[1].trim()] || 0) + 1;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    const topFixes = Object.entries(fixes).sort((a, b) => b[1] - a[1]).slice(0, 3).filter(([, v]) => v >= 2);
+    const topErrors = Object.entries(errors).sort((a, b) => b[1] - a[1]).slice(0, 3).filter(([, v]) => v >= 2);
+    if (!topFixes.length && !topErrors.length) return '';
+    const parts = [];
+    if (topFixes.length) parts.push('fixes that worked: ' + topFixes.map(([k, v]) => k + ' (x' + v + ')').join(', '));
+    if (topErrors.length) parts.push('recurring errors: ' + topErrors.map(([k, v]) => k + ' (x' + v + ')').join(', '));
+    return '📚 Transcript lessons (from last 10 sessions): ' + parts.join('; ') + '.';
+  } catch (_) { return ''; }
+}
+
+function perfLessonsNudge() {
+  const hist = loadPerfHistory().slice(-5); if (!hist.length) return '';
+  const tally = {};
+  for (const sess of hist) for (const k of ['loopsFired','diagTimeouts','redundantModifies','fsWanders','emptyRetries']) if (sess[k] > 0) tally[k] = (tally[k]||0) + sess[k];
+  const top = Object.entries(tally).sort((a,b)=>b[1]-a[1]).slice(0,3).filter(([,v])=>v>=2);
+  const map = { loopsFired:'repeated the same read-only call', diagTimeouts:'diagnosed past 5 read-only calls without acting', redundantModifies:'re-ran the same modifying command', fsWanders:'wandered the same filesystem subtree', emptyRetries:'returned empty tool_calls' };
+  const parts = [];
+  if (top.length) parts.push('📈 Past-session lessons (avoid these this task): ' + top.map(([k,v]) => (map[k]||k) + ' (x' + v + ' in last 5 sessions)').join('; ') + '.');
+  // 📍 Learn where points came from last session — follow the point map: repeat gainers, avoid losers.
+  const lastSess = hist[hist.length - 1];
+  if (lastSess && lastSess.pointMap) {
+    const _pm = summarizePointMap(lastSess.pointMap, 3);
+    if (_pm) parts.push('📍 Last session point map (where your points came from — repeat the gainers, avoid the losers): ' + _pm + '.');
+  }
+  return parts.join(' ');
+}
+function perfRow() {
+  const p = _sessionPerf; const el = Math.max(1, (Date.now() - p.started) / 60000);
+  const eff = p.roundsUsed ? (p.points / p.roundsUsed).toFixed(1) : '0';
+  const speed = (p.roundsUsed / el).toFixed(1);            // rounds/min
+  const hist = loadPerfHistory().slice(-5);
+  const avgPts = hist.length ? Math.round(hist.reduce((a, x) => a + (x.points || 0), 0) / hist.length) : 0;
+  const trend = hist.length ? (p.points >= avgPts ? '▲ vs avg ' + avgPts : '▼ vs avg ' + avgPts) : '';
+  const conv = p.convergenceRound ? `done@${p.convergenceRound}` : `no-finish`;
+  return `${C.bold}${C.cyan}📊 Performance${C.reset} ${C.dim}(this session)${C.reset}
+  ${C.fgBase}${p.points}${C.reset} pts · ${C.fgMuted}rounds${C.reset} ${p.roundsUsed}/${p.maxRounds} · ${C.fgMuted}eff${C.reset} ${eff}/r · ${C.fgMuted}speed${C.reset} ${speed}/min · ${C.fgMuted}W/L${C.reset} ${C.success}${p.successes}${C.reset}/${C.error}${p.failures}${C.reset} · ${C.fgMuted}loops${C.reset} ${p.loopsFired} ${C.fgMuted}diag${C.reset} ${p.diagTimeouts} ${C.fgMuted}redund${C.reset} ${p.redundantModifies} · ${C.fgMuted}${conv}${C.reset} ${C.dim}${trend}${C.reset}`;
+}
+
 // Tracks: timestamps, turn number, detection type, reason, and context snippet.
 const STUCK_ALERT_LOG = require('path').join(__dirname, '..', '..', 'data', 'stuck-alerts.log');
 let _stuckAlertTurnCount = 0;
-const _stuckAlertThresholds = new Set([3, 5, 8, 10, 12, 15]);
+const _stuckAlertThresholds = new Set([2, 4, 6, 8, 10, 12, 14]);  // tighter for 15-turn max
 function _stuckDebugLog(type, reason, context) {
   const ts = new Date().toISOString();
   _stuckAlertTurnCount++;
@@ -895,6 +1415,10 @@ let _messageQueue = [];            // Queue of incoming messages (flushed on stu
 let _batch = null;                 // Paste-batching state: { lines: string[], timer: NodeJS.Timeout }
 let _stuckCooldown = 0;             // After stuck-loop break, skip this many queued messages to prevent re-loop
 let _shellRepeatBreak = false;      // Set by shell executor when a generic repeat-loop is detected;
+let _repeatHardBreakCount = 0;  // soft repeat-breaks this run; >=2 -> hard stop (protect token budget)
+let _hadLoopBreak = false;  // set when any loop/stall break fires this run — used to reward recovery on clean-finish
+let _announceRutCount = 0;  // consecutive "now writing/let me…" turns with NO tool call — announce-without-act rut
+let _forcedFinish = false;  // true when a loop break forced the end with no recovery tool call since — suppresses clean-finish
 
 // ── Tool-error loop detection ──
 // Track consecutive errors from the SAME tool — if a tool errors 3+ times in a row,
@@ -962,6 +1486,7 @@ function _checkShellRepeatLoop(command) {
 // Displayed as "#N" in the TUI chain and log output so the user can see
 // exactly how many tool calls have been made.
 let _toolCallCount = 0;
+let _lastConsolidationTurn = 0;    // _toolCallCount value at last CONSOLIDATE trigger (loop.js shouldConsolidate)
 
 // ── Action tracker: what was done in this task ──
 let _actionsTaken = [];  // [{emoji, text}] — tracks every tool call + result summary
@@ -1006,6 +1531,17 @@ function _printDoneChecklist() {
   console.log(`${C.bold}${T.thin.repeat(60)}${C.reset}`);
   console.log(`${C.dim}📊 Project: ${C.fgMuted}${path.basename(__filename)}${C.reset} ${C.dim}=${C.reset} ${C.bold}${C.primary}${projectLineCount.toLocaleString()}${C.reset} ${C.dim}lines${C.reset}`);
   console.log(`${C.bold}${T.thin.repeat(60)}${C.reset}\n`);
+  // 📍 Where points came from (the map) + when/where they were earned, with session id
+  if (_sessionPerf.pointMap && Object.keys(_sessionPerf.pointMap).length) {
+    const _pmSum = summarizePointMap(_sessionPerf.pointMap, 4);
+    if (_pmSum) console.log(`${C.bold}${C.fgMuted}📍 Where points came from:${C.reset} ${C.fgBase}${_pmSum}${C.reset} ${C.dim}(session ${(_agentSessionId||'?').slice(0,8)})${C.reset}`);
+    const _log = (_sessionPerf.pointLog || []).slice(-6);
+    if (_log.length) {
+      console.log(`${C.dim}   recent point events (turn · why · pts · when):${C.reset}`);
+      for (const e of _log) console.log(`${C.dim}   t${e.turn} · ${e.why} · ${e.delta>=0?'+':''}${e.delta}p · ${new Date(e.ts).toLocaleTimeString()}${C.reset}`);
+    }
+    console.log(`${C.bold}${T.thin.repeat(60)}${C.reset}\n`);
+  }
   _actionsTaken = [];
 }
 
@@ -1013,6 +1549,19 @@ function _printDoneChecklist() {
 let _agentActivity  = 'Idle';   // Thinking | Executing | Talking | Explaining | Patching | Idle
 let _activityDetail  = '';       // Short detail: tool name or topic
 let _activityStart   = Date.now();
+let _currentTopic = '';  // the current task — shown as the main topic line
+const WORKING_PHRASES = {
+  Thinking:  ['Analyzing the problem...', 'Reasoning through it...', 'Connecting the dots...', 'Working it out...', 'Thinking it through...'],
+  Executing: ['Running the command...', 'Making it happen...', 'Executing the plan...', 'Getting it done...'],
+  Patching:  ['Applying the fix...', 'Editing the code...', 'Patching it up...', 'Tightening the bolts...'],
+  Reading:   ['Reviewing the file...', 'Reading through it...', 'Scanning the code...', 'Taking it in...'],
+  Writing:   ['Writing the code...', 'Creating the file...', 'Drafting it...', 'Putting it down...'],
+  Idle:      ['Ready.'],
+};
+function workingPhrase() {
+  const arr = WORKING_PHRASES[_agentActivity] || ['Working...'];
+  return arr[Math.floor(Date.now() / 800) % arr.length];  // cycle ~every 800ms
+}
 let _statusBarInterval = null;   // Interval for bottom status bar rendering
 let _pendingTools    = [];       // [{name, id}] — tool calls queued for execution
 
@@ -1032,6 +1581,8 @@ let _stallGuardTimer  = null;
 const STALL_GUARD_MS  = 20000;  // 20 seconds — kickstart if no activity
 let _lastActivityTime = Date.now();
 let _awaitingConfirm  = false;  // True while waiting on a y/N dangerous-command prompt — suppresses status bar / stall guard so they don't clobber the readline question
+let processing = false;  // (hoisted to module scope so agentLoop's status-bar interval can read it; repl() resets this on each session)
+let _pendingSudoPassword = null;  // sudo password typed into the approval popout (fed to `sudo -S` via stdin so sudo actually works headlessly)
 
 // ── Humane focus nudges — encouraging prompts to get back on task ──
 const FOCUS_NUDGES = [
@@ -1047,6 +1598,10 @@ const FOCUS_NUDGES = [
   "Less thinking, more doing. What's the fastest path to done?",
   "Hey — you're looping. Break out with a concrete action RIGHT NOW.",
   "The user is waiting. Stop deliberating and DO the thing.",
+  "STOP searching. You already have the data. Chain the fix: sudo chown && npm install && pm2 restart && curl health.",
+  "You've been reading files for too long. CLOSE the files and RUN the fix command.",
+  "Diagnosis is done. The error is in the logs. Now FIX it — don't read another file.",
+  "You know the problem. You know the fix. Execute it NOW in one shell call with &&.",
   "You already know the answer. Apply it.",
   "Time to ship. Execute the fix and verify it works.",
 ];
@@ -1262,12 +1817,27 @@ const DANGEROUS_SHELL_PATTERNS = [
   /\bbadblocks\s+.*-w\b/i,              // destructive badblocks test
   /\bsfdisk\b/i,                         // partition manipulator
   /\bcfdisk\b/i,                         // partition manipulator
+  /:\(\)\s*\{.*\|.*&/,                   // fork bomb — ported from phantom-server.js CMD_BLOCKLIST
+  />\s*\/dev\/(sd|hd|nvme)/i,            // write to raw block device (broadened to include /dev/hd*)
+  // 🔑 PROTECT CREDENTIALS — never let the agent wipe/overwrite/exfiltrate its own config or secrets
+  // Ported from phantom-server.js CMD_BLOCKLIST's .phantom-ai-config protection.
+  /[>|]\s*(\.env|.*hakster-config\.json|.*google-oauth-client\.json|\.phantom-ai-config\.json)\b/i,
+  /\b(echo|tee|cat)\b.*(\.env\b|hakster-config\.json|google-oauth-client\.json|\.phantom-ai-config\.json)/i,
+  /\b(curl|fetch|axios)\b.*\/api\/ai\/config.*(POST|-d\b|--data\b)/i,
+  /\b(curl|fetch|axios)\b.*(POST|-d\b|--data\b).*\/api\/ai\/config/i,
 ];
 
 const CRITICAL_PATHS = [
   '/etc/passwd', '/etc/shadow', '/etc/sudoers', '/etc/ssh',
   '/etc/systemd', '/boot', '/usr/bin', '/usr/sbin',
   '/home/ghost/.ssh', '/root/.ssh',
+  // 🔑 haksterAi's own credentials/config — ported from phantom's .phantom-ai-config protection
+  '/home/ghost/haksterAi/.env',
+  '/home/ghost/haksterAi/server/.env',
+  '/home/ghost/haksterAi/server/hakster-config.json',
+  '/home/ghost/haksterAi/server/src/hakster-config.json',
+  '/home/ghost/haksterAi/server/google-oauth-client.json',
+  '/home/ghost/haksterAi/cli/.phantom-ai-config.json',
 ];
 
 function isDangerousCommand(tool, args) {
@@ -1321,7 +1891,7 @@ const TOOL_EMOJI = {
   git_op:           '🔀',  pm2:             '📦',
   service_check:    '💊',  snapshot:        '📸',
   sub_agent:        '🤖',  parallel_shell:  '⚡',
-  crush:            '💘',  claude_proxy:    '🧠',
+  crush: '💘', codex: '⚡', ollama: '🦙', claude_proxy: '🧠',
   code_grid:        '🎨',  browser_navigate: '🧭',
   browser_click:    '👆',  browser_type:    '⌨️',
   browser_screenshot: '📸', browser_snapshot: '🔍',
@@ -1929,6 +2499,8 @@ function renderReasoningPanel() {
   const barColor = progress > 80 ? C.error : progress > 50 ? C.mustard : C.primary;
   const bar = `${barColor}${'█'.repeat(filled)}${C.fgSubtle}${'░'.repeat(barLen - filled)}${C.reset} ${C.bold}${C.fgBase}${progress}%${C.reset} ${C.fgMuted}Step ${_tuiStep}/${_tuiMaxSteps}${C.reset}`;
   lines.push(`           ${C.fgMuted}└─${C.reset} ${C.fgSubtle}Progress${C.reset} ${bar}`);
+  lines.push(`           ${C.fgMuted}└─${C.reset} ${C.fgSubtle}🧠 Smart ${C.reset}  ${smartBar()}`);
+  lines.push(`           ${C.fgMuted}└─${C.reset} ${C.fgSubtle}📚 Auto  ${C.reset}  ${autolearnBar()}`);
   // ── Token usage + tool stats ──
   const totalTokens = _tuiTokensIn + _tuiTokensOut;
   const tokenStr = totalTokens > 0 ? `${C.fgSubtle}│${C.reset} ${C.fgMuted}tok≈${(totalTokens / 1000).toFixed(1)}k${C.reset}` : '';
@@ -2102,7 +2674,7 @@ function renderToolPanel() {
   // HaksterAI-style model footer: ◇ model_name + elapsed
   const sessionDur = _tuiSessionStart ? _fmtDuration(Date.now() - _tuiSessionStart) : '';
   const sessTag = sessionDur ? ` ${C.fgSubtle}⏱${C.reset}${C.fgMuted}${sessionDur}${C.reset}` : '';
-  lines.push(`${C.tertiary}◇${C.reset} ${C.fgMuted}${MODEL}${C.reset}${sessTag}`);
+  lines.push(`${C.tertiary}◇${C.reset} ${C.fgMuted}${modelLabel()}${C.reset}${sessTag}`);
   // Status-dependent border color
   const borderColor = errs > 0 ? C.error : runs > 0 ? C.mustard : C.success;
   const border = C.bgSubtle + C.bold;
@@ -2401,7 +2973,7 @@ function banner() {
     `${_truncPad(`  ${C.fgSubtle}[ ]${R}  Waiting for tool calls...`, leftW)}${C.bgSubtle} │${R} ${_truncPad('', rightW)}`,
     `${C.bgSubtle}${'─'.repeat(leftW)}${C.bold}─┼─${R}${C.bgSubtle}${'─'.repeat(rightW)}${R}`,
     `${C.bold}Total:${R} 0  ${C.success}✓0${R}  ${C.mustard}●0${R}  ${C.error}×0${R}  ${C.primary}${'░'.repeat(20)}${R}`,
-    `${C.tertiary}◇${R} ${C.fgMuted}${MODEL}${R}`,
+    `${C.tertiary}◇${R} ${C.fgMuted}${modelLabel()}${R}`,
   ];
   const toolGridBox = [
     `  ${C.bgSubtle}${C.bold}╭${'─'.repeat(W + 2)}╮${R}`,
@@ -2459,13 +3031,17 @@ let TOOLS = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: 'Read a file and return its contents. Supports offset/limit for large files.',
+      description: 'Read a file and return its contents with line numbers. Supports offset/limit. Set full=true to read the WHOLE file with no truncation (up to 50k lines). Set low_context=true to minify (strip indentation/blank-lines/comments) so big chunks fit in far fewer tokens. Set raw=true for plain output (no ANSI), smallest payload. mode: "full"|"low"|"raw"|"auto" shortcuts.',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'File path (absolute or relative to project)' },
           offset: { type: 'number', description: 'Line number to start reading from (1-indexed)' },
-          limit: { type: 'number', description: 'Max lines to return' },
+          limit: { type: 'number', description: 'Max lines to return (ignored if full=true; default 500, max 50000)' },
+          full: { type: 'boolean', description: 'Read the ENTIRE file with no truncation (up to 50000 lines)' },
+          low_context: { type: 'boolean', description: 'Minify: strip leading indentation, collapse blank lines, drop block/line comments — big files in fewer tokens' },
+          raw: { type: 'boolean', description: 'Plain output without ANSI colors/line-number padding — smallest payload, fastest' },
+          mode: { type: 'string', description: 'Shortcut: "full" | "low" | "raw" | "auto" (default auto = current behavior)' },
         },
         required: ['path'],
       },
@@ -2583,7 +3159,21 @@ let TOOLS = [
         required: ['pattern'],
       },
     },
+  },  {
+    type: 'function',
+    function: {
+      name: 'project_map',
+      description: 'Build a recursive, line-level map of a directory tree (.js/.cjs/.mjs/.astro): requires/imports, routes, PORT, app.listen, functions, classes, comment-banner sections, astro frontmatter fences, env vars, exports. Call this FIRST for any service/codebase task so you know exactly which file+line to go to for a fix — no need to search repeatedly.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Directory to map (default: .)' },
+          depth: { type: 'number', description: 'Max subdirectory recursion depth (default 4, max 6)' },
+        },
+      },
+    },
   },
+
   {
     type: 'function',
     function: {
@@ -2839,16 +3429,50 @@ let TOOLS = [
       },
     },
   },
-  {
-    type: 'function',
-    function: {
+      {
+       type: 'function',
+       function: {
+        name: 'codex',
+        description: 'Run OpenAI Codex CLI - a terminal-native agentic coding agent. Can read/write files, run commands, apply patches, and reason about code autonomously. Use for complex coding tasks, multi-file refactoring, patching, and when you need GPT-5.5-level coding power. Runs non-interactively with a prompt.',
+        parameters: {
+         type: 'object',
+         properties: {
+          prompt: { type: 'string', description: 'The task/prompt for Codex to execute' },
+          model: { type: 'string', description: 'Model to use (default: o4-mini). Options: o4-mini, gpt-4.1, o3, gpt-5.5' },
+          cwd: { type: 'string', description: 'Working directory for Codex' },
+          timeout: { type: 'number', description: 'Timeout in seconds (default 120, max 300)' },
+         },
+         required: ['prompt'],
+        },
+       },
+      },
+      {
+       type: 'function',
+       function: {
+        name: 'ollama',
+        description: 'Run a prompt against a local Ollama model (GLM-5.2, Kimi-K2.7, GPT-OSS:120b, Hermes3, Qwen, Mistral, etc.). Uses the local Ollama API at localhost:11434. Use for fast local inference, coding tasks, second opinions, or when you need an open-source model. Returns the model response text.',
+        parameters: {
+         type: 'object',
+         properties: {
+          prompt: { type: 'string', description: 'The prompt/message to send to the model' },
+          model: { type: 'string', description: 'Ollama model name (default: glm-5.2:cloud). Available: glm-5.2:cloud, glm-5.1:cloud, kimi-k2.7-code:cloud, gpt-oss:120b-cloud, hermes3:latest, qwen3.5:latest, mistral:latest, llama3.2:3b' },
+          system: { type: 'string', description: 'Optional system prompt for the model' },
+          timeout: { type: 'number', description: 'Timeout in seconds (default 60)' },
+         },
+         required: ['prompt'],
+        },
+       },
+      },
+ {
+ type: 'function',
+ function: {
       name: 'crush',
       description: 'Run Crush (Charmbracelet agentic coding tool) for a task. Crush is a terminal-first AI coding agent that can read/write files, run commands, and reason about code. Use for complex coding tasks, refactoring, debugging, or when you need a second opinion from a different model. Runs non-interactively with a prompt. Supports model selection (e.g. claude-sonnet-4-5, gpt-4.1) and working directory.',
       parameters: {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'The task/prompt for Crush to execute (e.g. "Fix the TypeScript type errors in server/src/agent/index.js")' },
-          model: { type: 'string', description: 'Model to use (default: gpt-oss:120b-cloud via Ollama). Currently configured to use gpt-oss:120b-cloud. Other models require separate provider configuration in crush.json.' },
+          model: { type: 'string', description: 'Model to use (default: glm-5.2:cloud via Ollama). Currently configured to use glm-5.2:cloud. Other models require separate provider configuration in crush.json.' },
           cwd: { type: 'string', description: 'Working directory for Crush (default: current project dir)' },
           timeout: { type: 'number', description: 'Timeout in seconds (default: 120, max: 300)' },
         },
@@ -3315,14 +3939,21 @@ const bgProcesses = new Map();
 
 // ── Async shell (replaces execSync — non-blocking, proper timeout kill) ──
 function asyncShell(command, opts = {}) {
-  const { cwd = WORK_DIR, timeout = 30, maxBuffer = 1024 * 1024 * 5 } = opts;
+  const { cwd = WORK_DIR, timeout = 30, maxBuffer = 1024 * 1024 * 5, sudoPassword = null } = opts;
+  // If a sudo password was supplied, switch to `sudo -S` and feed it via stdin so
+  // sudo authenticates headlessly (no TTY needed). Only rewrites a leading `sudo `.
+  const useSudoS = sudoPassword && /^\s*sudo(\s+-\w+)*\s+/i.test(command);
+  const finalCommand = useSudoS ? command.replace(/^(\s*)sudo(\s+-\w+)*(\s+)/i, '$1sudo -S$3') : command;
   return new Promise((resolve) => {
-    const child = spawn('/bin/bash', ['-c', command], {
+    const child = spawn('/bin/bash', ['-c', finalCommand], {
       cwd,
       env: { ...process.env, FORCE_COLOR: '0', TERM: 'dumb' },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [useSudoS ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       detached: true,  // needed for process.kill(-pid) to wipe the group
     });
+    if (useSudoS) {
+      try { child.stdin.write(sudoPassword + '\n'); child.stdin.end(); } catch (_) { try { child.stdin.end(); } catch (__) {} }
+    }
     let stdout = '', stderr = '';
     let killed = false;
     let resolved = false;
@@ -3378,7 +4009,7 @@ function shellQuote(value) {
 
 // ── Tool Executors ──────────────────────────────────────────────────────
 const toolExecutors = {
-  async shell({ command, timeout = 30 }) {
+  async shell({ command, timeout = 30, sudoPassword = null }) {
     // ── Auto-wrap unbounded grep/rg/find commands with output limits ──
     let finalCmd = command;
     const cmdLower = command.trim().toLowerCase();
@@ -3448,12 +4079,12 @@ const toolExecutors = {
     const grepLikeCount = _recentShellCommands.filter(c => c.tool === 'grep' || c.tool === 'find').length;
     if (grepLikeCount >= GREP_LOOP_LIMIT && _recentShellCommands.length >= 3) {
       const warning = '\n[LOOP WARNING: ' + grepLikeCount + ' search commands in a row. Stop searching and use what you know. Take a concrete action now — edit a file, run a fix command, or give the user an answer.]\n';
-      const result = await asyncShell(finalCmd, { timeout });
+      const result = await asyncShell(finalCmd, { timeout, sudoPassword });
       _recentShellCommands = [];
       return result.output + warning;
     }
 
-    const result = await asyncShell(finalCmd, { timeout });
+    const result = await asyncShell(finalCmd, { timeout, sudoPassword });
     // Truncate grep output if still too long
     if (isGrepLike) {
       const lines = result.output.split('\n');
@@ -3465,23 +4096,81 @@ const toolExecutors = {
     return result.output;
   },
 
-  read_file({ path: filePath, offset = 1, limit = 500 }) {
+  // rg — the model sometimes calls an "rg" tool; ripgrep is installed, so honor
+  // it (run via asyncShell with bounded output) instead of "Unknown tool rg".
+  // rg — accepts BOTH call styles the model uses:
+  //   {command: "rg -n ..."}        (shell-style)
+  //   {path, query/pattern}        (search-style, like search_files)
+  // Without this, search-style calls returned "(no output)" and the model
+  // retried 20+ times — the thrash. Now it actually runs ripgrep and returns hits.
+  async rg(args = {}) {
+    let cmd;
+    if (args && args.command) {
+      cmd = String(args.command);
+    } else {
+      const q = String(args.query || args.pattern || args.search || args.text || '');
+      const target = String(args.path || args.file || args.directory || args.dir || '.');
+      // --no-ignore so source files excluded by .gitignore/.ignore are still
+      // searched (the agent is looking at the working tree, not a git cache).
+      // --no-binary / skip node_modules-heavy dirs would help, but keep it simple.
+      // Skip node_modules for dir searches (huge + noisy); search it only when
+      // the path explicitly points into it.
+      const _isNodeMods = /\/node_modules\//.test(target) || /(^|\/)node_modules$/.test(target);
+      const _skip = !_isNodeMods ? '--glob !node_modules/**' : '';
+      if (q) cmd = `rg -n --max-count 50 --no-ignore ${_skip} -- ${shellQuote(q)} ${shellQuote(target)}`;
+      else   cmd = `rg --files --no-ignore ${shellQuote(target)}`;
+    }
+    if (!/\|\s*head\b/.test(cmd)) cmd = cmd + ' 2>/dev/null | head -n 200';
+    try {
+      const r = await asyncShell(cmd, { timeout: Math.min(args.timeout || 15, 15), sudoPassword: null });
+      return r.output || '(no matches)';
+    } catch (e) { return `Error: ${e.message}`; }
+  },
+
+  read_file({ path: filePath, offset = 1, limit = 500, full = false, low_context = false, raw = false, mode = 'auto' }) {
     const resolved = path.resolve(WORK_DIR, filePath);
     try {
       if (!fs.existsSync(resolved)) return `Error: File not found: ${resolved}`;
-      const content = fs.readFileSync(resolved, 'utf-8');
+      let content = fs.readFileSync(resolved, 'utf-8');
+      const wantFull = full || mode === 'full' || (typeof limit === 'number' && limit <= 0);
+      const lowCtx = low_context || mode === 'low';
+      const wantRaw = raw || mode === 'raw';
+
+      // ── Low-context bypass: minify so big chunks fit in far fewer tokens ──
+      if (lowCtx) {
+        content = content
+          .replace(/\/\*[\s\S]*?\*\//g, '\n')      // block comments (js/ts/css/go)
+          .replace(/^\s*\/\/[^\n]*$/gm, '')        // full-line // comments
+          .replace(/^[ \t]+/gm, '')                  // strip leading indentation (biggest token saver)
+          .replace(/[ \t]+$/gm, '')                  // trailing whitespace
+          .replace(/\n{2,}/g, '\n')                  // collapse blank runs
+          .trim();
+      }
+
       const lines = content.split('\n');
       const totalWidth = String(lines.length).length + 1;
       const start = Math.max(0, offset - 1);
-      const end = Math.min(lines.length, start + limit);
+      const maxLines = wantFull ? lines.length : Math.min(Math.max(limit, 1), 50000);
+      const end = Math.min(lines.length, start + maxLines);
       const sliced = lines.slice(start, end);
+
+      // ── Raw/fast bypass: plain output, no ANSI, smallest payload ──
+      if (wantRaw) {
+        return sliced.join('\n') + (end < lines.length
+          ? `\n--- lines ${start + 1}-${end} of ${lines.length} ---`
+          : `\n--- full: ${lines.length} lines ---`);
+      }
+
       // Color line numbers with dim purple, alternating subtle bg for readability
       const numbered = sliced.map((l, i) => {
         const lineNum = String(start + i + 1).padStart(totalWidth);
         const bgColor = i % 2 === 0 ? '\x1b[48;5;234m' : '\x1b[48;5;236m';
         return `${bgColor}\x1b[38;5;183m${lineNum}│\x1b[0m${l}`;
       }).join('\n');
-      return numbered + `\n--- showing lines ${start + 1}-${end} of ${lines.length} ---`;
+      const footer = end < lines.length
+        ? `\n--- showing lines ${start + 1}-${end} of ${lines.length} ---`
+        : `\n--- full file: ${lines.length} lines ---`;
+      return numbered + footer;
     } catch (err) {
       return `Error: ${err.message}`;
     }
@@ -3677,6 +4366,82 @@ const toolExecutors = {
     } catch (err) {
       return `Error: ${err.message}`;
     }
+  },
+
+  // project_map — builds a line-level map of key files in a directory tree so the
+  // agent goes DIRECTLY to the line it needs instead of searching 20 times.
+  // Recurses subdirectories (haksterAi's real code lives nested: server/src/agent/index.js,
+  // src/pages/*.astro, etc — a root-only scan found almost nothing).
+  // Returns: file -> key lines (requires/imports, routes, PORT, app.listen, env vars,
+  // exports, function/class defs, astro frontmatter boundaries, comment-banner sections).
+  project_map({ path: dirPath = '.', depth = 4 }) {
+    const resolved = path.resolve(WORK_DIR, dirPath);
+    try {
+      if (!fs.existsSync(resolved)) return `Error: Directory not found: ${resolved}`;
+      const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.astro', '.hakster', '.vite', 'data', 'public']);
+      const EXT_RE = /\.(js|cjs|mjs|astro)$/i; // trailing $ naturally excludes *.bak/*.bak.* backup files
+      const MAX_FILES = 40;
+      const MAX_DEPTH = Math.max(1, Math.min(Number(depth) || 4, 6));
+
+      const files = [];
+      (function walk(dir, rel, d) {
+        if (d > MAX_DEPTH || files.length >= MAX_FILES) return;
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+        for (const e of entries) {
+          if (files.length >= MAX_FILES) return;
+          if (e.name.startsWith('.') && e.name !== '.env') continue;
+          if (SKIP_DIRS.has(e.name)) continue;
+          const full = path.join(dir, e.name);
+          const relPath = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory()) walk(full, relPath, d + 1);
+          else if (EXT_RE.test(e.name)) files.push({ full, rel: relPath });
+        }
+      })(resolved, '', 0);
+
+      const map = [];
+      // package.json: main + scripts
+      try {
+        const pj = JSON.parse(fs.readFileSync(path.join(resolved, 'package.json'), 'utf-8'));
+        map.push(`package.json: main=${pj.main || 'index.js'} scripts=[${Object.keys(pj.scripts || {}).join(', ')}]`);
+      } catch (_) {}
+      // .env: list var names (not values — security)
+      try {
+        const envContent = fs.readFileSync(path.join(resolved, '.env'), 'utf-8');
+        const envVars = envContent.split('\n').map(l => l.match(/^(\w+)=/)).filter(Boolean).map(m => m[1]);
+        if (envVars.length) map.push(`.env: ${envVars.join(', ')}`);
+      } catch (_) {}
+      // Scan each file for key lines
+      for (const { full, rel } of files) {
+        try {
+          const content = fs.readFileSync(full, 'utf-8');
+          const lines = content.split('\n');
+          const hits = [];
+          const isAstro = /\.astro$/i.test(rel);
+          for (let i = 0; i < lines.length && hits.length < 30; i++) {
+            const l = lines[i];
+            // Key patterns: requires/imports, app.listen, PORT, routes, function/class defs,
+            // comment-banner sections, astro frontmatter fences, env vars, exports
+            if (isAstro && /^---\s*$/.test(l)) { hits.push(`L${i+1} --- (frontmatter fence)`); continue; }
+            if (/^\s*(const|let|var)\s+\w+\s*=\s*require\(/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/^\s*import\s.+from\s+['"]/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/app\.listen\s*\(/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/\bPORT\b\s*=/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/app\.(get|post|put|delete|patch|use|ws)\s*\(\s*['"]/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/^\s*(export\s+)?(async\s+)?function\s+\w+/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/^\s*(export\s+)?(const|let)\s+\w+\s*=\s*(async\s*)?\([^)]*\)\s*=>/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/^\s*(export\s+)?class\s+\w+/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/^\s*\/\/\s*[─━═]{3,}/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/process\.env\.\w+/.test(l) && hits.length < 20) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+            if (/module\.exports\s*=/.test(l)) { hits.push(`L${i+1} ${l.trim().substring(0, 70)}`); continue; }
+          }
+          if (hits.length) map.push(`${rel} (${lines.length} lines):\n  ${hits.join('\n  ')}`);
+        } catch (_) {}
+      }
+      return map.length
+        ? `PROJECT MAP for ${dirPath} (${files.length} files, depth ${MAX_DEPTH}):\n\n${map.join('\n\n')}`
+        : '(no matching .js/.cjs/.mjs/.astro files found under ' + dirPath + ')';
+    } catch (e) { return `Error: ${e.message}`; }
   },
 
   list_dir({ path: dirPath = '.', recursive = false }) {
@@ -4221,7 +4986,7 @@ ${trunc(md, 12000)}`;
       const taskHist = [{ role: 'system', content: buildSystemPrompt() }];
       log(`${C.primary}  ◆ ${taskName}: ${task.goal.substring(0, 80)}${C.reset}`);
       try {
-        const result = await agentLoop(task.goal, taskHist, true, { lowToken: _lowToken }); // silent mode
+        const result = await agentLoop(task.goal, taskHist, true, { lowToken: false }); // silent mode — _lowToken is only defined inside agentLoop; sub-agents run normal-budget (was: ReferenceError _lowToken is not defined)
         const lastAssistant = [...taskHist].reverse().find(m => m.role === 'assistant');
         return { name: taskName, status: 'done', result: lastAssistant?.content || '(completed)' };
       } catch (err) {
@@ -4237,186 +5002,69 @@ ${trunc(md, 12000)}`;
     return results.join('\n\n');
   },
 
-  async crush({ prompt, model, cwd, timeout = 120 }) {
-    // Run Charm Crush agentic coding tool in non-interactive mode
-    const maxTimeout = Math.min(timeout, HAKSTER_SHELL_MAX_TIMEOUT);
-    const cmdParts = ['crush', 'run', '--quiet'];
-    if (model) cmdParts.push('-m', model);
-    if (cwd) cmdParts.push('-c', cwd);
-    // Escape the prompt for shell safety
-    const escapedPrompt = prompt.replace(/'/g, "'\\''");
-    cmdParts.push(`'${escapedPrompt}'`);
-    const cmd = cmdParts.join(' ');
-    log(`\n${C.secondary}💘 Crush: ${prompt.substring(0, 80)}${C.reset}`);
-    try {
-      const result = await asyncShell(cmd, { timeout: maxTimeout });
-      const output = (result.stdout || '') + (result.stderr ? '\n' + result.stderr : '');
-      if (!output.trim()) return result.killed ? `Crush timed out after ${maxTimeout}s` : '(Crush returned no output)';
-      // Truncate very long outputs
-      return output.length > 8000 ? output.substring(0, 8000) + '\n... (truncated)' : output;
-    } catch (err) {
-      return `Crush error: ${err.message}`;
-    }
-  },
+  async codex({ prompt, model, cwd, timeout = 120 }) {
+  // Run OpenAI Codex CLI in non-interactive mode
+  const maxTimeout = Math.min(timeout, HAKSTER_SHELL_MAX_TIMEOUT);
+  const cmdParts = ['codex', '--quiet'];
+  if (model) cmdParts.push('-m', model);
+  if (cwd) cmdParts.push('-C', cwd);
+  const escapedPrompt = prompt.replace(/'/g, "'\''");
+  cmdParts.push(`'${escapedPrompt}'`);
+  const cmd = cmdParts.join(' ');
+  log(`\n${C.secondary}⚡ Codex: ${prompt.substring(0, 80)}${C.reset}`);
+  try {
+   const result = await asyncShell(cmd, { timeout: maxTimeout });
+   const output = (result.stdout || '') + (result.stderr ? '\n' + result.stderr : '');
+   if (!output.trim()) return result.killed ? `Codex timed out after ${maxTimeout}s` : 'Codex completed (no output)';
+   return output.substring(0, 8000);
+  } catch (e) {
+   return `Codex error: ${e.message}`;
+  }
+ },
 
-  async parallel_shell({ commands, timeout = 30 }) {
-    const maxTimeout = Math.min(timeout, HAKSTER_SHELL_MAX_TIMEOUT);
-    const results = commands.map(cmd => {
-      return asyncShell(cmd, { timeout: maxTimeout }).then(result => ({
-        cmd,
-        stdout: (result.stdout || '').substring(0, 3000),
-        stderr: (result.stderr || '').substring(0, 1000),
-        code: result.exitCode,
-        killed: result.killed,
-      }));
-    });
+ async ollama({ prompt, model = 'glm-5.2:cloud', system, timeout = 60 }) {
+  // Run prompt against local Ollama API at localhost:11434
+  const body = {
+   model,
+   prompt,
+   stream: false,
+   ...(system ? { system } : {}),
+  };
+  log(`\n${C.secondary}🦙 Ollama (${model}): ${prompt.substring(0, 80)}${C.reset}`);
+  try {
+   const resp = await fetch('http://localhost:11434/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeout * 1000),
+   });
+   const data = await resp.json();
+   if (!resp.ok) return `Ollama error (${resp.status}): ${JSON.stringify(data.error || data).substring(0, 500)}`;
+   return (data.response || '').substring(0, 8000);
+  } catch (e) {
+   return `Ollama error: ${e.message}`;
+  }
+ },
 
-    return Promise.all(results).then(outputs => {
-      return outputs.map(o => {
-        const parts = [`$ ${o.cmd}`];
-        if (o.stdout) parts.push(o.stdout);
-        if (o.stderr) parts.push(`[stderr] ${o.stderr}`);
-        if (o.killed) parts.push(`[timeout after ${timeout}s]`);
-        if (o.code !== 0 && !o.killed) parts.push(`[exit: ${o.code}]`);
-        return parts.join('\n');
-      }).join('\n---\n');
-    });
-  },
-
-  code_grid({ code, title, lang = '', highlight_lines = [], diff_lines = [] }) {
-    const lines = code.split('\n');
-    const lineNumWidth = String(lines.length).length;
-    const diffSet = {};
-    for (const d of diff_lines) {
-      if (d.startsWith('+')) diffSet[parseInt(d.substring(1))] = 'add';
-      else if (d.startsWith('-')) diffSet[parseInt(d.substring(1))] = 'del';
-    }
-    const hlSet = new Set(highlight_lines);
-
-    // Color codes for terminal output
-    const GR = '\x1b[32m'; // green - additions
-    const RD = '\x1b[31m'; // red - deletions
-    const CY = '\x1b[36m'; // cyan - line numbers
-    const YL = '\x1b[33m'; // yellow - highlighted
-    const MG = '\x1b[35m'; // magenta - header
-    const DM = '\x1b[2m'; // dim
-    const BD = '\x1b[1m'; // bold
-    const RS = '\x1b[0m'; // reset
-
-    _updateBoxW();
-    // Use dynamic width matching dashboard panels for alignment
-    const gridW = Math.min(BOX_W + 6, Math.max(60, title.length + lang.length + 6));
-    const bar = '─'.repeat(gridW);
-    const output = [
-      `${MG}${BD}┌${bar}┐${RS}`,
-      `${MG}│ ${BD}${title}${RS}${lang ? ` ${DM}(${lang})${RS}` : ''} ${MG}${' '.repeat(Math.max(0, bar.length - title.length - (lang ? lang.length + 3 : 1) - 2))}│${RS}`,
-      `${MG}├${bar}┤${RS}`,
-    ];
-
-    for (let i = 0; i < lines.length; i++) {
-      const num = i + 1;
-      const numStr = String(num).padStart(lineNumWidth);
-      const line = lines[i];
-      let prefix = ' ';
-      let color = '';
-      let suffix = RS;
-
-      if (diffSet[num] === 'add') { prefix = '+'; color = GR; suffix = RS; }
-      else if (diffSet[num] === 'del') { prefix = '-'; color = RD; suffix = RS; }
-      else if (hlSet.has(num)) { color = YL; suffix = RS; }
-
-      const numColor = CY;
-      const gutter = `${MG}│${RS} ${numColor}${numStr}${RS} ${color}${prefix}${RS} `;
-      const lineColor = color || RS;
-
-      // Truncate very long lines to fit grid width
-      const maxLen = gridW - lineNumWidth - 4;  // 4 for gutter chars
-      const displayLine = line.length > maxLen ? line.substring(0, maxLen) + `${DM}...${RS}` : line;
-      output.push(`${gutter}${lineColor}${displayLine}${suffix}`);
-    }
-
-    output.push(`${MG}└${bar}┘${RS}`);
-    return output.join('\n');
-  },
-
-  // ── Visual Browser Tools (Puppeteer) ──────────────────────────────────
-  async browser_navigate({ url, wait_ms = 2000 }) {
-    try {
-      const page = await getPage();
-      const response = await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
-      if (wait_ms > 0) await page.waitForTimeout(wait_ms);
-      const title = await page.title();
-      const currentUrl = page.url();
-      const statusCode = response ? response.status() : null;
-      const statusText = response ? response.statusText() : '';
-      // Get accessibility snapshot
-      const snapshot = await page.evaluate(() => {
-        const elements = [];
-        const interactive = document.querySelectorAll('button, a, input, select, textarea, [role="button"], [role="link"], [contenteditable]');
-        interactive.forEach((el, i) => {
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 && rect.height === 0) return;
-          const tag = el.tagName.toLowerCase();
-          const text = (el.textContent || '').trim().slice(0, 80);
-          const type = el.getAttribute('type') || '';
-          const placeholder = el.getAttribute('placeholder') || '';
-          const href = el.getAttribute('href') || '';
-          const name = el.getAttribute('name') || '';
-          elements.push({ idx: i, tag, text, type, placeholder, href, name });
-        });
-        return { title: document.title, url: location.href, elements };
-      });
-      const lines = [
-        `🧭 Navigated to: ${currentUrl}`,
-        `Status: ${statusCode} ${statusText}`,
-        `Title: ${title}`,
-        `Interactive elements (${snapshot.elements.length}):`,
-      ];
-      snapshot.elements.slice(0, 30).forEach(el => {
-        const label = el.text || el.placeholder || el.name || el.href?.slice(0, 50) || '(unnamed)';
-        lines.push(`  [${el.idx}] <${el.tag}${el.type ? ' type=' + el.type : ''}> ${label}`);
-      });
-      if (snapshot.elements.length > 30) lines.push(`  ... and ${snapshot.elements.length - 30} more`);
-      return lines.join('\n');
-    } catch (err) {
-      return `Error navigating to ${url}: ${err.message}`;
-    }
-  },
-
-  async browser_click({ selector, index = 0 }) {
-    try {
-      const page = await getPage();
-      // Try CSS selector first, then text content
-      let clicked = false;
-      try {
-        const els = await page.$$(selector);
-        if (els.length > index) {
-          await els[index].click();
-          clicked = true;
-        }
-      } catch (_) {}
-      if (!clicked) {
-        // Try as text content of button/link
-        const el = await page.evaluateHandle((text, idx) => {
-          const all = Array.from(document.querySelectorAll('button, a, [role="button"], [role="link"]'));
-          const match = all.filter(e => e.textContent.trim().includes(text));
-          return match[idx] || match[0] || null;
-        }, selector, index);
-        if (el && el.asElement()) {
-          await el.asElement().click();
-          clicked = true;
-        }
-      }
-      if (!clicked) return `Could not find clickable element matching: ${selector}`;
-      await page.waitForTimeout(1000);
-      // Return snapshot after click
-      const title = await page.title();
-      const url = page.url();
-      return `👆 Clicked: ${selector}\nNow at: ${url}\nTitle: ${title}`;
-    } catch (err) {
-      return `Error clicking ${selector}: ${err.message}`;
-    }
-  },
+ async crush({ prompt, model, cwd, timeout = 120 }) {
+  // Run Charm Crush agentic coding tool in non-interactive mode
+  const maxTimeout = Math.min(timeout, HAKSTER_SHELL_MAX_TIMEOUT);
+  const cmdParts = ['crush', 'run', '--quiet'];
+  if (model) cmdParts.push('-m', model);
+  if (cwd) cmdParts.push('-c', cwd);
+  const escapedPrompt = prompt.replace(/'/g, "'\''");
+  cmdParts.push(`'${escapedPrompt}'`);
+  const cmd = cmdParts.join(' ');
+  log(`\n${C.secondary}💘 Crush: ${prompt.substring(0, 80)}${C.reset}`);
+  try {
+   const result = await asyncShell(cmd, { timeout: maxTimeout });
+   const output = (result.stdout || '') + (result.stderr ? '\n' + result.stderr : '');
+   if (!output.trim()) return result.killed ? `Crush timed out after ${maxTimeout}s` : 'Crush completed (no output)';
+   return output.substring(0, 8000);
+  } catch (e) {
+   return `Crush error: ${e.message}`;
+  }
+ },
 
   async browser_type({ selector, text, press_enter = false }) {
     try {
@@ -5201,13 +5849,63 @@ async function initMcpTools() {
 }
 
 // ── Ollama API Call ─────────────────────────────────────────────────────
-function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
+// ── 5xxx rate-limit bypass: automatic model waterfall on 429/quota ──
+// When the active model (gpt-5.5, gpt-oss:120b-cloud, glm-5.2:cloud, …) is
+// rate-limited, callOllama transparently retries with the next model in the
+// fallback chain. Chain = [MODEL, ...HAKSTER_MODEL_FALLBACK] (env override,
+// comma-separated). ONLY 429/quota/throttle errors trigger fallback; every
+// other error propagates to the existing retry logic untouched.
+const RATE_LIMIT_RE = /(?:\b429\b|rate.?limit|too many requests|quota|exceeded|over.?limit|throttl|\brpm\b|\btpm\b)/i;
+const MODEL_FALLBACK_CHAIN = (() => {
+  const env = (process.env.HAKSTER_MODEL_FALLBACK || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (env.length) return env;
+  // Cross-vendor cloud fallback so a throttled 5.x model never dead-ends.
+  return ['gpt-4o', 'glm-5.2:cloud', 'gemini-2.5-flash', 'claude-haiku-3-5'];
+})();
+// Cloud models surfaced in the /model menu so the user can pick them directly
+// and sign in (paste an API key) without leaving the REPL. Add entries here to
+// grow the cloud roster. `family` drives the API-key prompt label + env var.
+const CLOUD_MODELS = [
+  { name: 'glm-5.2:cloud',      family: 'charm',  size: 'cloud' },
+  { name: 'gpt-4o',             family: 'openai',  size: 'cloud' },
+  { name: 'gemini-2.5-flash',    family: 'gemini', size: 'cloud' },
+  { name: 'claude-haiku-3-5',    family: 'anthropic', size: 'cloud' },
+];
+const CLOUD_FAMILIES = new Set(CLOUD_MODELS.map(m => m.family));
+function _modelChainFor() {
+  return [MODEL, ...MODEL_FALLBACK_CHAIN].filter((m, i, a) => a.indexOf(m) === i);
+}
+async function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
+  const chain = _modelChainFor();
+  let lastErr = null;
+  for (let i = 0; i < chain.length; i++) {
+    const tryModel = chain[i];
+    try {
+      const resp = await _callOllamaOnce(tryModel, messages, tools, { onToken, lowToken });
+      if (i > 0) {
+        console.log(`${C.success}✓ Rate-limit bypass: served by ${C.bold}${tryModel}${C.reset} ${C.dim}(after ${MODEL} was throttled)${C.reset}`);
+      }
+      return resp;
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      if (RATE_LIMIT_RE.test(msg) && i < chain.length - 1) {
+        console.log(`${C.mustard}⚠ ${tryModel} rate-limited — falling back to ${chain[i + 1]}${C.reset}`);
+        lastErr = e;
+        continue;
+      }
+      throw e; // non-rate-limit error or chain exhausted → existing retry logic handles
+    }
+  }
+  throw lastErr || new Error('All fallback models exhausted');
+}
+
+function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } = {}) {
   return new Promise((resolve, reject) => {
     const numPredict = lowToken
       ? Math.max(1024, parseInt(process.env.HAKSTER_LOW_TOKEN_NUM_PREDICT || '4096', 10) || 4096)
       : Math.max(1024, parseInt(process.env.HAKSTER_NUM_PREDICT || '4096', 10) || 4096);  // was 16384 — cap generation to stop runaway token burn
     const body = JSON.stringify({
-      model: MODEL,
+      model: model || MODEL,
       messages,
       tools: tools || undefined,
       stream: true,   // ← STREAMING: tokens arrive in real-time instead of blocking until complete
@@ -5596,6 +6294,14 @@ function compactHistory(history, lowToken = false) {
     log(`${C.fgMuted}◇ Skipping compact — tool calls in progress${C.reset}`);
     return;
   }
+  // ── PreCompact hook (claudePreCompactGuard) — advisory, fail-open. Logs the
+  //    guard's compaction decision so the hook is LIVE without overriding the
+  //    existing char-based logic. Never throws into compactHistory.
+  try {
+    const _tc = Math.round(estimateChars(history) / 4);
+    const _g = claudePreCompactGuard({ tokenCount: _tc, maxTokens: CONTEXT_WINDOW, activeTasks: (_pendingTools?.length||0), pendingApprovals: (_awaitingConfirm?1:0) });
+    if (_g && !_g.compact) log(`${C.fgMuted}🔒 PreCompact guard: ${_g.reason}${C.reset}`);
+  } catch (_) {}
 
   // ALWAYS enforce message count limit, regardless of char size.
   if (history.length > maxMsgs + 1) { // +1 for system prompt
@@ -5679,27 +6385,40 @@ function startSpinner(label) {
 }
 
 // ── Agent Loop ───────────────────────────────────────────────────────────
+rotateTranscripts();  // prune old session transcripts (keep last 50)
 async function agentLoop(userMessage, history, silent = false, opts = {}) {
   const _lowToken = opts.lowToken || false;
   const _maxTurns = _lowToken ? LOW_TOKEN_MAX_TURNS : MAX_TURNS;
   _currentMaxTurns = _maxTurns;
   // Reset tool call counter for each new user request
   _toolCallCount = 0;
+  _lastConsolidationTurn = 0;
   // BUG FIX: Reset ALL module-level loop-detection state per-call, not just at REPL start.
   // Previously these only reset at repl() init or when a loop was already detected —
   // meaning they accumulated across agentLoop() calls and caused false-positive
   // "stuck-loop detected" breaks on normal multi-turn conversations.
   _noProgressCount = 0;
+  _diagCount = 0;  // reset diagnosis counter per task
+  _diagFires = 0;   // reset escalation counter per task
+  _modifyingSigs = {};   // reset redundant-modify counter per task
+  _smartDelta = 0;  _smartTrendDrops = 0;   // smartness STICKS (no reset to 62) — only trend resets per task
+  _smartMissedFiles = new Set();   // reset tracked-missing-file penalties per task
+  try { spawnSync(HAKSTER_GUARDRAILS, ['reset'], { timeout: 2000 }); } catch (_) {}
   _recentResponsePrefixes = [];
   _emptyRetries = 0;
   _explorationCalls = [];
   _recentToolSigs = [];
   _repeatToolSigCount = 0;  // reset per-call too — prevent cross-call false positives
+  _repeatHardBreakCount = 0;  // reset hard-break counter per agent run
+  _hadLoopBreak = false;  // reset loop-break flag per agent run
+  _announceRutCount = 0; _forcedFinish = false;  // reset announce-rut + forced-finish flags per agent run
+  _liveLessonSeen = new Set(); _mistakeMemorySeen = new Set();  // reset live-learning dedupe sets per agent run
   _agentActivity = 'Thinking'; _activityDetail = 'Starting'; _activityStart = Date.now();
   _lastActivityTime = Date.now();
 
   // ── INIT: Collect pentester fingerprint for this session ──
   const fp = getPentesterFingerprint();
+  _agentSessionId = fp.session_uid;  // stamp every point event with this session id
   if (!silent) {
     log(`${C.info}🔐 Device Identity${C.reset} ${C.fgMuted}uid=${fp.device_uid.device_id}${C.reset}`);
     log(`${C.fgMuted}   session=${fp.session_uid} hostname=${fp.hostname} os=${fp.os.name}${C.reset}`);
@@ -5712,10 +6431,26 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     if (_awaitingConfirm) return;  // Don't nudge while a y/N prompt is open
     const elapsed = Date.now() - _lastActivityTime;
     if (elapsed > STALL_GUARD_MS) {
-      const nudge = FOCUS_NUDGES[Math.floor(Math.random() * FOCUS_NUDGES.length)];
+      // Context-aware nudge: if the agent has been diagnosing (read-only calls),
+      // push an ACTION nudge, not generic encouragement.
+      let nudge;
+      if (_diagCount >= 3) {
+        nudge = `⚡ STALL (20s idle, ${_diagCount} diagnostic calls). STOP diagnosing. You have the data. Run the fix NOW: chain sudo chown + npm install + pm2 restart + curl in ONE shell call with &&.`;
+      } else if (_noProgressCount >= 2) {
+        nudge = `⚡ STALL (20s idle, ${_noProgressCount} turns without tool calls). Either answer the user or take a concrete action. Don't just think — DO.`;
+      } else {
+        nudge = FOCUS_NUDGES[Math.floor(Math.random() * FOCUS_NUDGES.length)];
+      }
       log(`${C.mustard}${C.bold}⚡ NUDGE${C.reset} ${C.fgMuted}(${(elapsed/1000).toFixed(0)}s idle)${C.reset} ${nudge}`);
-      history.push({ role: 'system', content: nudge });
+      // Token-burn fix: nudges fire every 20s and used to pile into history,
+      // each one re-sent on every later turn. Keep only the latest nudge.
+      for (let i = history.length - 1; i >= 1; i--) {
+        const _h = history[i];
+        if (_h && _h.role === 'system' && typeof _h.content === 'string' && _h.content.startsWith('[NUDGE] ')) history.splice(i, 1);
+      }
+      history.push({ role: 'system', content: '[NUDGE] ' + nudge });
       _lastActivityTime = Date.now();
+      _stuckDebugLog('stall_guard', `20s idle, diagCount=${_diagCount}, noProgress=${_noProgressCount}`, nudge);
     }
   }, STALL_GUARD_MS);
 
@@ -5730,7 +6465,12 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       sbarIdx++;
       const icon = _agentActivity === 'Thinking' ? '🧠' : _agentActivity === 'Executing' ? '⚡' : _agentActivity === 'Patching' ? '🔧' : _agentActivity === 'Talking' ? '💬' : _agentActivity === 'Explaining' ? '📖' : _agentActivity === 'Reading' ? '📄' : _agentActivity === 'Writing' ? '✏️' : '⏸';
       const actColor = _agentActivity === 'Patching' ? C.primary : _agentActivity === 'Thinking' ? C.tertiary : _agentActivity === 'Executing' ? C.secondary : C.fgBase;
-      const detail = _activityDetail ? ' → ' + C.fgHalf + _activityDetail.substring(0, 35) + C.reset : '';
+      // Prefer showing the ACTUAL work (real file/command/arg from _activityDetail) over
+      // the generic rotating flavor phrase — placeholders like "Starting"/"Turn N/M" don't
+      // count as real content and still fall back to workingPhrase().
+      const _hasRealDetail = _activityDetail && !/^(Starting|Turn \d+\/\d+|Step \d+)$/.test(_activityDetail);
+      const primaryText = _hasRealDetail ? _activityDetail.substring(0, 48) : workingPhrase();
+      const detail = '';
       const sessIn = _sessionTokensIn > 0 ? (_sessionTokensIn / 1000).toFixed(1) : '0';
       const sessOut = _sessionTokensOut > 0 ? (_sessionTokensOut / 1000).toFixed(1) : '0';
       const burnRate = _sessionTokensIn > 0 && parseInt(elapsed) > 0 ? ((_sessionTokensIn + _sessionTokensOut) / parseInt(elapsed) * 60 / 1000).toFixed(0) : '0';
@@ -5741,8 +6481,15 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       const pendingStr = _pendingTools.length > 0 ? ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.mustard + '🔍' + C.reset + C.fgBase + _pendingTools.length + C.reset + C.mustard + ' pending' + C.reset + ' ' + C.fgMuted + _pendingTools.map(p => p.name).join(',').substring(0, 40) + C.reset : '';
       // Blinking haksterAI ❯ prompt marker while working (toggles each status tick ~1Hz).
       const _blinkOn = (sbarIdx & 1) === 0;
-      const _blinkPrompt = C.fgMuted + ' haksterAI ' + C.reset + (_blinkOn ? (C.primary + C.bold + '❯' + C.reset) : (C.fgSubtle + '❯' + C.reset)) + ' ' + C.fgSubtle + '│' + C.reset + ' ';
-      process.stdout.write('\r' + _blinkPrompt + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + _agentActivity + C.reset + detail + ' ' + C.fgSubtle + frame + C.reset + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + ' ' + C.reset + '   ');
+      // Pulse color: RED when bad (service down, smartness <33, stall trend),
+      // GREEN when working + healthy, dim/hollow when idle.
+      const _svcDown = SERVICE_PORTS.some(svc => !_serviceHealth[svc.port]);
+      const _isBad = _svcDown || _smartScore < 33 || _smartTrendDrops >= 3;
+      const _pulseCol = _isBad ? C.error : C.success;
+      const _greenPulse = processing && _blinkOn;  // kept for compat
+      const _blinkPrompt = ((_isBad || _greenPulse) ? _pulseCol + C.bold : C.fgMuted) + ' haksterAI ' + C.reset + (_blinkOn ? (_isBad ? _pulseCol + C.bold : (processing ? _pulseCol + C.bold : C.primary + C.bold)) : C.fgSubtle) + '\u276f' + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ';
+      const waitingInfo = _messageQueue.length > 0 ? ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.mustard + '📬' + C.reset + C.fgBase + _messageQueue.length + ' waiting' + C.reset : '';
+      process.stdout.write('\r' + _blinkPrompt + (_currentTopic ? C.fgSubtle + '\ud83c\udfaf ' + _currentTopic.slice(0, 35) + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ' : '') + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + primaryText + C.reset + detail + ' ' + C.fgSubtle + frame + C.reset + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + waitingInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + servicesChip() + mcpChip() + smartCompact() + ' ' + C.reset + ' ' + (_isBad ? (_blinkOn ? C.error + C.bold + '\u25cf' + C.reset : C.error + '\u25cf' + C.reset) : (_greenPulse ? C.success + C.bold + '\u25cf' + C.reset : (processing ? C.fgSubtle + '\u25cf' + C.reset : C.fgSubtle + '\u25cb' + C.reset))) + '   ');
     }, 500);
     // Clear status bar on exit
     process.on('SIGINT', () => { if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; } process.stdout.write('\r' + ' '.repeat(120) + '\r'); });
@@ -5753,6 +6500,37 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
 
   let lastHadToolCalls = false;
   for (let turn = 0; turn < _maxTurns; turn++) {
+    _sessionPerf.roundsUsed = turn + 1; _sessionPerf.elapsedMs = Date.now() - _sessionPerf.started; _sessionPerf.maxRounds = _maxTurns;
+    // ── Auto-consolidation at every 50 rounds: compact context + consolidate
+    //    memory, then continue for another 50. Rolling — the agent never
+    //    hard-stops at 50; it condenses and keeps going with a fresh context.
+    if (turn > 0 && turn % 50 === 0) {
+      log('\n' + C.cyan + '📦 Auto-consolidation @ round ' + turn + ' — compacting context for another 50 rounds' + C.reset + '\n');
+      try { compactHistory(history, _lowToken); } catch (_) {}
+      try { autolearn.consolidateMemories(path.join(process.env.HOME || '/home/ghost', '.hakster')); } catch (_) {}
+      history.push({ role: 'system', content: '📦 Context auto-consolidated at round ' + turn + '. You have a fresh context window — continue working with the key facts you still have. Do not re-diagnose from scratch; use what you already know.' });
+    }
+    if (turn === 0 && !_perfLessonsInjected) {
+      _perfLessonsInjected = true;
+      _smartScore = Math.max(_smartScore, recentSmartnessAnchor());
+      // Add up points from recent sessions (carry over — lifetime accumulation)
+      try { const hist = loadPerfHistory(); const lastPts = hist.length ? (hist[hist.length - 1].points || 0) : 0; _sessionPerf.points = Math.max(_smartScore, lastPts); } catch (_) { _sessionPerf.points = _smartScore; }
+      const _pl = (perfLessonsNudge() + ' ' + transcriptLessonsNudge()).trim(); if (_pl) history.push({ role: 'system', content: _pl });
+    }
+    // 📍 Learn ALWAYS + FAST: surface the live point map mid-run so the agent self-corrects
+    //    THIS session (not just next time). Throttled every N turns + only NEW loss categories.
+    if (turn > 0 && turn % LIVE_LESSON_INTERVAL === 0) {
+      const _ll = livePointLesson();
+      if (_ll) history.push({ role: 'system', content: _ll });
+    }
+    // ── Periodic checkpoint: persist session mid-loop so a crash/restart can
+    //    resume from here instead of losing all progress since the last
+    //    agentLoop completion. Throttled to every 10 turns to avoid disk churn.
+    if (turn > 0 && turn % 10 === 0) {
+      try { saveSession(history); } catch (_) {}
+      try { appendCheckpoint(turn, history.length - 1, contextPercent(history, _lowToken)); } catch (_) {}
+      log(`${C.fgMuted}💾 Checkpoint saved (turn ${turn}, ${history.length - 1} msgs, ctx ${contextPercent(history, _lowToken)}%)${C.reset}`);
+    }
     // 6-phase: THINK at start of each turn
     tuiSetPhase('THINK');
     // ── Drain notification queue at start of each turn ──
@@ -5794,9 +6572,24 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         const _firstUser = history.find(m => m.role === 'user');
         console.log(`[DEBUG] sys_prompt_len=${(_sysMsg?.content||'').length} first_user_len=${(_firstUser?.content||'').length} first_user_preview=${JSON.stringify((_firstUser?.content||'').substring(0,200))}`);
       }
+      // ── Round-aware nudge (hakster-guardrails.sh nudge <round> <max>) ──
+      // Transient: appended to a COPY for this call only — never persisted in
+      // history, so it can't accumulate one-per-round or be collapsed by
+      // sanitizeHistory. Prints nothing when fine; a halfway nudge at 50%, a
+      // converge nudge at 80%, a ship-now nudge at 100%, plus a loop-recovery
+      // nudge if `track` flagged a repeat this task.
+      let _historyForCall = history;
+      try {
+        const _gr = spawnSync(HAKSTER_GUARDRAILS, ['nudge', String(turn + 1), String(_maxTurns)], { encoding: 'utf-8', timeout: 2000 });
+        const _nudge = (_gr.stdout || '').trim();
+        if (_nudge) {
+          _historyForCall = [...history, { role: 'system', content: _nudge }];
+          if (process.env.HAKSTER_DEBUG_AGENT === '1') console.log(`[DEBUG] round nudge (turn ${turn + 1}/${_maxTurns}): ${_nudge.replace(/\n/g, ' ').slice(0, 140)}`);
+        }
+      } catch (_) { /* guardrails optional; never break the agent on its failure */ }
       // ── Activity: thinking ──
       _agentActivity = 'Thinking'; _activityDetail = `Turn ${turn + 1}/${_maxTurns}`; _activityStart = Date.now();
-      response = await callOllama(history, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
+      response = await callOllama(_historyForCall, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
       _lastActivityTime = Date.now();
       const _rContent = (response?.message?.content || '');
       const _rThinking = (response?.message?.thinking || '');
@@ -5823,7 +6616,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         await new Promise(r => setTimeout(r, 2000 * (retry + 1))); // backoff
         const retrySpinner = silent ? null : startSpinner('retrying...');
         try {
-          response = await callOllama(history, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
+          response = await callOllama(_historyForCall, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
           if (retrySpinner) retrySpinner.stop('');
           log(`${C.success}✓ API retry succeeded${C.reset}`);
           lastErr = null;
@@ -5972,6 +6765,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     // This is the stuck-loop pattern — model calls tools blindly without reasoning
     if (msg.tool_calls && msg.tool_calls.length > 0 && !hasContent && !hasThinking && _emptyRetries < EMPTY_RETRY_LIMIT) {
       _emptyRetries++;
+      bumpSmart(-5, 'empty-retry');
       log(`${C.mustard}⚠  Model returned tool_calls with no content/thinking (stuck-loop pattern, retry ${_emptyRetries}/${EMPTY_RETRY_LIMIT}). Compacting and retrying...${C.reset}`);
       compactHistory(history, _lowToken);
       // Don't save this empty tool-call turn — just retry with a nudge
@@ -6010,7 +6804,29 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         // so the model doesn't see its own fake status lines in context and loop on them
         // BUG 17 FIX: Use _stripFakeTui() helper instead of inline regex chain
         const cleanThinkingNoTool = _stripFakeTui(msg.thinking || '');
-        history.push({ role: 'assistant', content: cleanContent || '', ...(cleanThinkingNoTool ? { thinking: cleanThinkingNoTool } : {}) });
+        history.push({ role: 'assistant', content: cleanContent || '' });  // thinking stripped from history — re-sending prior reasoning burns O(N²) tokens
+        // 🪝 LEVERS 1+2: detect 'announce-without-act' rut. If the content says
+        //    'now writing / let me create / I\'ll add …' but NO tool was called this
+        //    turn, that's stalling — DON'T award clean-finish, and nudge to ACT.
+        const _isAnnounce = /\b(now i will|i'?ll now|let me (create|write|add|build|finish|start|make)|i'?m (going to|gonna) (write|create|add|build|make)|now writing|now creating|now adding|time to (write|create|add|build))\b/i.test(cleanContent || '');
+        if (_isAnnounce && !_forcedFinish) {
+          _announceRutCount++;
+          if (_announceRutCount >= 2) {
+            log(`\n${C.mustard}${C.bold}⚡ ANNOUNCE-RUT: ${_announceRutCount} turns of \"now writing / let me …\" with NO tool call. STOP announcing — call write_file/patch_file/shell NOW.${C.reset}`);
+            history.push({ role: 'system', content: `⚡ ANNOUNCE-RUT (${_announceRutCount}x): You keep saying \"now writing / let me create / I\'ll add\" WITHOUT calling a tool. That is stalling, not progress. Your NEXT message MUST contain a tool call (write_file, patch_file, or shell) — do not produce another sentence of narration without a tool call. Execute NOW.` });
+            _announceRutCount = 0;
+          }
+          // a mere announcement is not a finish — no clean-finish awarded
+        } else if (!_forcedFinish) {
+          _announceRutCount = 0;
+          bumpSmart(8, 'clean-finish');  // real final answer — reward completion
+          if (_hadLoopBreak) bumpSmart(6, 'loop-broken');  // recovered from a loop/stall AND still finished
+        } else {
+          // _forcedFinish: run ended via a loop break with no recovery tool call since —
+          //    not a true finish, so no clean-finish (+8). Keeps the score honest.
+          _announceRutCount = 0;
+          log(`${C.dim}◇ Forced finish (loop break, no recovery tool) — clean-finish not awarded${C.reset}`);
+        }
       }
       lastHadToolCalls = false;
 
@@ -6052,6 +6868,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         else if (clarifyingLoopNoTool) reason = `clarifying-question loop (${_recentResponsePrefixes.filter(p => _isClarifyingQuestion(p)).length} clarifying responses)`;
         else reason = `${_noProgressCount} turns with no tool calls (likely semantic loop)`;
         log(`\n${C.mustard}${C.bold}⚠  Stuck-loop detected: ${reason}. Breaking loop.${C.reset} ${C.bgSubtle}${T.hashFill(20, C.mustard)}${C.reset}`);
+        _forcedFinish = true;  // this break forces the end — a later 'done' is not a clean finish
         log(`${C.dim}   (Clearing stale queued messages too)${C.reset}\n`);
         _lastAssistantResponse = '';
         _noProgressCount = 0;
@@ -6210,6 +7027,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     if (_shellRepeatBreak) {
       log(`\n${C.red}${C.bold}🔴 Shell repeat-loop detected: same shell command re-run without progress. Breaking loop.${C.reset}`);
       _shellRepeatBreak = false;
+      _repeatHardBreakCount++;
       _recentShellCommands = [];
       _noProgressCount = 0;
       _explorationCalls = [];
@@ -6276,7 +7094,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       if (_hasLoopContent) {
         // BUG 17 FIX: Use _stripFakeTui() helper
         const cleanThinking = _stripFakeTui(msg.thinking || '');
-        history.push({ role: 'assistant', content: cleanContent || '', ...(cleanThinking ? { thinking: cleanThinking } : {}) });
+        history.push({ role: 'assistant', content: cleanContent || '' });  // thinking stripped from history (token-burn fix)
       }
       break;
     }
@@ -6305,22 +7123,25 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     history.push({
       role: 'assistant',
       content: cleanContent || '',
-      ...(cleanThinkingTool ? { thinking: cleanThinkingTool } : {}),
+      // thinking stripped from history (token-burn fix): re-sending prior
+      // reasoning traces every turn is the #1 O(N²) token sink.
       tool_calls: msg.tool_calls,
     });
 
     // ── Track pending tools for status bar ──
     _pendingTools = (msg.tool_calls || []).map(tc => ({ name: tc.function?.name || tc.name || 'unknown', id: tc.id || String(_toolCallCount) }));
 
+    let fnName = '';
+    let fnArgs = {};
     for (const tc of msg.tool_calls) {
       _toolCallCount++;
-      const fnName = tc.function?.name || tc.name;
+      fnName = tc.function?.name || tc.name;
       // CRITICAL: Ollama models (e.g. glm-5.2:cloud) return tool_call arguments as a
       // JSON STRING, not a parsed object. If we pass the string straight to the
       // executor, destructuring ({action, url, ...}) yields undefined for every
       // field and every parameterized tool fails ("scrape requires url", "Error
       // navigating to undefined", etc.). Parse to an object here, once.
-      let fnArgs = tc.function?.arguments || tc.arguments || {};
+      fnArgs = tc.function?.arguments || tc.arguments || {};
       if (typeof fnArgs === 'string') {
         try { fnArgs = JSON.parse(fnArgs); } catch (_) { fnArgs = {}; }
       }
@@ -6370,6 +7191,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         if (_repeatToolSigCount >= TOOL_REPEAT_LIMIT) {
           log(`\n${C.red}${C.bold}🔁 Tool repeat-loop detected: "${fnName}" called ${_repeatToolSigCount + 1}x with identical args. Breaking loop.${C.reset}`);
           _repeatToolSigCount = 0;
+          _repeatHardBreakCount++;
           _recentToolSigs = [];
           _noProgressCount = 0;
           _explorationCalls = [];
@@ -6394,6 +7216,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         const wanderCallCount = _explorationCalls.length;
         log(`\n${C.yellow}${C.bold}⚠️  Filesystem-wandering loop detected: ${wanderCallCount} calls exploring same subtree without convergence. Breaking loop.${C.reset} ${C.bgSubtle}${T.hashFill(15, C.yellow)}${C.reset}`);
         log(`${C.dim}   (Trimming history, draining queue, injecting course correction)${C.reset}\n`);
+        bumpSmart(-10, 'fs-wandering');
         _explorationCalls = [];
         _noProgressCount = 0;
         _recentResponsePrefixes = [];
@@ -6458,6 +7281,13 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
           } else {
             log(`${C.green}✅ Approved${C.reset}`);
           }
+          // If the user typed a sudo password in the popout, hand it to the shell
+          // executor so sudo runs with `sudo -S` + password on stdin (otherwise sudo
+          // fails headlessly with "a terminal is required").
+          if (_pendingSudoPassword && (fnName === 'shell' || fnName === 'exec_shell') && /^\s*sudo\b/i.test(String((fnArgs && fnArgs.command) || ''))) {
+            fnArgs = { ...fnArgs, sudoPassword: _pendingSudoPassword };
+            _pendingSudoPassword = null;
+          }
         } else {
           // No confirmation function available (module mode) — block by default
           log(`${C.red}🚫 Blocked (no confirmation available in module mode)${C.reset}`);
@@ -6480,8 +7310,21 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         }, Math.round(500 / SCROLL_SPEED));
       }
       try {
+        // ── PreToolUse hook (codexSandboxPolicy) — GATE: block WRITES to system
+        //    paths only (/etc,/usr,/boot,/sys,/proc,/dev). Project files are never
+        //    blocked. Fail-open: any guard error -> allow (never breaks the loop).
+        try {
+          const _writeTools = ['write_file','patch_file','multi_patch','edit_file','insert_lines','delete_lines','replace_regex','append_file','create_file'];
+          if (_writeTools.includes(fnName)) {
+            const _wp = String((fnArgs && (fnArgs.path || fnArgs.file || '')) || '');
+            const _sb = codexSandboxPolicy({ level: 'limited', path: _wp, operation: 'write' });
+            if (!_sb.allowed) { result = `⛔ Blocked by sandbox: ${_sb.reason}`; log(`${C.red}🔒 PreToolUse: ${_sb.reason}${C.reset}`); }
+          }
+        } catch (_) {}
         const executor = toolExecutors[fnName];
-        if (!executor) {
+        if (result) {
+          // gate already set a blocked result — skip execution, flow to history push
+        } else if (!executor) {
           // Fallback: try MCP tool
           if (isMcpTool(fnName)) {
             result = await callMcpTool(fnName, fnArgs);
@@ -6533,8 +7376,12 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         // Tool succeeded — reset consecutive error tracking
         _consecutiveToolErrors = [];
 
+        // ── Memory hook (hermesMemoryConsolidation) — advisory, fail-open: notes when
+        //    raw observation volume warrants consolidation (shouldConsolidate still decides).
+        try { const _hg = hermesMemoryConsolidation({ rawCount: _toolCallCount, threshold: 50 }); if (_hg && _hg.shouldConsolidate) log(`${C.fgMuted}🧠 Memory hook: ${_hg.reason}${C.reset}`); } catch (_) {}
         // ── Auto-learn: CONSOLIDATE phase ──
-        if (shouldConsolidate(_toolCallCount)) {
+        if (shouldConsolidate({ turn: _toolCallCount, rawMemoryCount: _toolCallCount, lastConsolidationTurn: _lastConsolidationTurn })) {
+          _lastConsolidationTurn = _toolCallCount;
           try {
             await autolearn.consolidateMemories(path.join(process.env.HOME || '/home/ghost', '.hakster'));
           } catch (e) { /* non-blocking */ }
@@ -6574,7 +7421,13 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         });
 
         // ── Auto-learn: REFLECT phase ──
-        if (shouldReflect(_noProgressCount, _recentResponsePrefixes)) {
+        if (shouldReflect({
+          noProgressCount: _noProgressCount,
+          semanticLoopDetected: false, // dedicated semantic-loop break already handles this above
+          sameToolErrorCount: _consecutiveToolErrors.reduce((max, e) => Math.max(max, e.count), 0),
+          isClarifyingQuestion: false, // dedicated clarifying-loop break already handles this above
+          isFilesystemWandering: isWandering,
+        })) {
           tuiSetPhase('REFLECT');
           const reflection = injectLearnedLessons(process.cwd(), ['pentest', 'agent']);
           if (reflection) {
@@ -6598,6 +7451,17 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       // Pass result summary to grid (truncated to 80 chars inside tuiToolDone)
       tuiToolDone(fnName, tuiStatus, String(result).substring(0, 200));
       const resultStr = String(result);
+      _announceRutCount = 0;  // a tool was called — no longer an announce rut
+      if (!isErr) _forcedFinish = false;  // successful tool after a break = genuine recovery (clear forced-finish)
+      _sessionPerf.actions++; if (!isErr) _sessionPerf.successes++; else _sessionPerf.failures++;
+      // ── PostToolUse hook (reactCycleValidator) — advisory, fail-open: flags an
+      //    empty/invalid observation so the hook is LIVE (the existing empty-retry
+      //    + stuck-loop handlers do the actual breaking).
+      try {
+        const _rv = reactCycleValidator({ phase: 'observation', hasContent: resultStr.length > 0 && resultStr !== '(no output)', isEmpty: resultStr.length === 0 });
+        if (_rv && !_rv.valid && !isErr) log(`${C.fgMuted}🧩 PostToolUse: ${_rv.reason}${C.reset}`);
+      } catch (_) {}
+      bumpSmart(scoreToolCall(fnName, fnArgs, !isErr, resultStr), 'tool:' + fnName);   // smartness reflects real per-call outcomes
       // ── Record the REAL action with its actual output for the "What was done"
       //    checklist — shows the user what each tool actually returned, not just
       //    the command that was run. (Must run AFTER `const resultStr` to avoid
@@ -6635,9 +7499,17 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       // Add tool result to history — cap to reduce context bloat
       // (display already shows 2000 chars; history only needs enough for the LLM to understand)
       const HISTORY_RESULT_CAP = parseInt(process.env.HAKSTER_HISTORY_RESULT_CAP || '800', 10) || 800;  // was 4000 — tiny tool-result history — smaller tool-result history = fewer tokens resent per turn
-      const historyContent = resultStr.length > HISTORY_RESULT_CAP
-        ? resultStr.substring(0, HISTORY_RESULT_CAP) + '\n[truncated]'
-        : resultStr;
+      // Strip box-drawing chars (U+2500-U+257F: ─│┌┐└┘├┤┬┴┼ ═║╔╗╚╝ ╭╮╰╯) and
+      // em/en dashes from tool results stored in history. Tables like `pm2 list`
+      // / `ss` dump box art that bloats context and confuses the model (it starts
+      // echoing box lines). The display above keeps the original; the model sees
+      // clean space-separated data instead.
+      const _stripBoxes = (t) => t.replace(/[\u2500-\u257F\u2014\u2013]/g, ' ').replace(/[ ]{2,}/g, ' ');
+      const historyContent = _stripBoxes(
+        resultStr.length > HISTORY_RESULT_CAP
+          ? resultStr.substring(0, HISTORY_RESULT_CAP) + '\n[truncated]'
+          : resultStr
+      );
       history.push({
         role: 'tool',
         name: fnName,
@@ -6646,8 +7518,139 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       });
     }
 
+    // ── Hard stop: soft repeat-breaks fired >= 2 times this run → the model is
+    // ignoring course corrections and ruts on the same call. End the run now
+    // instead of looping up to MAX_TURNS and burning the whole token budget.
+    if (_repeatHardBreakCount >= 2) {
+      log(`\n${C.red}${C.bold}🔁🔁 HARD STOP: ${_repeatHardBreakCount} repeat-loop breaks ignored — agent stuck re-emitting the same tool call. Ending run to protect the token budget.${C.reset}`);
+      history.push({ role: 'system', content: `HARD STOP: You triggered ${_repeatHardBreakCount} repeat-loop breaks and kept re-emitting the same tool call. The run is terminated to avoid wasting tokens. Summarize what you found and ask the user for guidance, or rephrase the task.` });
+      _forcedFinish = true;  // hard stop forced the end — not a clean finish
+      break;
+    }
+
     // 6-phase: OBSERVE after tool results
     tuiSetPhase('OBSERVE');
+
+    // ── Diagnosis timeout: if the agent has done 5+ consecutive read-only calls
+    //    (read_file, search_files, rg, pm2 logs, curl, grep, ss) without a single
+    //    state-modifying action (sudo, npm, chown, pm2 restart, write_file, patch),
+    //    inject a forced-action message so it STOPS diagnosing and STARTS fixing.
+    //    This is the #1 cause of "ran out of turns without fixing anything."
+    {
+      // 🧠 Trend-driven stall nudge: 3 consecutive setbacks = the current approach
+      // is failing — surface it before the loop/timeout detectors, and tighten.
+      if (_smartTrendDrops >= 3) {
+        history.push({ role: 'system', content: `🧠 STALL TREND: smartness has dropped ${_smartTrendDrops} times in a row — the current approach is not working. Stop repeating it. Either (a) change one structural thing (different target / read the actual error / different tool) and act once, or (b) if the goal is already met, declare done and stop. Do not continue the same failing pattern.` });
+        log(`\n${C.mustard}${C.bold}🧠 STALL TREND (${_smartTrendDrops} consecutive drops → ${_smartScore}%). Forcing a change.${C.reset}\n`);
+        _smartTrendDrops = 0;
+      }
+      const _cmd = String((fnArgs && fnArgs.command) || '');
+      const _isModifying = fnName === 'patch_file' || fnName === 'write_file' || fnName === 'multi_patch'
+        || fnName === 'insert_lines' || fnName === 'delete_lines' || fnName === 'replace_regex'
+        || fnName === 'append_file' || fnName === 'edit_file'
+        || (fnName === 'shell' && /\b(sudo|npm|chown|chmod|pm2\s+(restart|start|stop|delete)|rm\s|mv\s|cp\s|mkdir|sed\s+-i|wget|curl\s+-X\s+(POST|PUT|DELETE|PATCH)|fuser\s+\S*k|p?kill(all)?|systemctl\s+(restart|start|stop)|service\s+\S+\s+(restart|start|stop)|reboot|shutdown)\b/i.test(_cmd));
+      if (_isModifying) {
+        // Redundant-modify detector: re-running the SAME modifying command (e.g.
+        // `npm rebuild better-sqlite3` 2-3x after it already succeeded) wastes
+        // rounds. If the first didn't fix it, an identical retry won't either; if it
+        // did, there's no reason to re-run. Normalizes the command so trailing
+        // pipes / 2>&1 / `| tail` fluff can't evade detection by cosmetic suffix
+        // tweaks. Fires at the 2nd identical run — modifying actions are costlier
+        // than reads, so catch redundancy early.
+        const _normCmd = String((fnArgs && fnArgs.command) || fnArgs.path || fnName || '')
+          .replace(/2>&1/g, '').replace(/2>\/dev\/null/g, '')
+          .replace(/echo\s+"[^"]*"/g, '').replace(/echo\s+'[^']*'/g, '')
+          .replace(/\bsleep\s+\d+(\.\d+)?\b/g, '')
+          .replace(/\s*\|[^;&]*$/g, '').replace(/\s+/g, ' ')
+          .replace(/&&\s*&&/g, '&&')
+          .replace(/^[&;\s]+/, '').replace(/[&;\s]+$/, '').trim();
+        const _msig = fnName + '|' + _normCmd.slice(0, 120);
+        _modifyingSigs[_msig] = (_modifyingSigs[_msig] || 0) + 1;
+        const _mCount = _modifyingSigs[_msig];
+        if (_mCount === 2) {
+          // 1st trip: gentle reflection — one identical re-run is already wasteful.
+          history.push({ role: 'system', content: `🔁 REDUNDANT MODIFY: you have now run "${_msig}" 2x this task. Re-running an identical modifying command rarely changes the outcome. If the first run did not fix it, change the command (different flags / different target / read the actual error). If it did fix it, move on instead of re-verifying by re-running. Your next step should be different.` });
+          log(`\n${C.mustard}${C.bold}🔁 REDUNDANT MODIFY (${_msig}) x2${C.reset}\n`);
+          bumpSmart(-5, 'redundant-modify');
+        } else if (_mCount >= 3) {
+          // 2nd trip: he ignored the nudge and re-ran again. Force a decision —
+          // either change the approach and actually solve it, or if the current
+          // state is satisfactory, declare the task done and stop. No more repeats.
+          history.push({ role: 'system', content: `🚨 REDUNDANT MODIFY (final): you have run "${_msig}" ${_mCount}x this task and ignored the prior warning. STOP repeating this command — an identical retry will not change the outcome. You must now do ONE of the following, nothing else:\n(a) If the current state is satisfactory / the goal is met: declare the task DONE, summarize what was achieved, and stop. Do not run another command.\n(b) If it is NOT satisfactory: change the approach structurally — different command, different target, or read the actual error output to find the real cause — then act once. Re-running "${_msig}" again is not an option.` });
+          log(`\n${C.mustard}${C.bold}🚨 REDUNDANT MODIFY (${_msig}) x${_mCount} — converge or declare done${C.reset}\n`);
+          bumpSmart(-10, 'redundant-modify-final');
+        }
+        _diagCount = 0;
+        _diagFires = 0;   // a real state-modifying action clears the escalation
+        try { spawnSync(HAKSTER_GUARDRAILS, ['reset'], { timeout: 2000 }); } catch (_) {}
+      } else {
+        _diagCount++;
+        // Stable per-call signature for loop detection: fnName + primary
+        // target (command for shell, path for read_file/list_dir, query for
+        // search_files). Offset/limit deliberately excluded so paginating the
+        // same file still counts as a repeat — reading the same file 3x is a loop.
+        // Stable per-call signature for loop detection. For shell, normalize
+        // aggressively and keep only the LEADING command so cosmetic suffix
+        // variation can't let the agent evade detection by re-running the same
+        // check with different decoration. Strips: 2>&1 / 2>/dev/null, `sleep N`,
+        // `echo "..."` section labels, pipe segments (| tail / | grep / | head),
+        // and trailing && clauses. So `curl health && echo "--ERRORS--"` and
+        // `curl health && echo "--OUT--"` and `sleep 3 && curl health && pm2 list`
+        // all collapse to the same primary: `curl ... http://.../api/health`.
+        let _sigTarget = '';
+        if (fnArgs) {
+          if (fnArgs.command) {
+            _sigTarget = String(fnArgs.command)
+              .replace(/2>&1/g, '').replace(/2>\/dev\/null/g, '')
+              .replace(/echo\s+"[^"]*"/g, '').replace(/echo\s+'[^']*'/g, '')
+              .replace(/\bsleep\s+\d+(\.\d+)?\b/g, '')
+              .replace(/\s*\|[^;&]*/g, '')
+              .replace(/\s+/g, ' ')
+              .replace(/&&\s*&&/g, '&&')
+              .replace(/^[&;\s]+/, '').replace(/[&;\s]+$/, '')
+              .split(/\s*&&\s*/)[0].trim();
+          } else {
+            _sigTarget = fnArgs.path || fnArgs.query || fnArgs.pattern || fnArgs.directory || fnArgs.url || '';
+          }
+        }
+        const _sig = fnName + '|' + String(_sigTarget || '').slice(0, 120);
+        // hakster-guardrails track: flags the SAME signature 3x in the last 5
+        // read-only actions. Trips at 3, before the 5-call threshold, so exact-
+        // repeat loops (e.g. reading .env over and over) break fast.
+        let _loopDetected = false;
+        try {
+          const _gr = spawnSync(HAKSTER_GUARDRAILS, ['track', _sig], { encoding: 'utf8', timeout: 3000 });
+          if (/LOOP_DETECTED/.test(_gr.stderr || '')) _loopDetected = true;
+        } catch (_) { /* guardrails optional; never break the agent on its failure */ }
+        if (_loopDetected) {
+          history.push({ role: 'system', content: `🔁 LOOP DETECTED: you have run the same call ("${_sig}") 3+ times in the last 5 actions with the same result. Re-running it will not change the output. STOP. Either change one structural thing (different path / different flag / read the actual error text) before retrying, or run the fix now. Do not re-run the identical call.` });
+          log(`\n${C.mustard}${C.bold}🔁 LOOP DETECTED (${_sig}). Breaking the repeat.${C.reset}\n`);
+          bumpSmart(-10, 'loop-detected');
+          _diagCount = 0;
+        } else {
+          // Escalating threshold: 1st fire at 5 read-only calls, 2nd fire at +2,
+          // every fire after that at +1 — so the nudge stays on, not a one-shot
+          // the model can ignore and then do 5 more read-only calls.
+          // Adaptive: when he's struggling/sleeping, break read-only stalls sooner.
+          const _threshold = _smartScore < 25 ? 1 : _smartScore < 40 ? (_diagFires === 0 ? 3 : 1) : (_diagFires === 0 ? 5 : _diagFires === 1 ? 2 : 1);
+          if (_diagCount >= _threshold) {
+            _diagFires++;
+            bumpSmart(_diagFires === 1 ? -3 : _diagFires === 2 ? -5 : -8, 'diagnosis-timeout');  // tuned down: exploration is normal — was -5/-10/-15, which tanked smartness on healthy read-only streaks
+            let _diagMsg;
+            if (_diagFires === 1) {
+              _diagMsg = `⚠️ DIAGNOSIS TIMEOUT: ${_diagCount} consecutive read-only/diagnostic calls (read_file, search_files, pm2 logs, grep, curl, ss) without a single state-modifying action. STOP DIAGNOSING — you already have the information. ACT NOW: run the fix in ONE shell call with &&. Do not call another read-only tool.`;
+            } else if (_diagFires === 2) {
+              _diagMsg = `🚨 DIAGNOSIS TIMEOUT (#2): you ignored the first warning and kept diagnosing. You have MORE than enough information. Your next tool call MUST be state-modifying (shell with sudo/npm/chown/pm2 restart, or patch_file/write_file). Another read_file/search_files/list_dir/grep wastes the user's turns — ACT NOW.`;
+            } else {
+              _diagMsg = `🚨🚨 DIAGNOSIS TIMEOUT (#${_diagFires}): ${_diagCount} read-only calls and ${_diagFires - 1} prior warnings ignored. STOP. Do not call ANY read-only tool. Either (a) run the fix now in one shell call, or (b) if you genuinely cannot, write your final answer stating exactly what blocks you. Repeated diagnosis is not an option.`;
+            }
+            history.push({ role: 'system', content: _diagMsg });
+            log(`\n${C.mustard}${C.bold}⚠️ DIAGNOSIS TIMEOUT #${_diagFires} (${_diagCount} read-only calls). Forcing action.${C.reset}\n`);
+            _diagCount = 0;
+          }
+        }
+      }
+    }
 
     // ── TUI dashboard: in-place redraw after OBSERVE (no append) ──
     // Gated to avoid appending a fresh multi-panel block on every step; the
@@ -6689,10 +7692,41 @@ function saveToHistory(line) {
   } catch (_) {}
 }
 
+// ── Per-session IDs + checkpoint log (kept to last 50) ──
+// Each agent process gets a stable session ID. Transcripts are named with it,
+// and checkpoint events are appended to a capped checkpoints.json (last 50).
+const SESSION_ID = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+let _transcriptFile = 'transcript_' + SESSION_ID + '.json';
+const TRANSCRIPT_DIR = path.join(os.homedir(), '.hakster', 'transcripts');
+const CHECKPOINT_LOG = path.join(os.homedir(), '.hakster', 'checkpoints.json');
+function rotateTranscripts() {
+  try {
+    if (!fs.existsSync(TRANSCRIPT_DIR)) return;
+    const files = fs.readdirSync(TRANSCRIPT_DIR).filter(f => f.startsWith('transcript_')).map(f => ({
+      name: f, mtime: fs.statSync(path.join(TRANSCRIPT_DIR, f)).mtimeMs,
+    })).sort((a, b) => b.mtime - a.mtime);
+    for (const f of files.slice(50)) { try { fs.unlinkSync(path.join(TRANSCRIPT_DIR, f.name)); } catch (_) {} }
+  } catch (_) {}
+}
+function appendCheckpoint(turn, msgCount, ctxPct) {
+  try {
+    const dir = path.dirname(CHECKPOINT_LOG);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    let entries = [];
+    if (fs.existsSync(CHECKPOINT_LOG)) {
+      try { entries = JSON.parse(fs.readFileSync(CHECKPOINT_LOG, 'utf-8')); } catch (_) {}
+    }
+    entries.push({ sid: SESSION_ID, turn, msgs: msgCount, ctx: ctxPct, ts: new Date().toISOString() });
+    // Keep last 50 checkpoint events
+    entries = entries.slice(-50);
+    fs.writeFileSync(CHECKPOINT_LOG, JSON.stringify(entries, null, 2), 'utf-8');
+  } catch (_) {}
+}
 function saveSession(history) {
   try {
     const dir = path.dirname(SESSION_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    // Trimmed session for resume (context-budget friendly)
     const msgs = history.filter(m => m.role !== 'system').map(m => ({
       role: m.role,
       content: (m.content || '').substring(0, 2000),
@@ -6701,6 +7735,16 @@ function saveSession(history) {
       ...(m.name ? { name: m.name } : {}),
     }));
     fs.writeFileSync(SESSION_FILE, JSON.stringify(msgs, null, 2), 'utf-8');
+    // FULL transcript (no truncation) for archival — one file per session, kept to last 50
+    if (!fs.existsSync(TRANSCRIPT_DIR)) fs.mkdirSync(TRANSCRIPT_DIR, { recursive: true });
+    const full = history.filter(m => m.role !== 'system').map(m => ({
+      role: m.role, content: m.content || '',
+      ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
+      ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+      ...(m.name ? { name: m.name } : {}),
+    }));
+    fs.writeFileSync(path.join(TRANSCRIPT_DIR, _transcriptFile),
+      JSON.stringify({ sid: SESSION_ID, ts: new Date().toISOString(), count: full.length, messages: full }, null, 2));
   } catch (_) {}
 }
 
@@ -6936,19 +7980,34 @@ async function repl() {
         '',
         ...cmdLines.map((cl, i) => (i === 0 ? `${_CRUSH.text}$ ${cl}${C.reset}` : `${_CRUSH.text}  ${cl}${C.reset}`)),
         '',
-        `${_CRUSH.muted}Choices:${C.reset}  ${_CRUSH.green}y${C.reset}=approve   ${_CRUSH.gold}a${C.reset}=allowlist   ${_CRUSH.red}n${C.reset}=deny${isSudo ? `   ${_CRUSH.purple}(sudo) password${C.reset}` : ''}`,
+        `${_CRUSH.bgGreen}${_CRUSH.dark}${C.bold} 1 Allow once ${C.reset}  ${_CRUSH.bgGold}${_CRUSH.dark}${C.bold} 2 This session ${C.reset}  ${_CRUSH.bgPurple}${_CRUSH.dark}${C.bold} 3 Permanent ${C.reset}  ${_CRUSH.bgRed}${_CRUSH.dark}${C.bold} 4 Deny ${C.reset}`,
       ];
-      const promptLabel = isSudo ? `${accentBg}${_CRUSH.dark}${C.bold} 🔑 sudo ${C.reset} password / y / a / n: `
-                                 : `${accentBg}${_CRUSH.dark}${C.bold} y/N ${C.reset} (or a=allowlist): `;
+      const promptLabel = isSudo ? `${accentBg}${_CRUSH.dark}${C.bold} \ud83d\udd11 sudo ${C.reset} password / 1/2/3/4: `
+                                 : `${accentBg}${_CRUSH.dark}${C.bold} 1/2/3/4 ${C.reset} `;
       _crushPanel({ accent, title: `${titleTag} — APPROVAL REQUIRED`, bodyLines, promptLabel, mask: isSudo }).then((answer) => {
         _awaitingConfirm = false;  // Resume status bar / stall guard / panels
         _lastActivityTime = Date.now();
         const a = answer.trim().toLowerCase();
         let decision = false;
-        if (a === 'a') decision = 'allowlist';
-        else if (a === 'n' || a === '') decision = false;
-        else if (isSudo) decision = answer.trim().length > 0 ? true : false;   // any non-empty (password or y) approves
-        else decision = a === 'y';
+        // Numbered button selection (1/2/3/4) or legacy (y/a/n)
+        if (a === '1' || a === 'y') decision = true;
+        else if (a === '2' || a === 'a') decision = 'allowlist';
+        else if (a === '3' || a === 'p') decision = 'permanent';
+        else if (a === '4' || a === 'n' || a === '') decision = false;
+        else if (isSudo && a.length > 0) decision = true;
+        // Permanent allowlist: persist to disk
+        if (decision === 'permanent') {
+          _localAllowlist.add(_cmdSig(fnName, fnArgs));
+          try {
+            const alFile = path.join(os.homedir(), '.hakster', 'permanent_allowlist.json');
+            let list = []; try { list = JSON.parse(fs.readFileSync(alFile, 'utf-8')) || []; } catch (_) {}
+            list.push({ tool: fnName, sig: _cmdSig(fnName, fnArgs), ts: Date.now() });
+            fs.writeFileSync(alFile, JSON.stringify(list, null, 2));
+            log(`${C.green}\u2705 Approved & permanently allowlisted${C.reset}`);
+          } catch (_) {}
+          decision = true;
+        }
+        _pendingSudoPassword = isSudo && decision ? answer.trim() : null;
         resolve(decision);
         if (!answer) rl.prompt();
       });
@@ -6982,6 +8041,33 @@ async function repl() {
       console.log(`  ${icon} ${tc}${m.msg.substring(0, 100)}${C.reset} ${C.dim}${time} from:${m.source}${C.reset}`);
     }
     console.log();
+  }
+
+  // ── Startup model availability check ─────────────────────────────────
+  // If the configured default routes through Ollama but Ollama is down or the
+  // model isn't pulled, print an error and auto-fall-back to the charm cloud
+  // model (glm-5.2:cloud) so the REPL never boots into a stuck state.
+  // "Direct cloud" = a known provider family (charm/openai/gemini/anthropic);
+  // ollama-proxied models like "kimi-k2.7-code:cloud" still need Ollama up.
+  const _isDirectCloudModel = (m) => {
+    const fam = String(m).split(':')[0].toLowerCase();
+    return CLOUD_FAMILIES.has(fam);
+  };
+  if (!_isDirectCloudModel(MODEL)) {
+    let ollamaUp = false, hasModel = false;
+    try {
+      const j = await (await fetch(OLLAMA_HOST + '/api/tags', { signal: AbortSignal.timeout(1200) })).json();
+      ollamaUp = true;
+      hasModel = (j.models || []).some(m => m.name === MODEL || m.name === MODEL.split(':')[0]);
+    } catch (_) { /* ollama unreachable */ }
+    if (!ollamaUp || !hasModel) {
+      console.log(`  ${C.error}${C.bold}✗ Ollama ${ollamaUp ? 'model "' + MODEL + '" not found' : 'unreachable (' + OLLAMA_HOST + ')'}${C.reset}`);
+      const charm = CLOUD_MODELS.find(m => m.family === 'charm');
+      if (charm) {
+        MODEL = charm.name;
+        console.log(`  ${C.yellow}↻ Default switched to charm cloud model ${C.bold}${MODEL}${C.reset}${C.yellow} — use /model to change.${C.reset}`);
+      }
+    }
   }
 
   // ── History & state ──────────────────────────────────────────────────
@@ -7076,6 +8162,223 @@ async function repl() {
       resolve(answer);
     });
   });
+
+// ── Crush-style popup: centered box on alternate screen. ←/→ or hotkeys
+  // move focus; Enter confirms; Esc cancels. Shows options like [y] [n] [c].
+  const _crushButtons = ({ accent, title, bodyLines, buttons, focus = 0 }) => new Promise((resolve) => {
+    const termCols = process.stdout.columns || 100;
+    const termRows = process.stdout.rows || 30;
+    let cols = Math.min(78, Math.max(44, termCols - 2));
+    if (cols + 2 > termCols) cols = Math.max(34, termCols - 2);
+    const PAD_L = 2;
+    const innerW = cols - 2;
+    const maxContentW = innerW - PAD_L;
+
+    let focusIdx = Math.max(0, Math.min(focus, buttons.length - 1));
+
+    const _vlen2 = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, '').length;
+    const _fit = (s, n) => {
+      if (n <= 0) return '';
+      if (_vlen2(s) <= n) return s;
+      let out = '', vis = 0, inEsc = false;
+      for (const ch of String(s)) {
+        if (inEsc) { out += ch; if (/[A-Za-z]/.test(ch)) inEsc = false; continue; }
+        if (ch === '\x1b') { inEsc = true; out += ch; continue; }
+        if (vis >= n - 1) break;
+        out += ch; vis++;
+      }
+      out = out.replace(/\x1b\[[0-9;]*m+$/, '');
+      return out + '…' + C.reset;
+    };
+
+    const buildFrame = () => {
+      const lines = [_fit(`${accent}${C.bold}${title}${C.reset}`, maxContentW), ''];
+      for (const l of bodyLines) lines.push(_fit(l, maxContentW));
+      lines.push('');
+      const opts = buttons.map((b, i) => {
+        const f = i === focusIdx;
+        const label = `[${b.hotkey}] ${b.label}`;
+        // Visible focus cursor (❯) + coloured bg on the focused button, and a
+        // matching 2-space indent on the others so the row stays aligned. The ❯
+        // marker makes the focus obvious even on terminals that don't render
+        // truecolor backgrounds (where the green bg alone would be invisible).
+        // _CRUSH.bg is re-emitted after every label so the focused button's bg
+        // colour doesn\'t bleed across the rest of the row.
+        return f
+          ? `${b.color || accent}${C.bold}\u276f ${label}${C.reset}${_CRUSH.bg}`
+          : `${_CRUSH.muted}  ${label}${C.reset}${_CRUSH.bg}`;
+      });
+      const brow = _fit(opts.join('  '), maxContentW);
+      const lead = Math.max(0, Math.floor((innerW - PAD_L - _vlen2(brow)) / 2));
+      lines.push(' '.repeat(lead) + brow);
+      const hint = _fit(`${_CRUSH.muted}←/→ focus · Enter confirm · Esc cancel${C.reset}`, maxContentW);
+      const lead2 = Math.max(0, Math.floor((innerW - PAD_L - _vlen2(hint)) / 2));
+      lines.push(' '.repeat(lead2) + hint);
+      lines.push('');
+
+      const panelH = lines.length + 2;
+      const topPad = Math.max(0, Math.floor((termRows - panelH) / 2));
+      const leftPad = Math.max(0, Math.floor((termCols - cols) / 2));
+      const leftSpaces = ' '.repeat(leftPad);
+      let frame = '';
+      frame += '\n'.repeat(topPad);
+      const top = accent + C.bold + '╭' + '─'.repeat(innerW) + '╮' + C.reset;
+      const bot = accent + C.bold + '╰' + '─'.repeat(innerW) + '╯' + C.reset;
+      frame += leftSpaces + top + '\n';
+      for (const text of lines) {
+        const t = _keepBg(text);
+        const padR = Math.max(0, innerW - PAD_L - _vlen2(t));
+        const row = accent + C.bold + '│' + C.reset + _CRUSH.bg + ' '.repeat(PAD_L) + t + _CRUSH.bg + ' '.repeat(padR) + _CRUSH.bg + C.reset + accent + C.bold + '│' + C.reset;
+        frame += leftSpaces + row + '\n';
+      }
+      frame += leftSpaces + bot + '\n';
+      return frame;
+    };
+
+    const render = () => {
+      process.stdout.write('\x1b[2J\x1b[H' + buildFrame());
+    };
+
+    // If stdout is not a real TTY, fall back to a plain inline prompt so the user isn't stuck.
+    if (!process.stdout.isTTY) {
+      rl.question(`${title} — ${buttons.map(b => `[${b.hotkey}] ${b.label}`).join('  ')} (Enter hotkey): `, (ans) => {
+        const hk = (ans || '').trim().toLowerCase();
+        const hit = buttons.find(b => b.hotkey.toLowerCase() === hk);
+        resolve(hit ? hit.value : null);
+      });
+      return;
+    }
+
+    process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l');
+    render();
+
+    const wasRaw = process.stdin.isTTY ? process.stdin.isRaw : false;
+    rl.pause();
+    readline.emitKeypressEvents(process.stdin);
+    try { process.stdin.setRawMode(true); } catch (_) {}
+    process.stdin.resume();
+    let done = false;
+    const finish = (val) => {
+      if (done) return; done = true;
+      process.stdin.removeListener('keypress', onKey);
+      try { process.stdin.setRawMode(wasRaw); } catch (_) {}
+      process.stdout.write('\x1b[?25h\x1b[?1049l');
+      try { process.stdin.pause(); } catch (_) {}
+      try { while (process.stdin.read() !== null) {} } catch (_) {}
+      rl.resume();
+      if (rl.line) { rl.line = ''; rl.cursor = 0; }
+      // Redraw the readline prompt so the user can see the cursor and type.
+      try { rl.prompt(true); } catch (_) {}
+      resolve(val);
+    };
+    const onKey = (str, key) => {
+      if (!key) return;
+      const name = key.name || '';
+      if (name === 'left') { focusIdx = (focusIdx - 1 + buttons.length) % buttons.length; render(); return; }
+      if (name === 'right' || name === 'tab') { focusIdx = (focusIdx + 1) % buttons.length; render(); return; }
+      if (name === 'escape') { finish(null); return; }
+      if (key.ctrl && name === 'c') { finish(null); return; }
+      // Enter confirms the currently-focused button (default focus = Resume),
+      // so the user can resume with Enter instead of being forced to hit 'y'.
+      if (name === 'return') { finish(buttons[focusIdx].value); return; }
+      // Hotkeys (y/n/c) still work as a quick confirm for any button.
+      const hk = (str || '').toLowerCase();
+      const hit = buttons.findIndex(b => b.hotkey && b.hotkey.toLowerCase() === hk);
+      if (hit >= 0) { finish(buttons[hit].value); return; }
+    };
+    process.stdin.on('keypress', onKey);
+  });
+
+  // ── Crush-style model menu: grouped list + filter + (optional) API key paste ──
+  // Mirrors crush's ModelDialog: a filterable list of models grouped by company
+  // (family), pick by number/name/substring, and an API-key paste step (masked,
+  // crush-style) when the chosen provider needs one. Ollama-served models skip
+  // the API step. `/model <name>` switches directly without the menu.
+  // Cloud providers need an API key pasted at first use; local Ollama families don't.
+  const MODEL_MENU_NEEDS_API = (fam) => CLOUD_FAMILIES.has(fam);
+  const modelMenu = async () => {
+    let models = [];
+    try {
+      const j = await (await fetch(OLLAMA_HOST + '/api/tags')).json();
+      models = (j.models || []).map(m => ({
+        name: m.name,
+        family: (m.details && m.details.family) || String(m.name).split(':')[0] || 'other',
+        size: (m.details && m.details.parameter_size) || null,
+      })).filter(m => m.name);
+    } catch (_) {}
+    // Merge cloud providers (charm/openai/gemini/anthropic/…) so the menu lists
+    // every provider in one place, like crush. Cloud models first, dedup by name.
+    const seen = new Set(models.map(m => m.name));
+    for (const c of CLOUD_MODELS) {
+      if (!seen.has(c.name)) { models.push(c); seen.add(c.name); }
+    }
+    if (!models.length || !models.find(m => m.name === MODEL)) {
+      models.unshift({ name: MODEL, family: String(MODEL).split(':')[0] || 'other', size: null });
+    }
+    // group by family (company) — cloud providers surface first
+    const groups = {}; const order = [];
+    for (const c of CLOUD_MODELS) if (!order.includes(c.family)) order.push(c.family);
+    for (const m of models) {
+      if (!groups[m.family]) { groups[m.family] = []; if (!order.includes(m.family)) order.push(m.family); }
+      groups[m.family].push(m);
+    }
+    let chosen = null;
+    while (!chosen) {
+      const bodyLines = [];
+      bodyLines.push(_CRUSH.muted + 'Filter by typing; pick a # or exact name. Current: ' + _CRUSH.text + modelLabel() + C.reset);
+      bodyLines.push('');
+      let idx = 1; const flat = []; let capped = false;
+      for (const fam of order) {
+        if (capped) break;
+        bodyLines.push(_CRUSH.green + fam + C.reset + ' ' + _CRUSH.muted + '(' + groups[fam].length + ')' + C.reset);
+        for (const m of groups[fam]) {
+          if (idx > 60) { capped = true; break; }
+          const cur = m.name === MODEL ? ' ' + _CRUSH.purple + '← current' + C.reset : '';
+          bodyLines.push('  ' + _CRUSH.purple + idx + C.reset + ' ' + _CRUSH.text + m.name + cur + C.reset + (m.size ? ' ' + _CRUSH.muted + m.size + C.reset : ''));
+          flat.push({ idx: idx++, name: m.name, family: m.family });
+        }
+      }
+      if (capped) bodyLines.push(_CRUSH.muted + '…(showing first 60; type a filter to narrow)' + C.reset);
+      const ans = (await _crushPanel({
+        accent: _CRUSH.purple,
+        title: '◈ SELECT MODEL',
+        bodyLines,
+        promptLabel: _CRUSH.bgPurple + _CRUSH.dark + C.bold + ' # / name / filter ' + C.reset + ' ',
+      })).trim();
+      if (!ans) return null; // cancelled (Esc / empty)
+      if (/^\d+$/.test(ans)) {
+        const n = parseInt(ans, 10);
+        chosen = flat.find(m => m.idx === n) || null;
+        if (!chosen) console.log(C.error + 'No model #' + n + C.reset);
+      } else {
+        const exact = flat.find(m => m.name === ans);
+        if (exact) chosen = exact;
+        else {
+          const filt = flat.filter(m => m.name.toLowerCase().includes(ans.toLowerCase()) || m.family.toLowerCase().includes(ans.toLowerCase()));
+          if (filt.length === 1) chosen = filt[0];
+          else if (filt.length > 1) { console.log(_CRUSH.muted + 'Multiple match:' + C.reset); filt.forEach(m => console.log('  ' + _CRUSH.purple + m.idx + C.reset + ' ' + _CRUSH.text + m.name + C.reset)); }
+          else console.log(C.error + 'No match for "' + ans + '"' + C.reset);
+        }
+      }
+    }
+    // API key paste (crush-style) only when the provider needs one
+    if (MODEL_MENU_NEEDS_API(chosen.family)) {
+      const key = (await _crushPanel({
+        accent: _CRUSH.purple,
+        title: '🔑 ' + chosen.family.toUpperCase() + ' API KEY',
+        bodyLines: [_CRUSH.text + 'Paste your ' + chosen.family + ' API key.' + C.reset, _CRUSH.muted + 'Stored locally for this provider.' + C.reset],
+        promptLabel: _CRUSH.bgPurple + _CRUSH.dark + C.bold + ' key ❯ ' + C.reset + ' ',
+        mask: true,
+      })).trim();
+      if (!key) { console.log(C.error + 'No API key entered — keeping ' + MODEL + C.reset); return null; }
+      try { process.env[chosen.family.toUpperCase().replace(/[^A-Z0-9]/g, '') + '_API_KEY'] = key; } catch (_) {}
+      console.log(C.success + '✓ API key stored for ' + chosen.family + C.reset);
+    }
+    MODEL = chosen.name;
+    console.log(C.success + '✓ Model switched to ' + C.bold + MODEL + C.reset);
+    return MODEL;
+  };
+
   const savedSession = loadSession();   // full cleaned history incl. leading system msg
   let history;
   if (savedSession && savedSession.length > 1) {
@@ -7083,7 +8386,7 @@ async function repl() {
     const userMsgs = savedSession.filter(m => m.role === 'user');
     const lastUser = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content.substring(0, 70) : '(none)';
     const realCount = savedSession.length - 1;   // exclude the leading system msg
-    const ans = (await _crushPanel({
+    const ans = (await _crushButtons({
       accent: _CRUSH.purple,
       title: '↻ RESUME SESSION',
       bodyLines: [
@@ -7091,16 +8394,19 @@ async function repl() {
         '',
         `${_CRUSH.muted}Messages saved:${C.reset}   ${_CRUSH.text}${realCount}${C.reset}`,
         `${_CRUSH.muted}Last user message:${C.reset} ${_CRUSH.text}"${lastUser}"${C.reset}`,
-        '',
-        `${_CRUSH.green}y${C.reset} = resume   ${_CRUSH.red}n${C.reset} / Enter = start fresh`,
       ],
-      promptLabel: `${_CRUSH.bgPurple}${_CRUSH.dark}${C.bold} y/N ${C.reset} `,
-    })).trim().toLowerCase();
-    if (ans === 'y' || ans === 'yes') {
+      buttons: [
+        { label: 'Resume', value: 'resume', hotkey: 'y', color: _CRUSH.bgGreen },
+        { label: 'Fresh',  value: 'fresh',  hotkey: 'n', color: _CRUSH.bgRed },
+        { label: 'Clear',  value: 'clear',  hotkey: 'c', color: _CRUSH.bgPurple },
+      ],
+      focus: 0,
+    })) || 'fresh';   // Esc = fresh
+    if (ans === 'resume') {
       // Trim to recent turns ONLY on resume, logged here (after the choice), and
       // orphan-safe: drop any leading `tool` messages in the slice.
-      if (realCount > 20) {
-        const slice = savedSession.slice(-8);
+      if (realCount > 100) {
+        const slice = savedSession.slice(-50);
         let k = 0;
         while (k < slice.length && slice[k].role === 'tool') k++;
         const kept = slice.slice(k);
@@ -7111,7 +8417,16 @@ async function repl() {
       }
       console.log(`  ${C.green}✓ Resumed session${C.reset} ${C.fgMuted}(${history.length - 1} msgs)${C.reset} ${C.dim}last: "${lastUser}"${C.reset}`);
       console.log(`  ${C.fgSubtle}Type /clear to start fresh${C.reset}`);
+      // Prime the agent: on resume, ASK if the user wants to continue the last
+      // project or start a new task instead of auto-continuing.
+      history.push({ role: 'system', content: 'Session resumed from disk. The user may or may not want to continue the previous task. When they send their first message (even a casual yo or hey), greet them BRIEFLY and ASK: would you like to resume the last project or start something new? Do NOT assume they want to continue where you left off. Wait for their direction.' });
+    } else if (ans === 'clear') {
+      try { fs.unlinkSync(SESSION_FILE); } catch (_) {}
+      _currentTopic = '';
+      history = [{ role: 'system', content: buildSystemPrompt() }];
+      console.log(`  ${C.yellow}\u2718 Cleared saved session + starting fresh.${C.reset}`);
     } else {
+      // 'fresh' (or null/Esc) — start fresh, keep saved session on disk.
       history = [{ role: 'system', content: buildSystemPrompt() }];
       console.log(`  ${C.dim}Starting fresh session (saved session kept on disk).${C.reset}`);
     }
@@ -7119,7 +8434,7 @@ async function repl() {
     history = [{ role: 'system', content: buildSystemPrompt() }];
   }
   let idleTimer = null;
-  let processing = false;
+  processing = false;  // reset module-level flag for this REPL session (hoisted out so agentLoop can read it)
   let _lastIdleReview = 0;
   let _idleReviewCount = 0;
   _messageQueue = [];  // Reset module-level queue for this REPL session
@@ -7267,6 +8582,36 @@ async function repl() {
       console.log(`  ${tag}  ${C.fgMuted}${svc.proto}://localhost:${svc.port}${C.reset}`);
     }
 
+    // 📁 File integrity — important files present vs missing (%)
+    const _fi = fileIntegrity();
+    const _fiBar = (() => { const bl = 20, f = Math.round(_fi.pct / 100 * bl); const c = _fi.pct >= 90 ? C.success : _fi.pct >= 60 ? C.mustard : C.error; return c + '█'.repeat(f) + C.fgSubtle + '░'.repeat(bl - f) + C.reset; })();
+    console.log(`${C.bold}${C.cyan}📁 Files${C.reset} ${C.dim}(${_fi.present}/${_fi.total} important)${C.reset}`);
+    console.log(`  ${_fiBar} ${_fi.pct}%${_fi.missing.length ? '  ' + C.error + 'missing: ' + _fi.missing.join(', ') + C.reset : '  ' + C.success + 'all present' + C.reset}`);
+    for (const f of _fi.missing) { if (!_smartMissedFiles.has(f)) { _smartMissedFiles.add(f); bumpSmart(-10, 'file-missing:' + f); } }
+    for (const f of [..._smartMissedFiles]) { if (!_fi.missing.includes(f)) { _smartMissedFiles.delete(f); bumpSmart(5, 'file-restored:' + f); } }
+    // 🧠 Idle recovery: when the CLI is idle (not actively working), smartness
+    //    drifts back toward the anchor/peak. He's not making mistakes, so he
+    //    recovers — auto-corrects back up. +3 per idle review (~2min) toward the
+    //    max of recentSmartnessAnchor() (from the perf logs) and this session's peak.
+    {
+      const _target = Math.max(recentSmartnessAnchor(), _sessionPerf.smartnessPeak);
+      if (_smartScore < _target) {
+        const _before = _smartScore;
+        _smartScore = Math.min(_smartScore + 3, _target);
+        _smartDelta = _smartScore - _before;
+        if (process.env.HAKSTER_DEBUG_AGENT === '1') log(C.dim + '[smart] idle recovery +' + _smartDelta + ' -> ' + _smartScore + '% (toward ' + _target + ')' + C.reset);
+      }
+    }
+    // 🧠 Smartness meter — where he's at this task
+    const _sLabel = _smartScore >= 80 ? 'Sharp' : _smartScore >= 66 ? 'Strong' : _smartScore >= 50 ? 'Steady' : _smartScore >= 33 ? 'Slipping' : 'Struggling';
+    const _sLabelCol = _smartScore >= 66 ? C.success : _smartScore >= 33 ? C.mustard : C.error;
+    // Flair: 💪 when he's strong/sharp, ⚠️ hazard when slipping, ☠️ when suffering.
+    const _sEmoji = _smartScore >= 66 ? '💪' : _smartScore >= 50 ? '🙂' : _smartScore >= 33 ? '⚠️' : '☠️';
+    console.log(`${C.bold}${C.cyan}🧠 Smartness${C.reset} ${C.dim}(this task)${C.reset}`);
+    console.log(`  ${smartBar()}  ${_sLabelCol}${C.bold}${_sLabel}${C.reset} ${_sEmoji}`);
+    console.log(`  ${autolearnBar()}  ${C.fgSubtle}Autolearn (session reward)${C.reset}`);
+    console.log(perfRow());
+    reviewTranscript(history, { verbose: false });  // 📝 on idle: review transcript + log the point map
     console.log(`${C.bgSubtle}${T.hashFill(50, C.fgMuted)}${C.reset}`);
     console.log(`${C.dim}✓ Auto-review #${reviewNum} complete. Next in ${IDLE_TIMEOUT_MS / 1000}s.${C.reset}\n`);
     startIdleTimer();
@@ -7411,6 +8756,7 @@ async function repl() {
 
     // Commands
     if (input === '/exit' || input === '/quit') {
+      savePerfHistory();
       shutdownMcp();
       console.log('bye ⚡');
       process.exit(0);
@@ -7423,6 +8769,7 @@ async function repl() {
       process.stdout.write(`\x1b[${Math.min(termH2, 3)}A`);
       console.clear();
       console.log(banner());
+      _currentTopic = '';
       history.length = 0;
       history.push({ role: 'system', content: buildSystemPrompt() });
       saveSession(history); // Clear saved session too
@@ -7430,8 +8777,158 @@ async function repl() {
       rl.prompt();
       return;
     }
+    // ── / (slash menu) — crush-style popout listing all commands. Pick by #/name/filter.
+    if (input === '/') {
+      (async () => {
+        const cmds = [
+          { cmd: '/model',    desc: 'Switch model (crush-style menu)' },
+          { cmd: '/repair',   desc: 'Self-repair — check + fix native modules, services' },
+          { cmd: '/review',   desc: 'Idle auto-review (services, health, smartness, files)' },
+          { cmd: '/clear',    desc: 'Clear session history + start fresh' },
+          { cmd: '/img',      desc: 'Image generation mode' },
+          { cmd: '/tools',    desc: 'List MCP tools + servers' },
+          { cmd: '/memory',   desc: 'Show memory state' },
+          { cmd: '/status',   desc: 'Session + system status' },
+          { cmd: '/models',   desc: 'Same as /model' },
+          { cmd: '/exit',     desc: 'Quit' },
+          { cmd: '/help',     desc: 'Show help' },
+        ];
+        const bodyLines = [];
+        bodyLines.push(_CRUSH.muted + 'Pick a command by number, type it, or filter:' + C.reset);
+        bodyLines.push('');
+        cmds.forEach((c, i) => {
+          bodyLines.push('  ' + _CRUSH.purple + (i + 1) + C.reset + ' ' + _CRUSH.text + C.bold + c.cmd + C.reset + ' ' + _CRUSH.muted + c.desc + C.reset);
+        });
+        const ans = (await _crushPanel({
+          accent: _CRUSH.purple,
+          title: '\u26a1 SLASH COMMANDS',
+          bodyLines,
+          promptLabel: _CRUSH.bgPurple + _CRUSH.dark + C.bold + ' # / name / filter ' + C.reset + ' ',
+        })).trim();
+        if (!ans) { rl.prompt(); return; }
+        let chosen = null;
+        if (/^\d+$/.test(ans)) { const n = parseInt(ans, 10); if (n >= 1 && n <= cmds.length) chosen = cmds[n - 1].cmd; }
+        else if (ans.startsWith('/')) chosen = ans;
+        else { const m = cmds.filter(c => c.cmd.includes(ans) || c.desc.toLowerCase().includes(ans.toLowerCase())); if (m.length === 1) chosen = m[0].cmd; else if (m.length > 1) { console.log(_CRUSH.muted + 'Multiple match:' + C.reset); m.forEach(c => console.log('  ' + _CRUSH.text + c.cmd + C.reset)); } }
+        if (chosen) { handleInput(chosen); } else { console.log(C.error + 'No match: ' + ans + C.reset); rl.prompt(); }
+      })();
+      return;
+    }
+
     if (input === '/review' || input === '/health') {
       runIdleAutoReview();
+      return;
+    }
+    // ── /points — point system diagram box (tiers + deltas + current session) ──
+    if (input === '/points') {
+      (async () => {
+        const _lbl = _smartScore >= 80 ? 'Sharp' : _smartScore >= 66 ? 'Strong' : _smartScore >= 50 ? 'Steady' : _smartScore >= 33 ? 'Slipping' : 'Struggling';
+        const _emoji = _smartScore >= 66 ? '\ud83d\ud4aa' : _smartScore >= 50 ? '\ud83d\ude42' : _smartScore >= 33 ? '\u26a0\ufe0f' : '\u2620\ufe0f';
+        const bodyLines = [
+          _CRUSH.green + '\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 80-100% Sharp ' + '\ud83d\ud4aa' + C.reset,
+          _CRUSH.text + '\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591\u2591 66-79%  Strong ' + '\ud83d\ud4aa' + C.reset,
+          _CRUSH.muted + '\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591\u2591\u2591 50-65%  Steady ' + '\ud83d\ude42' + C.reset,
+          _CRUSH.mustard + '\u2588\u2588\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 33-49%  Slipping ' + '\u26a0\ufe0f' + C.reset,
+          _CRUSH.red + '\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 0-32%   Struggling ' + '\u2620\ufe0f' + C.reset,
+          '',
+          _CRUSH.green + '+ POINTS (earned)' + C.reset,
+          '  +5  successful command / HTTP 200',
+          '  +5  small edit (any write/patch)',
+          '  +8  meaningful doc/data (400+ chars)',
+          '  +10 big data/doc (2000+ chars)',
+          '  +10 clean finish (final answer)',
+          '  +5  file restored',
+          '',
+          _CRUSH.red + '- POINTS (penalties, by 5s)' + C.reset,
+          '  -5  failed command',
+          '  -5  error signature (EADDRINUSE / ERR_DLOPEN)',
+          '  -5  empty retry (stuck-loop)',
+          '  -5  redundant modify (1st trip)',
+          '  -10 loop detected (read-only repeat)',
+          '  -10 filesystem wandering',
+          '  -10 missing important file',
+          '  -10 redundant modify (final trip)',
+          '  -5/-10/-15 diagnosis timeout (escalating)',
+          '  -10 rm important file (.md/.env/.js)',
+          '',
+          _CRUSH.purple + 'THIS SESSION' + C.reset,
+          '  Smartness: ' + _smartScore + '% ' + _lbl + ' ' + _emoji,
+          '  Points:    ' + _sessionPerf.points,
+          '  Rounds:    ' + _sessionPerf.roundsUsed + '/' + _sessionPerf.maxRounds,
+          '  W/L:       ' + _sessionPerf.successes + '/' + _sessionPerf.failures,
+        ];
+        await _crushPanel({ accent: _CRUSH.purple, title: '\ud83d\udcca POINT SYSTEM', bodyLines, promptLabel: _CRUSH.bgPurple + _CRUSH.dark + C.bold + ' Enter to close ' + C.reset + ' ' });
+        rl.prompt();
+      })();
+      return;
+    }
+
+    if (input === '/repair') {
+      console.log(`\n${C.bold}${C.cyan}\ud83d\udd27 Self-Repair${C.reset}\n`);
+      const checks = [
+        { name: 'better-sqlite3', test: () => { require('better-sqlite3'); }, fix: () => { execSync('npm rebuild better-sqlite3 --quiet', { stdio: 'inherit', timeout: 120000, cwd: SERVER_ROOT }); } },
+        { name: 'sharp', test: () => { require('sharp'); }, fix: () => { execSync('npm rebuild sharp --quiet', { stdio: 'inherit', timeout: 120000, cwd: HAKSTER_ROOT }); } },
+      ];
+      for (const c of checks) {
+        try { c.test(); console.log(`  ${C.success}\u2705 ${c.name}${C.reset} loads OK`); }
+        catch (e) {
+          console.log(`  ${C.error}\u274c ${c.name}${C.reset} broken: ${e.message.slice(0, 80)}`);
+          console.log(`  ${C.mustard}  repairing...${C.reset}`);
+          try { c.fix(); console.log(`  ${C.success}  \u2705 ${c.name} rebuilt${C.reset}`); }
+          catch (e2) { console.log(`  ${C.error}  \u274c repair failed: ${e2.message.slice(0, 80)}${C.reset}`); }
+        }
+      }
+      try {
+        const list = JSON.parse(execSync('pm2 jlist', { encoding: 'utf-8', timeout: 10000 }) || '[]');
+        for (const sv of list) { const st = sv.pm2_env && sv.pm2_env.status; console.log(`  ${st === 'online' ? C.success + '\u2705' : C.error + '\u274c'} ${sv.name}${C.reset} ${st || '?'}`); }
+      } catch (_) { console.log(`  ${C.fgMuted}(pm2 check skipped)${C.reset}`); }
+      let disk = '?', mem = '?';
+      try { disk = execSync("df -P / | tail -1 | awk '{print $5}'", { encoding: 'utf-8', timeout: 5000 }).trim(); } catch (_) {}
+      try { mem = execSync("free | awk '/Mem:/ {printf \"%d\", \$3/\$2*100}'", { encoding: 'utf-8', timeout: 5000 }).trim(); } catch (_) {}
+      console.log(`  ${C.fgMuted}disk ${disk} | mem ${mem}%${C.reset}`);
+      console.log(`\n${C.fgSubtle}Repair complete.${C.reset}\n`);
+      rl.prompt();
+      return;
+    }
+    // ── /model — crush-style model menu (grouped list + filter + API paste) ──
+    if (input === '/model' || input === '/models') {
+      (async () => { try { await modelMenu(); } catch (e) { console.log(C.error + 'model menu: ' + e.message + C.reset); } rl.prompt(); })();
+      return;
+    }
+    if (input.startsWith('/model ')) {
+      const m = input.substring(7).trim();
+      if (m) { MODEL = m; console.log(C.success + '✓ Model switched to ' + C.bold + MODEL + C.reset); }
+      rl.prompt();
+      return;
+    }
+    // ── /m — quick HEAVY-model switch (in TUI). `/m` lists the heavy tier; `/m 1-4` or `/m <frag>` switches instantly.
+    const HEAVY_MODELS = [
+      { name: 'kimi-k2.7-code:cloud', why: '1T, code-tuned — hard coding' },
+      { name: 'gpt-oss:120b-cloud',   why: '117B reasoner — hard general' },
+      { name: 'glm-5.2:cloud',        why: '756B — default/easy (also hp-1000)' },
+      { name: 'glm-5.1:cloud',        why: 'older GLM — fallback' },
+    ];
+    if (input === '/m' || input === '/heavy') {
+      console.log(`${C.bold}${C.cyan}⚡ Heavy models${C.reset} ${C.dim}(current: ${modelLabel()})${C.reset}`);
+      HEAVY_MODELS.forEach((m, i) => {
+        const isCur = m.name === MODEL || (m.name === 'glm-5.2:cloud' && /^hp-1000/i.test(MODEL));
+        console.log(`  ${C.primary}${i + 1}${C.reset} ${C.bold}${m.name}${C.reset} ${C.dim}${m.why}${C.reset}` + (isCur ? ` ${C.success}← current${C.reset}` : ''));
+      });
+      console.log(`${C.dim}Switch: /m <1-4> or /m <frag>  (e.g. /m 1, /m kimi, /m gpt)${C.reset}`);
+      rl.prompt();
+      return;
+    }
+    if (input.startsWith('/m ')) {
+      const arg = input.substring(3).trim();
+      let pick = null;
+      if (/^\d+$/.test(arg)) { pick = HEAVY_MODELS[parseInt(arg, 10) - 1] || null; }
+      else if (arg) {
+        const filt = HEAVY_MODELS.filter(m => m.name.toLowerCase().includes(arg.toLowerCase()) || arg.toLowerCase().includes(m.name.split(':')[0].toLowerCase()));
+        if (filt.length === 1) pick = filt[0];
+      }
+      if (pick) { MODEL = pick.name; console.log(`${C.success}✓ Switched to ${C.bold}${MODEL}${C.reset} ${C.dim}(${pick.why})${C.reset}`); }
+      else console.log(`${C.error}No heavy model match for "${arg}". Use /m to list.${C.reset}`);
+      rl.prompt();
       return;
     }
     // ── /img — Image generation input bar ──
@@ -7683,6 +9180,7 @@ async function repl() {
       return;
     }
     processing = true;
+    _currentTopic = input.substring(0, 50);
     _statusFn(`${T.sparkle} Processing...`);
     startSpinner('Processing');
     (async () => {
@@ -7706,6 +9204,7 @@ async function repl() {
       process.stdout.write('\r' + ' '.repeat(80) + '\r');  // clear status bar
       startIdleTimer();
       saveSession(history); // Persist conversation for next session
+      reviewTranscript(history, { verbose: true });  // 📝 review transcript + log where/when points came from after every session
       // Process queued messages — but skip if in stuck-loop cooldown
       if (_stuckCooldown > 0 && _messageQueue.length > 0) {
         // Drain up to _stuckCooldown messages from queue to prevent re-looping
@@ -7733,6 +9232,8 @@ async function repl() {
       fs.writeFileSync(HISTORY_FILE, hist.join('\n'), 'utf-8');
     } catch (_) {}
     saveSession(history);
+    savePerfHistory();
+    reviewTranscript(history);  // 📝 final transcript review on exit
     shutdownMcp();
     console.log('bye ⚡');
     process.exit(0);

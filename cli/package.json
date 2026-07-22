@@ -7,6 +7,15 @@
     "hakster": "./index.js",
     "haksterai": "./index.js"
   },
+  "files": [
+    "index.js",
+    "logo.js",
+    "memory.js",
+    "providers.js",
+    "tools.js",
+    "ui.js",
+    "ui.mjs"
+  ],
   "scripts": {
     "start": "node index.js",
     "build:ui": "cd ui && node build.mjs"

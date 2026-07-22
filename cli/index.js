@@ -42,7 +42,16 @@ const ui = require('./ui');
 const C = providers.C;
 
 // ── Auto-learn module (non-blocking) ─────────────────────────────────────
-const autolearn = require('../server/src/agent/autolearn');
+// Reaches into the monorepo's server/ package for the shared autolearn engine.
+// That path only exists in a git checkout — an `npm install -g hakster-cli`
+// install has no server/ sibling, so this must never throw at require() time
+// or it takes the entire CLI down before a single command can run.
+let autolearn;
+try {
+  autolearn = require('../server/src/agent/autolearn');
+} catch (_) {
+  autolearn = { autoInit() { return ''; } };
+}
 
 // Show intro on every launch (skip for TUI mode — Ink manages the screen)
 if (!process.argv.includes('ui')) {

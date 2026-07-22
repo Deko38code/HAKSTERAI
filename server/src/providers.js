@@ -1097,6 +1097,7 @@ async function listModels(provider) {
 
     if (cfg.type === 'nous') {
       return [
+        { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', thinking: true },
         { id: 'nousresearch/hermes-4-70b', name: 'Hermes 4 70B' },
         { id: '~anthropic/claude-fable-latest', name: 'Claude Fable Latest' },
         { id: 'anthropic/claude-fable-latest', name: 'Claude Fable Latest' },
@@ -1643,7 +1644,18 @@ const KNOWN_PROJECTS = [
 
 // ── Dynamic system prompt builder (replaces static AGENT_SYSTEM_PROMPT) ──
 // Injects AGENTS.md steering + autolearned lessons + MEMORY.md + project map
-function buildAgentSystemPrompt(cwd, contextTags) {
+const _sysPromptCache = new Map(); // cwd -> { prompt, ts }
+const SYS_PROMPT_CACHE_TTL = 60000; // 60s; prompts are expensive to rebuild
+
+function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
+  const { lowToken = false } = opts;
+  const cacheKey = `${cwd}::${lowToken}`;
+  const now = Date.now();
+  const cached = _sysPromptCache.get(cacheKey);
+  if (cached && (now - cached.ts) < SYS_PROMPT_CACHE_TTL) {
+    return cached.prompt;
+  }
+
   let prompt = AGENT_SYSTEM_PROMPT_BASE;
 
   // Inject a compact, refreshed project map with file:line anchors.
@@ -1677,15 +1689,18 @@ function buildAgentSystemPrompt(cwd, contextTags) {
       { path: 'docs/agents/codex-cli-secrets.md', label: 'CODEX CLI SECRETS (internal prompts, memory, permissions)' },
       { path: 'docs/agent/gap-analysis-hermes-codex.md', label: 'HAKSTERAI vs CODEX GAP ANALYSIS' },
     ];
-    const PER_FILE_CAP = 16000; // chars per doc — keeps total under ~48K
-    for (const doc of CODEX_DOCS) {
-      const docPath = path3.join(haksterRoot, doc.path);
-      if (fs3.existsSync(docPath)) {
-        let content = fs3.readFileSync(docPath, 'utf8').trim();
-        if (content.length > PER_FILE_CAP) {
-          content = content.slice(0, PER_FILE_CAP) + '\n...[truncated, see ' + doc.path + ' for full doc]';
+    // Low-token mode: skip heavy reference docs entirely (~12K tokens otherwise).
+    if (!lowToken) {
+      const PER_FILE_CAP = 8000; // cap at 8K each (~6K tokens total)
+      for (const doc of CODEX_DOCS) {
+        const docPath = path3.join(haksterRoot, doc.path);
+        if (fs3.existsSync(docPath)) {
+          let content = fs3.readFileSync(docPath, 'utf8').trim();
+          if (content.length > PER_FILE_CAP) {
+            content = content.slice(0, PER_FILE_CAP) + '\n...[truncated, see ' + doc.path + ' for full doc]';
+          }
+          prompt += `\n\n═══ ${doc.label} ═══\n${content}\n═══ END ${doc.label} ═══`;
         }
-        prompt += `\n\n═══ ${doc.label} ═══\n${content}\n═══ END ${doc.label} ═══`;
       }
     }
   } catch (e) { /* codex docs injection is best-effort */ }
@@ -1716,7 +1731,8 @@ function buildAgentSystemPrompt(cwd, contextTags) {
   try {
     const lessons = injectLearnedLessons(cwd || process.cwd(), contextTags || []);
     if (lessons) {
-      prompt += `\n\n═══ LEARNED LESSONS (auto-memory) ═══\n${lessons}\n═══ END LESSONS ═══`;
+      const cappedLessons = lowToken && lessons.length > 1500 ? lessons.slice(0, 1500) + '\n...(learned lessons trimmed)' : lessons;
+      prompt += `\n\n═══ LEARNED LESSONS (auto-memory) ═══\n${cappedLessons}\n═══ END LESSONS ═══`;
     }
   } catch (e) { /* lessons injection is best-effort */ }
 
@@ -1725,7 +1741,7 @@ function buildAgentSystemPrompt(cwd, contextTags) {
   // visible to the agent and it appears to "forget" everything across sessions.
   try {
     const { getMemoryContext } = require('./memory');
-    const memCtx = getMemoryContext(null, { maxMemories: 20, maxChars: 4000 });
+    const memCtx = getMemoryContext(null, { maxMemories: lowToken ? 5 : 20, maxChars: lowToken ? 1000 : 4000 });
     if (memCtx) {
       prompt += `\n\n${memCtx}`;
     }
@@ -1750,6 +1766,7 @@ You operate in a 6-phase loop: THINK → PLAN → ACT → OBSERVE → REFLECT �
 The server tracks these phases and will inject [REFLECT] and [CONSOLIDATE] system messages when needed.
 ═══ END PHASES ═══`;
 
+  _sysPromptCache.set(cacheKey, { prompt, ts: Date.now() });
   return prompt;
 }
 

@@ -4,6 +4,7 @@ import Layout from '../layouts/Layout.astro';
 <link rel="stylesheet" href="/css/xterm.css" />
 <script is:inline src="/js/xterm.js"></script>
 <script is:inline src="/js/addon-fit.js"></script>
+<script is:inline src="https://telegram.org/js/telegram-web-app.js"></script>
 
 <Layout title="haksterAi — Chat">
   <section id="hacker-chat" class="h-dvh min-h-0 flex flex-row bg-[#141414] text-white overflow-hidden pt-[64px]">
@@ -104,6 +105,10 @@ import Layout from '../layouts/Layout.astro';
           <svg class="h-3.5 w-3.5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
           Sign in with Google
         </button>
+        <a href="https://t.me/Haksterbotbot" target="_blank" rel="noopener" class="w-full flex items-center justify-center gap-2 rounded-lg border border-[#229ED9]/30 bg-[#229ED9]/10 px-3 py-2 text-xs text-[#67c1eb] hover:bg-[#229ED9]/20 hover:border-[#229ED9]/50 transition mb-2">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.62 7.63c-.12.55-.44.68-.9.42l-2.48-1.83-1.2 1.15c-.13.13-.24.24-.5.24l.18-2.54 4.63-4.18c.2-.18-.04-.28-.32-.1l-5.72 3.6-2.46-.77c-.54-.17-.55-.54.11-.8l9.62-3.71c.45-.16.84.1.66.89z"/></svg>
+          Chat on Telegram
+        </a>
         <div id="sidebar-google-badge" class="hidden items-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-2 py-1.5 mb-2">
           <img id="sidebar-google-avatar" class="h-4 w-4 rounded-full" alt="" />
           <span id="sidebar-google-name" class="text-xs text-white/70 truncate">—</span>
@@ -484,6 +489,15 @@ import Layout from '../layouts/Layout.astro';
     .send-status-dot { width: 7px; height: 7px; border-radius: 9999px; background: #a78bfa; }
     .send-status.spinning .send-status-dot { animation: pulseDot 1.2s ease-in-out infinite; }
     @keyframes pulseDot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.35); } }
+    /* Codex-CLI-style pulsing color status text — the label itself breathes through
+       a small color cycle while work is in progress, instead of staying a flat purple. */
+    .send-status.spinning .send-status-text { animation: statusColorPulse 2.4s ease-in-out infinite; }
+    @keyframes statusColorPulse {
+      0%   { color: #a78bfa; }
+      35%  { color: #f0abfc; }
+      65%  { color: #7dd3fc; }
+      100% { color: #a78bfa; }
+    }
     .chat-fullscreen-btn {
       position: absolute;
       top: 0.75rem;
@@ -784,6 +798,40 @@ import Layout from '../layouts/Layout.astro';
       0% { transform: translateX(-100%); }
       100% { transform: translateX(100%); }
     }
+    /* Shimmer-text thinking indicator — the label itself sweeps with a moving
+       highlight (same idea as Claude/ChatGPT's "Thinking…" text), not just a spinner. */
+    .thinking-inline.streaming .thinking-label,
+    .agent-loop-inline:not(.done) .agent-loop-text {
+      background: linear-gradient(90deg,
+        rgba(148,163,184,0.55) 0%, rgba(148,163,184,0.55) 35%,
+        rgba(255,255,255,0.98) 50%,
+        rgba(148,163,184,0.55) 65%, rgba(148,163,184,0.55) 100%);
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+      animation: textShimmer 1.6s ease-in-out infinite;
+    }
+    @keyframes textShimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    /* Softer 3-dot "typing" indicator, shown before any tokens/tool output have
+       arrived yet — the very first moment of a turn, before there's anything else
+       to show. */
+    .typing-dots { display: inline-flex; align-items: center; gap: 0.22rem; }
+    .typing-dots span {
+      width: 0.32rem; height: 0.32rem; border-radius: 999px;
+      background: rgba(165,243,252,0.85);
+      animation: typingBounce 1.1s ease-in-out infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes typingBounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+      30% { transform: translateY(-0.15rem); opacity: 1; }
+    }
     .thinking-header {
       display: flex;
       align-items: center;
@@ -864,20 +912,35 @@ import Layout from '../layouts/Layout.astro';
       gap: 0.5rem;
     }
     .agent-loop-inline.done { color: rgba(187,247,208,0.86); border-color: rgba(34,197,94,0.24); }
+    /* Rich "turning head" spinner — a conic-gradient halo that sweeps around a dark
+       core, plus a soft glow, instead of the old flat two-tone ring. */
     .agent-loop-dot {
-      width: 0.65rem;
-      height: 0.65rem;
+      width: 0.85rem;
+      height: 0.85rem;
       border-radius: 999px;
-      border: 2px solid rgba(34,211,238,0.28);
-      border-top-color: rgba(34,211,238,0.95);
-      animation: spin 0.7s linear infinite;
       flex: none;
+      position: relative;
+      background: conic-gradient(from 0deg,
+        rgba(34,211,238,0) 0deg,
+        rgba(34,211,238,0.35) 90deg,
+        rgba(165,243,252,1) 260deg,
+        rgba(34,211,238,0) 360deg);
+      animation: spin 0.9s linear infinite;
+      filter: drop-shadow(0 0 3px rgba(34,211,238,0.65));
+    }
+    .agent-loop-dot::after {
+      content: '';
+      position: absolute;
+      inset: 2px;
+      border-radius: 999px;
+      background: rgba(8,15,26,0.92);
     }
     .agent-loop-inline.done .agent-loop-dot {
       animation: none;
-      border-color: rgba(34,197,94,0.65);
-      background: rgba(34,197,94,0.8);
+      filter: drop-shadow(0 0 3px rgba(34,197,94,0.6));
+      background: rgba(34,197,94,0.85);
     }
+    .agent-loop-inline.done .agent-loop-dot::after { content: none; }
     .agent-loop-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     /* Tool work feed — visible inline list of file/tool operations during agent run */
     .tool-work-feed {
@@ -917,6 +980,31 @@ import Layout from '../layouts/Layout.astro';
     .tool-work-status.running { background: rgba(251,191,36,0.15); color: #fbbf24; }
     .tool-work-status.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
     .tool-work-status.error { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .tool-work-status.running .tool-work-spin { display: inline-block; animation: toolSpin 0.8s linear infinite; }
+    @keyframes toolSpin { to { transform: rotate(360deg); } }
+    /* Claude/Copilot-style expandable tool result — collapsed by default, click the
+       card to reveal what the tool actually returned (image preview, scrape text, etc). */
+    .tool-work-item.has-detail { cursor: pointer; }
+    .tool-work-item.has-detail:hover { border-color: rgba(99,102,241,0.4); background: rgba(15,23,42,0.75); }
+    .tool-work-chevron { flex: none; font-size: 0.65rem; color: rgba(148,163,184,0.6); transition: transform 0.15s ease; margin-left: 0.15rem; }
+    .tool-work-item.expanded .tool-work-chevron { transform: rotate(90deg); }
+    .tool-work-detail {
+      display: none;
+      margin: -0.1rem 0 0.35rem;
+      padding: 0.5rem 0.6rem;
+      border-radius: 0.4rem;
+      background: rgba(2,6,23,0.6);
+      border: 1px solid rgba(99,102,241,0.14);
+      font-size: 0.7rem;
+      line-height: 1.5;
+      color: rgba(203,213,225,0.85);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .tool-work-item.expanded + .tool-work-detail { display: block; }
+    .tool-work-detail img { max-width: 100%; max-height: 220px; border-radius: 0.4rem; margin-top: 0.3rem; display: block; }
     .msg-image { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); }
     .msg-script { background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.18); }
     .msg-script .tui-code-block { border-color: rgba(16,185,129,0.25); background: rgba(2,1,8,0.95); }
@@ -2199,34 +2287,29 @@ import Layout from '../layouts/Layout.astro';
     // Google logins don't see each other's chats. Falls back to 'shared'
     // if no Google token is present (legacy behavior).
     function _userNamespace(): string {
+      // IMPORTANT: every branch here must resolve to the same 'u<user.id>' key for
+      // the same account, or a user's conversation history "disappears" the moment
+      // the resolution path changes between page loads (e.g. right after the OAuth
+      // redirect vs. every load after). Real user id, in the same 'u<id>' shape,
+      // takes priority in every branch — never fall back to hashing the API key,
+      // since that produced a different, permanently orphaned namespace.
+      // 1) Cached user data from a previous login — the common case on every load
+      //    after the first, since checkGoogleCallback() writes this on login.
       try {
-        const token = localStorage.getItem('hakster_google_token');
-        if (token) {
-          // Extract user ID from the token (it's the API key — use a hash of it)
-          // to keep it short and stable per-user
-          let hash = 0;
-          for (let i = 0; i < token.length; i++) {
-            hash = ((hash << 5) - hash) + token.charCodeAt(i);
-            hash |= 0;
-          }
-          return 'u' + Math.abs(hash).toString(36);
+        const userData = localStorage.getItem('hakster_user_data');
+        if (userData) {
+          const parsed = JSON.parse(userData);
+          if (parsed.id) return 'u' + parsed.id;
         }
       } catch {}
-      // Try to get user ID from the Google auth data stored on login
+      // 2) Fresh OAuth redirect — google_auth is only present on this exact page load,
+      //    before checkGoogleCallback() has had a chance to cache hakster_user_data yet.
       try {
         const urlParams = new URLSearchParams(window.location.search);
         const authData = urlParams.get('google_auth');
         if (authData) {
           const parsed = JSON.parse(decodeURIComponent(authData));
           if (parsed.user?.id) return 'u' + parsed.user.id;
-        }
-      } catch {}
-      // Check if we have cached user data from login
-      try {
-        const userData = localStorage.getItem('hakster_user_data');
-        if (userData) {
-          const parsed = JSON.parse(userData);
-          if (parsed.id) return 'u' + parsed.id;
         }
       } catch {}
       return 'shared';
@@ -2608,10 +2691,12 @@ import Layout from '../layouts/Layout.astro';
       maybeScroll();
     }
 
-    // appendToolWork — shows file/tool operations as visible inline work items
-    function appendToolWork(bodyEl: HTMLElement | null, icon: string, toolName: string, argHint: string) {
+    // appendToolWork — shows tool calls as visible inline work items, Claude Code /
+    // Copilot style: a compact chip while running, a status badge on completion, and
+    // (when finishToolWork attaches a result) a click-to-expand detail panel.
+    function appendToolWork(bodyEl: HTMLElement | null, icon: string, toolName: string, argHint: string, toolCallId?: string) {
       const bubble = getAssistantBubbleRoot(bodyEl);
-      if (!bubble) return;
+      if (!bubble) return null;
       let workFeed = bubble.querySelector('.tool-work-feed') as HTMLElement | null;
       if (!workFeed) {
         workFeed = document.createElement('div');
@@ -2622,10 +2707,39 @@ import Layout from '../layouts/Layout.astro';
       }
       const item = document.createElement('div');
       item.className = 'tool-work-item';
+      if (toolCallId) item.dataset.toolCallId = toolCallId;
       const shortArg = argHint ? argHint.replace(/^\/home\/ghost\/haksterAi\//, '').replace(/^\/home\/ghost\//, '~/').slice(0, 70) : '';
-      item.innerHTML = `<span class="tool-work-icon">${icon}</span><span class="tool-work-name">${escapeHtml(toolName)}</span>${shortArg ? `<span class="tool-work-arg">${escapeHtml(shortArg)}</span>` : ''}`;
+      item.innerHTML = `<span class="tool-work-icon">${icon}</span><span class="tool-work-name">${escapeHtml(toolName)}</span>${shortArg ? `<span class="tool-work-arg">${escapeHtml(shortArg)}</span>` : ''}<span class="tool-work-status running"><span class="tool-work-spin">⟳</span></span>`;
+      const detail = document.createElement('div');
+      detail.className = 'tool-work-detail';
       workFeed.appendChild(item);
+      workFeed.appendChild(detail);
       maybeScroll();
+      return item;
+    }
+
+    // finishToolWork — called on tool_result: flips the running badge to ok/error and,
+    // if there's meaningful output, makes the card expandable to reveal it (images get
+    // an inline <img> preview, everything else gets a truncated text preview).
+    function finishToolWork(toolCallId: string, ok: boolean, resultText: string, imageUrl?: string) {
+      if (!toolCallId) return false;
+      const item = document.querySelector(`.tool-work-item[data-tool-call-id="${CSS.escape(toolCallId)}"]`) as HTMLElement | null;
+      if (!item) return false;
+      const status = item.querySelector('.tool-work-status') as HTMLElement | null;
+      if (status) { status.className = `tool-work-status ${ok ? 'ok' : 'error'}`; status.textContent = ok ? '✓' : '✗'; }
+      const detail = item.nextElementSibling as HTMLElement | null;
+      const trimmed = (resultText || '').trim();
+      if (imageUrl || trimmed) {
+        item.classList.add('has-detail');
+        item.innerHTML += `<span class="tool-work-chevron">▸</span>`;
+        if (detail) {
+          detail.innerHTML = (imageUrl ? `<img src="${imageUrl}" loading="lazy" alt="tool result" />` : '') +
+            (trimmed ? escapeHtml(trimmed.slice(0, 2000)) : '');
+        }
+        item.addEventListener('click', () => { item.classList.toggle('expanded'); });
+      }
+      maybeScroll();
+      return true;
     }
 
     function renderScriptLines(text: string): string {
@@ -2720,7 +2834,7 @@ import Layout from '../layouts/Layout.astro';
 
     // ===== Models & Capabilities =====
     const FALLBACK_MODELS = [
-      'gpt-oss:120b-cloud', 'glm-5.2:cloud', 'kimi-k2.7-code:cloud',
+      'deepseek/deepseek-v4-flash', 'gpt-oss:120b-cloud', 'glm-5.2:cloud', 'kimi-k2.7-code:cloud',
       'glm-5.1:cloud-ctx', 'glm-5.1:cloud', 'qwen3.5:latest',
       'hermes3:latest', 'hermes3-65k:latest', 'mistral:latest',
       'mistral-ctx:latest', 'mistral-hermes:latest', 'llama3.2:3b',
@@ -2733,9 +2847,10 @@ import Layout from '../layouts/Layout.astro';
       'openai/gpt-5.5', 'openai/gpt-5.4', 'openai/gpt-5.2',
       'google/gemini-2.5-pro', 'google/gemini-2.5-flash',
       'anthropic/claude-opus-4.8', 'anthropic/claude-sonnet-5',
-      'deepseek/deepseek-r1',
+      'deepseek/deepseek-r1', 'deepseek/deepseek-v4-flash',
     ];
     const NOUS_FALLBACK_MODELS = [
+      'deepseek/deepseek-v4-flash',
       'nousresearch/hermes-4-70b',
       '~anthropic/claude-fable-latest',
       'anthropic/claude-fable-latest',
@@ -2795,6 +2910,13 @@ import Layout from '../layouts/Layout.astro';
       return /cerebras/i.test(id);
     }
 
+    // Map model IDs to their correct Crush provider
+    function providerForModel(model: string): string {
+      if (/^openai\//.test(model) || /^google\//.test(model) || /^anthropic\//.test(model) || /^deepseek\/(?!deepseek-v4-flash$)/.test(model)) return 'codex';
+      if (/^deepseek\/deepseek-v4-flash$/.test(model) || /^nousresearch\//.test(model) || /^~?anthropic\//.test(model)) return 'nous';
+      return 'ollama';
+    }
+
     async function loadModels() {
       let models: string[] = [...FALLBACK_MODELS];
       // Use codex fallbacks when codex provider is active
@@ -2831,11 +2953,13 @@ import Layout from '../layouts/Layout.astro';
       const syncModel = async (model: string) => {
         if (!model || /cerebras/i.test(model)) return;
         currentModel = model; modelSelect.value = model; sidebarModelSelect.value = model;
+        const provider = providerForModel(model);
+        currentProvider = provider;
         try {
           await fetch(`${API}/api/crush/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider: currentProvider, model }),
+            body: JSON.stringify({ provider, model }),
           });
         } catch {}
       };
@@ -3238,16 +3362,13 @@ import Layout from '../layouts/Layout.astro';
                     webOutputs.set(event.tool_call_id || `${toolName}-${Date.now()}`, msg);
                     conv.messages.push(msg); saveConversation(conv); addMessageBubble(msg);
                   } else if (toolName && toolName !== 'exec_shell') {
-                    // Show file/tool operations as visible inline work items
-                    const isFileOp = ['read_file','write_file','edit_file','list_dir','apply_patch','patch_file','multi_patch','delete_file','move_file','copy_file','search_files','codebase_index'].includes(toolName);
+                    // Show every other tool call as a Claude Code/Copilot-style work
+                    // item chip (running → ✓/✗ badge, click to expand the result) —
+                    // covers file ops, generate_image, and anything else the agent calls.
                     const icon = toolName.startsWith('read') || toolName === 'list_dir' || toolName === 'search_files' ? '👁' :
                                  toolName.startsWith('write') || toolName === 'edit_file' || toolName.includes('patch') ? '✏️' :
-                                 toolName === 'exec_shell' ? '⚡' : '🔧';
-                    if (isFileOp) {
-                      appendToolWork(lastBubble, icon, toolName, argHint);
-                    } else {
-                      appendThinking(lastBubble, `${icon} ${toolLabel}`);
-                    }
+                                 toolName === 'generate_image' ? '🎨' : '🔧';
+                    appendToolWork(lastBubble, icon, toolName, argHint, event.tool_call_id || '');
                   }
                 } else if (event.type === 'tool_call') {
                   setAgentLoopStatus(lastBubble, 'Calling tool');
@@ -3310,14 +3431,18 @@ import Layout from '../layouts/Layout.astro';
                   }
                 } else if (event.type === 'tool_result' || event.type === 'tool_call_result') {
                   const resultToolName = event.tool_name || '';
-                  setAgentLoopStatus(lastBubble, resultToolName ? `✓ ${resultToolName}` : '✓ Tool done');
-                  setLiveStatus(resultToolName ? `✓ ${resultToolName} done` : '✓ Tool done');
+                  const okResult = !/^error/i.test(String(event.result || event.tool_result || '').trim());
+                  setAgentLoopStatus(lastBubble, resultToolName ? `${okResult ? '✓' : '✗'} ${resultToolName}` : (okResult ? '✓ Tool done' : '✗ Tool failed'));
+                  setLiveStatus(resultToolName ? `${okResult ? '✓' : '✗'} ${resultToolName} done` : '✓ Tool done');
                   const toolResult = event.result || event.tool_result || '';
                   const webMsg = webOutputs.get(event.tool_call_id || '');
                   if (webMsg) {
                     webMsg.content += `\n\n${toolResult.slice(0, 1200)}`;
                     saveConversation(conv);
                     renderMessages(conv.messages);
+                  } else if (finishToolWork(event.tool_call_id || '', okResult, toolResult)) {
+                    // Matched an inline work-item chip — result now lives in its
+                    // click-to-expand detail panel, nothing else to render.
                   } else if (!scriptOutputs.has(event.tool_call_id || '')) {
                     addMessageBubble({ role: 'assistant', content: `→ ${toolResult.slice(0, 500)}` });
                   }
@@ -3331,6 +3456,9 @@ import Layout from '../layouts/Layout.astro';
                   conv.messages.push(fileMsg); saveConversation(conv);
                   addMessageBubble(fileMsg);
                 } else if (event.type === 'image') {
+                  // Close out the generate_image work-item chip (if any) with a thumbnail,
+                  // then render the full-size image as its own prominent bubble.
+                  finishToolWork(event.tool_call_id || '', true, '', event.url);
                   const imgMsg: Message = { role: 'image', content: '', url: event.url, prompt: event.prompt || '' };
                   conv.messages.push(imgMsg); saveConversation(conv); addMessageBubble(imgMsg);
                 } else if (event.type === 'needs_confirmation') {
@@ -3739,8 +3867,38 @@ import Layout from '../layouts/Layout.astro';
       } catch {}
     });
 
+    // ── Telegram Mini App auto-login ──────────────────────────────────
+    // Google OAuth is blocked by Google itself inside Telegram's in-app
+    // browser (disallowed_useragent) — when this page is opened from a bot's
+    // menu button (@Haksterbotbot etc.), skip Google entirely and use
+    // Telegram's own signed initData instead. Reuses the same storage keys
+    // checkGoogleCallback() writes, so the rest of the app doesn't care which
+    // login path was used.
+    async function checkTelegramMiniApp() {
+      try {
+        const tg = (window as any).Telegram?.WebApp;
+        if (!tg || !tg.initData) return; // not opened inside Telegram
+        tg.ready();
+        if (localStorage.getItem('hakster_google_token')) return; // already signed in
+        const res = await fetch(`${API}/api/auth/telegram/webapp`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData: tg.initData }),
+        });
+        const data = await res.json();
+        if (!data.ok) { console.error('Telegram Mini App login failed:', data.error); return; }
+        googleToken = data.apiKey;
+        googleUser = data.user;
+        localStorage.setItem('hakster_google_token', googleToken!);
+        localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
+        localStorage.setItem('hakster_user_data', JSON.stringify({ id: data.user.id || '', name: data.user.displayName || data.user.username || 'User', email: data.user.email || '', picture: data.user.picture || '' }));
+        (window as any).haksterSessionTouch?.();
+        showGoogleUserBadge(data.user);
+      } catch (e) { console.error('Telegram Mini App login error:', e); }
+    }
+
     initGoogleButton(); // Check for existing Google session
     checkGoogleCallback(); // Handle OAuth redirect result
+    checkTelegramMiniApp(); // Handle Telegram Mini App auto-login (no-op outside Telegram)
 
     // ===== Init =====
     loadModels(); loadProjects(); loadCapabilities(); renderHistoryList();

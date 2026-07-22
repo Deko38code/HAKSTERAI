@@ -140,6 +140,7 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
 
 <link rel="stylesheet" href="/css/xterm.css" />
 <script is:inline src="/js/xterm.js"></script>
+<script is:inline src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/xterm-addon-webgl.min.js"></script>
 <script is:inline src="/js/addon-fit.js"></script>
 
 <script define:vars={{ termId: id, autoStart }}>
@@ -418,12 +419,13 @@ const { id = 'crush-terminal', autoStart = true, compact = false } = Astro.props
     const term = new Terminal({
       theme: currentTheme, fontFamily: 'JetBrains Mono, monospace', fontSize: parseInt(localStorage.getItem(TID + '-fontSize') || '15'), lineHeight: (parseInt(localStorage.getItem(TID + '-lineHeight') || '12')) / 10,
       fontWeight: localStorage.getItem(TID + '-fontWeight') === 'bold' ? 'bold' : 'normal',
-      letterSpacing: 0, cursorBlink: true, cursorStyle: 'bar', scrollback: 50000,
+      letterSpacing: 0, cursorBlink: true, cursorStyle: 'bar', scrollback: 10000,
       fastScrollModifier: 'alt', fastScrollSensitivity: 10, scrollSensitivity: 0,
       smoothScrollDuration: 0, convertEol: false, rightClickSelectsWord: true,
       macOptionIsMeta: true, allowProposedApi: true, allowTransparency: true, scrollbarWidth: 6, rendererType: 'dom',
     });
     const fit = new FitAddon.FitAddon();
+    try { if (window.WebglAddon) { const _wg = new WebglAddon(); term.loadAddon(_wg); } } catch (_) {} /* fall back to dom renderer */
     term.loadAddon(fit);
     term.open(termDiv);
 

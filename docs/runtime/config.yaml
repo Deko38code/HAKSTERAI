@@ -1,0 +1,85 @@
+# config.yaml — all configurable limits in one place
+# Env vars override; code defaults in parens. See docs/runtime/*.md for semantics.
+
+runtime:
+  max_turns: 120              # HAKSTER_AGENT_MAX_TURNS  (index.js:951)
+  low_token_max_turns: 30     # HAKSTER_LOW_TOKEN_MAX_TURNS (index.js:952)
+  think_budget_ms: 30000       # 🔲 per-turn THINK wall-clock (runtime.md)
+  empty_retry_limit: 3         # EMPTY_RETRY_LIMIT (index.js _emptyRetries)
+  api_retries: 2               # callOllama retry path (index.js:6064)
+
+smartness:
+  baseline: 62                # _smartScore start + per-task reset (index.js:975,5985)
+  clamp_min: 0
+  clamp_max: 100
+  # adaptive diagnosis threshold (index.js:7094)
+  diag_threshold_healthy: [5, 2, 1]
+  diag_threshold_slipping: [3, 1]   # smartScore 25–39
+  diag_threshold_struggling: [1]    # smartScore <25
+  stall_trend_drops: 3        # _smartTrendDrops → stall nudge (index.js:7002)
+  # per-call deltas (scoreToolCall, index.js:1010)
+  success_http200: +2
+  write_patch: +2
+  scrape: +3
+  install_rebuild: +1
+  failed: -4
+  error_signature: -3
+  rm_important: -10
+  clean_finish: +5
+  empty_retry: -3
+  loop_detected: -8
+  diag_timeout: [-5, -7, -8]
+  redundant_modify: [-6, -10]
+  fs_wandering: -7
+  file_missing: -8
+  file_restored: +5
+
+loop_guard:
+  readonly_repeat: 3         # guardrails track: same sig 3x in last 5 (index.js:7063)
+  redundant_modify_first: 2   # _modifyingSigs 2x → nudge (index.js:6994)
+  redundant_modify_final: 3   # 3x → force done
+  fs_wandering: 6             # calls same subtree (index.js:6652)
+  track_window: 5             # guardrails history window
+
+round_nudge:                  # hakster-guardrails.sh nudge (index.js:6097)
+  halfway_pct: 50
+  converge_pct: 80
+  ship_at_max: true
+
+memory:
+  consolidation_tool_count: 10   # autolearn (AGENTS.md)
+  skill_extract_repeats: 3
+  phantom_brain_cap: 3000        # loadPhantomBrain (index.js:621)
+  agents_md_cap: 0               # uncapped (injectAgentsMd)
+  memory_md_cap: 4000            # buildProjectMemoryBlock
+  budget_max: 131072             # context compaction cap (index.js:7179) — glm supports 1M; raise cautiously on RAM-tight boxes
+
+file_integrity:               # IMPORTANT_FILES (index.js:997)
+  check_on_idle_review: true
+  penalty_missing: -8
+  reward_restored: +5
+
+tui:
+  idle_review_interval_ms: 120000   # IDLE_TIMEOUT_MS
+  status_tick_hz: 1
+  bar_len: 20
+
+guardrails:
+  script: scripts/hakster-guardrails.sh   # HAKSTER_GUARDRAILS env override (index.js:1028)
+  track_timeout_ms: 3000
+  nudge_timeout_ms: 2000
+  reset_timeout_ms: 2000
+
+watchdog:
+  interval_ms: 15000          # WATCHDOG_INTERVAL_MS (system-watchdog.cjs)
+  fail_threshold: 3
+  disk_pct: 95
+  mem_pct: 95
+  restart_cooldown_ms: 60000
+  debug_report_on_startup: true   # debugReport() (system-watchdog.cjs:116)
+
+cinevault:
+  # NOTE: do NOT use `pm2 restart cinevault --update-env` (switches to nvm v24,
+  # mismatches the v22-compiled better-sqlite3 → crash-loop). Plain `pm2 restart` only.
+  remux_route: /api/remux      # ffmpeg -map 0:a:0 -codec copy (audio-preserving)
+  source_order_default: smashy-first   # reverted after demotion broke playback

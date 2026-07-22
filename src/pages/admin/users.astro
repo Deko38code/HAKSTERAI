@@ -3,6 +3,61 @@ import Layout from '../../layouts/Layout.astro';
 ---
 
 <Layout title="Admin — Users | haksterAi">
+  <style>
+    #pin-screen{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
+      background:#0a0a0f;}
+    .pin-box{text-align:center;padding:40px;border:1px solid #7c3aed;border-radius:16px;
+      background:#111118;box-shadow:0 0 40px #7c3aed33,inset 0 0 40px #7c3aed0a;}
+    .pin-logo-img{width:56px;height:56px;border-radius:12px;margin:0 auto 8px;display:block;
+      filter:drop-shadow(0 0 12px #7c3aed88);}
+    .pin-title{font-size:1.1rem;font-weight:700;color:#e2e8f0;letter-spacing:1px;margin-bottom:2px;}
+    .pin-sub{color:#94a3b8;font-size:.75rem;margin-bottom:26px;letter-spacing:1.5px;}
+    .pin-dots{display:flex;gap:10px;justify-content:center;margin-bottom:22px;}
+    .pin-dot{width:13px;height:13px;border-radius:50%;border:2px solid #7c3aed;transition:.08s;background:transparent;}
+    .pin-dot.filled{background:#a855f7;box-shadow:0 0 10px #a855f7;}
+    .pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:220px;}
+    .pin-btn{padding:16px;border:1px solid #1e1e2e;border-radius:8px;background:#0a0a0f;
+      color:#a855f7;font-family:'JetBrains Mono',monospace;font-size:1.1rem;cursor:pointer;
+      transition:.08s;}
+    .pin-btn:hover{background:#7c3aed22;box-shadow:0 0 15px #7c3aed44;}
+    .pin-btn:active{transform:scale(.95);}
+    .pin-error{color:#ef4444;font-size:.75rem;margin-top:12px;height:16px;}
+    .pin-change{margin-top:14px;font-size:.65rem;color:#64748b;text-decoration:underline;cursor:pointer;}
+  </style>
+
+  <div id="pin-screen">
+    <div class="pin-box">
+      <img src="/logo-192.png" alt="haksterAi" class="pin-logo-img" />
+      <div class="pin-title">HAKSTER ADMIN</div>
+      <div id="pin-sub" class="pin-sub">ENTER PIN TO ACCESS</div>
+      <div class="pin-dots">
+        <div class="pin-dot" id="pd0"></div>
+        <div class="pin-dot" id="pd1"></div>
+        <div class="pin-dot" id="pd2"></div>
+        <div class="pin-dot" id="pd3"></div>
+        <div class="pin-dot" id="pd4"></div>
+        <div class="pin-dot" id="pd5"></div>
+      </div>
+      <div class="pin-pad">
+        <button class="pin-btn" data-pin="1">1</button>
+        <button class="pin-btn" data-pin="2">2</button>
+        <button class="pin-btn" data-pin="3">3</button>
+        <button class="pin-btn" data-pin="4">4</button>
+        <button class="pin-btn" data-pin="5">5</button>
+        <button class="pin-btn" data-pin="6">6</button>
+        <button class="pin-btn" data-pin="7">7</button>
+        <button class="pin-btn" data-pin="8">8</button>
+        <button class="pin-btn" data-pin="9">9</button>
+        <button class="pin-btn" data-pin="clear" style="font-size:.75rem;">CLR</button>
+        <button class="pin-btn" data-pin="0">0</button>
+        <button class="pin-btn" data-pin="back" style="font-size:.75rem;">⌫</button>
+      </div>
+      <div class="pin-error" id="pin-error"></div>
+      <div class="pin-change" id="pin-change-link">change pin</div>
+    </div>
+  </div>
+
+  <div id="admin-content" style="display:none;">
   <div class="min-h-screen pt-[80px] pb-12 bg-[#0a0a0f] text-[#e2e8f0] px-4">
     <div class="max-w-7xl mx-auto">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -55,8 +110,112 @@ import Layout from '../../layouts/Layout.astro';
       </div>
     </div>
   </div>
+  </div>
 
   <script is:inline>
+    // ── PIN PAD (ported from phantom-ide.html, re-themed; no default/bypass PIN,
+    // no unauthenticated reset — first run makes you set your own 6-digit PIN) ──
+    const PIN_KEY = 'hakster_admin_pin';
+    const PIN_SESSION_KEY = 'hakster_admin_pin_session';
+    let correctPin = localStorage.getItem(PIN_KEY) || '';
+    let pinEntry = '';
+    let pinMode = correctPin ? 'unlock' : 'setup_new'; // setup_new|setup_confirm|unlock|change_old|change_new|change_confirm
+    let pendingNewPin = '';
+
+    function revealAdmin() {
+      document.getElementById('pin-screen').style.display = 'none';
+      document.getElementById('admin-content').style.display = '';
+      load();
+    }
+
+    function updateDots() {
+      for (let i = 0; i < 6; i++) {
+        const dot = document.getElementById('pd' + i);
+        if (dot) dot.classList.toggle('filled', i < pinEntry.length);
+      }
+    }
+
+    function setSub(text) {
+      const el = document.getElementById('pin-sub');
+      if (el) el.textContent = text;
+    }
+
+    function pinPress(val) {
+      const err = document.getElementById('pin-error');
+      if (err) err.textContent = '';
+      if (val === 'clear') { pinEntry = ''; updateDots(); return; }
+      if (val === 'back') { pinEntry = pinEntry.slice(0, -1); updateDots(); return; }
+      if (pinEntry.length >= 6) return;
+      pinEntry += val;
+      updateDots();
+      if (pinEntry.length === 6) setTimeout(checkPin, 120);
+    }
+
+    function checkPin() {
+      const err = document.getElementById('pin-error');
+      if (pinEntry.length < 6) return;
+      if (pinMode === 'setup_new' || pinMode === 'change_new') {
+        pendingNewPin = pinEntry;
+        pinMode = pinMode === 'setup_new' ? 'setup_confirm' : 'change_confirm';
+        setSub('CONFIRM YOUR PIN');
+        pinEntry = ''; updateDots();
+      } else if (pinMode === 'setup_confirm' || pinMode === 'change_confirm') {
+        if (pinEntry === pendingNewPin) {
+          correctPin = pinEntry;
+          localStorage.setItem(PIN_KEY, correctPin);
+          sessionStorage.setItem(PIN_SESSION_KEY, '1');
+          pinMode = 'unlock';
+          pinEntry = ''; updateDots();
+          revealAdmin();
+        } else {
+          if (err) err.textContent = '✕ PINs did not match. Try again.';
+          pinMode = pinMode === 'setup_confirm' ? 'setup_new' : 'change_new';
+          setSub(pinMode === 'setup_new' ? 'SET YOUR 6-DIGIT PIN' : 'ENTER NEW PIN');
+          pinEntry = ''; updateDots();
+        }
+      } else if (pinMode === 'change_old') {
+        if (pinEntry === correctPin) {
+          pinMode = 'change_new';
+          setSub('ENTER NEW PIN');
+          pinEntry = ''; updateDots();
+        } else {
+          if (err) err.textContent = '✕ Wrong current PIN.';
+          pinEntry = ''; updateDots();
+        }
+      } else { // unlock
+        if (pinEntry === correctPin) {
+          sessionStorage.setItem(PIN_SESSION_KEY, '1');
+          revealAdmin();
+        } else {
+          if (err) err.textContent = '✕ Wrong PIN. Try again.';
+          pinEntry = ''; updateDots();
+        }
+      }
+    }
+
+    document.querySelectorAll('.pin-btn').forEach(btn => {
+      btn.addEventListener('click', () => pinPress(btn.dataset.pin));
+    });
+
+    document.getElementById('pin-change-link')?.addEventListener('click', () => {
+      if (!correctPin) return;
+      pinEntry = ''; pinMode = 'change_old';
+      document.getElementById('pin-error').textContent = '';
+      setSub('ENTER CURRENT PIN');
+      updateDots();
+    });
+
+    document.addEventListener('keydown', e => {
+      if (document.getElementById('pin-screen').style.display === 'none') return;
+      if (e.key >= '0' && e.key <= '9') { e.preventDefault(); pinPress(e.key); }
+      else if (e.key === 'Backspace') { e.preventDefault(); pinPress('back'); }
+      else if (e.key === 'Escape' || e.key === 'Delete') { e.preventDefault(); pinPress('clear'); }
+    });
+
+    setSub(pinMode === 'setup_new' ? 'SET YOUR 6-DIGIT PIN' : 'ENTER PIN TO ACCESS');
+    if (correctPin && sessionStorage.getItem(PIN_SESSION_KEY) === '1') revealAdmin();
+
+    // ── existing admin/users logic below (unchanged) ──
     const API = location.port === '4321' ? 'http://localhost:3579' : '';
     let allUsers = [];
     let logsByUser = {};

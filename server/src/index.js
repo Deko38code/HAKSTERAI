@@ -17,7 +17,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER } = require('./providers');
+const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
 const stuckMonitor = require('./agent/stuckMonitor');
@@ -642,8 +642,8 @@ function getHaksterModelConfig() {
     return { provider: envProvider, model: envModel || PROVIDERS[envProvider].defaultModel };
   }
   const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');
-  let provider = 'nous';
-  let model = PROVIDERS.nous.defaultModel;
+  let provider = 'ollama';
+  let model = PROVIDERS.ollama.defaultModel;
   try {
     const cfg = JSON.parse(fs.readFileSync(haksterConfigPath, 'utf8'));
     if (cfg.provider && !isCerebrasValue(cfg.provider)) provider = cfg.provider;
@@ -778,6 +778,38 @@ async function openAICompatStreamFetch(baseURL, payload, signal) {
 
 // ── Health ────────────────────────────────────────────────────────
 // Existing health endpoint
+// ── /api/points — point system tiers + deltas + last session perf ──
+app.get('/api/points', (_req, res) => {
+  try {
+    let lastSession = null;
+    try { const pf = path.join(os.homedir(), '.hakster', 'perf_history.json'); const hist = JSON.parse(fs.readFileSync(pf, 'utf-8')) || []; lastSession = hist[hist.length - 1] || null; } catch (_) {}
+    res.json({
+      tiers: [
+        { range: '80-100%', label: 'Sharp', emoji: '\ud83d\ud4aa', color: '#22c55e' },
+        { range: '66-79%',  label: 'Strong', emoji: '\ud83d\ud4aa', color: '#e2e8f0' },
+        { range: '50-65%',  label: 'Steady', emoji: '\ud83d\ude42', color: '#94a3b8' },
+        { range: '33-49%',  label: 'Slipping', emoji: '\u26a0\ufe0f', color: '#facc15' },
+        { range: '0-32%',   label: 'Struggling', emoji: '\u2620\ufe0f', color: '#ef4444' },
+      ],
+      earned: [
+        { pts: '+5',  desc: 'successful command / HTTP 200' },
+        { pts: '+5',  desc: 'small edit (write/patch)' },
+        { pts: '+8',  desc: 'meaningful doc/data (400+ chars)' },
+        { pts: '+10', desc: 'big data/doc (2000+ chars)' },
+        { pts: '+10', desc: 'clean finish (final answer)' },
+      ],
+      lost: [
+        { pts: '-5',  desc: 'failed command / error signature' },
+        { pts: '-5',  desc: 'empty retry / redundant modify' },
+        { pts: '-10', desc: 'loop detected / filesystem wandering' },
+        { pts: '-10', desc: 'missing important file / rm important' },
+        { pts: '-15', desc: 'diagnosis timeout (escalating)' },
+      ],
+      lastSession,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0', providers: Object.keys(PROVIDERS) });
 });
@@ -1078,6 +1110,37 @@ function notifPeek(limit = 20) {
 
 function notifSize() { return _notifQueue.length; }
 function notifClear() { _notifQueue.length = 0; }
+
+// Broadcast a live agent-loop event (phase/tool/thinking/token/etc.) to every WS
+// client subscribed to 'agent'. Clients that never sent {action:'subscribe'} get
+// everything (back-compat); clients that did are filtered to their chosen types.
+function broadcastAgentEvent(event, meta = {}) {
+  try {
+    if (typeof wss === 'undefined' || !wss || !wss.clients) return;
+    const payload = JSON.stringify({ ...event, ...meta });
+    wss.clients.forEach(client => {
+      if (client.readyState !== 1) return;
+      if (client._subscribedTypes && !client._subscribedTypes.has('agent')) return;
+      try { client.send(payload); } catch {}
+    });
+  } catch {}
+}
+
+// Wrap res.write on an SSE response so every `data: {...}` event it sends is also
+// mirrored live to subscribed WS clients (e.g. the TUI dashboard). Heartbeat
+// comment lines (`:heartbeat`) are ignored. Call right after res.flushHeaders().
+function mirrorSSEToAgentSubscribers(res, meta = {}) {
+  const origWrite = res.write.bind(res);
+  res.write = (chunk, ...rest) => {
+    if (typeof chunk === 'string' && chunk.startsWith('data: ')) {
+      try {
+        const evt = JSON.parse(chunk.slice(6).trim());
+        broadcastAgentEvent(evt, meta);
+      } catch {}
+    }
+    return origWrite(chunk, ...rest);
+  };
+}
 
 // Push a notification (also broadcasts to WS clients if available)
 app.post('/api/notify', (req, res) => {
@@ -1549,6 +1612,27 @@ app.get('/api/integrations', (_req, res) => {
   });
 });
 
+// ── Firecrawl proxy for lightweight tool callers (e.g. the CLI's local
+//    execTools dispatcher in cli/tools.js) that don't run the full agent loop
+//    and so never see FIRECRAWL_API_KEY directly — this reuses the same
+//    rotating-key firecrawlScrape/firecrawlSearch already used by the agent.
+app.post('/api/agent/firecrawl', async (req, res) => {
+  const { action = 'scrape', url, query } = req.body || {};
+  try {
+    if (action === 'search') {
+      if (!query) return res.status(400).json({ ok: false, error: 'search requires query' });
+      const results = await firecrawlSearch(query, 5);
+      const text = results.map(r => `${r.title}\n${r.url}\n${r.snippet}`).join('\n\n') || 'No results';
+      return res.json({ ok: true, output: `🔥 Firecrawl search: ${query}\n\n${text}` });
+    }
+    if (!url) return res.status(400).json({ ok: false, error: 'scrape requires url' });
+    const markdown = await firecrawlScrape(url);
+    res.json({ ok: true, output: `🔥 Firecrawl scrape ${url}\n${String(markdown).slice(0, 12000)}` });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message || 'Firecrawl request failed' });
+  }
+});
+
 // ── Persistent Memory API ─────────────────────────────────────────
 app.get('/api/memory', (req, res) => {
   const { category, limit, offset } = req.query;
@@ -1605,6 +1689,47 @@ app.get('/api/agent/skills', (_req, res) => {
           if (seen.has(a)) continue; seen.add(a);
           const rel = path.relative(d, a).replace(/\.md$/, '');
           skills.push({ name: rel, path: a });
+        }
+      } catch (_) {}
+    }
+    res.json({ total: skills.length, skills });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Back-compat for older TUI/CLI tools that still call the pre-namespaced route.
+app.get('/api/agent-skills', (req, res) => {
+  try {
+    const path = require('path');
+    const { globSync } = require('glob');
+    const roots = Array.from(new Set([
+      path.join(process.env.HOME || '/home/ghost', '.hakster'),
+      '/home/ghost/.hakster',
+      path.join(process.cwd(), '.hakster'),
+      '/home/ghost/haksterAi/.hakster',
+      '/home/ghost/.agents',
+      '/home/ghost/skills',
+      '/home/ghost/.hermes/hermes-agent',
+      '/home/ghost/.hermes',
+      '/home/ghost/haksterAi/pentest-agents',
+    ]));
+    const dirs = [];
+    for (const r of roots) { dirs.push(path.join(r, 'skills')); if (r.endsWith('/skills')) dirs.push(r); }
+    const seen = new Set();
+    const skills = [];
+    const needle = String(req.query.name || '').toLowerCase();
+    for (const d of Array.from(new Set(dirs))) {
+      try {
+        for (const f of globSync(path.join(d, '**', '*.md'), { ignore: ['**/node_modules/**', '**/.git/**'] })) {
+          const abs = path.resolve(f);
+          if (seen.has(abs)) continue; seen.add(abs);
+          const name = path.relative(d, abs).replace(/\.md$/, '');
+          if (needle && !name.toLowerCase().includes(needle)) continue;
+          let description = '';
+          try {
+            const head = fs.readFileSync(abs, 'utf8').slice(0, 800);
+            description = (head.match(/^description:\s*(.+)$/m) || [])[1] || '';
+          } catch {}
+          skills.push({ name, path: abs, description });
         }
       } catch (_) {}
     }
@@ -1837,6 +1962,7 @@ app.post('/api/chat/stream', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
+  mirrorSSEToAgentSubscribers(res, { sessionId });
 
   // Inject client device context into system prompt
   const clientCtxStr = getClientContextString(sessionId);
@@ -2156,6 +2282,16 @@ app.post('/api/agent/run', async (req, res) => {
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'messages array required' });
   }
+  // ── Persist the incoming user turn (shared session history — lets a Telegram
+  //    bot conversation and a website chat tab pointed at the same sessionId
+  //    see each other's turns). Deliberately scoped to just the user message,
+  //    logged before any streaming starts: this endpoint has many res.end()
+  //    exit points below (errors, tool loops, aborts, normal completion), so
+  //    capturing the assistant's final reply from every branch is a separate,
+  //    more invasive follow-up rather than something to bolt on here safely.
+  if (sessionId) {
+    try { persistUserTurn(sessionId, provider, model, messages); } catch (e) { console.error('[session] persist failed:', e.message); }
+  }
   // Usage check
   const user = getUserByApiKey(req);
   const usageCheck = checkUsageLimit(user);
@@ -2270,6 +2406,7 @@ app.post('/api/agent/run', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
   res.flushHeaders();
+  mirrorSSEToAgentSubscribers(res, { sessionId });
 
   // Emit initial phase event AFTER headers are set
   res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn: 0 })}\n\n`);
@@ -2569,14 +2706,10 @@ ${dirListing}
         'Do not repeat failed tool calls. If a command times out, switch to a smaller diagnostic.',
         'After tools finish, always end with a short rundown checklist: What was done, what was verified, and any follow-up or blocker. Keep it concise.',
       ].join('\n')
-    : buildAgentSystemPrompt(agentCwd, contextTags);
-  let projectInventoryContext = '';
-  try {
-    projectInventoryContext = '\n\n=== PROJECT INVENTORY AND LINE MAP ===\n' + formatProjectInventory({ maxProjects: 10 }) + '\nUse codebase_index for exact file:line anchors before code edits.\n=== END PROJECT INVENTORY ===';
-  } catch (_) {}
+    : buildAgentSystemPrompt(agentCwd, contextTags, { lowToken });
+  // NOTE: project inventory is already injected by buildAgentSystemPrompt(); do not duplicate it here.
   const systemContent = dynamicPrompt
     + (clientSystemContent ? '\n\n=== CLIENT DIRECTIVE ===\n' + clientSystemContent : '')
-    + projectInventoryContext
     + '\n\n' + machineContext
     + (memoryContext ? '\n\n' + memoryContext : '');
 
@@ -4041,6 +4174,7 @@ app.post('/api/generate', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
+  mirrorSSEToAgentSubscribers(res, { sessionId });
 
   // Loop detection state
   let loopDetect = {
@@ -4818,17 +4952,95 @@ function applyCrushGuardConfig(cfg) {
   cfg.models.small.reasoning_effort = cfg.models.small.reasoning_effort || 'low';
   cfg.options = cfg.options || {};
   cfg.options.disable_provider_auto_update = true;
-  cfg.options.skills_paths = ['/home/ghost/.agents/skills'];
+  cfg.options.skills_paths = [
+    '/home/ghost/.agents/skills',
+    '/home/ghost/skills',
+    '/home/ghost/.hermes/hermes-agent/skills',
+    '/home/ghost/.hermes/skills',
+    '/home/ghost/haksterAi/pentest-agents/skills',
+    '/home/ghost/haksterAi/.hakster/skills',
+  ].filter(p => { try { return require('fs').existsSync(p); } catch(_) { return false; } });
   cfg.context_paths = ['CRUSH.md', 'AGENTS.md'];
   cfg.global_context_paths = ['/home/ghost/haksterAi/CRUSH.md'];
   return cfg;
 }
 
+// Ensure a model id is registered in crush's provider config. Crush validates
+// the selected model against providers.<provider>.models and returns
+// "404 page not found" if the id is missing. We seed a minimal entry so
+// crush accepts it.
+function ensureCrushModelRegistered(cfg, provider, model) {
+  if (!provider || !model) return cfg;
+  cfg.providers = cfg.providers || {};
+  const prov = cfg.providers[provider] = cfg.providers[provider] || {};
+  // Ensure critical provider fields exist for non-ollama providers
+  if (provider === 'nous') {
+    if (!prov.base_url) prov.base_url = 'https://inference-api.nousresearch.com/v1';
+    if (!prov.type) prov.type = 'openai';
+    if (!prov.api_key && process.env.NOUS_API_KEY) prov.api_key = process.env.NOUS_API_KEY;
+  }
+  prov.models = Array.isArray(prov.models) ? prov.models : [];
+  if (prov.models.some(m => m && m.id === model)) return cfg;
+  // Copy a sibling entry's shape so cost/window fields are sane;
+  // fall back to a minimal default if none exist.
+  const tmpl = prov.models.find(m => m && typeof m === 'object' && m.id && m.id.includes(':cloud'))
+    || prov.models.find(m => m && typeof m === 'object' && m.id)
+    || { id: 'glm-5.2:cloud', name: 'GLM 5.2 Cloud', cost_per_1m_in: 0, cost_per_1m_out: 0, cost_per_1m_in_cached: 0, cost_per_1m_out_cached: 0, context_window: 131072, default_max_tokens: 16384, can_reason: true, supports_attachments: false };
+  const entry = { ...tmpl, id: model, name: model };
+  prov.models.push(entry);
+  if (provider === 'ollama' && !prov.default_large_model_id) prov.default_large_model_id = model;
+  return cfg;
+}
+
 // ── Crush config update (model/provider switch) ──────────────────
+app.get('/api/crush/config', (_req, res) => {
+  try {
+    const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');
+    let saved = {};
+    try { saved = JSON.parse(fs.readFileSync(haksterConfigPath, 'utf8')); } catch {}
+
+    const userHome = process.env.HAKSTER_HOME || (process.env.HOME && process.env.HOME !== '/root' ? process.env.HOME : '/home/ghost');
+    const configPaths = [
+      path.join(userHome, '.crush.json'),
+      path.join(userHome, '.config/crush/crush.json'),
+      path.join(userHome, '.local/share/crush/crush.json'),
+    ];
+    let crushCfg = {};
+    for (const cfgPath of configPaths) {
+      try {
+        crushCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        break;
+      } catch {}
+    }
+
+    const model = saved.model || crushCfg.models?.large?.model || 'gpt-oss:120b-cloud';
+    const provider = saved.provider || crushCfg.models?.large?.provider || 'ollama';
+    res.json({
+      ok: true,
+      provider,
+      model,
+      models: crushCfg.models || {},
+      providers: Object.keys(crushCfg.providers || {}),
+      skills_paths: crushCfg.options?.skills_paths || [],
+    });
+  } catch (e) {
+    console.error('[crush] config read error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/crush/config', express.json(), (req, res) => {
   try {
-  const { provider, model } = req.body;
-    if (!provider || !model) return res.status(400).json({ error: 'provider and model are required' });
+  let { provider, model } = req.body || {};
+    // Default provider to the currently-saved one (or ollama) so a model-only
+    // selection still applies — the sidebar sometimes sends no provider.
+    if (!provider) {
+      try {
+        const saved = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'hakster-config.json'), 'utf8'));
+        provider = saved.provider || 'ollama';
+      } catch { provider = 'ollama'; }
+    }
+    if (!model) return res.status(400).json({ error: 'model is required' });
     if (isCerebrasValue(provider) || isCerebrasValue(model)) {
       return res.status(400).json({ error: 'Cerebras models are disabled' });
     }
@@ -4850,6 +5062,7 @@ app.post('/api/crush/config', express.json(), (req, res) => {
     crushCfg.models.large.provider = provider;
     crushCfg.models.small.model = model;
     crushCfg.models.small.provider = provider;
+    ensureCrushModelRegistered(crushCfg, provider, model);
     applyCrushGuardConfig(crushCfg);
     // Purge cerebras from recent_models — not a valid haksterAi provider
     if (crushCfg.recent_models) {
@@ -4874,9 +5087,38 @@ app.post('/api/crush/config', express.json(), (req, res) => {
       crushConf.models.large.provider = provider;
       crushConf.models.small.model = model;
       crushConf.models.small.provider = provider;
+      ensureCrushModelRegistered(crushConf, provider, model);
       applyCrushGuardConfig(crushConf);
       fs.writeFileSync(crushConfigDir, JSON.stringify(crushConf, null, 2));
     } catch (e) { console.error('[crush] config dir update error:', e.message); }
+    // Update top-priority Crush config too. Crush reads ~/.crush.json before
+    // ~/.config/crush/crush.json, so leaving this stale makes model switches
+    // look successful in the UI while the spawned terminal still hits 404s.
+    const crushTopConfigPath = path.join(userHome, '.crush.json');
+    try {
+      let crushTop = {};
+      try { crushTop = JSON.parse(fs.readFileSync(crushTopConfigPath, 'utf8')); } catch {}
+      crushTop.models = crushTop.models || {};
+      crushTop.models.large = crushTop.models.large || {};
+      crushTop.models.small = crushTop.models.small || {};
+      crushTop.models.large.model = model;
+      crushTop.models.large.provider = provider;
+      crushTop.models.small.model = model;
+      crushTop.models.small.provider = provider;
+      ensureCrushModelRegistered(crushTop, provider, model);
+      applyCrushGuardConfig(crushTop);
+      fs.writeFileSync(crushTopConfigPath, JSON.stringify(crushTop, null, 2));
+    } catch (e) { console.error('[crush] top config update error:', e.message); }
+    // Kill active Crush PTY so it respawns with the new model on reconnect
+    if (activeCrushPty) {
+      try {
+        console.log('[crush] killing active PTY for model switch');
+        activeCrushPty.kill('SIGTERM');
+        setTimeout(() => { try { activeCrushPty.kill('SIGKILL'); } catch {} }, 100);
+      } catch (e) { console.error('[crush] pty kill error:', e.message); }
+      activeCrushPty = null;
+    }
+
     console.log(`[crush] config updated: provider=${provider}, model=${model}`);
     res.json({ ok: true, provider, model, config: crushCfg });
   } catch (e) {
@@ -5158,6 +5400,83 @@ app.post('/api/subscription', (req, res) => {
   db.prepare('UPDATE users SET plan = ?, updated_at = unixepoch() WHERE id = ?').run(plan || 'pro', user.id);
   const sub = db.prepare(`SELECT * FROM subscriptions WHERE id = ?`).get(subId);
   res.json({ ok: true, subscription: sub });
+});
+
+// ── Shared session history — lets any caller of /api/agent/run (website chat
+// tab, Telegram command bot, future clients) read/write the same conversation
+// when they pass the same sessionId. Uses the existing sessions/messages
+// tables. Only the user turn is captured here (see the call site in
+// /api/agent/run for why); assistant-turn capture across every stream exit
+// path is a follow-up.
+function persistUserTurn(sessionId, provider, model, messages) {
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const existing = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
+  if (existing) {
+    db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
+  } else {
+    const title = String(messages[messages.length - 1]?.content || '').slice(0, 60) || 'New session';
+    db.prepare('INSERT INTO sessions (id, title, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(sessionId, title, provider || 'unknown', model || 'unknown', now, now);
+  }
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg && lastMsg.role === 'user' && typeof lastMsg.content === 'string') {
+    db.prepare('INSERT INTO messages (id, session_id, role, content, created_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(crypto.randomBytes(12).toString('hex'), sessionId, 'user', lastMsg.content, now, provider || null, model || null);
+  }
+}
+
+// GET /api/sessions/:id/messages — full stored history for a session (currently
+// user turns only — see persistUserTurn). Lets a Telegram conversation and a
+// website chat tab pointed at the same sessionId see each other's prompts.
+app.get('/api/sessions/:id/messages', (req, res) => {
+  const db = getDb();
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id);
+  if (!session) return res.status(404).json({ ok: false, error: 'Session not found' });
+  const messages = db.prepare('SELECT role, content, created_at, provider, model FROM messages WHERE session_id = ? ORDER BY created_at ASC').all(req.params.id);
+  res.json({ ok: true, session, messages });
+});
+
+// ── Admin: Telegram message center — list bot conversations and reply from
+// the dashboard. telegram-<chatId> session ids come from telegramBots.js.
+app.get('/api/admin/telegram/sessions', requireAdmin, (_req, res) => {
+  const db = getDb();
+  const sessions = db.prepare("SELECT * FROM sessions WHERE id LIKE 'telegram-%' ORDER BY updated_at DESC LIMIT 200").all();
+  const withPreview = sessions.map(s => {
+    const last = db.prepare('SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 1').get(s.id);
+    const count = db.prepare('SELECT COUNT(*) as n FROM messages WHERE session_id = ?').get(s.id).n;
+    return { ...s, chatId: s.id.replace('telegram-', ''), lastMessage: last || null, messageCount: count };
+  });
+  res.json({ ok: true, sessions: withPreview });
+});
+
+// POST /api/admin/telegram/send  { chatId, text }  — admin reply, via the
+// command bot (TELEGRAM_BOT_TOKEN_1), persisted into the same session history.
+app.post('/api/admin/telegram/send', requireAdmin, async (req, res) => {
+  const { chatId, text } = req.body || {};
+  if (!chatId || !text) return res.status(400).json({ ok: false, error: 'chatId and text required' });
+  const token = process.env.TELEGRAM_BOT_TOKEN_1;
+  if (!token) return res.status(400).json({ ok: false, error: 'TELEGRAM_BOT_TOKEN_1 not configured' });
+  try {
+    const https = require('https');
+    const body = JSON.stringify({ chat_id: Number(chatId), text: `👤 Admin: ${text}` });
+    await new Promise((resolve, reject) => {
+      const r = https.request({ hostname: 'api.telegram.org', port: 443, path: `/bot${token}/sendMessage`, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, resp => {
+        let d = ''; resp.on('data', c => d += c); resp.on('end', () => {
+          const j = JSON.parse(d); j.ok ? resolve(j) : reject(new Error(j.description || 'Telegram send failed'));
+        });
+      });
+      r.on('error', reject); r.write(body); r.end();
+    });
+    const db = getDb();
+    const sessionId = `telegram-${chatId}`;
+    db.prepare('INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(crypto.randomBytes(12).toString('hex'), sessionId, 'assistant', `[admin] ${text}`, Math.floor(Date.now() / 1000));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
 });
 
 app.get('/api/pricing', (_req, res) => {
@@ -5480,6 +5799,110 @@ app.get('/api/referrals', (req, res) => {
   });
 });
 
+// ── Telegram auth — two flows, both landing on the same user record:
+//   1. Mini App (opened from a bot's menu button, e.g. @Haksterbotbot) sends
+//      window.Telegram.WebApp.initData. Verified per Telegram's WebApp spec:
+//      secret = HMAC_SHA256("WebAppData", bot_token); hash = HMAC_SHA256(secret, data_check_string).
+//   2. Login Widget (a "Log in with Telegram" button on a normal page, e.g.
+//      the landing page) sends the widget's callback fields directly. Verified
+//      per the Login Widget spec: secret = SHA256(bot_token); hash = HMAC_SHA256(secret, data_check_string).
+//   This exists specifically because Google OAuth is blocked by Google inside
+//   Telegram's in-app browser (disallowed_useragent) — Telegram's own signed
+//   auth is the correct replacement there, not a workaround.
+function telegramBotTokens() {
+  const tokens = [];
+  for (let i = 1; i <= 6; i++) { const t = process.env[`TELEGRAM_BOT_TOKEN_${i}`]; if (t) tokens.push(t); }
+  return tokens;
+}
+
+function verifyTelegramWebAppData(initData) {
+  const params = new URLSearchParams(initData);
+  const hash = params.get('hash');
+  if (!hash) return null;
+  params.delete('hash');
+  const dataCheckString = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('\n');
+  for (const token of telegramBotTokens()) {
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
+    const computedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+    if (computedHash === hash) {
+      const authDate = parseInt(params.get('auth_date') || '0', 10);
+      if (Date.now() / 1000 - authDate > 86400) return null; // reject stale (>24h) initData
+      try { return JSON.parse(params.get('user') || 'null'); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+function verifyTelegramLoginWidget(data) {
+  const { hash, ...fields } = data;
+  if (!hash) return null;
+  const dataCheckString = Object.keys(fields).sort().filter(k => fields[k] !== undefined && fields[k] !== null)
+    .map(k => `${k}=${fields[k]}`).join('\n');
+  for (const token of telegramBotTokens()) {
+    const secretKey = crypto.createHash('sha256').update(token).digest();
+    const computedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+    if (computedHash === hash) {
+      const authDate = parseInt(fields.auth_date || '0', 10);
+      if (Date.now() / 1000 - authDate > 86400) return null;
+      return fields;
+    }
+  }
+  return null;
+}
+
+function findOrCreateTelegramUser(tgUser, req) {
+  const db = getDb();
+  const telegramId = String(tgUser.id);
+  const ip = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || '';
+  let user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId);
+  let wasSignup = false;
+  if (!user) {
+    wasSignup = true;
+    const id = uuidv4();
+    const apiKey = 'hkai_' + crypto.randomBytes(24).toString('hex');
+    const name = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ') || tgUser.username || 'telegram_user';
+    const username = (tgUser.username || name).toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30) || ('tg_' + telegramId.slice(0, 8));
+    db.prepare('INSERT INTO users (id, username, email, api_key, telegram_id, role, plan, status, last_login_at, last_login_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)')
+      .run(id, username, '', apiKey, telegramId, 'user', 'free', 'active', ip);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    ensureReferralCode(db, user);
+  } else {
+    db.prepare('UPDATE users SET last_login_at = unixepoch(), last_login_ip = ?, updated_at = unixepoch() WHERE id = ?').run(ip, user.id);
+    ensureReferralCode(db, user);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  }
+  const displayName = tgUser.username ? '@' + tgUser.username : ([tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ') || user.username);
+  return { user, wasSignup, displayName, picture: tgUser.photo_url || '' };
+}
+
+function telegramAuthResponse(res, tgUser, req) {
+  if (!tgUser || !tgUser.id) return res.status(401).json({ ok: false, error: 'Invalid Telegram auth data' });
+  const { user, wasSignup, displayName, picture } = findOrCreateTelegramUser(tgUser, req);
+  notifPush(`👤 ${wasSignup ? 'New user' : 'Login'} via Telegram: ${displayName}`, { type: wasSignup ? 'user_signup' : 'user_login', priority: wasSignup ? 'high' : 'normal', source: 'auth' });
+  res.json({
+    ok: true,
+    isNewUser: wasSignup,
+    user: { id: user.id, username: user.username, displayName, name: displayName, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
+    apiKey: user.api_key,
+  });
+}
+
+// POST /api/auth/telegram/webapp  { initData }  — Mini App auto-login
+app.post('/api/auth/telegram/webapp', (req, res) => {
+  const { initData } = req.body || {};
+  if (!initData) return res.status(400).json({ ok: false, error: 'initData required' });
+  const tgUser = verifyTelegramWebAppData(initData);
+  if (!tgUser) return res.status(401).json({ ok: false, error: 'Invalid or expired Telegram WebApp data' });
+  telegramAuthResponse(res, tgUser, req);
+});
+
+// POST /api/auth/telegram/widget  — Telegram Login Widget callback (landing page button)
+app.post('/api/auth/telegram/widget', (req, res) => {
+  const verified = verifyTelegramLoginWidget(req.body || {});
+  if (!verified) return res.status(401).json({ ok: false, error: 'Invalid Telegram login data' });
+  telegramAuthResponse(res, verified, req);
+});
+
 app.post('/api/auth/google', async (req, res) => {
   const { credential, device } = req.body;
   const referralCode = normalizeReferralCode(req.body?.referralCode || req.body?.ref || '');
@@ -5773,6 +6196,13 @@ wss.on('connection', (ws) => {
 
     const { action, provider = 'ollama', model, messages, system, sessionId } = msg;
 
+    if (action === 'subscribe') {
+      const types = Array.isArray(msg.types) && msg.types.length ? msg.types : ['notification', 'agent'];
+      ws._subscribedTypes = new Set(types);
+      ws.send(JSON.stringify({ type: 'subscribed', types }));
+      return;
+    }
+
     if (action === 'chat') {
       // Non-streaming via WS
       try {
@@ -5894,6 +6324,7 @@ ptyWss.on('connection', (ws, req) => {
     if (!crushCfg.models.small) crushCfg.models.small = {};
     if (hakCfg.model) { crushCfg.models.large.model = hakCfg.model; crushCfg.models.small.model = hakCfg.model; }
     if (hakCfg.provider) { crushCfg.models.large.provider = hakCfg.provider; crushCfg.models.small.provider = hakCfg.provider; }
+    ensureCrushModelRegistered(crushCfg, hakCfg.provider || 'ollama', hakCfg.model);
     applyCrushGuardConfig(crushCfg);
     // Only give crush playwright + filesystem MCP to keep it fast on 4-core machine
     // haksterAi's agent API already has all 6 — crush doesn't need to duplicate them
@@ -5917,6 +6348,7 @@ ptyWss.on('connection', (ws, req) => {
     crushConf.models.small = crushConf.models.small || {};
     if (hakCfg.model) { crushConf.models.large.model = hakCfg.model; crushConf.models.small.model = hakCfg.model; }
     if (hakCfg.provider) { crushConf.models.large.provider = hakCfg.provider; crushConf.models.small.provider = hakCfg.provider; }
+    ensureCrushModelRegistered(crushConf, hakCfg.provider || 'ollama', hakCfg.model);
     applyCrushGuardConfig(crushConf);
     // Only playwright + filesystem for crush
     try {
@@ -5930,6 +6362,27 @@ ptyWss.on('connection', (ws, req) => {
     } catch (e) { console.log('[pty] MCP config sync error:', e.message); }
     fs.mkdirSync(path.dirname(crushConfigPath), { recursive: true });
     fs.writeFileSync(crushConfigPath, JSON.stringify(crushConf, null, 2));
+
+    const crushTopConfigPath = path.join(crushHome, '.crush.json');
+    let crushTop = {};
+    try { crushTop = JSON.parse(fs.readFileSync(crushTopConfigPath, 'utf8')); } catch {}
+    crushTop.models = crushTop.models || {};
+    crushTop.models.large = crushTop.models.large || {};
+    crushTop.models.small = crushTop.models.small || {};
+    if (hakCfg.model) { crushTop.models.large.model = hakCfg.model; crushTop.models.small.model = hakCfg.model; }
+    if (hakCfg.provider) { crushTop.models.large.provider = hakCfg.provider; crushTop.models.small.provider = hakCfg.provider; }
+    ensureCrushModelRegistered(crushTop, hakCfg.provider || 'ollama', hakCfg.model);
+    applyCrushGuardConfig(crushTop);
+    try {
+      const mcpPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
+      const mcpCfg = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+      if (mcpCfg.mcpServers) {
+        crushTop.mcp_servers = {};
+        if (mcpCfg.mcpServers.playwright) crushTop.mcp_servers.playwright = mcpCfg.mcpServers.playwright;
+        if (mcpCfg.mcpServers.filesystem) crushTop.mcp_servers.filesystem = mcpCfg.mcpServers.filesystem;
+      }
+    } catch (e) { console.log('[pty] MCP top config sync error:', e.message); }
+    fs.writeFileSync(crushTopConfigPath, JSON.stringify(crushTop, null, 2));
 
     // Write CRUSH.md context file so crush knows who the user is and what machine they're on
     try {
@@ -6049,7 +6502,11 @@ ptyWss.on('connection', (ws, req) => {
     if (ptyOutBuffer.length >= 65536 || ptyOutLineCount >= 10) {
       flushPtyOutput();
     } else if (!ptyOutTimer) {
-      ptyOutTimer = setTimeout(flushPtyOutput, ptyMode === 'crush' ? 16 : 40);
+      // Now that the upgraded socket has TCP_NODELAY set, a short coalescing
+      // window still smooths bursty output without adding noticeable per-
+      // keystroke latency (was 16/40ms — that was the dominant source of felt
+      // "typing lag" since even a 1-byte echo waited out the full timer).
+      ptyOutTimer = setTimeout(flushPtyOutput, ptyMode === 'crush' ? 6 : 16);
     }
   });
 
@@ -6098,10 +6555,15 @@ ptyWss.on('connection', (ws, req) => {
 });
 
 // Upgrade handler — route /ws to chat WSS, /pty to PTY WSS.
+// /ws/pty is kept as a compatibility alias for older frontend bundles.
 server.on('upgrade', (req, socket, head) => {
   let pathname = req.url || '';
   try { pathname = new URL(req.url || '/', 'http://localhost').pathname; } catch {}
-  if (pathname === '/pty') {
+  // Disable Nagle's algorithm on every upgraded WS socket — without this, small
+  // frames (single keystrokes, PTY echo bytes) can sit buffered for up to ~40ms
+  // waiting to coalesce before the kernel sends them, which reads as input lag.
+  try { socket.setNoDelay(true); } catch {}
+  if (pathname === '/pty' || pathname === '/ws/pty') {
     ptyWss.handleUpgrade(req, socket, head, (ws) => {
       ptyWss.emit('connection', ws, req);
     });

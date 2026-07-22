@@ -59,7 +59,7 @@ const history = { cpu: [], mem: [], reqs: [], tokens: [], ts: [] };
 function pushH(key, val) { history[key].push(val); if (history[key].length > HISTORY_LEN) history[key].shift(); }
 
 // ── WebSocket connection ──────────────────────────────────────────
-const WS_BASE = API_BASE.replace(/^http/, 'ws');
+const WS_BASE = API_BASE.replace(/^http/, 'ws') + '/ws';
 
 function wsConnect() {
   if (wsConn && (wsConn.readyState === WebSocket.OPEN || wsConn.readyState === WebSocket.CONNECTING)) return;
@@ -127,6 +127,14 @@ function handleWSEvent(msg) {
     const text = truncate(msg.token || msg.text || msg.content, 60);
     if (!text) return;
     logBox.log(`{${C.fgSubtle}}${ts} {${C.accent}}tok{/${C.accent}} ${text}{/${C.fgSubtle}}`);
+    return;
+  }
+
+  // Delta: live model output text chunks (the actual streamed response)
+  if (t === 'delta') {
+    const text = truncate(msg.content, 100);
+    if (!text) return;
+    logBox.log(`{${C.fgSubtle}}  {/${C.fgSubtle}} {${C.success}}out{/${C.success}} {${C.fg}}${text}{/${C.fg}}`);
     return;
   }
 

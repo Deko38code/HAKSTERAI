@@ -355,6 +355,9 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         }
       })();
 
+      // Auth headers for /api/dashboard (it requires x-api-key)
+      function authHeaders() { const t = localStorage.getItem('hakster_google_token'); return t ? { 'x-api-key': t } : {}; }
+
       // ── Sidebar toggle ──────────────────────────────────────────
       const sidebar = document.getElementById('term-sidebar');
       const toggleBtn = document.getElementById('sidebar-toggle-btn');
@@ -413,7 +416,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       // Set initial status
       if (statusEl) statusEl.innerHTML = '<span style="color:#ffd700">●</span> <span>Connecting...</span>';
 
-      fetch('/api/dashboard').then(r => r.json()).then(d => {
+      fetch('/api/dashboard', { headers: authHeaders() }).then(r => r.json()).then(d => {
         // Update status
         if (d.crush) {
           if (modelInfo) {
@@ -444,6 +447,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
         // Load models — use haksterAi provider
         const hakProv = (d.crush && d.crush.provider) || 'ollama';
+          window.__currentCrushProvider = hakProv; window.__currentCrushModel = (d.crush && d.crush.model) || '';
         const knownProviders = (d.providers || []).map(p => p.id);
         const modelProvider = knownProviders.includes(hakProv) ? hakProv : 'ollama';
         if (provSelect) provSelect.value = modelProvider;
@@ -510,9 +514,11 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
       // ── Model select → switch model config + reconnect PTY ──
       document.getElementById('sb-model')?.addEventListener('change', (e) => {
-        const provider = document.getElementById('sb-provider')?.value;
+        const provider = document.getElementById('sb-provider')?.value || window.__currentCrushProvider || 'ollama';
         const model = e.target.value;
         if (!model) return;
+        window.__currentCrushProvider = provider;
+        window.__currentCrushModel = model;
         // Update the model info display immediately
         const modelInfo = document.getElementById('sb-model-info');
         if (modelInfo) modelInfo.innerHTML = 'Model: <span style="color:#7c3aed">' + (model.length > 25 ? model.substring(0,23) + '…' : model) + '</span>';
@@ -543,7 +549,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
             }
             // Refresh dashboard data after switch
             setTimeout(() => {
-              fetch('/api/dashboard').then(r => r.json()).then(dash => {
+              fetch('/api/dashboard', { headers: authHeaders() }).then(r => r.json()).then(dash => {
                 if (dash.crush) {
                   if (modelInfo) modelInfo.innerHTML = 'Model: <span style="color:#00ff88">' + (dash.crush.model || model).substring(0, 25) + '</span>';
                   if (statusEl) statusEl.innerHTML = '<span style="color:#00ff88">●</span> <span>Online</span>';
@@ -649,7 +655,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       }
 
       document.getElementById('cockpit-reload')?.addEventListener('click', () => {
-        fetch('/api/dashboard').then(r => r.json()).then(d => {
+        fetch('/api/dashboard', { headers: authHeaders() }).then(r => r.json()).then(d => {
           updateCockpitHeader(d);
         }).catch(() => {
           const statusText = document.getElementById('cockpit-status-text');
@@ -788,7 +794,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       renderCrushLiveState();
 
       function refreshCrushSidebar() {
-        fetch('/api/dashboard').then(r => r.json()).then(d => {
+        fetch('/api/dashboard', { headers: authHeaders() }).then(r => r.json()).then(d => {
           if (d.crush) {
             const c = d.crush;
             const s = c.stats || {};
@@ -927,8 +933,23 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         } catch (_) { return false; }
       }
 
+      const dangerFeedbackEl = document.getElementById('danger-feedback');
+      const dangerBtns = {
+        once: document.getElementById('danger-once'),
+        session: document.getElementById('danger-session'),
+        allowlist: document.getElementById('danger-allowlist'),
+        deny: document.getElementById('danger-deny'),
+      };
+      let _dangerChoosing = false;
+      function resetDangerFeedback() {
+        _dangerChoosing = false;
+        if (dangerFeedbackEl) { dangerFeedbackEl.style.display = 'none'; dangerFeedbackEl.textContent = ''; }
+        Object.values(dangerBtns).forEach(b => { if (b) { b.style.transform = ''; b.style.boxShadow = ''; } });
+      }
+
       function hideDangerOverlay() {
         if (dangerOverlay) dangerOverlay.style.display = 'none';
+        resetDangerFeedback();
       }
 
       function showDangerOverlay({ kind, reason, command, diff }) {
@@ -943,7 +964,17 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         } else {
           dangerDiffWrap.style.display = 'none';
         }
+        resetDangerFeedback();
         dangerOverlay.style.display = 'flex';
+      }
+      // Shows what key/button was registered (the overlay covers the terminal, so its own
+      // echo is hidden — without this the user gets no visible confirmation of what they typed).
+      function dangerFeedback(key, btn, label) {
+        if (btn) { btn.style.transform = 'scale(0.96)'; btn.style.boxShadow = '0 0 0 3px rgba(255,255,255,0.55)'; }
+        if (dangerFeedbackEl) {
+          dangerFeedbackEl.textContent = `→ you pressed "${key}" — ${label}…`;
+          dangerFeedbackEl.style.display = 'block';
+        }
       }
 
       // Detect the CLI danger/sudo box in PTY output and surface it as an overlay.
@@ -990,10 +1021,70 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') { sendPtyInput('n\r'); hideDangerOverlay(); }
       });
 
+      // ── Resume-session overlay (crush's native y/n/c prompt → clickable popup) ──
+      const resumeOverlay = document.getElementById('resume-overlay');
+      const resumeMsgsEl = document.getElementById('resume-msgs');
+      const resumeLastEl = document.getElementById('resume-last');
+      let _resumeShown = false;
+      let _resumeChoosing = false;
+      const resumeFeedbackEl = document.getElementById('resume-feedback');
+      const resumeBtns = {
+        y: document.getElementById('resume-resume'),
+        n: document.getElementById('resume-fresh'),
+        c: document.getElementById('resume-clear'),
+      };
+      function resetResumeFeedback() {
+        _resumeChoosing = false;
+        if (resumeFeedbackEl) { resumeFeedbackEl.style.display = 'none'; resumeFeedbackEl.textContent = ''; }
+        Object.values(resumeBtns).forEach(b => { if (b) { b.style.transform = ''; b.style.boxShadow = ''; } });
+      }
+      function hideResumeOverlay() { if (resumeOverlay) resumeOverlay.style.display = 'none'; _resumeShown = false; resetResumeFeedback(); }
+      function showResumeOverlay({ msgs, last }) {
+        if (!resumeOverlay || _resumeShown) return;
+        if (resumeMsgsEl) resumeMsgsEl.textContent = msgs || '';
+        if (resumeLastEl) resumeLastEl.textContent = last || '(none)';
+        resetResumeFeedback();
+        resumeOverlay.style.display = 'flex';
+        _resumeShown = true;
+      }
+      function detectResumePrompt(raw) {
+        const text = stripAnsi(raw).replace(/\r/g, '\n');
+        if (!/RESUME SESSION|saved session was found/i.test(text)) return;
+        if (_resumeShown) return;
+        const msgs = (text.match(/Messages saved:\s*([0-9]+)/i) || [])[1] || '';
+        const last = (text.match(/Last user message:\s*"?([^"\n]*)"?\s*$/im) || [])[1] || '(none)';
+        showResumeOverlay({ msgs, last: last.trim() });
+      }
+      // Shows what key/button was registered (the overlay covers the terminal, so its own
+      // echo is hidden — without this the user gets no visible confirmation of what they typed).
+      function resumeChoose(v) {
+        if (_resumeChoosing) return;
+        _resumeChoosing = true;
+        const labels = { y: 'Resume', n: 'Fresh', c: 'Clear' };
+        const btn = resumeBtns[v];
+        if (btn) { btn.style.transform = 'scale(0.96)'; btn.style.boxShadow = '0 0 0 3px rgba(255,255,255,0.55)'; }
+        if (resumeFeedbackEl) {
+          resumeFeedbackEl.textContent = `→ you pressed "${v.toUpperCase()}" — ${labels[v] || v}…`;
+          resumeFeedbackEl.style.display = 'block';
+        }
+        setTimeout(() => { sendPtyInput(v + '\r'); hideResumeOverlay(); }, 260);
+      }
+      document.getElementById('resume-resume')?.addEventListener('click', () => resumeChoose('y'));
+      document.getElementById('resume-fresh')?.addEventListener('click', () => resumeChoose('n'));
+      document.getElementById('resume-clear')?.addEventListener('click', () => resumeChoose('c'));
+      document.addEventListener('keydown', (e) => {
+        if (!resumeOverlay || resumeOverlay.style.display === 'none') return;
+        if (e.key === 'y' || e.key === 'Y') resumeChoose('y');
+        else if (e.key === 'n' || e.key === 'N') resumeChoose('n');
+        else if (e.key === 'c' || e.key === 'C') resumeChoose('c');
+        else if (e.key === 'Escape') resumeChoose('n');
+      });
+
       // Hook danger detection into the existing PTY output listener.
       window.addEventListener('hakster:pty-output', (event) => {
         if (event.detail?.mode !== 'crush') return;
         try { detectDangerPrompt(event.detail.data || ''); } catch (_) {}
+        try { detectResumePrompt(event.detail.data || ''); } catch (_) {}
       });
 
       // ── "/" command palette — Commands / Models / Skills / Memories / Agents / All ──
@@ -1150,16 +1241,38 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           </div>
         </div>
         <div style="display:flex;gap:10px;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);background:#0e0e16;">
-          <button id="danger-once" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#ff3b3b;color:#fff;font-weight:700;cursor:pointer;">One time (y)</button>
-          <button id="danger-session" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#b45309;color:#fff;font-weight:600;cursor:pointer;">This session</button>
-          <button id="danger-allowlist" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;">Allow list</button>
-          <button id="danger-deny" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#23232e;color:#c7c7d6;font-weight:600;cursor:pointer;">Deny (n)</button>
+          <button id="danger-once" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#ff3b3b;color:#fff;font-weight:700;cursor:pointer;transition:transform .12s,box-shadow .12s;">One time (y)</button>
+          <button id="danger-session" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#b45309;color:#fff;font-weight:600;cursor:pointer;transition:transform .12s,box-shadow .12s;">This session</button>
+          <button id="danger-allowlist" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;transition:transform .12s,box-shadow .12s;">Allow list</button>
+          <button id="danger-deny" style="flex:1;padding:10px 12px;border:0;border-radius:8px;background:#23232e;color:#c7c7d6;font-weight:600;cursor:pointer;transition:transform .12s,box-shadow .12s;">Deny (n)</button>
         </div>
+        <div id="danger-feedback" style="display:none;padding:8px 16px;text-align:center;font-size:12px;font-weight:600;letter-spacing:0.04em;color:#e2e8f0;background:#141420;border-top:1px solid rgba(255,255,255,0.08);"></div>
       </div>
     </div>
     <style>
       #danger-diff .d-add{color:#7ee787;} #danger-diff .d-del{color:#ff7b72;} #danger-diff .d-hnk{color:#6b7080;}
     </style>
+
+    <!-- ── Resume-session overlay (crush's native prompt → clickable popup) ── -->
+    <div id="resume-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.62);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+      <div style="max-width:560px;width:88vw;display:flex;flex-direction:column;background:#0b0b12;border:1px solid #7c3aed;border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,0.6);overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:linear-gradient(90deg,rgba(124,58,237,0.18),transparent);border-bottom:1px solid rgba(124,58,237,0.35);">
+          <span style="font-size:20px;">↻</span>
+          <span style="color:#a78bfa;font-weight:700;letter-spacing:0.04em;">RESUME SESSION</span>
+        </div>
+        <div style="padding:14px 16px;color:#c7c7d6;font-size:13px;">
+          <div style="margin-bottom:10px;">A saved session was found on disk.</div>
+          <div style="display:flex;gap:8px;margin-bottom:6px;"><span style="color:#6b7080;width:150px;">Messages saved:</span><span id="resume-msgs" style="color:#e2e8f0;font-weight:600;"></span></div>
+          <div style="display:flex;gap:8px;"><span style="color:#6b7080;width:150px;">Last user message:</span><span id="resume-last" style="color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span></div>
+        </div>
+        <div style="display:flex;gap:10px;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);background:#0e0e16;">
+          <button id="resume-resume" style="flex:1;padding:11px 12px;border:0;border-radius:8px;background:#16a34a;color:#fff;font-weight:700;cursor:pointer;transition:transform .12s,box-shadow .12s;">Resume (y)</button>
+          <button id="resume-fresh" style="flex:1;padding:11px 12px;border:0;border-radius:8px;background:#dc2626;color:#fff;font-weight:600;cursor:pointer;transition:transform .12s,box-shadow .12s;">Fresh (n)</button>
+          <button id="resume-clear" style="flex:1;padding:11px 12px;border:0;border-radius:8px;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;transition:transform .12s,box-shadow .12s;">Clear (c)</button>
+        </div>
+        <div id="resume-feedback" style="display:none;padding:8px 16px;text-align:center;font-size:12px;font-weight:600;letter-spacing:0.04em;color:#e2e8f0;background:#141420;border-top:1px solid rgba(255,255,255,0.08);"></div>
+      </div>
+    </div>
 
     <!-- ── "/" command palette — Commands / Models / Skills / Memories / Agents / All ── -->
     <div id="cmd-palette" style="display:none;position:fixed;inset:0;z-index:10000;align-items:flex-start;justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;padding-top:10vh;">

@@ -14,6 +14,14 @@ When starting the dev server, use background mode:
 astro dev --background
 ```
 
+17. Kiro pre-tool guard (kiroPreToolGuard) — blocks repeated tool calls (same signature 2+ times) and known-dangerous patterns (rm -rf /, mkfs, dd if=, git push --force)
+18. Kiro post-tool progress scorer (kiroPostToolScore) — scores tool result quality 0-10, triggers reflection on low scores (≤2)
+19. Kiro prompt filter (kiroPromptFilter) — rejects prompts with destructive automation patterns (DROP TABLE, TRUNCATE, DELETE ALL, WIPE, FORMAT)
+20. Kiro pre-task gate (kiroPreTaskGate) — blocks tasks lacking description, target, or approval (trust < 10 requires explicit approval)
+21. Kiro round budget enforcer (kiroRoundBudget) — finite round budget with convergence nudges at 67%, 80%, 100%
+22. Kiro call signature tracker (kiroTrackCallSignature) — rolling window of tool call signatures for loop detection
+23. Kiro diagnosis timeout detector (kiroDiagnosisTimeout) — escalates warnings on consecutive read-only calls: ⚠️ (5) → 🚨 (6) → 🚨🚨 (7+)
+24. Kiro exit code handler (kiroExitCodeHandler) — exit code 2 from hook means "block execution and return STDERR to agent"
 Manage the background server with `astro dev stop`, `astro dev status`, and `astro dev logs`.
 
 ## Documentation
@@ -58,7 +66,7 @@ All transitions are validated. Invalid transitions (e.g., skipping ACT) are bloc
 
 Trust increases with verified actions; resets on destructive-action denial.
 
-### Loop Break Mechanisms (14 total)
+### Loop Break Mechanisms (24 total — 16 original + 8 Kiro-inspired)
 
 1. Stuck-loop detection (repeated prefixes)
 2. Grep/search loop tracking
@@ -74,6 +82,22 @@ Trust increases with verified actions; resets on destructive-action denial.
 12. Memory budget cap (from autolearn.js)
 13. Skill extraction throttle (from autolearn.js)
 14. Steering reload guard (from loop.js)
+15. Guardrails exact-repeat loop detection — `hakster-guardrails.sh track` flags the same call signature 3× in the last 5 read-only actions and injects `🔁 LOOP DETECTED`. Trips before the 5-call timeout.
+16. Diagnosis-timeout escalation — 5+ consecutive read-only calls without a state-modifying action inject `⚠️ → 🚨 → 🚨🚨 DIAGNOSIS TIMEOUT`, re-firing every 1–2 calls until the agent acts or gives a final answer.
+
+### Round Budget & Nudges
+
+The agent runs on a finite, single-use round budget. Rounds are not free — every tool call, retry, and re-read costs one. The budget does not refill mid-task.
+
+- **120 rounds, single use.** When the budget is gone, the task ends. Treat every round as finite and non-recoverable.
+- **Heed the runtime nudges — they are not noise.** Ignoring a nudge burns a round for zero progress:
+  - `🔁 LOOP DETECTED` (same call 3× in last 5) — you are repeating yourself. Change the input (different path / different flag / read the actual error) or act on what you have. Do not re-run the identical call.
+  - `⚠️ DIAGNOSIS TIMEOUT` (5 read-only calls, no state-modifying action) — stop diagnosing. Run the fix in one chained shell call, or state exactly what blocks you.
+  - `🚨` / `🚨🚨` — you ignored the prior nudge. Act now, or emit your final answer stating the blocker. Repeated diagnosis past this point is not acceptable.
+- **Converge past 80%.** Past round 96 of 120, stop exploring alternatives. Pick the simplest working option, apply it, run one verification command, and finish. No new experiments past round 96.
+- **At round 120, ship what you have.** Do not start anything new. Emit your best current result and a one-line note on what remains. An incomplete result handed back beats a perfect result never delivered.
+
+Rounds 0–80: diagnose and build. Rounds 80–96: narrow to the fix. Rounds 96–120: converge and ship.
 
 ## Tool Usage Guidelines
 

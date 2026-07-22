@@ -136,6 +136,7 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
 
 <link rel="stylesheet" href="/css/xterm.css" />
 <script is:inline src="/js/xterm.js"></script>
+<script is:inline src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/xterm-addon-webgl.min.js"></script>
 <script is:inline src="/js/addon-fit.js"></script>
 
 <script define:vars={{ termId: id, ptyMode, autoCommand }}>
@@ -357,7 +358,7 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
       letterSpacing: 0,
       cursorBlink: true,
       cursorStyle: 'bar',
-      scrollback: 150000,
+      scrollback: 10000,
       fastScrollModifier: 'alt',
       fastScrollSensitivity: 8,
       scrollSensitivity: 1,
@@ -368,6 +369,7 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
       windowsMode: false,
       allowProposedApi: true,
     });
+    try { if (window.WebglAddon) { term.loadAddon(new WebglAddon()); } } catch (_) {}
     fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(container);
@@ -467,11 +469,21 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
   }
 
   function termWrite(text) {
-    term?.write(String(text || ''));
+    if (!term) return;
+    term.write(String(text || ''));
+    if (autoScrollEnabled) {
+      term.scrollToBottom();
+      scheduleSteadyScroll();
+    }
   }
 
   function termWriteln(text) {
-    term?.writeln(String(text || ''));
+    if (!term) return;
+    term.writeln(String(text || ''));
+    if (autoScrollEnabled) {
+      term.scrollToBottom();
+      scheduleSteadyScroll();
+    }
   }
 
   function termClear() {

@@ -1,4 +1,4 @@
 {
   "provider": "ollama",
-  "model": "gpt-oss:120b-cloud"
+  "model": "hp-1000:latest"
 }

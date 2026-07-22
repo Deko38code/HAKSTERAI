@@ -671,6 +671,9 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         }
       })();
 
+      // Auth headers for /api/dashboard (it requires x-api-key)
+      function authHeaders() { const t = localStorage.getItem('hakster_google_token'); return t ? { 'x-api-key': t } : {}; }
+
       // ── Sidebar toggle ──────────────────────────────────────────
       const sidebar = document.getElementById('term-sidebar');
       const toggleBtn = document.getElementById('sidebar-toggle-btn');
@@ -742,7 +745,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
       if (statusEl) statusEl.innerHTML = '<span style="color:#ffd700">●</span> <span>Connecting...</span>';
 
-      fetch('/api/dashboard').then(r => r.json()).then(d => {
+      fetch('/api/dashboard', { headers: authHeaders() }).then(r => r.json()).then(d => {
         if (d.crush) {
           if (modelInfo) {
             const m = d.crush.model || '—';
@@ -769,6 +772,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         }
 
         const hakProv = (d.crush && d.crush.provider) || 'ollama';
+          window.__currentCrushProvider = hakProv; window.__currentCrushModel = (d.crush && d.crush.model) || '';
         const knownProviders = (d.providers || []).map(p => p.id);
         const modelProvider = knownProviders.includes(hakProv) ? hakProv : 'ollama';
         if (provSelect) provSelect.value = modelProvider;
@@ -828,9 +832,11 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       });
 
       document.getElementById('sb-model')?.addEventListener('change', (e) => {
-        const provider = document.getElementById('sb-provider')?.value;
+        const provider = document.getElementById('sb-provider')?.value || window.__currentCrushProvider || 'ollama';
         const model = e.target.value;
         if (!model) return;
+        window.__currentCrushProvider = provider;
+        window.__currentCrushModel = model;
         if (modelInfo) modelInfo.innerHTML = 'Model: <span style="color:#7c3aed">' + (model.length > 25 ? model.substring(0,23) + '…' : model) + '</span>';
         if (statusEl) statusEl.innerHTML = '<span style="color:#ffd700">●</span> <span>Switching...</span>';
         const modelBadge = document.getElementById('hack-main-model-badge');
@@ -854,7 +860,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
               location.reload();
             }
             setTimeout(() => {
-              fetch('/api/dashboard').then(r => r.json()).then(dash => {
+              fetch('/api/dashboard', { headers: authHeaders() }).then(r => r.json()).then(dash => {
                 if (dash.crush) {
                   if (modelInfo) modelInfo.innerHTML = 'Model: <span style="color:#00ff88">' + (dash.crush.model || model).substring(0, 25) + '</span>';
                   if (statusEl) statusEl.innerHTML = '<span style="color:#00ff88">●</span> <span>Online</span>';
@@ -882,7 +888,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
       }
 
       function refreshCrushSidebar() {
-        fetch('/api/dashboard').then(r => r.json()).then(d => {
+        fetch('/api/dashboard', { headers: authHeaders() }).then(r => r.json()).then(d => {
           if (d.crush) {
             const c = d.crush;
             const s = c.stats || {};
@@ -1206,14 +1212,56 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
             const res = await fetch(API + '/api/agent/run', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ messages: messagesWithSystem, sessionId, provider: options.provider || 'ollama', cwd: '/tmp' })
+              body: JSON.stringify({ messages: messagesWithSystem, sessionId, provider: options.provider || 'ollama', model: options.model || undefined, stream: true, cwd: '/tmp' })
             });
             if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
-            const data = await res.json();
-            const content = data.content || data.error || 'No response';
-            if (data.tokenCount) totalTokens += data.tokenCount;
             addLine('\n' + termBold('AI RESPONSE') + ' ──────────────────', '#7c3aed');
-            content.split('\n').forEach(line => addLine(line, '#e2e8f0'));
+            // ── Stream the SSE so you SEE the agent's output WHILE it works ──
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            let content = '';
+            let liveLine = '';
+            const flushLive = () => { if (liveLine) { addLine(liveLine, '#e2e8f0'); liveLine = ''; } };
+            const phaseColors = { THINK: '#60a5fa', PLAN: '#fbbf24', ACT: '#34d399', OBSERVE: '#22d3ee', REFLECT: '#f472b6', CONSOLIDATE: '#a78bfa' };
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop();
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let evt; try { evt = JSON.parse(line.slice(6)); } catch (_) { continue; }
+                if (evt.type === 'phase') {
+                  flushLive();
+                  const ph = evt.phase || '';
+                  if (ph && ph !== 'COMPLETE') addLine('[' + ph + (evt.turn !== undefined ? ' turn ' + evt.turn : '') + ']', phaseColors[ph] || '#7c3aed');
+                } else if (evt.type === 'delta' || evt.type === 'content') {
+                  // append to the current streaming line (visible immediately)
+                  content += evt.content || '';
+                  liveLine += evt.content || '';
+                  const t = getTerm(); if (t) { t.write(termColor(evt.content || '', '#e2e8f0')); }
+                } else if (evt.type === 'tool_call_start' || evt.type === 'tool_use') {
+                  flushLive();
+                  addLine('  ↳ [tool: ' + (evt.tool_name || evt.tool || 'tool') + ']', '#34d399');
+                } else if (evt.type === 'tool_call_result' || evt.type === 'tool_result') {
+                  flushLive();
+                  const r = String(evt.tool_result || evt.result || '').replace(/\n/g, ' ').slice(0, 120);
+                  addLine('     ' + r, '#64748b');
+                } else if (evt.type === 'thinking') {
+                  flushLive();
+                  addLine('  💭 ' + String(evt.content || '').slice(0, 160), '#64748b80');
+                } else if (evt.type === 'error') {
+                  flushLive();
+                  addLine('[ERROR] ' + (evt.error || evt.message || ''), '#ff6b6b');
+                } else if (evt.type === 'done') {
+                  flushLive();
+                }
+              }
+            }
+            flushLive();
+            if (!content) content = '(no response)';
             conversationHistory.push({ role: 'user', content: promptText });
             conversationHistory.push({ role: 'assistant', content: content });
             saveLabState();

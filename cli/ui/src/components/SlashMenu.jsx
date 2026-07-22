@@ -6,7 +6,7 @@ const COMMANDS = [
   '/approve', '/deny', '/clear', '/compact', '/diff',
   '/review', '/plan', '/sessions', '/resume', '/save',
   '/memory', '/skills', '/theme', '/fast', '/health',
-  '/undo', '/exit',
+  '/undo', '/commands', '/exit',
 ];
 
 const DESCRIPTIONS = {
@@ -29,6 +29,7 @@ const DESCRIPTIONS = {
   '/skills': 'List skills',
   '/theme': 'Switch theme',
   '/fast': 'Toggle fast mode',
+  '/commands': 'Open commands palette popup',
   '/health': 'Server health',
   '/undo': 'Undo last edit',
   '/exit': 'Exit CLI',

@@ -354,3 +354,70 @@ These events make the loop debuggable and prevent the model from faking progress
 - Kiro CLI overview: https://kiro.dev/cli/
 - HaksterAI web agent loop: `server/src/index.js`
 - HaksterAI terminal agent loop: `server/src/agent/index.js`
+
+## Kiro-Inspired Loop Tools (Added to loop.js)
+
+The following Kiro-inspired loop tools have been implemented in `server/src/agent/loop.js`:
+
+### 1. kiroPreToolGuard(ctx)
+- **Pattern**: Kiro `PreToolUse` hook / `pre-tool-loop-guard.js`
+- **Purpose**: Blocks repeated tool calls (same signature 2+ times in window) and known-dangerous patterns (`rm -rf /`, `mkfs`, `dd if=`, `git push --force`, raw device writes)
+- **Input**: `{ toolName, args, recentCalls: string[] }`
+- **Output**: `{ block: boolean, reason?: string }`
+
+### 2. kiroPostToolScore(ctx)
+- **Pattern**: Kiro `PostToolUse` hook / `post-tool-progress-score.js`
+- **Purpose**: Scores tool result quality 0-10 based on success, result size, duration, errors. Triggers reflection on low scores (≤2).
+- **Input**: `{ toolName, success, resultSize, hadError, duration }`
+- **Output**: `{ score: number, quality: string, shouldReflect: boolean }`
+
+### 3. kiroPromptFilter(prompt)
+- **Pattern**: Kiro `UserPromptSubmit` hook
+- **Purpose**: Rejects prompts containing destructive automation patterns (DROP TABLE, TRUNCATE, DELETE ALL, WIPE, FORMAT)
+- **Input**: `string` prompt
+- **Output**: `{ reject: boolean, reason?: string }`
+
+### 4. kiroPreTaskGate(task)
+- **Pattern**: Kiro `PreTaskExec` hook
+- **Purpose**: Blocks tasks that lack description, target, or approval (trust < 10 requires explicit approval)
+- **Input**: `{ description, target, approved, trustLevel }`
+- **Output**: `{ block: boolean, reason?: string }`
+
+### 5. kiroRoundBudget(ctx)
+- **Pattern**: Kiro round budget system
+- **Purpose**: Enforces finite round budget with convergence nudges at 67%, 80%, 100%
+- **Input**: `{ round, maxRounds }`
+- **Output**: `{ exhausted: boolean, phase: string, nudge?: string }`
+
+### 6. kiroTrackCallSignature(existing, sig, maxWindow)
+- **Pattern**: Kiro `.kiro/state/tool-loop.json` rolling window
+- **Purpose**: Maintains rolling window of tool call signatures for loop detection
+- **Input**: `string[] existing, string sig, number maxWindow`
+- **Output**: `string[]` updated signature list
+
+### 7. kiroDiagnosisTimeout(ctx)
+- **Pattern**: Kiro idle-detection / diagnosis timeout
+- **Purpose**: Detects consecutive read-only calls without state-modifying action. Escalates: ⚠️ (5) → 🚨 (6) → 🚨🚨 (7+)
+- **Input**: `{ readOnlyStreak, lastWriteAction }`
+- **Output**: `{ triggered: boolean, level: string, message?: string }`
+
+### 8. kiroExitCodeHandler(code, stderr)
+- **Pattern**: Kiro exit code 2 pattern
+- **Purpose**: Exit code 2 from a hook means "block execution and return STDERR to agent"
+- **Input**: `number code, string stderr`
+- **Output**: `{ block: boolean, feedback?: string }`
+
+### LOOP_GUARD Constants Added
+
+- `KIRO_REPEAT_BLOCK: 2` — max repeated tool calls before blocking
+- `KIRO_CALL_WINDOW: 20` — rolling window size for call signatures
+- `KIRO_DIAGNOSIS_THRESHOLD: 5` — read-only streak before diagnosis timeout
+
+### Integration Points
+
+These tools are exported from `loop.js` and can be called from `index.js` during:
+- **ACT phase** — `kiroPreToolGuard()` before each tool call, `kiroPostToolScore()` after
+- **THINK phase** — `kiroPromptFilter()` on user input, `kiroRoundBudget()` to check budget
+- **PLAN phase** — `kiroPreTaskGate()` before task execution
+- **OBSERVE phase** — `kiroDiagnosisTimeout()` to detect read-only streaks
+- **All phases** — `kiroTrackCallSignature()` to maintain call history, `kiroExitCodeHandler()` for hook exit codes

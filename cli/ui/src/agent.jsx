@@ -309,13 +309,19 @@ class HaksterAgent extends EventEmitter {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
+        // Split on newlines; keep the trailing partial line in the buffer.
+        // Handle CRLF robustly and tolerate `data:` with no trailing space.
+        let nl;
+        while ((nl = buffer.indexOf('\n')) !== -1) {
+          let line = buffer.slice(0, nl);
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          if (line[0] === 'd' && line.startsWith('data:')) {
+            const payload = line[5] === ' ' ? line.slice(6) : line.slice(5);
+            if (!payload) continue;
             try {
-              const data = JSON.parse(line.slice(6));
-              this._handleMessage(data);
+              this._handleMessage(JSON.parse(payload));
             } catch {}
           }
         }
@@ -371,7 +377,7 @@ class HaksterAgent extends EventEmitter {
   }
 
   // ── Approval response ────────────────────────────────
-  async respondApproval(toolCallId, approved, permanent = false) {
+  async respondApproval(toolCallId, approved, permanent = false, session = false, password = '') {
     try {
       await fetch(`${API_URL}/api/agent/confirm`, {
         method: 'POST',
@@ -382,6 +388,8 @@ class HaksterAgent extends EventEmitter {
           approved,
           command: '',
           permanent,
+          session,
+          password,
         }),
       });
     } catch {}

@@ -4,10 +4,13 @@ import agent from './agent.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import SlashMenu from './components/SlashMenu.jsx';
 import HelpOverlay from './components/HelpOverlay.jsx';
+import ModelDialog from './components/ModelDialog.jsx';
+import CommandsDialog from './components/CommandsDialog.jsx';
 import ApprovalPrompt from './components/ApprovalPrompt.jsx';
 import DiffPreview from './components/DiffPreview.jsx';
 import PlanDisplay from './components/PlanDisplay.jsx';
 import SessionList from './components/SessionList.jsx';
+import QueueBox from './components/QueueBox.jsx';
 import Spinner from './components/Spinner.jsx';
 import SplashScreen from './components/SplashScreen.jsx';
 import TokenBar from './components/TokenBar.jsx';
@@ -17,12 +20,19 @@ const MAX_OUTPUT = 500;
 const MAX_TOOLS = 50;
 
 const REASONING_TYPES = [
-  { pattern: /^(?:checking|scanning|looking|reading|inspecting)/i, type: 'inspect', color: 'blue' },
-  { pattern: /^(?:found|detected|identified|located)/i, type: 'find', color: 'green' },
-  { pattern: /^(?:error|fail|issue|problem|bug|crash|exception)/i, type: 'error', color: 'red' },
-  { pattern: /^(?:plan|step|approach|strategy|decide|will|should)/i, type: 'plan', color: 'yellow' },
-  { pattern: /^(?:conclusion|therefore|so |thus|result)/i, type: 'conclusion', color: 'yellow' },
-  { pattern: /^(?:root cause|the issue is|the problem is)/i, type: 'diagnosis', color: 'orange' },
+  { pattern: /^(?:checking|scanning|looking|reading|inspecting|examining|reviewing|verifying|testing|validating)/i, type: 'inspect', color: 'blue' },
+  { pattern: /^(?:found|detected|identified|located|discovered|spotted|noticed)/i, type: 'find', color: 'green' },
+  { pattern: /^(?:error|fail|issue|problem|bug|crash|exception|broken|invalid|unable|cannot|can't)/i, type: 'error', color: 'red' },
+  { pattern: /^(?:plan|step|approach|strategy|decide|will|should|going to|next|i'll|i will)/i, type: 'plan', color: 'yellow' },
+  { pattern: /^(?:conclusion|therefore|so |thus|result|hence|meaning|in short|tl;dr)/i, type: 'conclusion', color: 'yellow' },
+  { pattern: /^(?:root cause|the issue is|the problem is|caused by|because|due to)/i, type: 'diagnosis', color: 'orange' },
+  { pattern: /^(?:running|executing|calling|invoking|launching|starting)/i, type: 'action', color: 'magenta' },
+  { pattern: /^(?:searching|querying|grepping|finding files|listing)/i, type: 'search', color: 'cyan' },
+  { pattern: /^(?:analyzing|parsing|thinking|considering|wondering|pondering|maybe|perhaps|hmm|let me)/i, type: 'think', color: 'gray' },
+  { pattern: /^(?:creating|writing|editing|modifying|updating|building|adding|removing|deleting)/i, type: 'edit', color: 'magenta' },
+  { pattern: /^(?:connecting|fetching|loading|downloading|uploading|sending)/i, type: 'io', color: 'blue' },
+  { pattern: /^(?:waiting|ready|done|complete|success|finished)/i, type: 'status', color: 'green' },
+  { pattern: /^(?:warning|caution|careful|risky|danger|unsafe)/i, type: 'warn', color: 'yellow' },
 ];
 
 function classifyReasoning(text) {
@@ -56,6 +66,8 @@ export default function App() {
 
   // ─── Overlay/UI State ───
   const [showHelp, setShowHelp] = useState(false);
+  const [showModelDialog, setShowModelDialog] = useState(false);
+  const [showCommandsDialog, setShowCommandsDialog] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
@@ -109,10 +121,9 @@ export default function App() {
   // Blink the focus bar while the agent is working (thinking / executing).
   const _working = thinking || ['PLAN','ACT','OBSERVE','REFLECT','CONSOLIDATE','THINK'].includes(phase);
   useEffect(() => {
-    if (!_working) { setBlink(false); return; }
     const id = setInterval(() => setBlink(b => !b), 480);
     return () => clearInterval(id);
-  }, [_working]);
+  }, []);
 
   useEffect(() => {
     if (showSplash) return; // wait for splash done
@@ -161,16 +172,20 @@ export default function App() {
         risk: isSudo ? 'critical' : (req.risk || 'high'),
         reason: req.reason || 'Approval needed',
         isSudo,
-        onApprove: () => {
-          agent.respondApproval(toolCallId, true);
+        onApprove: (pw) => {
+          agent.respondApproval(toolCallId, true, false, false, pw || '');
           setOutput(p => [...p, { type: 'system', text: `✅ Approved${isSudo ? ' sudo' : ''}: ${command}` }].slice(-MAX_OUTPUT));
         },
-        onAllowlist: () => {
-          agent.respondApproval(toolCallId, true, true);
+        onApproveSession: (pw) => {
+          agent.respondApproval(toolCallId, true, false, true, pw || '');
+          setOutput(p => [...p, { type: 'system', text: `✅ Approved for session${isSudo ? ' sudo' : ''}: ${command}` }].slice(-MAX_OUTPUT));
+        },
+        onAllowlist: (pw) => {
+          agent.respondApproval(toolCallId, true, true, false, pw || '');
           setOutput(p => [...p, { type: 'system', text: `✅ Approved & allowlisted${isSudo ? ' sudo' : ''}: ${command}` }].slice(-MAX_OUTPUT));
         },
-        onDeny: () => {
-          agent.respondApproval(toolCallId, false);
+        onDeny: (pw) => {
+          agent.respondApproval(toolCallId, false, false, false, pw || '');
           setOutput(p => [...p, { type: 'system', text: `🚫 Denied${isSudo ? ' sudo' : ''}: ${command}` }].slice(-MAX_OUTPUT));
         },
       });
@@ -217,6 +232,10 @@ export default function App() {
         break;
       case '/model':
         if (arg) { agent.setModel?.(arg); setStatus(p => ({ ...p, model: arg })); }
+        else { setShowModelDialog(true); }
+        break;
+      case '/commands':
+        setShowCommandsDialog(true);
         break;
       case '/provider':
         if (arg) { agent.setProvider?.(arg); setStatus(p => ({ ...p, provider: arg })); }
@@ -286,17 +305,15 @@ export default function App() {
     // Splash screen: any key dismisses
     if (showSplash) return;
 
+    // Crush-style popups handle their own keys; block the main input loop while open.
+    if (showModelDialog || showCommandsDialog) return;
+
     // Help overlay: Esc/q to close
     if (showHelp && (key.escape || raw === 'q')) { setShowHelp(false); return; }
     if (showSessions && (key.escape || raw === 'q')) { setShowSessions(false); return; }
 
-    // Approval prompt: y/n/a
-    if (approval) {
-      if (raw === 'y' || raw === 'Y') { approval.onApprove?.(); setApproval(null); return; }
-      if (raw === 'n' || raw === 'N') { approval.onDeny?.(); setApproval(null); return; }
-      if (raw === 'a' || raw === 'A') { approval.onAllowlist?.(); setApproval(null); return; }
-      return; // block other input during approval
-    }
+    // Approval prompt — ApprovalPrompt owns the keyboard while open
+    if (approval) { return; }
 
     // Diff preview: y/n to approve/deny
     if (showDiff && diffData) {
@@ -306,17 +323,22 @@ export default function App() {
       return;
     }
 
-    // Slash menu
-    if (raw === '/' && !input) { setShowSlashMenu(true); return; }
+    // Slash menu — keep the leading '/' in the input so the filter + handler see the full command
+    if (raw === '/' && !input) { setInput('/'); setShowSlashMenu(true); return; }
     if (showSlashMenu) {
-      if (key.escape) { setShowSlashMenu(false); return; }
+      if (key.escape) { setShowSlashMenu(false); setInput(''); return; }
       if (key.return) {
         handleSlashCommand(input);
         setInput('');
         setShowSlashMenu(false);
         return;
       }
-      if (key.backspace || key.delete) { setInput(p => p.slice(0, -1)); return; }
+      if (key.backspace || key.delete) {
+        const n = input.slice(0, -1);
+        setInput(n);
+        if (!n) setShowSlashMenu(false);
+        return;
+      }
       if (raw && !key.ctrl && !key.meta && raw.length === 1) { setInput(p => p + raw); return; }
       return;
     }
@@ -410,6 +432,11 @@ export default function App() {
         </Box>
       )}
 
+      {/* Queue / waiting box */}
+      {queue && queue.length > 0 && (
+        <QueueBox items={queue} cols={cols} />
+      )}
+
       {/* Plan panel */}
       {showPlan && plan && (
         <PlanDisplay plan={plan} cols={cols} />
@@ -430,9 +457,11 @@ export default function App() {
           command={approval.command}
           reason={approval.reason || ''}
           risk={approval.risk || 'medium'}
-          onApprove={() => { approval.onApprove?.(); setApproval(null); }}
-          onAllowlist={() => { approval.onAllowlist?.(); setApproval(null); }}
-          onDeny={() => { approval.onDeny?.(); setApproval(null); }}
+          isSudo={approval.isSudo}
+          onApprove={(pw) => { approval.onApprove?.(pw); setApproval(null); }}
+          onApproveSession={(pw) => { approval.onApproveSession?.(pw); setApproval(null); }}
+          onAllowlist={(pw) => { approval.onAllowlist?.(pw); setApproval(null); }}
+          onDeny={(pw) => { approval.onDeny?.(pw); setApproval(null); }}
         />
       )}
 
@@ -447,13 +476,66 @@ export default function App() {
       {/* Slash menu */}
       {showSlashMenu && <SlashMenu input={input} cols={cols} />}
 
+      {/* Crush-style popup: model selector */}
+      {showModelDialog && (
+        <ModelDialog
+          cols={cols}
+          rows={rows}
+          currentModel={status.model}
+          onDismiss={() => setShowModelDialog(false)}
+          onSetProviderKey={(provider, key) => {
+            agent._apiKeys = agent._apiKeys || {};
+            agent._apiKeys[provider] = key;
+            return true;
+          }}
+          onSelect={(model, provider, modelType) => {
+            agent.setModel?.(model);
+            agent.setProvider?.(provider);
+            setStatus(p => ({ ...p, model, provider }));
+            setOutput(p => [...p, { type: 'system', text: `Model → ${model} (${provider}) [${modelType}]` }].slice(-MAX_OUTPUT));
+            setShowModelDialog(false);
+          }}
+        />
+      )}
+
+      {/* Crush-style popup: commands palette */}
+      {showCommandsDialog && (
+        <CommandsDialog
+          cols={cols}
+          rows={rows}
+          onDismiss={() => setShowCommandsDialog(false)}
+          onSelect={(id) => {
+            setShowCommandsDialog(false);
+            const map = {
+              switch_model: () => setShowModelDialog(true),
+              toggle_help: () => setShowHelp(true),
+              toggle_diff: () => handleSlashCommand('/diff'),
+              toggle_plan: () => handleSlashCommand('/plan'),
+              toggle_thinking: () => agent.toggleThinking?.(),
+              toggle_yolo: () => handleSlashCommand('/trust 30'),
+              summarize: () => handleSlashCommand('/compact'),
+              review: () => handleSlashCommand('/review'),
+              health: () => handleSlashCommand('/health'),
+              switch_session: () => handleSlashCommand('/sessions'),
+              new_session: () => { setOutput([]); setTools([]); agent.newSession?.(); },
+              file_picker: () => setOutput(p => [...p, { type: 'system', text: 'File picker not available in TUI.' }].slice(-MAX_OUTPUT)),
+              init: () => agent.send?.('initialize project — create/update CRUSH.md memory file'),
+              quit: () => exit(),
+            };
+            if (map[id]) { map[id](); return; }
+            if (id.startsWith('/')) { handleSlashCommand(id); return; }
+            setOutput(p => [...p, { type: 'system', text: `Unknown command: ${id}` }].slice(-MAX_OUTPUT));
+          }}
+        />
+      )}
+
       {/* Input line — highlighted focus bar (bold primary border + reverse marker,
           matches the highlighted scroll indicators so the focus point stands out) */}
       <Box width={cols} borderStyle="bold" borderColor={_working ? (blink ? theme.secondary : theme.primary) : theme.primary} paddingX={1}>
         <Text color={phase === 'ACT' ? theme.warning : theme.primary} bold reverse>
           {_working ? (blink ? '◆' : '◇') : (phase === 'ACT' ? '◆' : '>')}{' '}
         </Text>
-        <Text color="white" bold>{input}{_working ? (blink ? '▍' : ' ') : ''}</Text>
+        <Text color="white" bold>{input}{blink ? '▍' : ' '}</Text>
         <Text color="gray" dim>{showSlashMenu ? '' : '  (/help, Tab for commands, Ctrl+C to exit)'}</Text>
       </Box>
     </Box>

@@ -1,0 +1,292 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout title="Admin — Telegram | haksterAi">
+  <style>
+    #pin-screen{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
+      background:#0a0a0f;}
+    .pin-box{text-align:center;padding:40px;border:1px solid #7c3aed;border-radius:16px;
+      background:#111118;box-shadow:0 0 40px #7c3aed33,inset 0 0 40px #7c3aed0a;}
+    .pin-logo-img{width:56px;height:56px;border-radius:12px;margin:0 auto 8px;display:block;
+      filter:drop-shadow(0 0 12px #7c3aed88);}
+    .pin-title{font-size:1.1rem;font-weight:700;color:#e2e8f0;letter-spacing:1px;margin-bottom:2px;}
+    .pin-sub{color:#94a3b8;font-size:.75rem;margin-bottom:26px;letter-spacing:1.5px;}
+    .pin-dots{display:flex;gap:10px;justify-content:center;margin-bottom:22px;}
+    .pin-dot{width:13px;height:13px;border-radius:50%;border:2px solid #7c3aed;transition:.08s;background:transparent;}
+    .pin-dot.filled{background:#a855f7;box-shadow:0 0 10px #a855f7;}
+    .pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:220px;}
+    .pin-btn{padding:16px;border:1px solid #1e1e2e;border-radius:8px;background:#0a0a0f;
+      color:#a855f7;font-family:'JetBrains Mono',monospace;font-size:1.1rem;cursor:pointer;
+      transition:.08s;}
+    .pin-btn:hover{background:#7c3aed22;box-shadow:0 0 15px #7c3aed44;}
+    .pin-btn:active{transform:scale(.95);}
+    .pin-error{color:#ef4444;font-size:.75rem;margin-top:12px;height:16px;}
+    .pin-change{margin-top:14px;font-size:.65rem;color:#64748b;text-decoration:underline;cursor:pointer;}
+  </style>
+
+  <div id="pin-screen">
+    <div class="pin-box">
+      <img src="/logo-192.png" alt="haksterAi" class="pin-logo-img" />
+      <div class="pin-title">HAKSTER ADMIN</div>
+      <div id="pin-sub" class="pin-sub">ENTER PIN TO ACCESS</div>
+      <div class="pin-dots">
+        <div class="pin-dot" id="pd0"></div>
+        <div class="pin-dot" id="pd1"></div>
+        <div class="pin-dot" id="pd2"></div>
+        <div class="pin-dot" id="pd3"></div>
+        <div class="pin-dot" id="pd4"></div>
+        <div class="pin-dot" id="pd5"></div>
+      </div>
+      <div class="pin-pad">
+        <button class="pin-btn" data-pin="1">1</button>
+        <button class="pin-btn" data-pin="2">2</button>
+        <button class="pin-btn" data-pin="3">3</button>
+        <button class="pin-btn" data-pin="4">4</button>
+        <button class="pin-btn" data-pin="5">5</button>
+        <button class="pin-btn" data-pin="6">6</button>
+        <button class="pin-btn" data-pin="7">7</button>
+        <button class="pin-btn" data-pin="8">8</button>
+        <button class="pin-btn" data-pin="9">9</button>
+        <button class="pin-btn" data-pin="clear" style="font-size:.75rem;">CLR</button>
+        <button class="pin-btn" data-pin="0">0</button>
+        <button class="pin-btn" data-pin="back" style="font-size:.75rem;">⌫</button>
+      </div>
+      <div class="pin-error" id="pin-error"></div>
+      <div class="pin-change" id="pin-change-link">change pin</div>
+    </div>
+  </div>
+
+  <div id="admin-content" style="display:none;">
+  <div class="min-h-screen pt-[80px] pb-12 bg-[#0a0a0f] text-[#e2e8f0] px-4">
+    <div class="max-w-6xl mx-auto">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight">✈️ Telegram Message Center</h1>
+          <p class="text-sm text-[#64748b] mt-1">Every conversation the command bot (@Haksterbotbot) is having, in one place.</p>
+        </div>
+        <button id="refresh-btn" class="bg-[#7c3aed]/20 text-[#7c3aed] hover:bg-[#7c3aed]/30 border border-[#7c3aed]/30 px-3 py-2 rounded-lg text-sm font-medium transition-colors">
+          ↻ Refresh
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-4">
+        <!-- Session list -->
+        <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
+          <div class="px-4 py-3 border-b border-[#1e1e2e] text-xs uppercase tracking-wide text-[#94a3b8] flex items-center justify-between">
+            <span>Conversations</span>
+            <span id="sessions-count" class="text-[#64748b]">0</span>
+          </div>
+          <div id="sessions-list" class="max-h-[70vh] overflow-y-auto divide-y divide-[#1e1e2e]">
+            <div class="px-4 py-8 text-center text-[#64748b] text-sm">Loading…</div>
+          </div>
+        </div>
+
+        <!-- Thread view -->
+        <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl flex flex-col overflow-hidden">
+          <div id="thread-header" class="px-4 py-3 border-b border-[#1e1e2e] text-sm text-[#94a3b8]">
+            Select a conversation
+          </div>
+          <div id="thread-messages" class="flex-1 min-h-[50vh] max-h-[65vh] overflow-y-auto px-4 py-3 space-y-2"></div>
+          <form id="reply-form" class="border-t border-[#1e1e2e] p-3 flex gap-2">
+            <input id="reply-input" type="text" placeholder="Reply as admin…" disabled
+              class="flex-1 bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] placeholder-[#64748b] focus:border-[#7c3aed] focus:outline-none disabled:opacity-40" />
+            <button type="submit" disabled id="reply-send"
+              class="bg-[#229ED9]/20 text-[#67c1eb] hover:bg-[#229ED9]/30 border border-[#229ED9]/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              Send
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <script is:inline>
+    // ── PIN PAD (shared key with admin/users.astro — one PIN for all admin pages) ──
+    const PIN_KEY = 'hakster_admin_pin';
+    const PIN_SESSION_KEY = 'hakster_admin_pin_session';
+    let correctPin = localStorage.getItem(PIN_KEY) || '';
+    let pinEntry = '';
+    let pinMode = correctPin ? 'unlock' : 'setup_new';
+    let pendingNewPin = '';
+
+    function revealAdmin() {
+      document.getElementById('pin-screen').style.display = 'none';
+      document.getElementById('admin-content').style.display = '';
+      loadSessions();
+    }
+    function updateDots() {
+      for (let i = 0; i < 6; i++) {
+        const dot = document.getElementById('pd' + i);
+        if (dot) dot.classList.toggle('filled', i < pinEntry.length);
+      }
+    }
+    function setSub(text) {
+      const el = document.getElementById('pin-sub');
+      if (el) el.textContent = text;
+    }
+    function pinPress(val) {
+      const err = document.getElementById('pin-error');
+      if (err) err.textContent = '';
+      if (val === 'clear') { pinEntry = ''; updateDots(); return; }
+      if (val === 'back') { pinEntry = pinEntry.slice(0, -1); updateDots(); return; }
+      if (pinEntry.length >= 6) return;
+      pinEntry += val;
+      updateDots();
+      if (pinEntry.length === 6) setTimeout(checkPin, 120);
+    }
+    function checkPin() {
+      const err = document.getElementById('pin-error');
+      if (pinEntry.length < 6) return;
+      if (pinMode === 'setup_new' || pinMode === 'change_new') {
+        pendingNewPin = pinEntry;
+        pinMode = pinMode === 'setup_new' ? 'setup_confirm' : 'change_confirm';
+        setSub('CONFIRM YOUR PIN');
+        pinEntry = ''; updateDots();
+      } else if (pinMode === 'setup_confirm' || pinMode === 'change_confirm') {
+        if (pinEntry === pendingNewPin) {
+          correctPin = pinEntry;
+          localStorage.setItem(PIN_KEY, correctPin);
+          sessionStorage.setItem(PIN_SESSION_KEY, '1');
+          pinMode = 'unlock';
+          pinEntry = ''; updateDots();
+          revealAdmin();
+        } else {
+          if (err) err.textContent = '✕ PINs did not match. Try again.';
+          pinMode = pinMode === 'setup_confirm' ? 'setup_new' : 'change_new';
+          setSub(pinMode === 'setup_new' ? 'SET YOUR 6-DIGIT PIN' : 'ENTER NEW PIN');
+          pinEntry = ''; updateDots();
+        }
+      } else if (pinMode === 'change_old') {
+        if (pinEntry === correctPin) {
+          pinMode = 'change_new';
+          setSub('ENTER NEW PIN');
+          pinEntry = ''; updateDots();
+        } else {
+          if (err) err.textContent = '✕ Wrong current PIN.';
+          pinEntry = ''; updateDots();
+        }
+      } else {
+        if (pinEntry === correctPin) {
+          sessionStorage.setItem(PIN_SESSION_KEY, '1');
+          revealAdmin();
+        } else {
+          if (err) err.textContent = '✕ Wrong PIN. Try again.';
+          pinEntry = ''; updateDots();
+        }
+      }
+    }
+    document.querySelectorAll('.pin-btn').forEach(btn => {
+      btn.addEventListener('click', () => pinPress(btn.dataset.pin));
+    });
+    document.getElementById('pin-change-link')?.addEventListener('click', () => {
+      if (!correctPin) return;
+      pinEntry = ''; pinMode = 'change_old';
+      document.getElementById('pin-error').textContent = '';
+      setSub('ENTER CURRENT PIN');
+      updateDots();
+    });
+    document.addEventListener('keydown', e => {
+      if (document.getElementById('pin-screen').style.display === 'none') return;
+      if (e.key >= '0' && e.key <= '9') { e.preventDefault(); pinPress(e.key); }
+      else if (e.key === 'Backspace') { e.preventDefault(); pinPress('back'); }
+      else if (e.key === 'Escape' || e.key === 'Delete') { e.preventDefault(); pinPress('clear'); }
+    });
+    setSub(pinMode === 'setup_new' ? 'SET YOUR 6-DIGIT PIN' : 'ENTER PIN TO ACCESS');
+    if (correctPin && sessionStorage.getItem(PIN_SESSION_KEY) === '1') revealAdmin();
+
+    // ── Telegram message center ──────────────────────────────────────
+    const API = location.port === '4321' ? 'http://localhost:3579' : '';
+    function authHeaders() {
+      const token = localStorage.getItem('hakster_google_token');
+      return token ? { 'x-api-key': token } : {};
+    }
+
+    let activeChatId = null;
+    function fmtTime(ts) {
+      if (!ts) return '';
+      return new Date(ts * 1000).toLocaleString();
+    }
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    async function loadSessions() {
+      const list = document.getElementById('sessions-list');
+      try {
+        const res = await fetch(`${API}/api/admin/telegram/sessions`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.ok) { list.innerHTML = `<div class="px-4 py-6 text-center text-[#ef4444] text-sm">${escapeHtml(data.error || 'Failed to load')}</div>`; return; }
+        document.getElementById('sessions-count').textContent = String(data.sessions.length);
+        if (data.sessions.length === 0) { list.innerHTML = `<div class="px-4 py-8 text-center text-[#64748b] text-sm">No Telegram conversations yet.</div>`; return; }
+        list.innerHTML = data.sessions.map(s => `
+          <button class="session-item w-full text-left px-4 py-3 hover:bg-[#1e1e2e] transition-colors ${s.chatId === activeChatId ? 'bg-[#1e1e2e]' : ''}" data-chat-id="${s.chatId}">
+            <div class="text-sm text-[#e2e8f0] truncate">${escapeHtml(s.title || 'Chat ' + s.chatId)}</div>
+            <div class="text-xs text-[#64748b] truncate mt-0.5">${s.lastMessage ? escapeHtml(s.lastMessage.content).slice(0, 60) : 'No messages'}</div>
+            <div class="text-[10px] text-[#475569] mt-1">${fmtTime(s.updated_at)} · ${s.messageCount} msg${s.messageCount === 1 ? '' : 's'}</div>
+          </button>
+        `).join('');
+        list.querySelectorAll('.session-item').forEach(btn => {
+          btn.addEventListener('click', () => openThread(btn.dataset.chatId));
+        });
+      } catch (e) {
+        list.innerHTML = `<div class="px-4 py-6 text-center text-[#ef4444] text-sm">${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    async function openThread(chatId) {
+      activeChatId = chatId;
+      document.getElementById('thread-header').textContent = `Chat ${chatId}`;
+      document.getElementById('reply-input').disabled = false;
+      document.getElementById('reply-send').disabled = false;
+      const box = document.getElementById('thread-messages');
+      box.innerHTML = `<div class="text-center text-[#64748b] text-sm py-6">Loading…</div>`;
+      try {
+        const res = await fetch(`${API}/api/sessions/telegram-${chatId}/messages`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.ok) { box.innerHTML = `<div class="text-center text-[#ef4444] text-sm py-6">${escapeHtml(data.error)}</div>`; return; }
+        box.innerHTML = data.messages.map(m => `
+          <div class="flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}">
+            <div class="max-w-[75%] rounded-lg px-3 py-2 text-sm ${m.role === 'user' ? 'bg-[#1e1e2e] text-[#e2e8f0]' : 'bg-[#7c3aed]/20 text-[#e2e8f0]'}">
+              <div class="whitespace-pre-wrap">${escapeHtml(m.content)}</div>
+              <div class="text-[10px] text-[#64748b] mt-1">${fmtTime(m.created_at)}</div>
+            </div>
+          </div>
+        `).join('') || `<div class="text-center text-[#64748b] text-sm py-6">No messages yet.</div>`;
+        box.scrollTop = box.scrollHeight;
+      } catch (e) {
+        box.innerHTML = `<div class="text-center text-[#ef4444] text-sm py-6">${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    document.getElementById('reply-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('reply-input');
+      const text = input.value.trim();
+      if (!text || !activeChatId) return;
+      const sendBtn = document.getElementById('reply-send');
+      sendBtn.disabled = true;
+      try {
+        const res = await fetch(`${API}/api/admin/telegram/send`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ chatId: activeChatId, text }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('Send failed: ' + data.error); return; }
+        input.value = '';
+        await openThread(activeChatId);
+        await loadSessions();
+      } catch (e) {
+        alert('Send error: ' + e.message);
+      } finally {
+        sendBtn.disabled = false;
+      }
+    });
+
+    document.getElementById('refresh-btn')?.addEventListener('click', () => {
+      loadSessions();
+      if (activeChatId) openThread(activeChatId);
+    });
+  </script>
+</Layout>
