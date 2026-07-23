@@ -108,7 +108,7 @@ function getPentesterFingerprint() {
   if (!_pentesterFp) _pentesterFp = getFingerprint();
   return _pentesterFp;
 }
-const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn } = require('./mcp');
+const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn, testServerConfig: testMcpServerConfig, diffConfiguredVsConnected: diffMcpConfiguredVsConnected } = require('./mcp');
 const { generateImage } = require('../providers');
 
 // ── Auto-escalation safety net ──────────────────────────────────────────
@@ -353,7 +353,7 @@ Core haksterAi skills (always available):
 - Editing code? → skill_load hakster-coding
 - Deploying/restarting services? → skill_load hakster-cloud-ops
 - Working on movie/IPTV servers? → skill_load hakster-movie-servers or skill_load hakster-iptv
-- Web scraping/research? → skill_load firecrawl or skill_load firecrawl-search
+- Web scraping/research? → skill_load web-research
 - Security testing? → skill_load hunting-methodology
 - Debugging? → skill_load debugging-hermes-tui-commands
 
@@ -1164,6 +1164,36 @@ let _diagCount = 0;               // Consecutive read-only/diagnostic tool calls
 let _diagFires = 0;               // How many times the diagnosis-timeout has fired for this task (escalation)
 let _modifyingSigs = {};          // sig -> count of state-modifying commands this task (catches redundant re-runs)
 let _escalatedThisStreak = false; // guards against auto-escalating on every fire within one stuck streak
+// ── Web-tool loop state (2026-07-23) — the generic per-tool signature dedup
+// above only catches the SAME tool called with the SAME arg. It misses two
+// very common web-research loop shapes: (a) the same URL fetched via
+// DIFFERENT tools (web_fetch, then firecrawl, then browser_navigate — three
+// different fnNames, so the signature never repeats), and (b) the same
+// question searched with different wording (different query string, same
+// underlying ask). Tracked separately per task; see detectors in agentLoop.
+let _webUrlSeen = new Map();      // normalized URL -> times fetched this task (any web tool)
+let _webQuerySeen = [];           // word-sets of past web_search/firecrawl(search) queries this task
+let _webToolStreak = 0;           // consecutive web-category tool calls with no non-web tool in between
+
+function normalizeWebUrl(url) {
+  try {
+    const u = new URL(String(url).trim());
+    return `${u.origin}${u.pathname.replace(/\/+$/, '')}`; // drop hash + query + trailing slash noise
+  } catch (_) {
+    return String(url || '').trim().toLowerCase();
+  }
+}
+
+function queryWordSet(q) {
+  return new Set(String(q || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+}
+
+function querySimilarity(a, b) {
+  if (!a.size || !b.size) return 0;
+  let overlap = 0;
+  for (const w of a) if (b.has(w)) overlap++;
+  return overlap / Math.min(a.size, b.size);
+}
 // ── Smartness meter — trends up on real progress, down on loops / redundant
 //    re-runs / empty retries / wandering. Starts at his current rated level
 //    (62%) and re-baselines per task. Shown as 🧠 % in the reasoning panel +
@@ -1979,6 +2009,7 @@ const TOOL_EMOJI = {
   run_background:   '⚙️',  kill_process:    '☠️',
   git_op:           '🔀',  pm2:             '📦',
   service_check:    '💊',  snapshot:        '📸',
+  verify_mcp:       '✅',
   sub_agent:        '🤖',  parallel_shell:  '⚡',
   crush: '💘', codex: '⚡', ollama: '🦙', claude_proxy: '🧠',
   code_grid:        '🎨',  browser_navigate: '🧭',
@@ -2040,6 +2071,7 @@ const TOOL_TYPE = {
   run_background:   'BG',  kill_process:    'KL',
   git_op:           'GT',  pm2:             'PM',
   service_check:    'SV',  snapshot:        'SN',
+  verify_mcp:       'VM',
   sub_agent:        'SA',  parallel_shell:  'PS',
   crush:             'CR',
   code_grid:        'CG',  browser_navigate: 'BN',
@@ -2160,7 +2192,7 @@ const SAFE_READ_SUBCMDS = {
 };
 
 function isReadOnlyTool(tool, args) {
-  const readOnlyTools = ['read_file', 'list_dir', 'search_files', 'service_check', 'snapshot', 'browser_navigate', 'browser_snapshot', 'browser_screenshot', 'memory', 'skill_load', 'skill_list'];
+  const readOnlyTools = ['read_file', 'list_dir', 'search_files', 'service_check', 'verify_mcp', 'snapshot', 'browser_navigate', 'browser_snapshot', 'browser_screenshot', 'memory', 'skill_load', 'skill_list'];
   if (readOnlyTools.includes(tool)) return true;
   if (tool === 'shell') {
     const cmd = (args?.command || '').trim();
@@ -3437,6 +3469,22 @@ let TOOLS = [
           },
         },
         required: ['service'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'verify_mcp',
+      description: "Actually verify MCP servers instead of assuming they work. mode='status' (default) diffs .hakster/mcp.json against what's really connected right now and flags anything configured-but-not-loaded — use this after editing mcp.json or restarting the server. mode='test' spawns ONE server config standalone (does the real initialize + tools/list handshake, does NOT touch already-connected servers) and reports pass/fail with the discovered tools or the exact error — use this before/after adding a new MCP entry, or to re-check one that's currently failing. Always self-cleans its test process either way.",
+      parameters: {
+        type: 'object',
+        properties: {
+          mode: { type: 'string', enum: ['status', 'test'], description: "'status' = diff configured vs connected (default); 'test' = standalone probe of one server config" },
+          server: { type: 'string', description: "Server name from .hakster/mcp.json — required for mode='test'" },
+          timeout_ms: { type: 'number', description: 'Override init timeout for mode=test (default 60000, or 120000 for uv/uvx commands)' },
+        },
+        required: [],
       },
     },
   },
@@ -4988,6 +5036,35 @@ ${trunc(md, 12000)}`;
     return results.join('\n');
   },
 
+  async verify_mcp({ mode = 'status', server, timeout_ms }) {
+    const configDirs = getHaksterRoots();
+    if (mode === 'test') {
+      if (!server) return "Error: mode='test' requires a server name from .hakster/mcp.json.";
+      let config = null;
+      for (const dir of configDirs) {
+        try {
+          const json = JSON.parse(fs.readFileSync(path.join(dir, 'mcp.json'), 'utf-8'));
+          if (json.mcpServers && json.mcpServers[server]) { config = json.mcpServers[server]; break; }
+        } catch (_) { /* no mcp.json here, or invalid — keep looking */ }
+      }
+      if (!config) return `Error: "${server}" not found in any .hakster/mcp.json under ${configDirs.join(', ')}.`;
+
+      const result = await testMcpServerConfig(server, config, timeout_ms);
+      if (result.ok) {
+        return `✓ "${server}" verified — real initialize + tools/list handshake succeeded in ${result.durationMs}ms.\n  server: ${result.serverInfo?.name || server} ${result.serverInfo?.version || ''}\n  tools (${result.tools.length}): ${result.tools.join(', ')}`;
+      }
+      return `✗ "${server}" FAILED after ${result.durationMs}ms: ${result.error}${result.stderr ? `\n  stderr (tail): ${result.stderr.slice(-500)}` : ''}`;
+    }
+
+    // mode: 'status' — diff configured vs actually-connected
+    const diff = diffMcpConfiguredVsConnected(configDirs);
+    if (diff.missing.length === 0) {
+      return `✓ All ${diff.configured.length} configured MCP server(s) are connected: ${diff.connected.join(', ')}`;
+    }
+    const missingNames = diff.missing.map(m => m.name).join(', ');
+    return `✗ ${diff.missing.length}/${diff.configured.length} configured MCP server(s) NOT connected: ${missingNames}\n  connected fine: ${diff.connected.join(', ') || '(none)'}\n  Next step: run verify_mcp with mode='test' and server='<name>' on each missing one to see the exact failure (spawn error, wrong HOME, init timeout, etc).`;
+  },
+
   async claude_proxy({ prompt, model = 'claude-sonnet-4-5', system, max_tokens = 4096 }) {
     // Route through Claude Code Proxy (Anthropic format → LiteLLM)
     const messages = [{ role: 'user', content: prompt }];
@@ -6491,6 +6568,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
   _diagFires = 0;   // reset escalation counter per task
   _modifyingSigs = {};   // reset redundant-modify counter per task
   _escalatedThisStreak = false;   // reset auto-escalation guard per task
+  _webUrlSeen = new Map(); _webQuerySeen = []; _webToolStreak = 0;   // reset web-tool loop state per task
   _smartDelta = 0;  _smartTrendDrops = 0;   // smartness STICKS (no reset to 62) — only trend resets per task
   _smartMissedFiles = new Set();   // reset tracked-missing-file penalties per task
   try { spawnSync(HAKSTER_GUARDRAILS, ['reset'], { timeout: 2000 }); } catch (_) {}
@@ -7783,6 +7861,68 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
             _diagCount = 0;
           }
         }
+      }
+    }
+
+    // ── Web-tool loop detectors (2026-07-23) ────────────────────────────
+    // The signature-based loop detector above only catches the SAME tool called
+    // with the SAME arg. It misses two very common web-research loop shapes:
+    // fetching the same URL via a DIFFERENT tool each time (web_fetch, then
+    // firecrawl, then browser_navigate — three different fnNames, so the
+    // signature above never repeats), and searching the same underlying
+    // question with different wording (different query string, same ask).
+    {
+      const WEB_TOOLS = new Set(['web_search', 'firecrawl', 'browser_navigate', 'web_fetch']);
+      if (WEB_TOOLS.has(fnName)) {
+        _webToolStreak++;
+
+        // Cross-tool duplicate URL: web_fetch(url) → firecrawl(scrape,url) → browser_navigate(url)
+        const _rawUrl = fnArgs && fnArgs.url;
+        if (_rawUrl) {
+          const _normUrl = normalizeWebUrl(_rawUrl);
+          const _urlCount = (_webUrlSeen.get(_normUrl) || 0) + 1;
+          _webUrlSeen.set(_normUrl, _urlCount);
+          if (_urlCount === 2) {
+            history.push({ role: 'system', content: `🔁 DUPLICATE URL: "${_normUrl}" has now been fetched ${_urlCount}x this task (web_fetch/firecrawl/browser_navigate can all hit the same page — different tool, same URL still counts). If the first fetch already returned content, use it — refetching won't produce new information. If it failed, diagnose why instead of just trying a different tool on the same URL.` });
+            log(`\n${C.mustard}${C.bold}🔁 DUPLICATE URL (${_normUrl}) x${_urlCount}${C.reset}\n`);
+            bumpSmart(-5, 'duplicate-url');
+          } else if (_urlCount >= 3) {
+            history.push({ role: 'system', content: `🚨 DUPLICATE URL (final): "${_normUrl}" fetched ${_urlCount}x this task. STOP fetching this URL. Either extract an answer from what you already have, or state plainly that the page isn't giving usable content and move on — do not try yet another tool on the same URL.` });
+            log(`\n${C.mustard}${C.bold}🚨 DUPLICATE URL (${_normUrl}) x${_urlCount} — final warning${C.reset}\n`);
+            bumpSmart(-10, 'duplicate-url-final');
+          }
+        }
+
+        // Near-duplicate search query: different wording, same underlying question.
+        // Threshold 0.5 (word-overlap / smaller set size) — tuned against real
+        // rephrasing examples ("how to install nodejs on ubuntu" vs "install node
+        // ubuntu guide" scores 0.5; unrelated queries score 0).
+        const _rawQuery = fnArgs && fnArgs.query;
+        if (_rawQuery && (fnName === 'web_search' || (fnName === 'firecrawl' && fnArgs.action === 'search'))) {
+          const _qSet = queryWordSet(_rawQuery);
+          const _dupIdx = _webQuerySeen.findIndex(prev => querySimilarity(prev, _qSet) >= 0.5);
+          if (_dupIdx !== -1) {
+            const _pct = Math.round(querySimilarity(_webQuerySeen[_dupIdx], _qSet) * 100);
+            history.push({ role: 'system', content: `🔁 REPHRASED SEARCH: this query overlaps ${_pct}% with an earlier search this task. Rewording the same question rarely surfaces new results. Use what the earlier search(es) already returned, or change your actual approach (different tool, different angle, or a specific URL instead of another broad search).` });
+            log(`\n${C.mustard}${C.bold}🔁 REPHRASED SEARCH (${_pct}% overlap)${C.reset}\n`);
+            bumpSmart(-5, 'rephrased-search');
+          }
+          _webQuerySeen.push(_qSet);
+        }
+
+        // Web-research stall: too many consecutive web-tool calls with no other
+        // action in between — mirrors diagnosis-timeout but themed for research
+        // instead of code diagnosis, and explicitly offers the CLI fallback.
+        if (_webToolStreak >= 6) {
+          history.push({ role: 'system', content: `⚠️ WEB RESEARCH STALL: ${_webToolStreak} consecutive web tool calls (web_search/firecrawl/browser_navigate/web_fetch) with nothing else in between. Stop researching — synthesize an answer from what you've already gathered. If the browser/visual tools (playwright) keep failing or timing out, drop to the shell tool and access the web directly instead: curl -sv <url>, curl -I <url> for headers only, curl -A "Mozilla/5.0..." <url> if a site blocks the default user agent, wget --spider <url> to check reachability without downloading, or dig/nslookup <host> if it won't resolve at all.` });
+          log(`\n${C.mustard}${C.bold}⚠️ WEB RESEARCH STALL (${_webToolStreak} consecutive web calls)${C.reset}\n`);
+          bumpSmart(-5, 'web-research-stall');
+          _webToolStreak = 0;
+        }
+      } else if (fnName !== 'skill_load' && fnName !== 'skill_list') {
+        // Any non-web, non-skill-lookup tool call means real progress happened,
+        // not just more searching — break the stall streak.
+        _webToolStreak = 0;
       }
     }
 

@@ -17,7 +17,8 @@
 - filesystem: File operations on /home/ghost
 ## Additional MCP Tools (via haksterAi agent API)
 - nmap: Network scanning and port detection
-- sqlite: SQLite database queries on /home/ghost/haksterAi/data/mcp.db
+- sqlite: SQLite database queries on /home/ghost/haksterAi/data/mcp.db — EMPTY scratch DB, no
+  fixed schema. Call list_tables before querying; never assume a table (e.g. "apps") exists.
 - memory: Persistent memory across sessions
 - sequential-thinking: Step-by-step reasoning for complex problems
 ## Instructions

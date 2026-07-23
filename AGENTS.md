@@ -106,7 +106,13 @@ Rounds 0–80: diagnose and build. Rounds 80–96: narrow to the fix. Rounds 96�
 - **filesystem** — Read, write, list files on /home/ghost
 - **nmap** — Network scanning and port detection
 - **playwright** — Browser automation (see Playwright Skills below)
-- **sqlite** — Queries on /home/ghost/haksterAi/data/mcp.db
+- **sqlite** — Queries on /home/ghost/haksterAi/data/mcp.db. This is an EMPTY scratch database
+  with NO fixed schema — it starts with zero tables and nothing pre-creates any for you. Never
+  assume a table exists (e.g. `SELECT ... FROM apps` will fail with `no such table` — there is no
+  "apps" table, no matter how plausible the name sounds). Always call `list_tables` first; if the
+  table you need isn't there, either use `describe_table` to check what actually exists before
+  reading, or `create_table` it yourself if you're the one meant to persist that data for the
+  first time. Never react to `no such table` by retrying the same query.
 - **memory** — Persistent cross-session memory
 - **sequential-thinking** — Step-by-step reasoning for complex problems
 

@@ -118,12 +118,25 @@ function handleServerData(serverName, data) {
 /**
  * Spawn an MCP server process and connect via stdio.
  */
+// This box is single-operator (ghost). MCP child processes (claude, uvx/serena, ...) read
+// per-user config from $HOME, but hakster is sometimes launched as root — which points them
+// at /root instead of ghost's real config/credentials (e.g. claude-code auth). Pin HOME so
+// MCP servers always resolve to ghost's config no matter which user started the parent process.
+const GHOST_HOME = '/home/ghost';
+
 function connectServer(serverName, config) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, ...(config.env || {}) };
+    env.HOME = GHOST_HOME;
     // Ensure bun is in PATH for MCP servers that need it
     if (!env.PATH?.includes('/root/.bun/bin')) {
       env.PATH = `/root/.bun/bin:${env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}`;
+    }
+    // Ensure ~/.local/bin is in PATH — uv/uvx (serena and friends) install there,
+    // and it's not always on the parent process's PATH depending on how the server was launched.
+    const localBin = path.join(GHOST_HOME, '.local', 'bin');
+    if (!env.PATH?.includes(localBin)) {
+      env.PATH = `${localBin}:${env.PATH}`;
     }
 
     const child = spawn(config.command, config.args || [], {
@@ -186,6 +199,7 @@ function connectServer(serverName, config) {
         // Direct binaries start instantly — no delay needed
         const isNpx = config.command === 'npx' || config.command === 'npx.cmd';
         const isBun = config.command.endsWith('bun') || config.command.endsWith('/bun');
+        const isUvx = config.command === 'uvx' || config.command === 'uv' || config.command.endsWith('/uvx') || config.command.endsWith('/uv');
         if (isNpx) {
           const pkgName = config.args && config.args.length > 1 ? config.args[1] : '';
           _logFn(`  [MCP:${serverName}] npx starting${pkgName ? ` ${pkgName}` : ''}...`);
@@ -195,6 +209,11 @@ function connectServer(serverName, config) {
           await new Promise(r => setTimeout(r, 2000)); // 2s for bun to warm up
         }
 
+        // uv/uvx-launched servers (e.g. Serena) don't just resolve a package — they can also
+        // spin up a language server + dashboard on top, which is slower and more load-sensitive
+        // than the other MCP servers. Give them extra headroom so a busy box doesn't false-fail them.
+        const initTimeoutMs = isUvx ? 120000 : 60000;
+
         // Step 1: Send "initialize" request
         const initResult = await sendRequest(serverName, 'initialize', {
           protocolVersion: '2024-11-05',
@@ -203,7 +222,7 @@ function connectServer(serverName, config) {
             name: 'haksterAI',
             version: '2.1.0',
           },
-        }, 60000); // 60s timeout — npx may need to download on first run
+        }, initTimeoutMs); // 60s default, 120s for uv/uvx-launched servers under load
 
         _logFn(`  [MCP:${serverName}] initialized — protocol: ${initResult?.protocolVersion}, server: ${initResult?.serverInfo?.name || serverName}`);
 
@@ -406,6 +425,136 @@ function mcpStatus() {
 }
 
 /**
+ * One-shot test of an MCP server config — spawns it in isolation, does the real
+ * initialize + tools/list handshake, then always kills the process. Does NOT touch
+ * the live `mcpServers` registry, so it's safe to run against a config that's
+ * already connected (or one that isn't wired in yet) without disturbing it.
+ * Used by the `verify_mcp` tool so hakster can actually test a new/edited
+ * mcp.json entry — or re-check a currently-failing one — instead of assuming.
+ * @param {string} name — server name (for logging only)
+ * @param {object} config — { command, args, env } from mcp.json
+ * @param {number} [timeoutMs] — override the init timeout
+ * @returns {Promise<{ok: boolean, tools?: string[], serverInfo?: object, error?: string, stderr?: string, durationMs: number}>}
+ */
+function testServerConfig(name, config, timeoutMs) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const env = { ...process.env, ...(config.env || {}) };
+    env.HOME = GHOST_HOME;
+    if (!env.PATH?.includes('/root/.bun/bin')) {
+      env.PATH = `/root/.bun/bin:${env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}`;
+    }
+    const localBin = path.join(GHOST_HOME, '.local', 'bin');
+    if (!env.PATH?.includes(localBin)) {
+      env.PATH = `${localBin}:${env.PATH}`;
+    }
+
+    let child;
+    try {
+      child = spawn(config.command, config.args || [], { env, stdio: ['pipe', 'pipe', 'pipe'], cwd: '/tmp' });
+    } catch (err) {
+      return resolve({ ok: false, error: `spawn failed: ${err.message}`, durationMs: Date.now() - start });
+    }
+
+    let settled = false;
+    let stdoutBuf = '';
+    let stderrTail = '';
+    let initResult = null;
+    let timer = null;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { child.kill('SIGTERM'); } catch (_) {}
+      setTimeout(() => { try { if (!child.killed) child.kill('SIGKILL'); } catch (_) {} }, 2000);
+      resolve({ ...result, durationMs: Date.now() - start });
+    };
+
+    child.stdin.on('error', () => {});
+    child.stdout.on('error', () => {});
+    child.stderr.on('error', () => {});
+    child.stderr.on('data', (d) => { stderrTail = (stderrTail + d.toString()).slice(-2000); });
+    child.on('error', (err) => finish({ ok: false, error: `process error: ${err.message}`, stderr: stderrTail }));
+    child.on('close', (code) => {
+      if (!settled) finish({ ok: false, error: `process exited early with code ${code}`, stderr: stderrTail });
+    });
+
+    const isNpx = config.command === 'npx' || config.command === 'npx.cmd';
+    const isBun = config.command.endsWith('bun') || config.command.endsWith('/bun');
+    const isUvx = config.command === 'uvx' || config.command === 'uv' || config.command.endsWith('/uvx') || config.command.endsWith('/uv');
+    const startupDelay = isNpx ? 8000 : isBun ? 2000 : 0;
+    const effTimeout = timeoutMs || (isUvx ? 120000 : 60000);
+    timer = setTimeout(() => finish({ ok: false, error: `initialize timed out after ${effTimeout}ms`, stderr: stderrTail }), effTimeout + startupDelay);
+
+    child.stdout.on('data', (data) => {
+      stdoutBuf += data.toString();
+      let idx;
+      while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
+        const line = stdoutBuf.slice(0, idx).trim();
+        stdoutBuf = stdoutBuf.slice(idx + 1);
+        if (!line) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch (_) { continue; }
+        if (msg.id === 1 && msg.result) {
+          initResult = msg.result;
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', params: {}, id: 2 }) + '\n');
+        } else if (msg.id === 2 && msg.result) {
+          const tools = (msg.result.tools || []).map(t => t.name);
+          finish({ ok: true, tools, serverInfo: initResult?.serverInfo });
+        } else if (msg.error) {
+          finish({ ok: false, error: msg.error.message || JSON.stringify(msg.error), stderr: stderrTail });
+        }
+      }
+    });
+
+    (async () => {
+      if (startupDelay) await new Promise(r => setTimeout(r, startupDelay));
+      try {
+        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'haksterAI-verify', version: '1.0' } }, id: 1 }) + '\n');
+      } catch (err) {
+        finish({ ok: false, error: `write failed: ${err.message}`, stderr: stderrTail });
+      }
+    })();
+  });
+}
+
+/**
+ * Diff `.hakster/mcp.json` (across all configDirs) against what's actually
+ * connected right now. Surfaces "configured but not loaded" drift — exactly the
+ * kind of failure (PATH/ENOENT, wrong HOME, init timeout) that's silent unless
+ * someone manually checks `/api/agent/mcp-status` against the config by hand.
+ * @param {string[]} configDirs
+ * @returns {{configured: string[], connected: string[], missing: {name: string, config: object}[]}}
+ */
+function diffConfiguredVsConnected(configDirs) {
+  const configured = [];
+  const seen = new Set();
+  for (const dir of configDirs) {
+    const configPath = path.join(dir, 'mcp.json');
+    if (seen.has(configPath)) continue;
+    seen.add(configPath);
+    try {
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      const json = JSON.parse(raw);
+      for (const [name, cfg] of Object.entries(json.mcpServers || {})) {
+        configured.push({ name, config: cfg });
+      }
+    } catch (_) {
+      // mcp.json doesn't exist or is invalid at this dir — skip silently, same as loadMcpServers
+    }
+  }
+  const connectedNames = new Set(mcpServers.keys());
+  const missing = configured.filter(c => !connectedNames.has(c.name));
+  return {
+    configured: configured.map(c => c.name),
+    connected: configured.filter(c => connectedNames.has(c.name)).map(c => c.name),
+    missing: missing.map(c => ({ name: c.name, config: c.config })),
+  };
+}
+
+/**
  * Shut down all MCP server processes.
  */
 function shutdownMcp() {
@@ -442,4 +591,6 @@ module.exports = {
   shutdownMcp,
   setLogFn,
   setStatusFn,
+  testServerConfig,
+  diffConfiguredVsConnected,
 };
