@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Blocks commits that introduce secret-shaped strings (API keys, tokens, private keys).
+# Bypass only with `git commit --no-verify` if you're SURE it's a false positive.
+
+set -euo pipefail
+
+PATTERN='sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{20,}'
+PATTERN+='|sk-proj-[A-Za-z0-9_-]{20,}'
+PATTERN+='|sk-or-v1-[A-Za-z0-9]{20,}'
+PATTERN+='|gsk_[A-Za-z0-9]{20,}'
+PATTERN+='|AIzaSy[A-Za-z0-9_-]{30,}'
+PATTERN+='|AKIA[0-9A-Z]{12,}'
+PATTERN+='|ghp_[A-Za-z0-9]{30,}'
+PATTERN+='|github_pat_[A-Za-z0-9_]{20,}'
+PATTERN+='|xox[baprs]-[A-Za-z0-9-]{10,}'
+PATTERN+='|re_[A-Za-z0-9_]{20,}'
+PATTERN+='|hf_[A-Za-z0-9]{20,}'
+PATTERN+='|glpat-[A-Za-z0-9_-]{15,}'
+PATTERN+='|npm_[A-Za-z0-9]{20,}'
+PATTERN+='|sk_(live|test)_[A-Za-z0-9]{20,}'
+PATTERN+='|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+PATTERN+='|postgres(ql)?://[A-Za-z0-9_.-]+:[^@/[:space:]]{6,}@'
+PATTERN+='|[0-9]{8,10}:[A-Za-z0-9_-]{30,}'
+
+hits=$(git diff --cached -U0 -- . ':!*.lock' ':!package-lock.json' \
+  | grep -E '^\+' \
+  | grep -vE '^\+\+\+' \
+  | grep -E "$PATTERN" || true)
+
+if [ -n "$hits" ]; then
+  echo "🚫 pre-commit: possible secret detected in staged changes:"
+  echo "$hits" | sed 's/^/    /'
+  echo
+  echo "Remove it (or move it to .env / an untracked config) before committing."
+  echo "If this is a false positive, use: git commit --no-verify"
+  exit 1
+fi
+
+exit 0
