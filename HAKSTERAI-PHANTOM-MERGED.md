@@ -7287,7 +7287,7 @@ NEVER use `pkill node` — kills ALL node processes including server.
 
 ### Owner Account
 - Email: dekoneed@gmail.com
-- Password: Phantom2026!
+- Password: [REDACTED — rotate this, it was committed to git history]
 - Role: owner (full admin access)
 - Created directly in Render PostgreSQL DB
 
@@ -7300,7 +7300,7 @@ NEVER use `pkill node` — kills ALL node processes including server.
 - FIX: pro_intro plan now correctly upgrades user (was only checking plan==='pro')
 
 ### Email (Resend)
-- API key: re_Ci8DCLRb_6T9ff6WshHWDidoGmzzdXaHJ (hardcoded in server)
+- API key: [REDACTED — see .env, rotated after GitHub secret-scan leak 2026-07-23]
 - From: Phantom IDE <onboarding@resend.dev>
 - Free plan: 100/day, 3000/month
 - Tested OK — sends login credentials after payment
@@ -7382,7 +7382,7 @@ NEVER use `pkill node` — kills ALL node processes including server.
 
 ### OWNER INFO (updated)
 - Owner email (DB/login): `dekoneed@gmail.com`
-- Owner password: `Phantom2026!`
+- Owner password: `[REDACTED — rotate this, it was committed to git history]`
 - Role in DB: `owner`
 - Yahoo email (old/terminal): `deezykc1nun37@yahoo.com`
 - Login URL: `https://phantomide.com/ghost/admin`
