@@ -110,6 +110,46 @@ function getPentesterFingerprint() {
 }
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn } = require('./mcp');
 const { generateImage } = require('../providers');
+
+// ── Auto-escalation safety net ──────────────────────────────────────────
+// Escalates to a frontier model (claude-code's Agent tool, falling back to
+// codex) when the local model is provably stuck — diagnosis-timeout tier 3
+// or a redundant-modify final warning both mean the loop-break nudges have
+// already been ignored twice. This is the automatic half of escalation;
+// the explicit half is just the model choosing to call the
+// mcp__claude-code__* / mcp__codex__* tools itself, same as any other tool.
+function pickEscalationTool() {
+  const names = getMcpTools().map(t => t.function.name);
+  if (names.includes('mcp__claude-code__Agent')) return 'mcp__claude-code__Agent';
+  if (names.includes('mcp__codex__codex')) return 'mcp__codex__codex';
+  if (names.includes('mcp__kiro__kiro')) return 'mcp__kiro__kiro';
+  return null;
+}
+
+async function attemptAutoEscalation(history, reasonTag) {
+  const toolName = pickEscalationTool();
+  if (!toolName) return; // no escalation-capable MCP server connected — nothing to do
+
+  const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+  const recentContext = history.slice(-14)
+    .map(m => `[${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`.slice(0, 800))
+    .join('\n');
+
+  const prompt = `You are being called in as an escalation because a local coding agent got stuck (reason: ${reasonTag}) and its own loop-break warnings were ignored twice.\n\nOriginal task:\n${lastUserMsg ? lastUserMsg.content : '(unknown — not found in recent history)'}\n\nRecent transcript (most recent last):\n${recentContext}\n\nDiagnose what's actually blocking progress and either fix it directly (you have real tool access) or state precisely what information/decision is missing. Be concise — this hands control back to the local agent afterward.`;
+
+  try {
+    const args = toolName === 'mcp__claude-code__Agent'
+      ? { description: `Escalation: ${reasonTag}`, prompt, run_in_background: false }
+      : toolName === 'mcp__codex__codex'
+        ? { prompt, sandbox: 'workspace-write' }
+        : { prompt, trustAllTools: true }; // mcp__kiro__kiro
+    const result = await callMcpTool(toolName, args);
+    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    history.push({ role: 'system', content: `🆘 AUTO-ESCALATED to ${toolName} (${reasonTag}) — here is what it found:\n${text.slice(0, 4000)}\n\nUse this to unblock yourself. Do not escalate again immediately — act on this first.` });
+  } catch (err) {
+    history.push({ role: 'system', content: `🆘 AUTO-ESCALATION to ${toolName} failed (${err.message}). You're on your own for this one — try a structurally different approach.` });
+  }
+}
 const { SUGGEST, AUTO_EDIT, FULL_AUTO, shouldConfirm } = require('./approval');
 const { AgentLoopPhase, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition , claudePreCompactGuard, codexSandboxPolicy, reactCycleValidator, hermesMemoryConsolidation } = require('./loop');
 const autolearn = require('./autolearn');
@@ -957,8 +997,54 @@ function buildSystemPrompt(clientContext) {
     prompt += `\n\n## 📋 ${uniqueSkills.length} Skills Available (top categories)\nCategories: ${categories}${moreCats}\nUse skill_list to browse all, then skill_load to read a skill before following its steps.`;
   }
 
+  // ── Kiro session history — real past problem-solving on this machine ──
+  // ~20MB across 49 sessions; too much to inject, so point at it instead of
+  // dumping it — same pattern as the skills library above.
+  try {
+    const kiroSessDir = path.join(os.homedir(), '.kiro', 'sessions', 'cli');
+    const kiroFiles = fs.readdirSync(kiroSessDir).filter(f => f.endsWith('.json') && !f.endsWith('.history.json'));
+    if (kiroFiles.length > 0) {
+      prompt += `\n\n## 🗂️ ${kiroFiles.length} Past Kiro Sessions Available\nLocation: ~/.kiro/sessions/cli/*.json (+ matching .history/.jsonl per session) — real past problem-solving on this machine (bug fixes, debugging sessions, etc.), not documentation.\nBefore diagnosing something that feels familiar, grep the "title" fields across these files for a similar past issue (\`grep -h '"title"' ~/.kiro/sessions/cli/*.json\`), then read the specific matching session's .history/.jsonl for what was actually tried and what worked. Do not read all of them — search first, read only the match.`;
+    }
+  } catch (_) { /* no Kiro session history on this machine */ }
+
+  // ── Hermes session history — SQLite-backed, same on-demand pattern ──
+  try {
+    const hermesStats = spawnSync('hermes', ['sessions', 'stats'], { encoding: 'utf8', timeout: 5000 });
+    if (hermesStats.status === 0 && hermesStats.stdout) {
+      prompt += `\n\n## 🗂️ Past Hermes Sessions Available\n${hermesStats.stdout.trim()}\nBacked by SQLite (~/.hermes/state.db), not flat files — use the hermes CLI to search it, not direct file reads:\n- \`hermes sessions list\` — browse titles/previews for a similar past issue.\n- \`hermes sessions export - --session-id <ID>\` — print one specific session's full transcript to stdout once you've found the match.\nDo not export all sessions — search titles first, export only the match.`;
+    }
+  } catch (_) { /* hermes not available or no session store */ }
+
+  // ── Codex (GPT-5.x) session history — plain JSONL, greppable directly ──
+  try {
+    const codexSessDir = path.join(os.homedir(), '.codex', 'sessions');
+    const codexCount = spawnSync('find', [codexSessDir, '-name', '*.jsonl'], { encoding: 'utf8', timeout: 5000 });
+    const codexFileCount = codexCount.status === 0 ? codexCount.stdout.trim().split('\n').filter(Boolean).length : 0;
+    if (codexFileCount > 0) {
+      prompt += `\n\n## 🗂️ ${codexFileCount} Past Codex (GPT-5.x) Sessions Available\nLocation: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl — real past Codex work on this machine, plain JSONL (no docs library exists for Codex/ChatGPT on this machine — checked, this is the actual asset).\nSearch first, read only the match: \`grep -rl "<keyword>" ~/.codex/sessions/\` to find candidate files, then \`grep '"role":"user"' <file>\` to pull just the real user turns from that one session (each line is a full JSON message — the file is too large to read whole).`;
+    }
+  } catch (_) { /* no Codex session history on this machine */ }
+
   // Auto-inject core Claude Code skill content (cached, refreshed every 60s)
   prompt += loadCoreSkills();
+
+  // ── Escalation guidance — only mention tools that are actually connected ──
+  {
+    const mcpNames = getMcpTools().map(t => t.function.name);
+    const hasClaude = mcpNames.includes('mcp__claude-code__Agent');
+    const hasCodex = mcpNames.includes('mcp__codex__codex');
+    const hasKiro = mcpNames.includes('mcp__kiro__kiro');
+    if (hasClaude || hasCodex || hasKiro) {
+      const lines = ['\n\n## 🆘 Escalation — when you are not the right model for this step'];
+      lines.push(`You are running on a local model. For most work — reading/writing code, running commands, using Serena's symbol tools — you are the right tool and should just act. But some steps genuinely need stronger reasoning: an ambiguous requirement with no clear "correct" reading, a subtle bug where the cause isn't apparent from the code, or a decision with real consequences you're not confident about. For those, don't guess and don't loop — hand the step off.`);
+      if (hasClaude) lines.push(`- **mcp__claude-code__Agent** — delegate a self-contained sub-task to a frontier Claude agent with real tool access (Bash, Read, Write, Edit, WebSearch). Give it a "description" and a full "prompt" with all context it needs (it has no memory of this conversation).`);
+      if (hasCodex) lines.push(`- **mcp__codex__codex** — delegate to OpenAI Codex with real tool access. Give it a "prompt"; optionally set "sandbox": "workspace-write" if it needs to edit files.`);
+      if (hasKiro) lines.push(`- **mcp__kiro__kiro** — delegate to Kiro CLI (one-shot, non-interactive). Give it a "prompt"; set "trustAllTools": true if it needs to act, not just advise. Note: this account is currently over its monthly quota (resets 08/01) — expect it to fail with a quota error until then, prefer claude-code/codex over it in the meantime.`);
+      lines.push(`Use these deliberately, not reflexively — they cost real API usage and round-trip latency. If you also find yourself repeating the same failed approach, the runtime will auto-escalate for you as a safety net, but don't wait for that if you can already tell you're the wrong model for the step.`);
+      prompt += lines.join('\n');
+    }
+  }
 
   // ── Inject pentester fingerprint (stable device identity) ──
   const fp = getPentesterFingerprint();
@@ -1077,6 +1163,7 @@ let _noProgressCount = 0;          // Counts consecutive responses without tool 
 let _diagCount = 0;               // Consecutive read-only/diagnostic tool calls without a state-modifying action
 let _diagFires = 0;               // How many times the diagnosis-timeout has fired for this task (escalation)
 let _modifyingSigs = {};          // sig -> count of state-modifying commands this task (catches redundant re-runs)
+let _escalatedThisStreak = false; // guards against auto-escalating on every fire within one stuck streak
 // ── Smartness meter — trends up on real progress, down on loops / redundant
 //    re-runs / empty retries / wandering. Starts at his current rated level
 //    (62%) and re-baselines per task. Shown as 🧠 % in the reasoning panel +
@@ -1409,6 +1496,8 @@ function _stuckDebugLog(type, reason, context) {
 
 let _recentResponsePrefixes = [];  // Last N response prefixes for semantic loop detection
 let _emptyRetries = 0;              // Counts empty-response retries within a single agentLoop call
+let _verifyRetried = false;         // Whether the verify-before-answer nudge already fired this turn
+let _anyToolCallMade = false;       // Whether any tool call has happened yet this agentLoop call (survives empty-response retries, unlike raw turn index)
 const SEMANTIC_LOOP_WINDOW = 5;    // How many recent responses to check (was 3)
 const SEMANTIC_LOOP_THRESHOLD = 3; // How many similar prefixes → loop detected (was 2, raised to reduce false positives)
 let _messageQueue = [];            // Queue of incoming messages (flushed on stuck loop)
@@ -6401,11 +6490,14 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
   _diagCount = 0;  // reset diagnosis counter per task
   _diagFires = 0;   // reset escalation counter per task
   _modifyingSigs = {};   // reset redundant-modify counter per task
+  _escalatedThisStreak = false;   // reset auto-escalation guard per task
   _smartDelta = 0;  _smartTrendDrops = 0;   // smartness STICKS (no reset to 62) — only trend resets per task
   _smartMissedFiles = new Set();   // reset tracked-missing-file penalties per task
   try { spawnSync(HAKSTER_GUARDRAILS, ['reset'], { timeout: 2000 }); } catch (_) {}
   _recentResponsePrefixes = [];
   _emptyRetries = 0;
+  _verifyRetried = false;
+  _anyToolCallMade = false;
   _explorationCalls = [];
   _recentToolSigs = [];
   _repeatToolSigCount = 0;  // reset per-call too — prevent cross-call false positives
@@ -6761,6 +6853,9 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     const EMPTY_RETRY_LIMIT = 2;
     const hasContent = cleanContent && cleanContent.trim().length > 0;
     const hasThinking = msg.thinking && msg.thinking.trim().length > 0;
+    // Track cumulatively (not per-turn) so empty-response retries below — which advance
+    // `turn` without the model ever calling a tool — can't be mistaken for verification.
+    if (msg.tool_calls && msg.tool_calls.length > 0) _anyToolCallMade = true;
     // Also handle: model returns tool_calls but NO content and NO thinking
     // This is the stuck-loop pattern — model calls tools blindly without reasoning
     if (msg.tool_calls && msg.tool_calls.length > 0 && !hasContent && !hasThinking && _emptyRetries < EMPTY_RETRY_LIMIT) {
@@ -6793,6 +6888,36 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         continue; // retry the loop
       }
       // After retries exhausted, still empty — fall through to normal exit logic
+    }
+
+    // ── Verify-before-answer guard ──────────────────────────────────────
+    // If no tool call has happened yet this agentLoop call (checked via
+    // _anyToolCallMade, NOT raw turn index — empty-response retries above
+    // advance `turn` without ever calling a tool, so turn===0 alone would
+    // silently disable this check the moment a retry fired) and the model
+    // answered with prose but called no tool, force exactly one verification
+    // pass before treating that prose as final. Catches confabulation like
+    // asserting a fabricated sensor reading is real instead of re-running the
+    // command — recall from memory/context is not verification. Bounded to
+    // one nudge per turn so genuinely non-verifiable questions (opinions,
+    // "why did you choose X") still get answered instead of looping forever.
+    const _umTrim = userMessage.trim();
+    // Question detection deliberately doesn't require a literal "?" — plenty of
+    // real questions arrive as "where did u get rpm from fan at" with no
+    // trailing punctuation at all.
+    const _looksLikeQuestion = /\?\s*$/.test(_umTrim)
+      || /^(where|what|why|how|when|who|which|is|are|was|were|does|did|do|can|could|should|would|will|explain|verify|check|confirm)\b/i.test(_umTrim);
+    if (!_anyToolCallMade && (!msg.tool_calls || msg.tool_calls.length === 0) && hasContent && !_verifyRetried
+        && _looksLikeQuestion) {
+      _verifyRetried = true;
+      log(`${C.mustard}⚠  Question answered with zero tool calls — forcing one verification pass before finalizing.${C.reset}`);
+      // Save the model's own reply BEFORE the nudge so "that reply" below refers to
+      // something actually present in history — otherwise the model sees the nudge
+      // with no reply to verify (previously this push only happened further down,
+      // in a branch this guard's `continue` skips past).
+      history.push({ role: 'assistant', content: cleanContent || '' });
+      history.push({ role: 'system', content: '🔍 VERIFY BEFORE ANSWERING: that reply answered a question without calling any tool this turn. If any part of it depends on system/file/hardware state, a command\'s output, or code you did not read THIS turn, call the appropriate tool now and verify it before finalizing — do not assert unread state as fact, and do not justify a prior claim without re-checking it live. If this is a pure opinion/conceptual question with nothing to verify, just restate your answer.' });
+      continue;
     }
 
     // No tool calls = done (or empty response after retries exhausted)
@@ -7579,9 +7704,14 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
           history.push({ role: 'system', content: `🚨 REDUNDANT MODIFY (final): you have run "${_msig}" ${_mCount}x this task and ignored the prior warning. STOP repeating this command — an identical retry will not change the outcome. You must now do ONE of the following, nothing else:\n(a) If the current state is satisfactory / the goal is met: declare the task DONE, summarize what was achieved, and stop. Do not run another command.\n(b) If it is NOT satisfactory: change the approach structurally — different command, different target, or read the actual error output to find the real cause — then act once. Re-running "${_msig}" again is not an option.` });
           log(`\n${C.mustard}${C.bold}🚨 REDUNDANT MODIFY (${_msig}) x${_mCount} — converge or declare done${C.reset}\n`);
           bumpSmart(-10, 'redundant-modify-final');
+          if (!_escalatedThisStreak) {
+            _escalatedThisStreak = true;
+            await attemptAutoEscalation(history, `redundant-modify x${_mCount} on "${_msig}"`);
+          }
         }
         _diagCount = 0;
         _diagFires = 0;   // a real state-modifying action clears the escalation
+        _escalatedThisStreak = false;   // a real state-modifying action means the streak broke — allow escalation again if it gets stuck later
         try { spawnSync(HAKSTER_GUARDRAILS, ['reset'], { timeout: 2000 }); } catch (_) {}
       } else {
         _diagCount++;
@@ -7646,6 +7776,10 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
             }
             history.push({ role: 'system', content: _diagMsg });
             log(`\n${C.mustard}${C.bold}⚠️ DIAGNOSIS TIMEOUT #${_diagFires} (${_diagCount} read-only calls). Forcing action.${C.reset}\n`);
+            if (_diagFires >= 3 && !_escalatedThisStreak) {
+              _escalatedThisStreak = true;
+              await attemptAutoEscalation(history, `diagnosis-timeout tier ${_diagFires}`);
+            }
             _diagCount = 0;
           }
         }

@@ -281,9 +281,14 @@ async function loadMcpServers(configDirs) {
     return { tools: [], servers: [] };
   }
 
-  // Connect to all servers in parallel (with individual error handling)
+  // Connect to all servers in parallel (with individual error handling).
+  // Staggered by 250ms per server — spawning 10 interpreters (node/python/uv)
+  // at the exact same instant creates a CPU/IO spike that's cheap to avoid and
+  // gets worse when a heavy local Ollama model is also running on the same box.
   const results = await Promise.allSettled(
-    configs.map(({ name, config }) => connectServer(name, config))
+    configs.map(({ name, config }, i) =>
+      new Promise(r => setTimeout(r, i * 250)).then(() => connectServer(name, config))
+    )
   );
 
   const connected = [];
