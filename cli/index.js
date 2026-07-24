@@ -1063,6 +1063,27 @@ program
         return true;
       }
 
+      // ── Live grid toggle — todo/reasoning panel pinned to top of terminal, streaming
+      // output scrolls in a confined region below it (like a real split pane) instead
+      // of the panel overwriting scrollback each turn. Runtime toggle (no restart needed)
+      // since useLiveGrid re-reads HAKSTER_LIVE_GRID from env on every message. ──
+      if (cmd === '/livegrid') {
+        const want = (arg || '').trim().toLowerCase();
+        const turningOn = want === 'on' ? true : want === 'off' ? false : process.env.HAKSTER_LIVE_GRID !== '1';
+        process.env.HAKSTER_LIVE_GRID = turningOn ? '1' : '0';
+        const rows = process.stdout.rows || 0;
+        const minRows = 14 + 5;
+        if (turningOn && process.stdout.isTTY && rows < minRows) {
+          console.log(`${C.yellow}⚠ Live grid needs a terminal at least ${minRows} rows tall (yours is ${rows}) — it won't activate until the window is taller.${C.reset}`);
+        } else if (turningOn && !process.stdout.isTTY) {
+          console.log(`${C.yellow}⚠ Live grid needs an interactive terminal — has no effect when piped/redirected.${C.reset}`);
+        } else {
+          console.log(`${C.gray}Live grid ${turningOn ? `${C.green}ON${C.gray} — panel pinned to top, output scrolls below it` : `${C.red}OFF${C.gray} — panel prints inline with output`}${C.reset}`);
+        }
+        rl.prompt();
+        return true;
+      }
+
       // ── Encode (base64/hex/url/rot13/binary) ──
       if (cmd === '/encode') {
         if (!arg) {

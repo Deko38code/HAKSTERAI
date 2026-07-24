@@ -394,6 +394,7 @@ function showHelp() {
     /clear              Clear the screen
     /history            Show command history
     /toc [n]            List tool calls this session by #id (or full detail on one)
+    /livegrid [on|off]  Toggle the pinned todo/reasoning panel (embedded, split-pane style)
 
   ${C.bold}Shell (persistent):${C.reset}
     /cd <path>          Change directory (persists)
