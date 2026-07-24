@@ -46,9 +46,10 @@ const TYPE_WEIGHTS = {
 // File paths helper
 // ---------------------------------------------------------------------------
 function haksterDir(cwd) {
-  const home = process.env.HOME || '/home/ghost';
-  // Use ~/.hakster as the global memory store (same as existing system)
-  return path.join(home, '.hakster');
+ // Always use /home/ghost/.hakster regardless of who runs the process (root vs ghost)
+ // This ensures memory data is consistent across PM2 (root) and manual runs (ghost)
+ const home = '/home/ghost';
+ return path.join(home, '.hakster');
 }
 
 function memoriesFilePath(cwd) {
@@ -155,6 +156,48 @@ function cosineSimilarity(textA, textB) {
 
   const denom = Math.sqrt(magA) * Math.sqrt(magB);
   return denom === 0 ? 0 : dotProduct / denom;
+}
+
+/**
+ * Longest common prefix, as a fraction of the shorter string's length.
+ * Raw tool-output observations (search_files/shell dumps) often share long
+ * literal prefixes — same paths, same grep hits — while cosine similarity
+ * alone can dip just under threshold on the tail where they diverge.
+ */
+function prefixSimilarity(a, b) {
+  if (!a || !b) return 0;
+  const sa = a.toLowerCase();
+  const sb = b.toLowerCase();
+  const max = Math.min(sa.length, sb.length);
+  let i = 0;
+  while (i < max && sa[i] === sb[i]) i++;
+  return max === 0 ? 0 : i / max;
+}
+
+/**
+ * Two observations count as duplicates if they're near-identical overall
+ * (cosine) OR share enough of a literal prefix that they're clearly the same
+ * underlying tool output with a different tail (cosine alone misses these).
+ */
+function isNearDuplicate(a, b) {
+  const sim = cosineSimilarity(a, b);
+  if (sim > 0.75) return true;
+  if (prefixSimilarity(a, b) > 0.6 && sim > 0.5) return true;
+  // Same tool call ("[search_files] ...") re-run against the same files —
+  // repeated recon on identical targets, even when the tail (grep hits) shifts
+  // enough that cosine/prefix alone don't catch it.
+  const tagA = /^\[(\w+)\]/.exec(a || '');
+  const tagB = /^\[(\w+)\]/.exec(b || '');
+  if (tagA && tagB && tagA[1] === tagB[1] && sim > 0.5) {
+    const entA = new Set(extractEntities(a));
+    const entB = new Set(extractEntities(b));
+    if (entA.size > 0 && entB.size > 0) {
+      let shared = 0;
+      for (const e of entA) if (entB.has(e)) shared++;
+      if (shared / Math.min(entA.size, entB.size) >= 1) return true;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,8 +343,7 @@ function addMemory(entry, cwd) {
   // Check for duplicates using semantic similarity
   let isDuplicate = false;
   for (const existing of store.memories) {
-    const sim = cosineSimilarity(existing.observation, newMem.observation);
-    if (sim > 0.75) {
+    if (isNearDuplicate(existing.observation, newMem.observation)) {
       // Merge: boost the existing one, combine tags
       existing.reinforced = (existing.reinforced || 0) + 1;
       existing.recallCount = (existing.recallCount || 0) + 1;
@@ -681,7 +723,7 @@ function migrateOldArchives(cwd) {
     const entries = Array.isArray(data) ? data : (data.memories || []);
     for (const entry of entries) {
       // Skip if already exists (check by observation similarity)
-      const exists = store.memories.some(m => cosineSimilarity(m.observation, entry.observation || '') > 0.85);
+      const exists = store.memories.some(m => isNearDuplicate(m.observation, entry.observation || ''));
       if (!exists && entry.observation) {
         store.memories.push({
           id: entry.id || `migrated_${Date.now()}_${migrated}`,
@@ -800,6 +842,8 @@ module.exports = {
   extractEntities,
   computeScore,
   cosineSimilarity,
+  prefixSimilarity,
+  isNearDuplicate,
   tokenize,
   
   // Constants

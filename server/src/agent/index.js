@@ -80,20 +80,30 @@ ensureNativeModule('sharp');
 
 // ── Crash-loop detector + auto-fix: if the agent crashes 3+ times in 5 min,
 //    auto-rebuild native modules before exiting so the next boot succeeds.
+const NATIVE_MODULE_ERROR_RE = /NODE_MODULE_VERSION|ERR_DLOPEN_FAILED|Module version mismatch|was compiled against a different|did not self-register/i;
 const CRASH_LOG = path.join(os.homedir(), '.hakster', 'crash_log.json');
 function recordCrash(err) {
   try {
     const dir = path.dirname(CRASH_LOG); if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     let crashes = []; try { crashes = JSON.parse(fs.readFileSync(CRASH_LOG, 'utf-8')) || []; } catch (_) {}
     const now = Date.now();
-    crashes.push({ ts: now, msg: String((err && err.message) || err).slice(0, 300) });
+    const _crashMsg = String((err && err.message) || err).slice(0, 300);
+    const _crashStack = String((err && err.stack) || '').slice(0, 3000);
+    crashes.push({ ts: now, msg: _crashMsg, stack: _crashStack, nodeVersion: process.version });
     crashes = crashes.filter(c => now - c.ts < 300000);
     fs.writeFileSync(CRASH_LOG, JSON.stringify(crashes, null, 2));
     if (crashes.length >= 3) {
-      console.error('[hakster] \ud83d\udd27 Crash-loop detected (' + crashes.length + ' crashes in 5min) — auto-rebuilding...');
-      try { execSync('npm rebuild better-sqlite3 --quiet', { stdio: 'inherit', timeout: 120000, cwd: path.join(__dirname, '..', '..') }); } catch (_) {}
-      try { execSync('npm rebuild sharp --quiet', { stdio: 'inherit', timeout: 120000, cwd: path.join(__dirname, '..', '..', '..') }); } catch (_) {}
-      console.error('[hakster] \u2705 Auto-fix applied — next restart should succeed.');
+      const looksNative = crashes.some(c => NATIVE_MODULE_ERROR_RE.test(c.msg));
+      if (looksNative) {
+        console.error('[hakster] \ud83d\udd27 Crash-loop detected (' + crashes.length + ' crashes in 5min, native-module pattern) — auto-rebuilding...');
+        try { execSync('npm rebuild better-sqlite3 --quiet', { stdio: 'inherit', timeout: 120000, cwd: path.join(__dirname, '..', '..') }); } catch (_) {}
+        try { execSync('npm rebuild sharp --quiet', { stdio: 'inherit', timeout: 120000, cwd: path.join(__dirname, '..', '..', '..') }); } catch (_) {}
+        console.error('[hakster] \u2705 Auto-fix applied — next restart should succeed.');
+      } else {
+        console.error('[hakster] \ud83d\udea8 Crash-loop detected (' + crashes.length + ' crashes in 5min) — NOT a native-module error, rebuilding would not help.');
+        console.error('[hakster]   Last error: ' + _crashMsg);
+        console.error('[hakster]   Full stack + crash history: ' + CRASH_LOG);
+      }
     }
   } catch (_) {}
 }
@@ -4427,11 +4437,23 @@ const toolExecutors = {
 
       // ── 2. Fuzzy: normalized-whitespace match (tabs vs spaces, trailing spaces, CRLF) ──
       let matchMethod = 'exact';
+      // Anchor the sliding window on the first old_text line instead of brute-forcing every
+      // char position in the file — the un-anchored O(fileLength * 40) scan (re-normalizing a
+      // candidate substring on every single iteration) could take seconds to minutes on large
+      // files and made patch_file calls look like they'd hung or failed.
       if (idx === -1 && normContent.includes(normOld)) {
-        // Sliding window: find the region in original content whose normalized form matches
-        for (let ci = 0; ci <= content.length - old_text.length; ci++) {
-          for (let spanLen = old_text.length; spanLen <= old_text.length + 40; spanLen++) {
-            if (ci + spanLen > content.length) break;
+        const firstLineNorm = normOld.split('\n')[0];
+        const candidateStarts = [];
+        let searchFrom = 0;
+        while (candidateStarts.length < 200) {
+          const found = content.indexOf(firstLineNorm.trim(), searchFrom);
+          if (found === -1) break;
+          candidateStarts.push(found);
+          searchFrom = found + 1;
+        }
+        for (const ci of candidateStarts) {
+          for (let spanLen = old_text.length - 20; spanLen <= old_text.length + 40; spanLen++) {
+            if (spanLen < 1 || ci + spanLen > content.length) continue;
             const candidate = content.substring(ci, ci + spanLen);
             if (normalize(candidate) === normOld) {
               idx = ci;
@@ -4442,7 +4464,6 @@ const toolExecutors = {
               return `✓ Patched ${resolved} (line ~${lineStart}, ${matchMethod} match)`;
             }
           }
-          if (matchMethod !== 'exact') break; // found it
         }
         idx = -1; // fuzzy didn't find it either
       }
@@ -6267,6 +6288,25 @@ const MAX_CONTEXT_CHARS = parseInt(process.env.HAKSTER_COMPACT_CHARS || String(M
 const ABSOLUTE_CONTEXT_CHARS = parseInt(process.env.HAKSTER_COMPACT_CEILING || String(Math.floor(CONTEXT_WINDOW * 4 * 0.88)), 10) || Math.floor(CONTEXT_WINDOW * 4 * 0.88); // hard ~88%
 const MIN_MESSAGES_TO_KEEP = 12;  // Keep last ~6 exchanges (12 messages)
 
+// ── Task anchor: the user message that defines the CURRENT task ──
+// compactHistory used to drop/truncate oldest-first with only the system
+// prompt (index 0) protected. After a stall/lag piles up retries and nudges,
+// the next compaction pass could evict the task's own instruction along with
+// the old chatter — the model then has no idea what it's doing and wanders
+// (re-running commands, re-saving near-duplicate memories) instead of
+// finishing. Pinning this message by reference (not index, since indices
+// shift as older messages get dropped) keeps it alive through compaction.
+let _currentTaskAnchor = null;
+
+function _protectedIndices(msgs) {
+  const idxs = new Set([0]); // system prompt
+  if (_currentTaskAnchor) {
+    const i = msgs.indexOf(_currentTaskAnchor);
+    if (i !== -1) idxs.add(i);
+  }
+  return idxs;
+}
+
 function estimateChars(history) {
   return history.reduce((sum, m) => sum + (m.content?.length || 0), 0);
 }
@@ -6472,9 +6512,14 @@ function compactHistory(history, lowToken = false) {
   // ALWAYS enforce message count limit, regardless of char size.
   if (history.length > maxMsgs + 1) { // +1 for system prompt
     const dropCount = history.length - maxMsgs - 1;
-    log(`${C.mustard}◇ Dropping ${dropCount} oldest messages (history has ${history.length - 1} msgs, max ${maxMsgs})${C.reset}`);
+    const protectedIdx = _protectedIndices(history);
+    const toDrop = [];
+    for (let i = 1; i < history.length && toDrop.length < dropCount; i++) {
+      if (!protectedIdx.has(i)) toDrop.push(i);
+    }
+    log(`${C.mustard}◇ Dropping ${toDrop.length} oldest messages (history has ${history.length - 1} msgs, max ${maxMsgs})${C.reset}`);
     logContextUsage(history, 'before drop', lowToken);
-    history.splice(1, dropCount);
+    for (let k = toDrop.length - 1; k >= 0; k--) history.splice(toDrop[k], 1); // remove back-to-front so earlier indices stay valid
     logContextUsage(history, 'after drop', lowToken);
   }
 
@@ -6487,8 +6532,10 @@ function compactHistory(history, lowToken = false) {
 
   while (estimateChars(msgs) > ctxMax && perMsgLimit > msgFloor) {
     perMsgLimit = Math.max(msgFloor, Math.floor(perMsgLimit * 0.6));
+    const protectedIdx = _protectedIndices(msgs);
     msgs = msgs.map((m, i) => {
       if (i === 0 && m.role === 'system') return m; // never truncate system prompt
+      if (protectedIdx.has(i)) return m; // never truncate the active task's own instruction
       const content = (m.content || '');
       if (content.length <= perMsgLimit) return m;
       return { ...m, content: content.substring(0, perMsgLimit) + '\n[trimmed]' };
@@ -6498,15 +6545,22 @@ function compactHistory(history, lowToken = false) {
 
   // Nuclear: if still over absolute ceiling, cap everything hard
   if (estimateChars(msgs) > ctxAbs) {
+    const protectedIdxAbs = _protectedIndices(msgs);
     msgs = msgs.map((m, i) => {
       if (i === 0 && m.role === 'system') return m;
+      if (protectedIdxAbs.has(i)) return m;
       const content = (m.content || '');
       if (content.length <= msgFloor) return m;
       return { ...m, content: content.substring(0, msgFloor) + '\n[trimmed]' };
     });
     // If STILL over, drop oldest messages until under ceiling
     while (msgs.length > minMsgs + 1 && estimateChars(msgs) > ctxAbs) {
-      msgs.splice(1, 1); // remove oldest non-system message
+      const protectedIdxDrop = _protectedIndices(msgs);
+      let removed = false;
+      for (let i = 1; i < msgs.length; i++) {
+        if (!protectedIdxDrop.has(i)) { msgs.splice(i, 1); removed = true; break; } // remove oldest non-protected message
+      }
+      if (!removed) break; // only protected messages left — stop instead of looping forever
     }
   }
 
@@ -6594,6 +6648,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     log(`${C.fgMuted}   session=${fp.session_uid} hostname=${fp.hostname} os=${fp.os.name}${C.reset}`);
   }
   history.push({ role: 'user', content: userMessage });
+  _currentTaskAnchor = history[history.length - 1];
 
   // ── Stall guard: kickstart if no activity for 20 seconds ──
   if (_stallGuardTimer) clearInterval(_stallGuardTimer);
@@ -6944,6 +6999,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       // Don't save this empty tool-call turn — just retry with a nudge
       history.push({ role: 'system', content: 'CRITICAL: You MUST include text content (explanation or reasoning) with every response. Do NOT call tools without explaining what you are doing. Respond with substantive text content, then call tools if needed. Never return empty content.' });
       history.push({ role: 'user', content: userMessage });
+      _currentTaskAnchor = history[history.length - 1];
       continue; // retry
     }
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
@@ -6963,6 +7019,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         // Inject nudge and re-queue the user's message
         history.push({ role: 'system', content: 'IMPORTANT: Your last response was empty. You MUST respond with either a tool call or substantive text. Do not output empty content. If you have information to share, share it. If you need to act, call a tool.' });
         history.push({ role: 'user', content: userMessage });
+        _currentTaskAnchor = history[history.length - 1];
         continue; // retry the loop
       }
       // After retries exhausted, still empty — fall through to normal exit logic
@@ -7583,7 +7640,11 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         //    raw observation volume warrants consolidation (shouldConsolidate still decides).
         try { const _hg = hermesMemoryConsolidation({ rawCount: _toolCallCount, threshold: 50 }); if (_hg && _hg.shouldConsolidate) log(`${C.fgMuted}🧠 Memory hook: ${_hg.reason}${C.reset}`); } catch (_) {}
         // ── Auto-learn: CONSOLIDATE phase ──
-        if (shouldConsolidate({ turn: _toolCallCount, rawMemoryCount: _toolCallCount, lastConsolidationTurn: _lastConsolidationTurn })) {
+        // rawMemoryCount must be the actual pending raw-memory count, not the tool-call
+        // counter — using _toolCallCount here meant short sessions (few tool calls, but
+        // real memories piling up across many sessions) never tripped the threshold,
+        // leaving memory_summary.md stale for days while MEMORY.md kept growing.
+        if (shouldConsolidate({ turn: _toolCallCount, rawMemoryCount: autolearn.getRawMemoryCount(), lastConsolidationTurn: _lastConsolidationTurn })) {
           _lastConsolidationTurn = _toolCallCount;
           try {
             await autolearn.consolidateMemories(path.join(process.env.HOME || '/home/ghost', '.hakster'));
