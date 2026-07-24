@@ -3816,6 +3816,7 @@ import Layout from '../layouts/Layout.astro';
       const googleAuth = params.get('google_auth');
       const googleError = params.get('google_error');
       if (googleAuth) {
+        let handled = false;
         try {
           const data = JSON.parse(decodeURIComponent(googleAuth));
           if (data.ok) {
@@ -3827,16 +3828,29 @@ import Layout from '../layouts/Layout.astro';
             localStorage.removeItem('hakster_referral_code');
             (window as any).haksterSessionTouch?.();
             showGoogleUserBadge(data.user);
+            handled = true;
             const postAuthRedirect = sessionStorage.getItem('hakster_post_auth_redirect');
             if (postAuthRedirect) {
               sessionStorage.removeItem('hakster_post_auth_redirect');
               window.location.href = postAuthRedirect;
               return;
             }
+          } else {
+            console.error('Google auth callback returned ok:false', data);
           }
-        } catch {}
-        // Clean URL
-        window.history.replaceState({}, '', window.location.pathname);
+        } catch (e) {
+          console.error('Failed to parse google_auth payload — token was NOT stored:', e);
+        }
+        // Only strip the URL once we've actually stored the token. Stripping
+        // it unconditionally (previous behavior) erased the only evidence a
+        // login was in progress whenever parsing failed or data.ok was
+        // false — Layout.astro's auth-gate script then saw neither a token
+        // nor the google_auth param on the very next check and immediately
+        // redirected to '/', which looked like "sign-in just sends me home"
+        // even though the OAuth round-trip itself had succeeded.
+        if (handled) {
+          window.history.replaceState({}, '', window.location.pathname);
+        }
       }
       if (googleError) {
         console.error('Google auth error:', googleError);

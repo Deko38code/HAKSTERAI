@@ -1692,6 +1692,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           const googleAuth = params.get('google_auth');
           const googleError = params.get('google_error');
           if (googleAuth) {
+            let handled = false;
             try {
               const data = JSON.parse(decodeURIComponent(googleAuth));
               if (data.ok) {
@@ -1699,12 +1700,24 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
                 hackGoogleUser = data.user;
                 localStorage.setItem('hakster_google_token', hackGoogleToken);
                 localStorage.setItem('hakster_google_user', JSON.stringify(data.user));
+                localStorage.setItem('hakster_user_data', JSON.stringify({ id: data.user.id || '', name: data.user.username || data.user.email || 'User', email: data.user.email || '', picture: data.user.picture || '' }));
                 localStorage.removeItem('hakster_referral_code');
                 window.haksterSessionTouch?.();
                 showHackAccount(data.user);
+                handled = true;
+              } else {
+                console.error('Google auth callback returned ok:false', data);
               }
-            } catch {}
-            window.history.replaceState({}, '', window.location.pathname);
+            } catch (e) {
+              console.error('Failed to parse google_auth payload — token was NOT stored:', e);
+            }
+            // Only strip the URL once the token was actually stored — see
+            // build.astro's checkGoogleCallback for why stripping it
+            // unconditionally caused Layout.astro's auth-gate to bounce
+            // straight back to '/' whenever parsing failed.
+            if (handled) {
+              window.history.replaceState({}, '', window.location.pathname);
+            }
           }
           if (googleError) {
             console.error('Google auth error:', googleError);
