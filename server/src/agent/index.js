@@ -173,8 +173,25 @@ const memoryEngine = require('./memory-engine');
 
 // ── Puppeteer (lazy-loaded) ──────────────────────────────────────────
 let _browser = null;
+// Puppeteer's default cache dir (~/.cache/puppeteer) on this machine has its
+// chrome/chrome-headless-shell entries as root-owned symlinks pointing into
+// /root/.cache/puppeteer, which is 0700 — unreadable by the ghost user that
+// actually runs this agent, so every browser_* tool failed to even launch a
+// browser. Chrome is installed separately (PUPPETEER_CACHE_DIR=~/.cache/
+// puppeteer-ghost npx puppeteer browsers install chrome) into a cache dir
+// ghost actually owns. This env var must be set before require('puppeteer')
+// — Puppeteer resolves its default browser location from it at
+// import/construction time, not from launch() options (a `cacheDir` launch
+// option is NOT reliably honored).
+if (!process.env.PUPPETEER_CACHE_DIR) {
+  process.env.PUPPETEER_CACHE_DIR = path.join(os.homedir(), '.cache', 'puppeteer-ghost');
+}
 async function getBrowser() {
-  if (!_browser || !_browser.isConnected()) {
+  // Puppeteer 25 replaced Browser.isConnected() (method) with Browser.connected
+  // (property) — the old method call threw TypeError on every browser_* call
+  // after the first, once a browser had actually launched (previously masked
+  // by the cache-dir bug above always throwing before this line was reached).
+  if (!_browser || !_browser.connected) {
     const puppeteer = require('puppeteer');
     _browser = await puppeteer.launch({
       headless: true,
@@ -191,6 +208,69 @@ async function getPage() {
     await _page.setViewport({ width: 1280, height: 800 });
   }
   return _page;
+}
+
+// Puppeteer 25 removed page.waitForTimeout() (deprecated, then dropped) — every
+// browser_* tool that used it (browser_type, plus the new navigate/click below)
+// was throwing "page.waitForTimeout is not a function" on this install. Plain
+// setTimeout is the documented replacement.
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+// Shared by browser_navigate/browser_click/browser_snapshot so every browser_*
+// tool reports the same page state in the same format — they all act on the
+// one shared getPage() puppeteer session (see note on browser_navigate below
+// about why this must never be routed through the separate playwright-mcp
+// server instead).
+async function buildBrowserSnapshotText(page, full = false) {
+  const snapshot = await page.evaluate((wantFull) => {
+    const elements = [];
+    const interactive = document.querySelectorAll('button, a, input, select, textarea, [role="button"], [role="link"], [contenteditable]');
+    interactive.forEach((el, i) => {
+      const rect = el.getBoundingClientRect();
+      if (!wantFull && rect.width === 0 && rect.height === 0) return;
+      const tag = el.tagName.toLowerCase();
+      const text = (el.textContent || '').trim().slice(0, 100);
+      const type = el.getAttribute('type') || '';
+      const placeholder = el.getAttribute('placeholder') || '';
+      const value = el.value || '';
+      const href = el.getAttribute('href') || '';
+      const name = el.getAttribute('name') || '';
+      const id = el.id || '';
+      const checked = el.checked !== undefined ? String(el.checked) : '';
+      const disabled = el.disabled ? ' [disabled]' : '';
+      elements.push({ idx: i, tag, text: text.slice(0, 80), type, placeholder, value, href, name, id, checked, disabled });
+    });
+    const bodyText = document.body ? document.body.innerText.slice(0, wantFull ? 5000 : 1500) : '';
+    return {
+      title: document.title,
+      url: location.href,
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      scroll: { x: window.scrollX, y: window.scrollY },
+      elements,
+      bodyText,
+    };
+  }, full);
+  const lines = [
+    `🔍 Snapshot: ${snapshot.url}`,
+    `Title: ${snapshot.title}`,
+    `Viewport: ${snapshot.viewport.w}x${snapshot.viewport.h}`,
+    `Interactive elements (${snapshot.elements.length}):`,
+  ];
+  snapshot.elements.slice(0, full ? 50 : 25).forEach(el => {
+    const label = el.text || el.placeholder || el.name || el.id || '(unnamed)';
+    const extra = [];
+    if (el.type && el.tag === 'input') extra.push(`type=${el.type}`);
+    if (el.value) extra.push(`val="${el.value.slice(0, 30)}"`);
+    if (el.checked) extra.push(`checked=${el.checked}`);
+    lines.push(`  [${el.idx}] <${el.tag}${el.disabled}> ${label}${extra.length ? ' (' + extra.join(', ') + ')' : ''}`);
+  });
+  if (snapshot.elements.length > (full ? 50 : 25)) lines.push(`  ... and ${snapshot.elements.length - (full ? 50 : 25)} more`);
+  if (snapshot.bodyText) {
+    lines.push('', '--- Page text ---');
+    lines.push(snapshot.bodyText.slice(0, full ? 3000 : 800));
+    if (snapshot.bodyText.length > (full ? 3000 : 800)) lines.push(`... (${snapshot.bodyText.length} chars total)`);
+  }
+  return lines.join('\n');
 }
 
 // ── Config ──────────────────────────────────────────────────────────────
@@ -4787,7 +4867,7 @@ ${trunc(md, 12000)}`;
             }
           }
         } catch (_) {}
-        if (results.length === 0) return `🔍 No results found for "${query}". Try rephrasing or use web_fetch to check specific URLs.`;
+        if (results.length === 0) return `🔍 No results found for "${query}" (DuckDuckGo's instant-answer API only returns results for direct-answer topics, not general search, and its HTML page is region-gated when scraped headlessly). Try browser_navigate to "https://www.bing.com/search?q=${encodeURIComponent(query)}" for a real rendered results page you can then browser_snapshot to read, or use web_fetch on a specific URL if you already know it.`;
       }
       return `🔍 Web Search: "${query}"\n${results.slice(0, max_results).join('\n\n')}`;
     } catch (err) {
@@ -5263,6 +5343,56 @@ ${trunc(md, 12000)}`;
   }
  },
 
+  // ── browser_navigate / browser_click ──────────────────────────────────
+  // These were declared in the tool schema (told the model "navigate before
+  // click/type/screenshot") but had no local executor — calls fell through to
+  // isMcpTool() and got routed to the separate playwright-mcp server, a
+  // DIFFERENT browser instance from the one getPage() manages. Concretely:
+  // browser_navigate(url) would open the page in the MCP server's browser,
+  // then browser_type/browser_snapshot would still see the local page stuck
+  // at about:blank — the two halves of every "navigate then interact"
+  // workflow were talking to different browsers. Implementing both locally
+  // against the same getPage() session is what actually makes navigate ->
+  // click -> type -> screenshot/snapshot work as one continuous session, and
+  // makes results visually inspectable via browser_screenshot.
+  async browser_navigate({ url, wait_ms = 2000 }) {
+    try {
+      const page = await getPage();
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      if (wait_ms > 0) await sleep(Math.min(wait_ms, 10000));
+      const snapshotText = await buildBrowserSnapshotText(page, false);
+      return `🧭 Navigated to ${url}\n\n${snapshotText}`;
+    } catch (err) {
+      return `Error navigating to ${url}: ${err.message}`;
+    }
+  },
+
+  async browser_click({ selector, index = 0 }) {
+    try {
+      const page = await getPage();
+      if (page.url() === 'about:blank') return 'No page loaded. Use browser_navigate first.';
+      let handle = null;
+      try { handle = await page.$(selector); } catch (_) {}
+      if (!handle) {
+        // Fallback: match by visible text content across common clickable tags
+        // (single round-trip: search happens inside the page, not per-element).
+        const eh = await page.evaluateHandle((sel, idx) => {
+          const nodes = Array.from(document.querySelectorAll('button, a, [role="button"], [role="link"], input[type="submit"], input[type="button"], li, label, span, div'));
+          const matches = nodes.filter((el) => el.offsetParent !== null && (el.textContent || '').trim().toLowerCase().includes(String(sel).toLowerCase()));
+          return matches[idx] || null;
+        }, selector, index);
+        handle = eh.asElement();
+      }
+      if (!handle) return `Could not find clickable element matching: "${selector}"`;
+      await handle.click();
+      await sleep(400);
+      const snapshotText = await buildBrowserSnapshotText(page, false);
+      return `👆 Clicked "${selector}"\n\n${snapshotText}`;
+    } catch (err) {
+      return `Error clicking ${selector}: ${err.message}`;
+    }
+  },
+
   async browser_type({ selector, text, press_enter = false }) {
     try {
       const page = await getPage();
@@ -5279,7 +5409,7 @@ ${trunc(md, 12000)}`;
       await page.keyboard.press('Backspace');
       await el.type(text, { delay: 20 });
       if (press_enter) await page.keyboard.press('Enter');
-      await page.waitForTimeout(500);
+      await sleep(500);
       return `⌨️ Typed "${text}" into ${selector}${press_enter ? ' + Enter' : ''}`;
     } catch (err) {
       return `Error typing into ${selector}: ${err.message}`;
@@ -5314,58 +5444,8 @@ ${trunc(md, 12000)}`;
   async browser_snapshot({ full = false } = {}) {
     try {
       const page = await getPage();
-      const currentUrl = page.url();
-      if (currentUrl === 'about:blank') return 'No page loaded. Use browser_navigate first.';
-      const snapshot = await page.evaluate((wantFull) => {
-        const elements = [];
-        const interactive = document.querySelectorAll('button, a, input, select, textarea, [role="button"], [role="link"], [contenteditable]');
-        interactive.forEach((el, i) => {
-          const rect = el.getBoundingClientRect();
-          if (!wantFull && rect.width === 0 && rect.height === 0) return;
-          const tag = el.tagName.toLowerCase();
-          const text = (el.textContent || '').trim().slice(0, 100);
-          const type = el.getAttribute('type') || '';
-          const placeholder = el.getAttribute('placeholder') || '';
-          const value = el.value || '';
-          const href = el.getAttribute('href') || '';
-          const name = el.getAttribute('name') || '';
-          const id = el.id || '';
-          const checked = el.checked !== undefined ? String(el.checked) : '';
-          const disabled = el.disabled ? ' [disabled]' : '';
-          elements.push({ idx: i, tag, text: text.slice(0, 80), type, placeholder, value, href, name, id, checked, disabled });
-        });
-        // Page text content
-        const bodyText = document.body ? document.body.innerText.slice(0, wantFull ? 5000 : 1500) : '';
-        return {
-          title: document.title,
-          url: location.href,
-          viewport: { w: window.innerWidth, h: window.innerHeight },
-          scroll: { x: window.scrollX, y: window.scrollY },
-          elements,
-          bodyText,
-        };
-      }, full);
-      const lines = [
-        `🔍 Snapshot: ${snapshot.url}`,
-        `Title: ${snapshot.title}`,
-        `Viewport: ${snapshot.viewport.w}x${snapshot.viewport.h}`,
-        `Interactive elements (${snapshot.elements.length}):`,
-      ];
-      snapshot.elements.slice(0, full ? 50 : 25).forEach(el => {
-        const label = el.text || el.placeholder || el.name || el.id || '(unnamed)';
-        const extra = [];
-        if (el.type && el.tag === 'input') extra.push(`type=${el.type}`);
-        if (el.value) extra.push(`val="${el.value.slice(0, 30)}"`);
-        if (el.checked) extra.push(`checked=${el.checked}`);
-        lines.push(`  [${el.idx}] <${el.tag}${el.disabled}> ${label}${extra.length ? ' (' + extra.join(', ') + ')' : ''}`);
-      });
-      if (snapshot.elements.length > (full ? 50 : 25)) lines.push(`  ... and ${snapshot.elements.length - (full ? 50 : 25)} more`);
-      if (snapshot.bodyText) {
-        lines.push('', '--- Page text ---');
-        lines.push(snapshot.bodyText.slice(0, full ? 3000 : 800));
-        if (snapshot.bodyText.length > (full ? 3000 : 800)) lines.push(`... (${snapshot.bodyText.length} chars total)`);
-      }
-      return lines.join('\n');
+      if (page.url() === 'about:blank') return 'No page loaded. Use browser_navigate first.';
+      return await buildBrowserSnapshotText(page, full);
     } catch (err) {
       return `Error taking snapshot: ${err.message}`;
     }
