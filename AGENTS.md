@@ -45,6 +45,16 @@ Hakster agent loop guidance:
 - If a server-side change needs a restart to take effect, tell the user, let them finish their CLI work, and restart only on their go-ahead (or apply on the next natural restart). `pm2 restart/stop/reload haksterAi` and `systemctl restart pm2-root` are confirmation-gated for this reason.
 - Shell commands must never hang the agent: every `exec_shell` is bounded by a timeout (default 15s, max 120s) with a hard process-group kill. Do not run interactive or long-lived foreground commands (`tail -f`, REPLs, `npm start`, `ssh` without a password, servers) in `exec_shell` — background them with PM2/nohup or use the browser terminal.
 
+## Git Commit Policy (standing authorization — confirmed 2026-07-24)
+
+Commit is pre-authorized for this repo at all times when the work is clean and safe — no need to ask before each commit. "Clean and safe" means:
+
+- The change is a real fix/feature the user asked for or clearly wanted (not exploratory/scratch work).
+- Syntax-checked (`node -c`) and, where practical, verified (unit test, live smoke test, or logical simulation) before committing.
+- The diff is scoped to files actually touched for this change — review `git diff`/`git status` first and stage by filename, never a blanket `git add -A`/`.`, so unrelated pre-existing uncommitted work in other files doesn't get swept in unintentionally.
+- Never force-push, never `--no-verify`, never amend someone else's commit. Destructive git operations (`reset --hard`, force push, branch deletion) still require explicit confirmation — this authorization only covers normal `git commit`.
+- Still log the fix to haksterAi's own memory (`memoryEngine.addMemory` + `consolidate`) per the training rule below — commit and memory logging go together.
+
 ## Agent Loop Architecture
 
 The agent loop follows a 6-phase state machine:
