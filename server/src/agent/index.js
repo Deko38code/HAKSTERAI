@@ -6660,6 +6660,17 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
   history.push({ role: 'user', content: userMessage });
   _currentTaskAnchor = history[history.length - 1];
 
+  // ── Pull memory banks for THIS task ──
+  // buildSystemPrompt()'s memFrag is baked in once at session boot and never
+  // refreshes; banks written mid-session (addMemoryToBank) were previously
+  // write-only — nothing read them back. Pull a clustered, task-relevant
+  // digest fresh for every new task so newly-learned lessons actually reach
+  // the model instead of sitting unused in .hakster/memories/banks/*.json.
+  try {
+    const bankDigest = autolearn.pullMemoryBanks(process.cwd(), { query: userMessage, maxChars: 1500 });
+    if (bankDigest) history.push({ role: 'system', content: bankDigest });
+  } catch (_) { /* non-blocking */ }
+
   // ── Stall guard: kickstart if no activity for 20 seconds ──
   if (_stallGuardTimer) clearInterval(_stallGuardTimer);
   _stallGuardTimer = setInterval(() => {

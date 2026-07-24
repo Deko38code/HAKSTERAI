@@ -3,6 +3,29 @@
 const fs = require('fs');
 const path = require('path');
 
+// Resolve the real (non-root) operator's .hakster dir, even if this process was
+// launched as root (which would otherwise point HOME at /root). Mirrors the same
+// resolution used in ./mcp.js so both agree on one machine-independent path —
+// single-operator box: exactly one non-root home dir under /home.
+function resolveGhostHome() {
+  if (process.env.HAKSTER_HOME) return process.env.HAKSTER_HOME;
+  if (process.getuid && process.getuid() === 0) {
+    if (process.env.SUDO_USER) {
+      try {
+        const { execFileSync } = require('child_process');
+        const home = execFileSync('getent', ['passwd', process.env.SUDO_USER]).toString().trim().split(':')[5];
+        if (home) return home;
+      } catch { /* getent unavailable or user not found — fall through */ }
+    }
+    try {
+      const users = fs.readdirSync('/home').filter((u) => u !== 'lost+found');
+      if (users.length === 1) return path.join('/home', users[0]);
+    } catch { /* /home unreadable — fall through */ }
+  }
+  return require('os').homedir();
+}
+const HAKSTER_DIR = path.join(resolveGhostHome(), '.hakster');
+
 const {
   AgentLoopPhase,
   injectAgentsMd,
@@ -154,7 +177,7 @@ function bankSlug(section) {
 }
 
 function bankPath(cwd, section) {
-  return path.join(cwd, '.hakster', 'memories', 'banks', `${bankSlug(section)}.json`);
+  return path.join(HAKSTER_DIR, 'memories', 'banks', `${bankSlug(section)}.json`);
 }
 
 function readBank(cwd, section) {
@@ -165,7 +188,7 @@ function readBank(cwd, section) {
 // to BANK_CAP (drop oldest). Returns the bank size after write.
 function persistBank(cwd, section, newEntries) {
   if (!newEntries || newEntries.length === 0) return readBank(cwd, section).length;
-  ensureDir(path.join(cwd, '.hakster', 'memories', 'banks'));
+  ensureDir(path.join(HAKSTER_DIR, 'memories', 'banks'));
   const all = readBank(cwd, section).slice();
   for (const entry of newEntries) {
     let dup = false;
@@ -212,8 +235,59 @@ function addMemoryToBank(cwd, section, observation, tags = [], opts = {}) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// pullMemoryBanks(cwd, opts) — read the per-bank stores built by
+// addMemoryToBank/persistBank and hand back a clustered digest, grouped by
+// bank (not flattened into one pile), so a task starts with relevant prior
+// findings instead of the model rediscovering the same ground every time.
+// readBank() was previously write-only outside this module — banks kept
+// accumulating real content (patterns, errors, conventions, recon findings,
+// playbooks, ...) but nothing ever pulled it back into context. Call this at
+// the START of each task (not just once at session boot like buildSystemPrompt)
+// so newly-banked lessons from earlier in the session are visible too.
+// ---------------------------------------------------------------------------
+const UNIVERSAL_BANK_SECTIONS = ['Lessons & Anti-patterns', 'Errors Encountered', 'User Preferences', 'Conventions'];
+
+function pullMemoryBanks(cwd, opts = {}) {
+  const query = opts.query || '';
+  const perBankLimit = opts.perBankLimit || 3;
+  const maxChars = opts.maxChars || 1500;
+
+  const scored = [];
+  for (const section of MEMORY_SECTIONS) {
+    const entries = readBank(cwd, section);
+    if (entries.length === 0) continue;
+    const isUniversal = UNIVERSAL_BANK_SECTIONS.includes(section);
+    const ranked = entries
+      .map((e) => ({ e, score: query ? substringSimilarity(query, e.observation || '') : (e.confidence || 0.5) }))
+      .sort((a, b) => b.score - a.score);
+    // Topical banks (recon, vulns, infra, tools, ...) only earn a slot when they
+    // actually match this task; universal banks (lessons, errors, prefs,
+    // conventions) are worth a look regardless of topic.
+    const top = query && !isUniversal ? ranked.filter((r) => r.score > 0.15).slice(0, perBankLimit) : ranked.slice(0, perBankLimit);
+    if (top.length > 0) scored.push({ section, items: top.map((r) => r.e) });
+  }
+  if (scored.length === 0) return '';
+
+  let out = '## Memory Banks (pulled for this task)\n';
+  let used = out.length;
+  for (const bank of scored) {
+    let block = `\n### ${bank.section}\n`;
+    for (const item of bank.items) {
+      const line = `- ${String(item.observation).slice(0, 220)}\n`;
+      if (used + block.length + line.length > maxChars) break;
+      block += line;
+    }
+    if (block.trim().split('\n').length <= 1) continue; // header only — nothing fit the budget
+    if (used + block.length > maxChars) break;
+    out += block;
+    used += block.length;
+  }
+  return out.trim();
+}
+
 function initMemory(cwd) {
-  const haksterDir = path.join(cwd, '.hakster');
+  const haksterDir = HAKSTER_DIR;
   const memoriesDir = path.join(haksterDir, 'memories');
   const skillsDir = path.join(haksterDir, 'skills');
 
@@ -294,7 +368,7 @@ function addRawMemory(entry, cwd) {
     return false;
   }
 
-  const memoriesDir = path.join(cwd, '.hakster', 'memories');
+  const memoriesDir = path.join(HAKSTER_DIR, 'memories');
   const rawMemoriesPath = path.join(memoriesDir, 'raw_memories.json');
 
   ensureDir(memoriesDir);
@@ -348,8 +422,15 @@ function addRawMemory(entry, cwd) {
 // merges into MEMORY.md sections, regenerates memory_summary.md,
 // archives and clears raw memories.
 // ---------------------------------------------------------------------------
+
+// Actual pending raw-memory count — what shouldConsolidate()'s rawMemoryCount
+// param is meant to receive (real count, not a proxy like tool-call count).
+function getRawMemoryCount() {
+  return readJson(path.join(HAKSTER_DIR, 'memories', 'raw_memories.json'), []).length;
+}
+
 function consolidateMemories(cwd) {
-  const haksterDir = path.join(cwd, '.hakster');
+  const haksterDir = HAKSTER_DIR;
   const memoriesDir = path.join(haksterDir, 'memories');
   const rawMemoriesPath = path.join(memoriesDir, 'raw_memories.json');
   const memoryMdPath = path.join(haksterDir, 'MEMORY.md');
@@ -432,7 +513,7 @@ function consolidateMemories(cwd) {
 
     // Append new observations to existing sections
     for (const section of MEMORY_SECTIONS) {
-      const sectionRegex = new RegExp(`(### ${section}\\n)([\\s]*?)(?=###|##|$)`, 's');
+      const sectionRegex = new RegExp(`(### ${section}\\n)([\\s\\S]*?)(?=###|##|$)`, 's');
       const entries = deduped[section] || [];
       const additions = entries.map(e => `- **[${e.tags.join(', ')}]** ${e.observation}`).join('\n');
 
@@ -532,7 +613,7 @@ function extractSkill(entries, cwd) {
 
 function extractSkillFromMemories(entries, cwd) {
   if (!Array.isArray(entries) || entries.length === 0) return 0;
-  const skillsDir = path.join(cwd, '.hakster', 'skills');
+  const skillsDir = path.join(HAKSTER_DIR, 'skills');
   const skillIndexPath = path.join(skillsDir, 'index.json');
 
   ensureDir(skillsDir);
@@ -641,11 +722,11 @@ function autoInit(cwd) {
   const agentsMd = injectAgentsMd(cwd) || '';
 
   // Step 3: Load MEMORY.md content
-  const memoryMdPath = path.join(cwd, '.hakster', 'MEMORY.md');
+  const memoryMdPath = path.join(HAKSTER_DIR, 'MEMORY.md');
   const memoryContent = readText(memoryMdPath);
 
   // Step 4: Load skill index
-  const skillIndexPath = path.join(cwd, '.hakster', 'skills', 'index.json');
+  const skillIndexPath = path.join(HAKSTER_DIR, 'skills', 'index.json');
   const skillIndex = readJson(skillIndexPath, { skills: [], lastUpdated: '' });
   const skillNames = skillIndex.skills.map(s => s.name).join(', ');
 
@@ -694,13 +775,16 @@ module.exports = {
   initMemory,
   addRawMemory,
   addMemoryToBank,
+  getRawMemoryCount,
   consolidateMemories,
   extractSkill,
   loadLearnedLessons,
   autoInit,
   readBank,
+  pullMemoryBanks,
   bankPath,
   BANK_CAP,
+  MEMORY_SECTIONS,
 
   // Expose helpers for testing
   _jaccardSimilarity: jaccardSimilarity,
