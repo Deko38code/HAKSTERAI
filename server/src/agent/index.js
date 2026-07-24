@@ -5165,6 +5165,13 @@ ${trunc(md, 12000)}`;
     const results = [];
     const maxConcurrent = 3;
     const tasksToRun = tasks.slice(0, maxConcurrent);
+    // Nested agentLoop() calls have no cancellation hook and can each run up to the
+    // full round budget. Without an outer bound here, a single stuck sub-agent hangs
+    // this tool call — and therefore the parent turn — indefinitely; the 20s stall
+    // guard can't help because it only nudges BETWEEN turns, not during an in-flight
+    // tool call. Race each sub-task against a timeout so the parent always gets its
+    // turn back, even if the orphaned sub-agent keeps running in the background.
+    const SUB_AGENT_TIMEOUT_MS = 4 * 60 * 1000;
 
     log(`\n${C.info}◇ Spawning ${tasksToRun.length} sub-agent(s) in parallel...${C.reset}`);
 
@@ -5173,7 +5180,10 @@ ${trunc(md, 12000)}`;
       const taskHist = [{ role: 'system', content: buildSystemPrompt() }];
       log(`${C.primary}  ◆ ${taskName}: ${task.goal.substring(0, 80)}${C.reset}`);
       try {
-        const result = await agentLoop(task.goal, taskHist, true, { lowToken: false }); // silent mode — _lowToken is only defined inside agentLoop; sub-agents run normal-budget (was: ReferenceError _lowToken is not defined)
+        await Promise.race([
+          agentLoop(task.goal, taskHist, true, { lowToken: false }), // silent mode — _lowToken is only defined inside agentLoop; sub-agents run normal-budget (was: ReferenceError _lowToken is not defined)
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out after ${SUB_AGENT_TIMEOUT_MS / 1000}s — parent task resumed without waiting further`)), SUB_AGENT_TIMEOUT_MS)),
+        ]);
         const lastAssistant = [...taskHist].reverse().find(m => m.role === 'assistant');
         return { name: taskName, status: 'done', result: lastAssistant?.content || '(completed)' };
       } catch (err) {
