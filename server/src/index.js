@@ -478,6 +478,14 @@ const SKILLS_CACHE_TTL = 10000; // dashboard counters should stay live
 let _toolsCache = null;
 let _toolsCacheTime = 0;
 const TOOLS_CACHE_TTL = 10000; // dashboard counters should stay live
+// /api/dashboard recomputes several SQLite aggregates, shells out to `ss` twice with a
+// synchronous /proc read per listening socket, and parses up to 5000 crush.db message
+// rows as JSON — all synchronous, all blocking the event loop. None of that was cached,
+// so every dashboard poll (and every OTHER request queued behind it) paid the full cost.
+// A short TTL cache keyed by the response-shaping query flags keeps rapid polling cheap
+// while `live=1` still forces a fresh read.
+const _dashboardCache = new Map();
+const DASHBOARD_CACHE_TTL = 5000;
 
 function walkMarkdownFiles(dir, maxFiles = 5000) {
   const files = [];
@@ -4674,11 +4682,17 @@ app.get('/api/dashboard', (req, res) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
-    if (req.query.live === '1') {
+    const forceLive = req.query.live === '1';
+    if (forceLive) {
       _skillsCache = null;
       _skillsCacheTime = 0;
       _toolsCache = null;
       _toolsCacheTime = 0;
+    }
+    const dashCacheKey = `${isPublicDashboard ? 'pub' : 'admin'}:${req.query.compact === '1' ? 'compact' : 'full'}`;
+    const dashCached = _dashboardCache.get(dashCacheKey);
+    if (!forceLive && dashCached && (Date.now() - dashCached.time) < DASHBOARD_CACHE_TTL) {
+      return res.json(dashCached.payload);
     }
     // Request stats
     const totalRequests = db.prepare(`SELECT COUNT(*) as count FROM requests`).get().count;
@@ -4925,7 +4939,7 @@ app.get('/api/dashboard', (req, res) => {
     // Keep the dashboard fast. Calling the local crush wrapper can open an interactive menu.
     const crushVersion = 'local';
 
-    res.json({
+    const dashboardPayload = {
       requests: { total: totalRequests + (ledgerTotals.requests || 0), totalTokens, totalCost, byProvider, byUser, inputTokens: ledgerTotals.inputTokens || 0, outputTokens: (ledgerTotals.outputTokens || 0) + totalToolCalls },
       sessions: { total: sessionCount, active: activeSessions, messages: messageCount, artifacts: artifactCount },
       system: { cpus, totalMem, freeMem, uptime, hostname: os.hostname(), platform: os.platform(), arch: os.arch() },
@@ -4935,7 +4949,9 @@ app.get('/api/dashboard', (req, res) => {
       providers: Object.entries(PROVIDERS)
         .filter(([key, cfg]) => !isCerebrasValue(key) && !isCerebrasValue(cfg.name) && !isCerebrasValue(cfg.defaultModel))
         .map(([key, cfg]) => ({ id: key, name: cfg.name, type: cfg.type, defaultModel: cfg.defaultModel })),
-    });
+    };
+    _dashboardCache.set(dashCacheKey, { time: Date.now(), payload: dashboardPayload });
+    res.json(dashboardPayload);
   } catch (err) {
     console.error('[dashboard] stats error:', err);
     res.status(500).json({ error: 'dashboard stats failed', detail: err.message });
