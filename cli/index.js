@@ -627,6 +627,11 @@ program
     const { server, apiKey } = serverCfg;
     const readline = require('readline');
     const history = (opts.fresh ? [] : loadHistory());
+    // ── Session-wide tool call log (table of contents) ──
+    // Every tool call gets a persistent #id (never resets within the session) so
+    // the user can say "check #25" and both of us can find exactly which call that was.
+    let sessionToolSeq = 0;
+    const sessionToolLog = []; // [{id, name, argStr, status, preview, ms, turn}]
     if (!opts.fresh && history.length > 0) {
       console.log(`${C.gray}  ~ restored ${history.length} message(s) from last session${C.reset}\n`);
     }
@@ -1027,6 +1032,37 @@ program
         return true;
       }
 
+      // ── Table of contents: list every tool call this session with its #id ──
+      if (cmd === '/toc') {
+        if (sessionToolLog.length === 0) {
+          console.log(`${C.gray}No tool calls yet this session${C.reset}`);
+        } else {
+          // /toc <n> — show full detail for a single call
+          const wantId = arg && /^\d+$/.test(arg.trim()) ? parseInt(arg.trim(), 10) : null;
+          if (wantId != null) {
+            const e = sessionToolLog.find(x => x.id === wantId);
+            if (!e) {
+              console.log(`${C.yellow}No tool call #${wantId} in this session${C.reset}`);
+            } else {
+              const statusColor = e.status === 'running' ? C.yellow : C.green;
+              console.log(`${C.bold}#${e.id}${C.reset} ${C.cyan}${e.name}${C.reset} ${statusColor}${e.status}${C.reset} ${C.gray}${e.ms ? `(${e.ms}ms)` : ''}${C.reset}`);
+              if (e.argStr) console.log(`  ${C.gray}args:${C.reset} ${e.argStr}`);
+              if (e.preview) console.log(`  ${C.gray}result:${C.reset} ${e.preview}`);
+            }
+          } else {
+            console.log(`${C.cyan}Table of Contents (${sessionToolLog.length} tool call${sessionToolLog.length !== 1 ? 's' : ''} this session):${C.reset}`);
+            for (const e of sessionToolLog) {
+              const statusMark = e.status === 'running' ? `${C.yellow}…${C.reset}` : `${C.green}✓${C.reset}`;
+              const ms = e.ms ? ` ${C.gray}${e.ms}ms${C.reset}` : '';
+              console.log(`  ${C.bold}#${e.id}${C.reset} ${statusMark} ${C.cyan}${e.name}${C.reset}${ms} ${C.gray}${e.preview.slice(0, 60)}${C.reset}`);
+            }
+            console.log(`${C.gray}Use /toc <n> for full detail on one call (e.g. /toc 25)${C.reset}`);
+          }
+        }
+        rl.prompt();
+        return true;
+      }
+
       // ── Encode (base64/hex/url/rot13/binary) ──
       if (cmd === '/encode') {
         if (!arg) {
@@ -1412,9 +1448,13 @@ program
                 const argStr = Object.keys(args).length ? ' ' + JSON.stringify(args).slice(0, 100) : '';
                 todoState._toolStart = Date.now();
                 todoState._lastToolName = tname;
+                // ── Table of contents: assign a session-persistent #id to this call ──
+                sessionToolSeq++;
+                const _tocId = sessionToolSeq;
+                sessionToolLog.push({ id: _tocId, callId: evt.tool_call_id || null, name: tname, argStr: argStr.trim(), status: 'running', preview: '', ms: 0, startedAt: Date.now() });
                 showTodo({ totalTools: toolCount, activeTool: tname, status: 'active' });
                 startSpinner('ACT', `running ${tname}`);
-                process.stdout.write(`\n${C.gray}  ↳ [tool ${toolCount}] ${C.cyan}${tname}${C.reset}${C.gray}${argStr}${C.reset}`);
+                process.stdout.write(`\n${C.gray}  ↳ ${C.bold}#${_tocId}${C.reset} ${C.cyan}${tname}${C.reset}${C.gray}${argStr}${C.reset}`);
                 // ── Plan grid: parse steps when plan(action=write) fires ──────
                 if (tname === 'plan' && args.action === 'write' && args.content) {
                   const rawSteps = String(args.content).split('\n')
@@ -1437,7 +1477,20 @@ program
                 todoState._toolStart = null;
                 showTodo({ completedTools: Math.max(todoState.completedTools, toolCount), activeTool: tname || todoState.activeTool, avgToolTime: _avg(gridToolTimes) });
                 startSpinner('OBSERVE', `checking ${tname || 'tool'} result`);
-                process.stdout.write(`\n${C.gray}  ↳ ${C.green}✓${C.reset} ${C.gray}${preview}${result.length > 150 ? '...' : ''}${C.reset}\n`);
+                // ── Table of contents: close out the matching entry (by tool_call_id, else newest running w/ same name) ──
+                let _tocEntry = evt.tool_call_id ? sessionToolLog.find(e => e.callId === evt.tool_call_id) : null;
+                if (!_tocEntry) {
+                  for (let i = sessionToolLog.length - 1; i >= 0; i--) {
+                    if (sessionToolLog[i].status === 'running' && (!tname || sessionToolLog[i].name === tname)) { _tocEntry = sessionToolLog[i]; break; }
+                  }
+                }
+                const _tocId = _tocEntry ? _tocEntry.id : null;
+                if (_tocEntry) {
+                  _tocEntry.status = 'done';
+                  _tocEntry.preview = preview;
+                  _tocEntry.ms = dur;
+                }
+                process.stdout.write(`\n${C.gray}  ↳ ${C.green}✓${C.reset}${_tocId ? ` ${C.bold}#${_tocId}${C.reset}` : ''} ${C.gray}${preview}${result.length > 150 ? '...' : ''}${C.reset}\n`);
                 // ── Plan grid: show plan as read back from server ──────────────
                 if (tname === 'plan' && planState.steps.length === 0 && result.includes('\n')) {
                   const rawSteps = result.split('\n')
@@ -1717,6 +1770,12 @@ program
 
     rl.on('close', () => {
       if (pending) return;
+      // Session-end consolidation safety net: shouldConsolidate()'s threshold trigger
+      // only fires within a single long session (10+ tool calls). Short sessions were
+      // leaving real memories stuck in raw_memories.json indefinitely since nothing
+      // else ever consolidated them. Safe to call unconditionally — it's a no-op when
+      // there's nothing pending.
+      try { autolearn.consolidateMemories(path.join(os.homedir(), '.hakster')); } catch {}
       console.log(`\n${C.green}  session ended. 👻${C.reset}`);
       process.exit(0);
     });

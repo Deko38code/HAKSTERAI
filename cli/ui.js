@@ -393,6 +393,7 @@ function showHelp() {
     /exit               Exit Hakster
     /clear              Clear the screen
     /history            Show command history
+    /toc [n]            List tool calls this session by #id (or full detail on one)
 
   ${C.bold}Shell (persistent):${C.reset}
     /cd <path>          Change directory (persists)
