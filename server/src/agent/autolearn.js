@@ -248,6 +248,23 @@ function addMemoryToBank(cwd, section, observation, tags = [], opts = {}) {
 // ---------------------------------------------------------------------------
 const UNIVERSAL_BANK_SECTIONS = ['Lessons & Anti-patterns', 'Errors Encountered', 'User Preferences', 'Conventions'];
 
+// ── Cross-agent memory: read Phantom's memory notes, read-only ─────────────
+// Same machine, same operator — Phantom (phantom-cli.js) and haksterAi learn
+// genuinely overlapping lessons. Read-only (never writes into Phantom's
+// memory file) so there's no concurrent-write risk between the two agents.
+const PHANTOM_MEMORY_FILE = '/home/ghost/.phantom-memory.json';
+function getPhantomCrossMemoryText(limit = 8) {
+  try {
+    if (!fs.existsSync(PHANTOM_MEMORY_FILE)) return '';
+    const mem = JSON.parse(fs.readFileSync(PHANTOM_MEMORY_FILE, 'utf8'));
+    let notes = [];
+    if (Array.isArray(mem.notes)) notes = mem.notes;
+    else if (Array.isArray(mem.entries)) notes = mem.entries.map((e) => e.value || e.key || String(e));
+    if (!notes.length) return '';
+    return notes.slice(-limit).map((n) => `- ${String(n).slice(0, 200)}`).join('\n');
+  } catch { return ''; }
+}
+
 function pullMemoryBanks(cwd, opts = {}) {
   const query = opts.query || '';
   const perBankLimit = opts.perBankLimit || 3;
@@ -267,7 +284,8 @@ function pullMemoryBanks(cwd, opts = {}) {
     const top = query && !isUniversal ? ranked.filter((r) => r.score > 0.15).slice(0, perBankLimit) : ranked.slice(0, perBankLimit);
     if (top.length > 0) scored.push({ section, items: top.map((r) => r.e) });
   }
-  if (scored.length === 0) return '';
+  const phantomText = getPhantomCrossMemoryText();
+  if (scored.length === 0 && !phantomText) return '';
 
   let out = '## Memory Banks (pulled for this task)\n';
   let used = out.length;
@@ -282,6 +300,10 @@ function pullMemoryBanks(cwd, opts = {}) {
     if (used + block.length > maxChars) break;
     out += block;
     used += block.length;
+  }
+  if (phantomText) {
+    const block = `\n### From Phantom (shared lessons, same machine)\n${phantomText}\n`;
+    if (used + block.length <= maxChars) { out += block; used += block.length; }
   }
   return out.trim();
 }
