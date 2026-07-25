@@ -265,6 +265,28 @@ function getPhantomCrossMemoryText(limit = 8) {
   } catch { return ''; }
 }
 
+// ── Cross-agent memory: read Claude Code's memory index, read-only ─────────
+// Same machine, same operator — Claude Code (this CLI's own agent identity)
+// keeps a separate persistent memory at ~/.claude/projects/-home-ghost/memory/
+// (user profile, feedback, project facts, references) that never flows into
+// haksterAi's own memory system. Read-only: this only reads Claude Code's
+// index file (one-line hooks, no raw file bodies, no secrets) so haksterAi's
+// context includes what Claude Code has already learned about the operator
+// and this machine, without haksterAi ever writing back into it.
+const CLAUDE_CODE_MEMORY_INDEX = '/home/ghost/.claude/projects/-home-ghost/memory/MEMORY.md';
+function getClaudeCodeCrossMemoryText(limit = 12) {
+  try {
+    if (!fs.existsSync(CLAUDE_CODE_MEMORY_INDEX)) return '';
+    const md = fs.readFileSync(CLAUDE_CODE_MEMORY_INDEX, 'utf8');
+    const lines = md.split('\n')
+      .map((l) => l.match(/^- \[(.+?)\]\(.+?\) — (.+)$/))
+      .filter(Boolean)
+      .map((m) => `- ${m[1]}: ${m[2]}`.slice(0, 220));
+    if (!lines.length) return '';
+    return lines.slice(0, limit).join('\n');
+  } catch { return ''; }
+}
+
 function pullMemoryBanks(cwd, opts = {}) {
   const query = opts.query || '';
   const perBankLimit = opts.perBankLimit || 3;
@@ -285,7 +307,8 @@ function pullMemoryBanks(cwd, opts = {}) {
     if (top.length > 0) scored.push({ section, items: top.map((r) => r.e) });
   }
   const phantomText = getPhantomCrossMemoryText();
-  if (scored.length === 0 && !phantomText) return '';
+  const claudeCodeText = getClaudeCodeCrossMemoryText();
+  if (scored.length === 0 && !phantomText && !claudeCodeText) return '';
 
   let out = '## Memory Banks (pulled for this task)\n';
   let used = out.length;
@@ -303,6 +326,10 @@ function pullMemoryBanks(cwd, opts = {}) {
   }
   if (phantomText) {
     const block = `\n### From Phantom (shared lessons, same machine)\n${phantomText}\n`;
+    if (used + block.length <= maxChars) { out += block; used += block.length; }
+  }
+  if (claudeCodeText) {
+    const block = `\n### From Claude Code (this CLI's own memory, read-only)\n${claudeCodeText}\n`;
     if (used + block.length <= maxChars) { out += block; used += block.length; }
   }
   return out.trim();
@@ -811,5 +838,6 @@ module.exports = {
   // Expose helpers for testing
   _jaccardSimilarity: jaccardSimilarity,
   _substringSimilarity: substringSimilarity,
-  _generateId: generateId
+  _generateId: generateId,
+  getClaudeCodeCrossMemoryText
 };
