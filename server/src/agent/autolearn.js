@@ -551,8 +551,14 @@ function consolidateMemories(cwd) {
   if (existingMd) {
     // Find and replace sections in existing content
     // Strategy: keep header, replace section bodies
-    const headerMatch = existingMd.match(/^# haksterAi Memory\n(?:.*\n)*?## Project: haksterAi\n/s);
-    const header = headerMatch ? headerMatch[0] : `# haksterAi Memory\n\n_Last consolidated: ${timestamp}_\n_Raw memories processed: ${memories.length}_\n_Skills extracted: 0_\n\n## Project: haksterAi\n`;
+    // Plain indexOf, not regex: a backtracking `(?:.*\n)*?` header-scan over a large
+    // MEMORY.md that doesn't contain the marker (e.g. header format drift) is
+    // catastrophic-backtracking-prone and can peg the event loop for minutes,
+    // hanging the whole server (diagnosed via CPU profile — 100% of the pegged
+    // worker's self-time was this line).
+    const headerMarker = '## Project: haksterAi\n';
+    const markerIdx = existingMd.startsWith('# haksterAi Memory\n') ? existingMd.indexOf(headerMarker) : -1;
+    const header = markerIdx !== -1 ? existingMd.slice(0, markerIdx + headerMarker.length) : `# haksterAi Memory\n\n_Last consolidated: ${timestamp}_\n_Raw memories processed: ${memories.length}_\n_Skills extracted: 0_\n\n## Project: haksterAi\n`;
 
     // Rebuild with new section data appended
     let rebuilt = header.replace(
