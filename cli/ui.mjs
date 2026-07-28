@@ -1186,16 +1186,87 @@ function ApprovalPrompt({
 import React7 from "react";
 import { Box as Box7, Text as Text7 } from "ink";
 import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+var SIDE_BY_SIDE_MIN_COLS = 100;
+function pairDiffRows(lines) {
+  const rows = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith("diff") || line.startsWith("---") || line.startsWith("+++")) {
+      rows.push({ left: { text: line, kind: "meta" }, right: { text: line, kind: "meta" } });
+      i++;
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      rows.push({ left: { text: line, kind: "hunk" }, right: { text: line, kind: "hunk" } });
+      i++;
+      continue;
+    }
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      const removed = [];
+      while (i < lines.length && lines[i].startsWith("-") && !lines[i].startsWith("---")) {
+        removed.push(lines[i].slice(1));
+        i++;
+      }
+      const added = [];
+      while (i < lines.length && lines[i].startsWith("+") && !lines[i].startsWith("+++")) {
+        added.push(lines[i].slice(1));
+        i++;
+      }
+      const n = Math.max(removed.length, added.length);
+      for (let r = 0; r < n; r++) {
+        rows.push({
+          left: r < removed.length ? { text: removed[r], kind: "del" } : { text: "", kind: "blank" },
+          right: r < added.length ? { text: added[r], kind: "add" } : { text: "", kind: "blank" }
+        });
+      }
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      rows.push({ left: { text: "", kind: "blank" }, right: { text: line.slice(1), kind: "add" } });
+      i++;
+      continue;
+    }
+    const text = line.startsWith(" ") ? line.slice(1) : line;
+    rows.push({ left: { text, kind: "ctx" }, right: { text, kind: "ctx" } });
+    i++;
+  }
+  return rows;
+}
+var KIND_COLOR = { del: "red", add: "green", hunk: "cyan", meta: "magenta", ctx: "gray", blank: "gray" };
+var KIND_PREFIX = { del: "-", add: "+", hunk: "@", meta: " ", ctx: " ", blank: " " };
+function Cell({ cell, width }) {
+  const color = KIND_COLOR[cell.kind] || "gray";
+  const prefix = KIND_PREFIX[cell.kind] || " ";
+  const dim = cell.kind === "ctx" || cell.kind === "blank";
+  return /* @__PURE__ */ jsxs7(Text7, { color, dim, wrap: "truncate", children: [
+    prefix,
+    " ",
+    cell.text.slice(0, Math.max(0, width - 2))
+  ] });
+}
 function DiffPreview({ diff, cols = 80, onApprove, onDeny }) {
   if (!diff) return null;
-  const lines = diff.split("\n").slice(0, 20);
+  const allLines = diff.split("\n");
+  const capped = allLines.slice(0, 40);
+  const sideBySide = cols >= SIDE_BY_SIDE_MIN_COLS;
+  const colWidth = Math.floor((cols - 6) / 2);
+  const rows = sideBySide ? pairDiffRows(capped) : null;
   return /* @__PURE__ */ jsxs7(Box7, { flexDirection: "column", borderStyle: "round", borderColor: "yellow", paddingX: 1, children: [
     /* @__PURE__ */ jsxs7(Box7, { justifyContent: "space-between", children: [
-      /* @__PURE__ */ jsx7(Text7, { color: "yellow", bold: true, children: "\u26A0 Diff Preview \u2014 Review Before Apply" }),
+      /* @__PURE__ */ jsxs7(Text7, { color: "yellow", bold: true, children: [
+        "\u26A0 Diff Preview ",
+        sideBySide ? "\u2014 old \u2502 new" : "(unified)",
+        " \u2014 Review Before Apply"
+      ] }),
       /* @__PURE__ */ jsx7(Text7, { color: "gray", dim: true, children: "Y=approve \u2502 N=deny \u2502 V=view more" })
     ] }),
     /* @__PURE__ */ jsxs7(Box7, { flexDirection: "column", marginTop: 0, children: [
-      lines.map((line, i) => {
+      sideBySide ? rows.map((row, i) => /* @__PURE__ */ jsxs7(Box7, { flexDirection: "row", children: [
+        /* @__PURE__ */ jsx7(Box7, { width: colWidth, children: /* @__PURE__ */ jsx7(Cell, { cell: row.left, width: colWidth }) }),
+        /* @__PURE__ */ jsx7(Text7, { color: "gray", dim: true, children: " \u2502 " }),
+        /* @__PURE__ */ jsx7(Box7, { width: colWidth, children: /* @__PURE__ */ jsx7(Cell, { cell: row.right, width: colWidth }) })
+      ] }, i)) : capped.map((line, i) => {
         let color = "gray";
         let prefix = " ";
         if (line.startsWith("+") && !line.startsWith("+++")) {
@@ -1217,9 +1288,9 @@ function DiffPreview({ diff, cols = 80, onApprove, onDeny }) {
           line.slice(0, cols - 4)
         ] }, i);
       }),
-      diff.split("\n").length > 20 && /* @__PURE__ */ jsxs7(Text7, { color: "gray", dim: true, children: [
+      allLines.length > capped.length && /* @__PURE__ */ jsxs7(Text7, { color: "gray", dim: true, children: [
         "... ",
-        diff.split("\n").length - 20,
+        allLines.length - capped.length,
         " more lines (press V to view)"
       ] })
     ] }),
@@ -1554,6 +1625,7 @@ var THEME_NAMES = Object.keys(THEMES);
 import { jsx as jsx13, jsxs as jsxs14 } from "react/jsx-runtime";
 var MAX_OUTPUT = 500;
 var MAX_TOOLS = 50;
+var TOKEN_BATCH_MS = 16;
 var REASONING_TYPES = [
   { pattern: /^(?:checking|scanning|looking|reading|inspecting|examining|reviewing|verifying|testing|validating)/i, type: "inspect", color: "blue" },
   { pattern: /^(?:found|detected|identified|located|discovered|spotted|noticed)/i, type: "find", color: "green" },
@@ -1618,26 +1690,68 @@ function App() {
     Math.max(0, output.length - newerBelow - visCount),
     output.length - newerBelow
   );
+  const liveTextRef = useRef("");
+  const liveThinkRef = useRef("");
+  const [, forceTick] = useState7(0);
   const flushTokens = useCallback(() => {
     const b = batchRef.current;
     if (!b.text) return;
-    const text = b.text;
+    liveTextRef.current += b.text;
     b.text = "";
     b.timer = null;
-    setOutput((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && last.type === "assistant") {
-        return [...prev.slice(0, -1), { type: "assistant", text: last.text + text }].slice(-MAX_OUTPUT);
-      }
-      return [...prev, { type: "assistant", text }].slice(-MAX_OUTPUT);
-    });
+    forceTick((n) => n + 1);
   }, []);
   const appendToken = useCallback((token) => {
     batchRef.current.text += token;
+    if (token.includes("\n")) {
+      const full = batchRef.current.text;
+      batchRef.current.text = "";
+      if (batchRef.current.timer) {
+        clearTimeout(batchRef.current.timer);
+        batchRef.current.timer = null;
+      }
+      const parts = full.split("\n");
+      for (let i = 0; i < parts.length - 1; i++) {
+        setOutput((prev) => [...prev, { type: "assistant", text: parts[i] }].slice(-MAX_OUTPUT));
+      }
+      liveTextRef.current = parts[parts.length - 1];
+      forceTick((n) => n + 1);
+      return;
+    }
     if (!batchRef.current.timer) {
-      batchRef.current.timer = setTimeout(flushTokens, 30);
+      batchRef.current.timer = setTimeout(flushTokens, TOKEN_BATCH_MS);
     }
   }, [flushTokens]);
+  const thinkBatchRef = useRef({ timer: null, text: "" });
+  const flushThinking = useCallback(() => {
+    const b = thinkBatchRef.current;
+    if (!b.text) return;
+    liveThinkRef.current += b.text;
+    b.text = "";
+    b.timer = null;
+    forceTick((n) => n + 1);
+  }, []);
+  const appendThinking = useCallback((chunk) => {
+    thinkBatchRef.current.text += chunk;
+    if (chunk.includes("\n")) {
+      const full = thinkBatchRef.current.text;
+      thinkBatchRef.current.text = "";
+      if (thinkBatchRef.current.timer) {
+        clearTimeout(thinkBatchRef.current.timer);
+        thinkBatchRef.current.timer = null;
+      }
+      const parts = full.split("\n");
+      for (let i = 0; i < parts.length - 1; i++) {
+        setOutput((prev) => [...prev, { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT));
+      }
+      liveThinkRef.current = parts[parts.length - 1];
+      forceTick((n) => n + 1);
+      return;
+    }
+    if (!thinkBatchRef.current.timer) {
+      thinkBatchRef.current.timer = setTimeout(flushThinking, TOKEN_BATCH_MS);
+    }
+  }, [flushThinking]);
   const _working = thinking || ["PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE", "THINK"].includes(phase);
   useEffect4(() => {
     const id = setInterval(() => setBlink((b) => !b), 480);
@@ -1648,12 +1762,17 @@ function App() {
     agent_default.onToken((token) => appendToken(token));
     agent_default.onThinking((text) => {
       setThinking(true);
-      setOutput((prev) => {
-        if (prev.length && prev[prev.length - 1].type === "thinking" && prev[prev.length - 1].text === text) return prev;
-        return [...prev, { type: "thinking", text }].slice(-MAX_OUTPUT);
-      });
+      appendThinking(text);
     });
-    agent_default.onThinkingEnd(() => setThinking(false));
+    agent_default.onThinkingEnd(() => {
+      setThinking(false);
+      flushThinking();
+      if (liveThinkRef.current) {
+        const t = liveThinkRef.current;
+        liveThinkRef.current = "";
+        setOutput((prev) => [...prev, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
+      }
+    });
     agent_default.onToolStart((name) => {
       setTools((p) => [...p, { name, status: "running", start: Date.now(), result: "" }].slice(-MAX_TOOLS));
     });
@@ -1712,10 +1831,34 @@ function App() {
     });
     agent_default.onSessions((list) => setSessions(list || []));
     agent_default.onError((err) => {
+      flushTokens();
+      flushThinking();
+      if (liveTextRef.current) {
+        const t = liveTextRef.current;
+        liveTextRef.current = "";
+        setOutput((p) => [...p, { type: "assistant", text: t }].slice(-MAX_OUTPUT));
+      }
+      if (liveThinkRef.current) {
+        const t = liveThinkRef.current;
+        liveThinkRef.current = "";
+        setOutput((p) => [...p, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
+      }
       setOutput((p) => [...p, { type: "error", text: typeof err === "string" ? err : err?.message || "Unknown error" }].slice(-MAX_OUTPUT));
       setThinking(false);
     });
     agent_default.onDone(() => {
+      flushTokens();
+      flushThinking();
+      if (liveTextRef.current) {
+        const t = liveTextRef.current;
+        liveTextRef.current = "";
+        setOutput((p) => [...p, { type: "assistant", text: t }].slice(-MAX_OUTPUT));
+      }
+      if (liveThinkRef.current) {
+        const t = liveThinkRef.current;
+        liveThinkRef.current = "";
+        setOutput((p) => [...p, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
+      }
       setThinking(false);
       setStatus((p) => ({ ...p, phase: "done" }));
     });
@@ -1993,12 +2136,17 @@ function App() {
         }
         return /* @__PURE__ */ jsx13(Text14, { color: "white", children: line.text }, i);
       }),
+      _working && liveTextRef.current && /* @__PURE__ */ jsx13(Text14, { color: blink ? theme.accent : theme.primary, bold: true, children: liveTextRef.current }),
+      thinking && liveThinkRef.current && /* @__PURE__ */ jsxs14(Text14, { color: blink ? theme.secondary : theme.primary, dim: true, children: [
+        "  ",
+        liveThinkRef.current
+      ] }),
       newerBelow > 0 && /* @__PURE__ */ jsxs14(Text14, { color: theme.secondary, bold: true, reverse: true, children: [
         " \u2193 ",
         newerBelow,
         " line(s) below (newer) \u2014 \u2193 to return to bottom "
       ] }),
-      thinking && /* @__PURE__ */ jsx13(Spinner, { label: "thinking...", color: theme.primary })
+      thinking && !liveThinkRef.current && /* @__PURE__ */ jsx13(Spinner, { label: currentPhrase, color: theme.primary })
     ] }),
     tools.length > 0 && /* @__PURE__ */ jsxs14(Box13, { width: cols, flexDirection: "row", overflow: "hidden", children: [
       /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: "tools: " }),

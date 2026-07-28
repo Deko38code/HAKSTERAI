@@ -18,6 +18,7 @@ import { getTheme, THEMES } from './components/ThemeManager.js';
 
 const MAX_OUTPUT = 500;
 const MAX_TOOLS = 50;
+const TOKEN_BATCH_MS = 16; // ~60fps for smooth word flow
 
 const REASONING_TYPES = [
   { pattern: /^(?:checking|scanning|looking|reading|inspecting|examining|reviewing|verifying|testing|validating)/i, type: 'inspect', color: 'blue' },
@@ -94,28 +95,70 @@ export default function App() {
     output.length - newerBelow
   );
 
-  // ─── Token batching ───
+  // ─── Token streaming with ref-based live line ───
+  // Live text accumulates in a ref and renders directly, avoiding full output array
+  // rebuilds on every token batch. Completed lines (newline-delimited) commit to state.
+  const liveTextRef = useRef('');
+  const liveThinkRef = useRef('');
+  const [, forceTick] = useState(0); // re-render trigger for live line
+
   const flushTokens = useCallback(() => {
     const b = batchRef.current;
     if (!b.text) return;
-    const text = b.text;
+    liveTextRef.current += b.text;
     b.text = '';
     b.timer = null;
-    setOutput(prev => {
-      const last = prev[prev.length - 1];
-      if (last && last.type === 'assistant') {
-        return [...prev.slice(0, -1), { type: 'assistant', text: last.text + text }].slice(-MAX_OUTPUT);
-      }
-      return [...prev, { type: 'assistant', text }].slice(-MAX_OUTPUT);
-    });
+    forceTick(n => n + 1);
   }, []);
 
   const appendToken = useCallback((token) => {
     batchRef.current.text += token;
+    // On newline: commit complete lines to output, keep remainder in live ref
+    if (token.includes('\n')) {
+      const full = batchRef.current.text;
+      batchRef.current.text = '';
+      if (batchRef.current.timer) { clearTimeout(batchRef.current.timer); batchRef.current.timer = null; }
+      const parts = full.split('\n');
+      for (let i = 0; i < parts.length - 1; i++) {
+        setOutput(prev => [...prev, { type: 'assistant', text: parts[i] }].slice(-MAX_OUTPUT));
+      }
+      liveTextRef.current = parts[parts.length - 1];
+      forceTick(n => n + 1);
+      return;
+    }
     if (!batchRef.current.timer) {
-      batchRef.current.timer = setTimeout(flushTokens, 30);
+      batchRef.current.timer = setTimeout(flushTokens, TOKEN_BATCH_MS);
     }
   }, [flushTokens]);
+
+  // ─── Thinking streaming — same ref-based approach as tokens ───
+  const thinkBatchRef = useRef({ timer: null, text: '' });
+  const flushThinking = useCallback(() => {
+    const b = thinkBatchRef.current;
+    if (!b.text) return;
+    liveThinkRef.current += b.text;
+    b.text = '';
+    b.timer = null;
+    forceTick(n => n + 1);
+  }, []);
+  const appendThinking = useCallback((chunk) => {
+    thinkBatchRef.current.text += chunk;
+    if (chunk.includes('\n')) {
+      const full = thinkBatchRef.current.text;
+      thinkBatchRef.current.text = '';
+      if (thinkBatchRef.current.timer) { clearTimeout(thinkBatchRef.current.timer); thinkBatchRef.current.timer = null; }
+      const parts = full.split('\n');
+      for (let i = 0; i < parts.length - 1; i++) {
+        setOutput(prev => [...prev, { type: 'thinking', text: parts[i] }].slice(-MAX_OUTPUT));
+      }
+      liveThinkRef.current = parts[parts.length - 1];
+      forceTick(n => n + 1);
+      return;
+    }
+    if (!thinkBatchRef.current.timer) {
+      thinkBatchRef.current.timer = setTimeout(flushThinking, TOKEN_BATCH_MS);
+    }
+  }, [flushThinking]);
 
   // ─── Agent event wiring ───
   // Blink the focus bar while the agent is working (thinking / executing).
@@ -131,12 +174,17 @@ export default function App() {
     agent.onToken(token => appendToken(token));
     agent.onThinking(text => {
       setThinking(true);
-      setOutput(prev => {
-        if (prev.length && prev[prev.length - 1].type === 'thinking' && prev[prev.length - 1].text === text) return prev;
-        return [...prev, { type: 'thinking', text }].slice(-MAX_OUTPUT);
-      });
+      appendThinking(text);
     });
-    agent.onThinkingEnd(() => setThinking(false));
+    agent.onThinkingEnd(() => {
+      setThinking(false);
+      flushThinking();
+      if (liveThinkRef.current) {
+        const t = liveThinkRef.current;
+        liveThinkRef.current = '';
+        setOutput(prev => [...prev, { type: 'thinking', text: t }].slice(-MAX_OUTPUT));
+      }
+    });
     agent.onToolStart(name => {
       setTools(p => [...p, { name, status: 'running', start: Date.now(), result: '' }].slice(-MAX_TOOLS));
     });
@@ -192,10 +240,16 @@ export default function App() {
     });
     agent.onSessions(list => setSessions(list || []));
     agent.onError(err => {
+      flushTokens(); flushThinking();
+      if (liveTextRef.current) { const t = liveTextRef.current; liveTextRef.current = ''; setOutput(p => [...p, { type: 'assistant', text: t }].slice(-MAX_OUTPUT)); }
+      if (liveThinkRef.current) { const t = liveThinkRef.current; liveThinkRef.current = ''; setOutput(p => [...p, { type: 'thinking', text: t }].slice(-MAX_OUTPUT)); }
       setOutput(p => [...p, { type: 'error', text: typeof err === 'string' ? err : (err?.message || 'Unknown error') }].slice(-MAX_OUTPUT));
       setThinking(false);
     });
     agent.onDone(() => {
+      flushTokens(); flushThinking();
+      if (liveTextRef.current) { const t = liveTextRef.current; liveTextRef.current = ''; setOutput(p => [...p, { type: 'assistant', text: t }].slice(-MAX_OUTPUT)); }
+      if (liveThinkRef.current) { const t = liveThinkRef.current; liveThinkRef.current = ''; setOutput(p => [...p, { type: 'thinking', text: t }].slice(-MAX_OUTPUT)); }
       setThinking(false);
       setStatus(p => ({ ...p, phase: 'done' }));
     });
@@ -414,10 +468,18 @@ export default function App() {
           }
           return <Text key={i} color="white">{line.text}</Text>;
         })}
+        {/* Live streaming text — renders directly from refs, not from the output array.
+            Words FLOW instead of climbing because we don't rebuild the array on every token. */}
+        {_working && liveTextRef.current && (
+          <Text color={blink ? theme.accent : theme.primary} bold>{liveTextRef.current}</Text>
+        )}
+        {thinking && liveThinkRef.current && (
+          <Text color={blink ? theme.secondary : theme.primary} dim>  {liveThinkRef.current}</Text>
+        )}
         {newerBelow > 0 && (
           <Text color={theme.secondary} bold reverse> ↓ {newerBelow} line(s) below (newer) — ↓ to return to bottom </Text>
         )}
-        {thinking && <Spinner label="thinking..." color={theme.primary} />}
+        {thinking && !liveThinkRef.current && <Spinner label={currentPhrase} color={theme.primary} />}
       </Box>
 
       {/* Tools strip */}

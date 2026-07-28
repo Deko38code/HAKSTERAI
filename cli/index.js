@@ -2090,6 +2090,10 @@ program
               process.stdout.write(`\n${C.yellow}⚠ Max turns (${evt.maxTurns}) reached${C.reset}\n`);
             } else if (evt.type === 'done') {
               stopSpinner();
+              if (evt.model || evt.provider) {
+                const costStr = evt.cost ? ` · $${Number(evt.cost).toFixed(4)}` : '';
+                process.stdout.write(`\n${C.gray}[answered by ${evt.provider || DEFAULT_AI_PROVIDER}/${evt.model}${costStr}]${C.reset}\n`);
+              }
               process.stdout.write('\n');
             }
           } catch {}
