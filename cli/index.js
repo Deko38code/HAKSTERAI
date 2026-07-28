@@ -1445,19 +1445,16 @@ program
               else if (evt.type === 'thinking') {
                 if (evt.content && evt.content.trim()) {
                   thinkingBuf += evt.content;
-                  if (!thinkingRendered) {
-                    stopSpinner();
-                    process.stdout.write(`\n\x1b[2m\x1b[38;5;245m  💭 thinking…\x1b[0m\n`);
-                    thinkingRendered = true;
-                  }
-                  // Stream the model's reasoning live, dimmed to distinguish from the final answer
-                  process.stdout.write(`\x1b[2m\x1b[38;5;245m${evt.content}\x1b[0m`);
+                  // Update spinner activity with latest phrase (1 line at bottom, in-place)
+                  const lines = thinkingBuf.split('\n').map(l => l.trim()).filter(Boolean);
+                  const latest = lines[lines.length - 1] || '';
+                  if (latest) setSpinnerActivity(latest.slice(0, 80));
                 } else {
                   setSpinnerActivity('reasoning through the next action');
                 }
               }
               else if (evt.type === 'thinking_end') {
-                if (thinkingRendered) process.stdout.write(`\n\x1b[2m\x1b[38;5;240m  ┄┄┄\x1b[0m\n`);
+                // Don't print anything — spinner already showed latest phrase in 1 line
                 stopSpinner();
                 isThinking = false;
               }

@@ -1740,11 +1740,10 @@ function App() {
         clearTimeout(thinkBatchRef.current.timer);
         thinkBatchRef.current.timer = null;
       }
-      const parts = full.split("\n");
-      for (let i = 0; i < parts.length - 1; i++) {
-        setOutput((prev) => [...prev, { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT));
-      }
-      liveThinkRef.current = parts[parts.length - 1];
+      // ── Keep only the latest line in liveThinkRef (1 line, in-place at bottom).
+      //    Do NOT push into setOutput — that was causing 15+ lines to push screen up. ──
+      const parts = full.split("\n").map(l => l.trim()).filter(Boolean);
+      liveThinkRef.current = parts[parts.length - 1] || "";
       forceTick((n) => n + 1);
       return;
     }
@@ -1767,11 +1766,9 @@ function App() {
     agent_default.onThinkingEnd(() => {
       setThinking(false);
       flushThinking();
-      if (liveThinkRef.current) {
-        const t = liveThinkRef.current;
-        liveThinkRef.current = "";
-        setOutput((prev) => [...prev, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
-      }
+      // Clear the live thinking line — don't push into setOutput (keeps scrollback clean)
+      liveThinkRef.current = "";
+      forceTick((n) => n + 1);
     });
     agent_default.onToolStart((name) => {
       setTools((p) => [...p, { name, status: "running", start: Date.now(), result: "" }].slice(-MAX_TOOLS));
@@ -1839,9 +1836,7 @@ function App() {
         setOutput((p) => [...p, { type: "assistant", text: t }].slice(-MAX_OUTPUT));
       }
       if (liveThinkRef.current) {
-        const t = liveThinkRef.current;
         liveThinkRef.current = "";
-        setOutput((p) => [...p, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
       }
       setOutput((p) => [...p, { type: "error", text: typeof err === "string" ? err : err?.message || "Unknown error" }].slice(-MAX_OUTPUT));
       setThinking(false);
@@ -1854,11 +1849,8 @@ function App() {
         liveTextRef.current = "";
         setOutput((p) => [...p, { type: "assistant", text: t }].slice(-MAX_OUTPUT));
       }
-      if (liveThinkRef.current) {
-        const t = liveThinkRef.current;
-        liveThinkRef.current = "";
-        setOutput((p) => [...p, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
-      }
+      // Clear live thinking line without pushing to output (keeps scrollback clean)
+      liveThinkRef.current = "";
       setThinking(false);
       setStatus((p) => ({ ...p, phase: "done" }));
     });
@@ -2137,8 +2129,8 @@ function App() {
         return /* @__PURE__ */ jsx13(Text14, { color: "white", children: line.text }, i);
       }),
       _working && liveTextRef.current && /* @__PURE__ */ jsx13(Text14, { color: blink ? theme.accent : theme.primary, bold: true, children: liveTextRef.current }),
-      thinking && liveThinkRef.current && /* @__PURE__ */ jsxs14(Text14, { color: blink ? theme.secondary : theme.primary, dim: true, children: [
-        "  ",
+      thinking && liveThinkRef.current && /* @__PURE__ */ jsxs14(Text14, { color: blink ? theme.secondary : theme.primary, bold: true, children: [
+        "  💭 ",
         liveThinkRef.current
       ] }),
       newerBelow > 0 && /* @__PURE__ */ jsxs14(Text14, { color: theme.secondary, bold: true, reverse: true, children: [
