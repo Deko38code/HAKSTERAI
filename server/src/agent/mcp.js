@@ -231,7 +231,10 @@ function connectServer(serverName, config) {
         // uv/uvx-launched servers (e.g. Serena) don't just resolve a package — they can also
         // spin up a language server + dashboard on top, which is slower and more load-sensitive
         // than the other MCP servers. Give them extra headroom so a busy box doesn't false-fail them.
-        const initTimeoutMs = isUvx ? 120000 : 60000;
+        // Per-server override via config.initTimeoutMs takes priority over all heuristics.
+        const initTimeoutMs = config.initTimeoutMs
+          ? parseInt(config.initTimeoutMs, 10)
+          : (isUvx ? 120000 : 120000); // 120s default — heavy Python servers (hermes, serena) need it on slower boxes
 
         // Step 1: Send "initialize" request
         const initResult = await sendRequest(serverName, 'initialize', {
@@ -503,7 +506,7 @@ function testServerConfig(name, config, timeoutMs) {
     const isBun = config.command.endsWith('bun') || config.command.endsWith('/bun');
     const isUvx = config.command === 'uvx' || config.command === 'uv' || config.command.endsWith('/uvx') || config.command.endsWith('/uv');
     const startupDelay = isNpx ? 8000 : isBun ? 2000 : 0;
-    const effTimeout = timeoutMs || (isUvx ? 120000 : 60000);
+    const effTimeout = timeoutMs || config.initTimeoutMs || 120000;
     timer = setTimeout(() => finish({ ok: false, error: `initialize timed out after ${effTimeout}ms`, stderr: stderrTail }), effTimeout + startupDelay);
 
     child.stdout.on('data', (data) => {
