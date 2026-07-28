@@ -155,6 +155,11 @@ import Layout from '../layouts/Layout.astro';
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6"/>
         </svg>
       </button>
+      <!-- Fixed bottom thinking-phrase bar — 1 line, updates in place, doesn't push screen -->
+      <div id="thinking-bar" class="thinking-bar-hidden">
+        <span class="thinking-bar-spinner"></span>
+        <span class="thinking-bar-text"></span>
+      </div>
       <!-- Messages Area -->
       <div id="messages-area" class="hidden relative flex-1 overflow-y-auto px-2 sm:px-3 lg:px-4 pt-4 pb-24 chat-grid-bg">
         <div class="chat-ink-frame w-full">
@@ -865,6 +870,57 @@ import Layout from '../layouts/Layout.astro';
     .thinking-body::-webkit-scrollbar { width: 5px; }
     .thinking-body::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.35); border-radius: 999px; }
     .thinking-inline.collapsed .thinking-body { display: none; }
+    /* ── Fixed bottom thinking-phrase bar ──
+       Pins to bottom of screen, shows 1 line, updates in place.
+       Doesn't grow or push content. BIG text per user pref. */
+    #thinking-bar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: 2.2rem;
+      background: rgba(5, 8, 18, 0.96);
+      border-top: 1px solid rgba(56, 189, 248, 0.25);
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0 1rem;
+      z-index: 9999;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: rgba(165, 243, 252, 0.95);
+      backdrop-filter: blur(8px);
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    #thinking-bar.thinking-bar-hidden {
+      opacity: 0;
+      transform: translateY(100%);
+      pointer-events: none;
+    }
+    #thinking-bar .thinking-bar-spinner {
+      width: 0.9rem; height: 0.9rem;
+      border: 2px solid rgba(56, 189, 248, 0.3);
+      border-top-color: rgba(56, 189, 248, 1);
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+      flex: none;
+    }
+    #thinking-bar .thinking-bar-text {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+      animation: textShimmer 1.6s ease-in-out infinite;
+      background: linear-gradient(90deg,
+        rgba(148,163,184,0.55) 0%, rgba(148,163,184,0.55) 35%,
+        rgba(255,255,255,0.98) 50%,
+        rgba(148,163,184,0.55) 65%, rgba(148,163,184,0.55) 100%);
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+    }
     .thinking-toggle { margin-left: auto; font-size: 0.58rem; color: rgba(125,211,252,0.55); }
     /* Phase indicator badges for thinking blocks */
     .thinking-phase-badge {
@@ -2659,18 +2715,40 @@ import Layout from '../layouts/Layout.astro';
       t.root.classList.add('streaming');
       const label = t.root.querySelector('.thinking-label');
       if (label) label.textContent = 'Thinking';
+      // Stash full text in the thinking-body (hidden while streaming) for later review
       t.body.textContent += text;
-      maybeScroll();
+      // ── Update the fixed bottom bar — 1 line, in-place, no screen push ──
+      const bar = document.getElementById('thinking-bar');
+      if (bar) {
+        bar.classList.remove('thinking-bar-hidden');
+        const barText = bar.querySelector('.thinking-bar-text');
+        if (barText) {
+          // Show the latest phrase — last non-empty line of the accumulated text
+          const full = t.body.textContent || '';
+          const lines = full.split('\n').map(l => l.trim()).filter(Boolean);
+          const latest = lines[lines.length - 1] || text.trim() || 'Thinking...';
+          (barText as HTMLElement).textContent = latest.slice(0, 200);
+        }
+      }
     }
     function setThinkingFinished(bodyEl: HTMLElement | null) {
       const bubble = getAssistantBubbleRoot(bodyEl);
       const thinking = bubble?.querySelector('.thinking-inline') as HTMLElement | null;
-      if (!thinking) return;
+      if (!thinking) {
+        // Still hide the bar even if no thinking block
+        document.getElementById('thinking-bar')?.classList.add('thinking-bar-hidden');
+        return;
+      }
       thinking.classList.remove('streaming');
       const label = thinking.querySelector('.thinking-label');
       if (label) label.textContent = 'Thought';
       const toggle = thinking.querySelector('.thinking-toggle');
       if (toggle) toggle.textContent = thinking.classList.contains('collapsed') ? '+' : '−';
+      // Auto-collapse the thinking body when done (full text still accessible by clicking)
+      thinking.classList.add('collapsed');
+      if (toggle) toggle.textContent = '+';
+      // ── Hide the fixed bottom bar ──
+      document.getElementById('thinking-bar')?.classList.add('thinking-bar-hidden');
     }
 
     function setAgentLoopStatus(bodyEl: HTMLElement | null, text: string, done = false) {
@@ -3480,14 +3558,19 @@ import Layout from '../layouts/Layout.astro';
                 } else if (event.type === 'done') {
                   setAgentLoopStatus(lastBubble, '✅ Done', true);
                   setLiveStatus('✅ Done');
+                  setThinkingFinished(lastBubble);
+                  document.getElementById('thinking-bar')?.classList.add('thinking-bar-hidden');
                 } else if (event.type === 'max_turns') {
                   setAgentLoopStatus(lastBubble, 'Stopped at turn limit', true);
                   setLiveStatus('⏹ Turn limit reached');
+                  document.getElementById('thinking-bar')?.classList.add('thinking-bar-hidden');
                 } else if (event.type === 'loop_detected') {
                   setAgentLoopStatus(lastBubble, event.message || 'Loop stopped', true);
                   setLiveStatus('⏹ Loop stopped');
+                  document.getElementById('thinking-bar')?.classList.add('thinking-bar-hidden');
                 } else if (event.type === 'error') {
                   const errText = event.error || event.message || 'Unknown error';
+                  document.getElementById('thinking-bar')?.classList.add('thinking-bar-hidden');
                   // Skip aborted streams and duplicate errors; suppress non-critical errors if a file was already downloaded
                   if (errText && !errText.includes('aborted') && !conv.messages.some(m => m.content === `Error: ${errText}`)) {
                     if (!fileCreatedThisStream || errText.includes('limit') || errText.includes('timed out')) {
