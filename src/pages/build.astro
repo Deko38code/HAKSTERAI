@@ -7,7 +7,7 @@ import Layout from '../layouts/Layout.astro';
 <script is:inline src="https://telegram.org/js/telegram-web-app.js"></script>
 
 <Layout title="haksterAi — Chat">
-  <section id="hacker-chat" class="h-dvh min-h-0 flex flex-row bg-[#141414] text-white overflow-hidden pt-[64px]">
+  <section id="hacker-chat" class="h-dvh min-h-0 flex flex-row bg-[#141414] text-white overflow-hidden pt-[81px]">
 
     <!-- LEFT SIDEBAR -->
     <aside id="sidebar" class="chat-side-grid hidden md:flex flex-col w-64 min-w-[256px] border-r border-[#333] bg-[#111] relative z-10 transition-all duration-300 fixed md:relative inset-y-0 left-0 z-40 md:z-10">
@@ -156,7 +156,7 @@ import Layout from '../layouts/Layout.astro';
         </svg>
       </button>
       <!-- Messages Area -->
-      <div id="messages-area" class="hidden relative flex-1 overflow-y-auto px-2 sm:px-4 lg:px-6 pt-4 pb-24 chat-grid-bg">
+      <div id="messages-area" class="hidden relative flex-1 overflow-y-auto px-2 sm:px-3 lg:px-4 pt-4 pb-24 chat-grid-bg">
         <div class="chat-ink-frame w-full">
           <span class="ink-corner-tr"></span><span class="ink-corner-bl"></span>
           <div id="messages-container" class="space-y-4"></div>
@@ -197,7 +197,7 @@ import Layout from '../layouts/Layout.astro';
       </div>
 
       <!-- Legacy output panel -->
-      <div id="output-panel" class="hidden relative flex-1 overflow-y-auto px-2 sm:px-4 lg:px-6 pt-4 pb-24 chat-grid-bg">
+      <div id="output-panel" class="hidden relative flex-1 overflow-y-auto px-2 sm:px-3 lg:px-4 pt-4 pb-24 chat-grid-bg">
         <div class="agent-output-frame w-full">
           <div class="flex items-center justify-between mb-3">
             <span class="text-xs font-mono text-white/30">Output</span>
@@ -208,7 +208,7 @@ import Layout from '../layouts/Layout.astro';
       </div>
 
       <!-- Chat composer -->
-      <form id="chat-form" class="relative z-10 w-full px-2 sm:px-4 lg:px-6 pb-4">
+      <form id="chat-form" class="relative z-10 w-full px-2 sm:px-3 lg:px-4 pb-4">
         <div id="send-status" class="send-status hidden" aria-live="polite">
           <span class="send-status-dot"></span>
           <span class="send-status-text">Working...</span>

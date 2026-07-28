@@ -38,6 +38,7 @@ import Layout from '../layouts/Layout.astro';
       <button onclick="document.getElementById('terminal-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">⌨️ Terminal</button>
       <button onclick="document.getElementById('services-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">📡 Services</button>
       <button onclick="document.getElementById('providers-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🧪 Providers</button>
+      <button onclick="document.getElementById('skills-tools-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🧩 Skills &amp; Tools</button>
     </div>
 
     <!-- Top Stats Grid -->
@@ -108,6 +109,95 @@ import Layout from '../layouts/Layout.astro';
         haksterAi Tool Breakdown
       </h2>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" id="crush-tools-grid"></div>
+    </div>
+
+    <!-- Skills, Tools & Models -->
+    <div id="skills-tools-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider flex items-center gap-2">
+          🧩 Skills, Tools &amp; Models
+        </h2>
+        <div class="flex gap-1.5">
+          <button onclick="switchStmTab('browse')" data-tab="browse" class="stm-tab text-xs bg-[#7c3aed]/10 text-[#7c3aed] border border-[#7c3aed]/30 px-3 py-1.5 rounded-lg transition-colors">👀 Browse</button>
+          <button onclick="switchStmTab('create')" data-tab="create" class="stm-tab text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg transition-colors">➕ Create</button>
+        </div>
+      </div>
+
+      <!-- Browse panel -->
+      <div id="stm-browse-panel" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div>
+          <div class="text-xs text-[#64748b] uppercase tracking-wider mb-2">📚 Skills (<span id="stm-skills-count">0</span>)</div>
+          <input id="stm-skills-filter" type="text" placeholder="Filter skills..." class="w-full mb-2 rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1.5 text-xs text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50" />
+          <div id="stm-skills-list" class="space-y-1 max-h-[320px] overflow-auto">
+            <div class="text-xs text-[#64748b] text-center py-4">Loading...</div>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-[#64748b] uppercase tracking-wider mb-2">🔧 Tools (<span id="stm-tools-count">0</span>)</div>
+          <input id="stm-tools-filter" type="text" placeholder="Filter tools..." class="w-full mb-2 rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1.5 text-xs text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50" />
+          <div id="stm-tools-list" class="space-y-1 max-h-[320px] overflow-auto">
+            <div class="text-xs text-[#64748b] text-center py-4">Loading...</div>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-[#64748b] uppercase tracking-wider mb-2">🤖 Models</div>
+          <select id="stm-browse-provider" class="w-full mb-2 rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1.5 text-xs text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50">
+            <option value="">Select provider...</option>
+          </select>
+          <div id="stm-models-list" class="space-y-1 max-h-[280px] overflow-auto">
+            <div class="text-xs text-[#64748b] text-center py-4">Pick a provider</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Create panel -->
+      <div id="stm-create-panel" class="hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs text-[#64748b] uppercase tracking-wider mb-1">Cluster Name</label>
+              <input id="stm-cluster-name" type="text" placeholder="e.g. Recon Squad" class="w-full rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-3 py-2 text-sm text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50" />
+            </div>
+            <div>
+              <label class="block text-xs text-[#64748b] uppercase tracking-wider mb-1">Provider</label>
+              <select id="stm-create-provider" class="w-full rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-3 py-2 text-sm text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50">
+                <option value="">Select provider...</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-[#64748b] uppercase tracking-wider mb-1">Model</label>
+              <select id="stm-create-model" class="w-full rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-3 py-2 text-sm text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50">
+                <option value="">Select provider first...</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-[#64748b] uppercase tracking-wider mb-1">Notes / Memory Context</label>
+              <textarea id="stm-cluster-notes" rows="3" placeholder="Optional context to remember for this cluster..." class="w-full rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-3 py-2 text-sm text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50 resize-none"></textarea>
+            </div>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs text-[#64748b] uppercase tracking-wider mb-1">Tools (multi-select)</label>
+              <select id="stm-create-tools" multiple size="6" class="w-full rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-2 text-xs text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50"></select>
+            </div>
+            <div>
+              <label class="block text-xs text-[#64748b] uppercase tracking-wider mb-1">Skills (multi-select)</label>
+              <select id="stm-create-skills" multiple size="6" class="w-full rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-2 text-xs text-[#e2e8f0] outline-none focus:border-[#7c3aed]/50"></select>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center mt-4">
+          <button id="stm-save-cluster" class="rounded-lg bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-sm font-semibold py-2 px-4 transition-all active:scale-95">💾 Save Cluster</button>
+          <span id="stm-save-status" class="ml-3 text-xs text-[#64748b]"></span>
+        </div>
+
+        <div class="mt-6">
+          <div class="text-xs text-[#64748b] uppercase tracking-wider mb-2">📦 Saved Clusters</div>
+          <div id="stm-clusters-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div class="text-xs text-[#64748b] text-center py-4 col-span-full">No clusters yet</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Memory Bank & Autocompact -->
@@ -743,5 +833,169 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     connectDashboardLiveSocket();
+
+    // ── Skills, Tools & Models ────────────────────────────────
+    let stmTools = [];
+    let stmSkills = [];
+    let stmProviders = [];
+
+    function switchStmTab(tab) {
+      document.querySelectorAll('.stm-tab').forEach(btn => {
+        const active = btn.dataset.tab === tab;
+        btn.className = 'stm-tab text-xs px-3 py-1.5 rounded-lg transition-colors border ' + (active
+          ? 'bg-[#7c3aed]/10 text-[#7c3aed] border-[#7c3aed]/30'
+          : 'bg-[#111118] text-[#64748b] border-[#1e1e2e] hover:bg-[#1e1e2e]');
+      });
+      document.getElementById('stm-browse-panel').classList.toggle('hidden', tab !== 'browse');
+      document.getElementById('stm-create-panel').classList.toggle('hidden', tab !== 'create');
+    }
+    window.switchStmTab = switchStmTab;
+
+    function renderStmSkillsList(filter) {
+      const q = (filter || '').toLowerCase();
+      const list = document.getElementById('stm-skills-list');
+      const filtered = stmSkills.filter(s => !q || s.name.toLowerCase().includes(q));
+      setText('stm-skills-count', stmSkills.length);
+      list.innerHTML = filtered.length ? filtered.slice(0, 200).map(s =>
+        `<div class="text-xs bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2.5 py-1.5 truncate" title="${escapeHtml(s.path || s.name)}">📄 ${escapeHtml(s.name)}</div>`
+      ).join('') : '<div class="text-xs text-[#64748b] text-center py-4">No skills found</div>';
+    }
+
+    function renderStmToolsList(filter) {
+      const q = (filter || '').toLowerCase();
+      const list = document.getElementById('stm-tools-list');
+      const filtered = stmTools.filter(t => !q || t.name.toLowerCase().includes(q));
+      setText('stm-tools-count', stmTools.length);
+      list.innerHTML = filtered.length ? filtered.slice(0, 200).map(t =>
+        `<div class="text-xs bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
+          <span class="truncate font-mono">🔧 ${escapeHtml(t.name)}</span>
+          <span class="text-[9px] text-[#4b5563] shrink-0">${escapeHtml(t.source || '')}</span>
+        </div>`
+      ).join('') : '<div class="text-xs text-[#64748b] text-center py-4">No tools found</div>';
+    }
+
+    async function loadStmModelsFor(providerId, listElId, selectElId) {
+      const listEl = listElId ? document.getElementById(listElId) : null;
+      const selectEl = selectElId ? document.getElementById(selectElId) : null;
+      if (!providerId) {
+        if (listEl) listEl.innerHTML = '<div class="text-xs text-[#64748b] text-center py-4">Pick a provider</div>';
+        if (selectEl) selectEl.innerHTML = '<option value="">Select provider first...</option>';
+        return;
+      }
+      try {
+        const res = await liveFetch(`/api/providers/${encodeURIComponent(providerId)}/models`);
+        const data = await res.json();
+        const models = data.models || [];
+        if (listEl) {
+          listEl.innerHTML = models.length ? models.map(m => {
+            const id = typeof m === 'string' ? m : (m.id || m.name || '');
+            return `<div class="text-xs bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2.5 py-1.5 truncate font-mono">🤖 ${escapeHtml(id)}</div>`;
+          }).join('') : '<div class="text-xs text-[#64748b] text-center py-4">No models found</div>';
+        }
+        if (selectEl) {
+          selectEl.innerHTML = models.length ? models.map(m => {
+            const id = typeof m === 'string' ? m : (m.id || m.name || '');
+            return `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`;
+          }).join('') : '<option value="">No models found</option>';
+        }
+      } catch {
+        if (listEl) listEl.innerHTML = '<div class="text-xs text-[#ff6b6b] text-center py-4">Failed to load models</div>';
+        if (selectEl) selectEl.innerHTML = '<option value="">Failed to load</option>';
+      }
+    }
+
+    async function loadStmClusters() {
+      const list = document.getElementById('stm-clusters-list');
+      try {
+        const res = await liveFetch('/api/memory?category=general&limit=200');
+        const data = await res.json();
+        const clusters = (data.memories || []).filter(m => (m.key || '').startsWith('cluster:')).map(m => {
+          try { return { key: m.key, ...JSON.parse(m.value) }; } catch { return null; }
+        }).filter(Boolean);
+        list.innerHTML = clusters.length ? clusters.map(c => `
+          <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3">
+            <div class="flex items-center justify-between mb-1 gap-2">
+              <span class="text-sm font-medium truncate">${escapeHtml(c.name || c.key)}</span>
+              <button data-key="${escapeHtml(c.key)}" class="stm-delete-cluster text-[#ef4444] hover:text-red-400 text-xs shrink-0">✕</button>
+            </div>
+            <div class="text-[10px] text-[#64748b] font-mono truncate">${escapeHtml(c.provider || '—')} / ${escapeHtml(c.model || '—')}</div>
+            <div class="text-[10px] text-[#4b5563] mt-1">${(c.tools||[]).length} tools · ${(c.skills||[]).length} skills</div>
+          </div>
+        `).join('') : '<div class="text-xs text-[#64748b] text-center py-4 col-span-full">No clusters yet</div>';
+        list.querySelectorAll('.stm-delete-cluster').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            await liveFetch(`/api/memory/${encodeURIComponent(btn.dataset.key)}`, { method: 'DELETE' });
+            loadStmClusters();
+          });
+        });
+      } catch {
+        list.innerHTML = '<div class="text-xs text-[#ff6b6b] text-center py-4 col-span-full">Failed to load clusters</div>';
+      }
+    }
+
+    async function initSkillsToolsModels() {
+      try {
+        const [skillsRes, dashRes, provRes] = await Promise.all([
+          liveFetch('/api/agent/skills'),
+          liveFetch('/api/dashboard?live=1&compact=0'),
+          liveFetch('/api/providers'),
+        ]);
+        stmSkills = (await skillsRes.json()).skills || [];
+        stmTools = ((await dashRes.json()).agent || {}).tools || [];
+        stmProviders = (await provRes.json()).providers || [];
+      } catch (e) {
+        console.error('Skills/Tools/Models init failed:', e);
+      }
+      renderStmSkillsList('');
+      renderStmToolsList('');
+
+      const provOptions = '<option value="">Select provider...</option>' + stmProviders.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+      document.getElementById('stm-browse-provider').innerHTML = provOptions;
+      document.getElementById('stm-create-provider').innerHTML = provOptions;
+
+      document.getElementById('stm-create-tools').innerHTML = stmTools.map(t => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+      document.getElementById('stm-create-skills').innerHTML = stmSkills.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join('');
+
+      document.getElementById('stm-skills-filter').addEventListener('input', (e) => renderStmSkillsList(e.target.value));
+      document.getElementById('stm-tools-filter').addEventListener('input', (e) => renderStmToolsList(e.target.value));
+      document.getElementById('stm-browse-provider').addEventListener('change', (e) => loadStmModelsFor(e.target.value, 'stm-models-list', null));
+      document.getElementById('stm-create-provider').addEventListener('change', (e) => loadStmModelsFor(e.target.value, null, 'stm-create-model'));
+
+      document.getElementById('stm-save-cluster').addEventListener('click', async () => {
+        const name = document.getElementById('stm-cluster-name').value.trim();
+        const status = document.getElementById('stm-save-status');
+        if (!name) { status.textContent = 'Name required'; status.className = 'ml-3 text-xs text-[#ff6b6b]'; return; }
+        const provider = document.getElementById('stm-create-provider').value;
+        const model = document.getElementById('stm-create-model').value;
+        const notes = document.getElementById('stm-cluster-notes').value.trim();
+        const tools = Array.from(document.getElementById('stm-create-tools').selectedOptions).map(o => o.value);
+        const skills = Array.from(document.getElementById('stm-create-skills').selectedOptions).map(o => o.value);
+        const key = 'cluster:' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        try {
+          status.textContent = 'Saving...'; status.className = 'ml-3 text-xs text-[#ffd700]';
+          const res = await liveFetch('/api/memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              category: 'general',
+              key,
+              value: JSON.stringify({ name, provider, model, tools, skills, notes }),
+              source: 'dashboard',
+            }),
+          });
+          if (!res.ok) throw new Error('save failed');
+          status.textContent = 'Saved ✓'; status.className = 'ml-3 text-xs text-[#00ff88]';
+          document.getElementById('stm-cluster-name').value = '';
+          document.getElementById('stm-cluster-notes').value = '';
+          loadStmClusters();
+          setTimeout(() => { status.textContent = ''; }, 2500);
+        } catch {
+          status.textContent = 'Save failed'; status.className = 'ml-3 text-xs text-[#ff6b6b]';
+        }
+      });
+
+      loadStmClusters();
+    }
+    initSkillsToolsModels();
   </script>
 </Layout>
