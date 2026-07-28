@@ -2263,7 +2263,7 @@ app.delete('/api/agent/allowlist/:id', (req, res) => {
 });
 
 app.post('/api/agent/run', async (req, res) => {
-  const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false } = req.body;
+  const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false, maxTurns: requestedMaxTurns } = req.body;
   const savedAgent = getHaksterModelConfig();
   const requestedProvider = req.body.provider || savedAgent.provider || null;
   const requestedModel = req.body.model || savedAgent.model || null;
@@ -2322,7 +2322,7 @@ app.post('/api/agent/run', async (req, res) => {
   if (usingIsolatedWorkDir) {
     fs.mkdirSync(workDir, { recursive: true });
   }
-  const configuredMaxTurns = parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || (lowToken ? '12' : fastMode ? '18' : '80'), 10) || (lowToken ? 12 : fastMode ? 18 : 80);
+  const configuredMaxTurns = parseInt(requestedMaxTurns || process.env.HAKSTER_AGENT_MAX_TURNS || (lowToken ? '12' : fastMode ? '18' : '80'), 10) || (lowToken ? 12 : fastMode ? 18 : 80);
   const maxTurns = lowToken
     ? Math.min(Math.max(6, configuredMaxTurns), 16)
     : fastMode
@@ -3014,7 +3014,7 @@ ${dirListing}
   // fastMode: moderate limits for chat tab
   // normal: full context for deep agent work
   const CONTEXT_LIMIT = lowToken ? 16384 : fastMode ? 32768 : 131072;
-  const MAX_OUTPUT_TOKENS = lowToken ? 2048 : fastMode ? 4096 : 16384;
+  const MAX_OUTPUT_TOKENS = lowToken ? 2048 : fastMode ? 4096 : 32768;
   const INPUT_TOKEN_BUDGET = CONTEXT_LIMIT - MAX_OUTPUT_TOKENS;
   const MAX_CONTEXT_CHARS = lowToken ? 12000 : fastMode ? 24000 : 100000;
   const MAX_MSG_CHARS = lowToken ? 400 : fastMode ? 700 : 1000;

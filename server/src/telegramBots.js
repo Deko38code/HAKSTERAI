@@ -73,6 +73,7 @@ function runAgent(prompt, sessionId) {
     sessionId,
     thinking: false,
     approvalMode: 'full-auto', // telegram bots can't show confirmation dialogs
+    maxTurns: 200,             // no limits — deep cracking sessions
   });
 
   return new Promise((resolve, reject) => {
@@ -461,10 +462,28 @@ async function handleMessage(roleKey, msg) {
   // ── Role 3: recon/pentest bot ──
   if (roleKey === 'TELEGRAM_BOT_TOKEN_3') {
     const recon = text.match(/^\/(?:recon|scan)\s+(\S+)(?:\s+(.+))?$/i);
-    if (!recon) {
+    const askMatch = text.match(/^\/(?:ask|hakster)\s+([\s\S]+)$/i);
+    if (!recon && !askMatch) {
       return bot.sendMessage(chatId,
-        '⚡ *Recon Bot*\n\n`/recon <target>` — ping + quick nmap top ports',
+        '⚡ *Recon Bot* — MCP-powered pentest agent\n\n`/recon <target>` — ping + quick nmap top ports\n`/ask <prompt>` — full agent w/ MCP tools (nmap, bounty-platforms, writeup-search, playwright, sqlite)',
         { parse_mode: 'Markdown' });
+    }
+    // /ask → full agent loop with all MCP tools
+    if (askMatch) {
+      const prompt = askMatch[1].trim();
+      await bot.sendChatAction(chatId, 'typing');
+      const typingInterval = setInterval(() => { try { bot.sendChatAction(chatId, 'typing'); } catch {} }, 4000);
+      try {
+        const sessionId = `telegram-recon-${chatId}`;
+        const response = await runAgent(prompt, sessionId);
+        persistAssistantTurn(sessionId, response);
+        clearInterval(typingInterval);
+        await safeSendMarkdown(bot, chatId, response);
+      } catch (e) {
+        clearInterval(typingInterval);
+        await bot.sendMessage(chatId, `❌ Agent error: ${e.message}`);
+      }
+      return;
     }
     const target = recon[1];
     await bot.sendChatAction(chatId, 'typing');
@@ -475,7 +494,7 @@ async function handleMessage(roleKey, msg) {
     return;
   }
 
-  // ── Role 4: personal companion / notes ──
+  // ── Role 4: debugger / agent bot ──
   if (roleKey === 'TELEGRAM_BOT_TOKEN_4') {
     const note = text.match(/^\/note\s+([\s\S]+)$/i);
     if (note) {
@@ -485,19 +504,18 @@ async function handleMessage(roleKey, msg) {
       fs.appendFileSync(file, `[${new Date().toISOString()}] ${entry}\n`);
       return bot.sendMessage(chatId, '✅ note saved.');
     }
-    // general chat → haksterAi agent
+    // general chat → full haksterAi agent loop (MCP tools, 200 turns, no limits)
     await bot.sendChatAction(chatId, 'typing');
+    const typingInterval = setInterval(() => { try { bot.sendChatAction(chatId, 'typing'); } catch {} }, 4000);
     try {
-      const cfg = loadHaksterConfig();
-      const response = await chat({
-        provider: cfg.provider || process.env.DEFAULT_PROVIDER || 'ollama',
-        model: cfg.model || process.env.DEFAULT_MODEL || 'glm-5.2:cloud',
-        messages: [{ role: 'user', content: text }],
-        system: 'You are a helpful AI companion. Keep responses short and practical.',
-      });
-      await bot.sendMessage(chatId, String(response?.content || response || 'No response').slice(0, 4000));
+      const sessionId = `telegram-debug-${chatId}`;
+      const response = await runAgent(text, sessionId);
+      persistAssistantTurn(sessionId, response);
+      clearInterval(typingInterval);
+      await safeSendMarkdown(bot, chatId, response);
     } catch (e) {
-      await bot.sendMessage(chatId, `❌ Error: ${e.message}`);
+      clearInterval(typingInterval);
+      await bot.sendMessage(chatId, `❌ Agent error: ${e.message}`);
     }
     return;
   }
