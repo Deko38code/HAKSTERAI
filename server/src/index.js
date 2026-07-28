@@ -17,7 +17,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER } = require('./providers');
+const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
 const stuckMonitor = require('./agent/stuckMonitor');
@@ -2508,6 +2508,153 @@ app.post('/api/agent/run', async (req, res) => {
     } catch (err) {
       const msg = err.message || String(err);
       res.write(`data: ${JSON.stringify({ type: 'error', error: msg })}\n\n`);
+    } finally {
+      clearInterval(heartbeat);
+      res.end();
+    }
+    return;
+  }
+
+  // ── claude-cli: real Claude Code agent as the backend ──────────────────
+  // Runs `claude -p` with its OWN native tools (Read/Edit/Bash/etc, via
+  // --dangerously-skip-permissions since there's no TTY to approve them),
+  // scoped to workDir. This bypasses Hakster's own THINK/PLAN/ACT tool
+  // loop below entirely for this provider — that loop expects structured
+  // tool_calls from an OpenAI/Anthropic SDK client, which a plain text
+  // completion can't produce, but the Claude Code CLI already emits real
+  // structured tool-call events via --output-format stream-json. We just
+  // translate those into the same SSE event shapes (tool_call_start,
+  // tool_result, delta, done) the CLI/TUI already renders for every other
+  // provider, so tool use "just shows up" the same way.
+  if (cfg.type === 'claude-cli') {
+    async function runClaudeCliAgent() {
+      const { spawn } = require('child_process');
+      const transcript = messages
+        .filter(m => m.role !== 'system')
+        .map(m => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${getMessageText(m.content)}`)
+        .join('\n\n');
+      const sysMsg = messages.find(m => m.role === 'system');
+      const sysPrompt = sysMsg ? getMessageText(sysMsg.content) : '';
+
+      // Prompt goes over stdin, not argv — a resumed session's transcript can
+      // easily exceed the OS's command-line argument size limit ("spawn E2BIG").
+      const args = [
+        '-p',
+        '--output-format', 'stream-json',
+        '--verbose',
+        '--dangerously-skip-permissions',
+        '--add-dir', workDir,
+      ];
+      // Same pentest MCP toolkit (nmap, playwright, serena, sqlite, etc.) the
+      // rest of Hakster's agent loop uses — see server/src/agent/mcp.js's
+      // loadMcpServers(), which reads this same file.
+      const mcpConfigPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
+      if (fs.existsSync(mcpConfigPath)) args.push('--mcp-config', mcpConfigPath);
+      // The system prompt is often huge (steering docs, memory summaries) — passing
+      // it as a raw --append-system-prompt argv string hits Linux's ~128KB
+      // per-argument limit and fails with "spawn E2BIG". A file has no such cap.
+      let sysPromptFile = null;
+      if (sysPrompt) {
+        sysPromptFile = path.join(os.tmpdir(), `hakster-sysprompt-${process.pid}-${Date.now()}.txt`);
+        fs.writeFileSync(sysPromptFile, sysPrompt);
+        args.push('--append-system-prompt-file', sysPromptFile);
+      }
+      if (agentModel) args.push('--model', agentModel);
+
+      return new Promise((resolve, reject) => {
+        const child = spawn('claude', args, { cwd: workDir, env: claudeCliEnv() });
+        child.stdin.write(transcript);
+        child.stdin.end();
+
+        // Guard against a stuck spawn (e.g. MCP tool-discovery hanging) —
+        // without this, a hung `claude` process never closes and the SSE
+        // request just sits open forever with no error surfaced.
+        const AGENT_TIMEOUT_MS = 600000; // 10 min — generous for multi-tool-call turns
+        let timedOut = false;
+        const timeoutTimer = setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGTERM');
+          setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 5000);
+        }, AGENT_TIMEOUT_MS);
+
+        let toolCount = 0;
+        let finalText = '';
+        let realModel = null;   // the actual model claude-cli reports back (e.g. "claude-sonnet-5")
+        let costUsd = 0;
+        let usage = null;
+        let stdoutBuf = '';
+        let stderrBuf = '';
+        let settled = false;
+
+        child.stdout.on('data', (chunk) => {
+          stdoutBuf += chunk.toString();
+          const lines = stdoutBuf.split('\n');
+          stdoutBuf = lines.pop();
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            let evt;
+            try { evt = JSON.parse(line); } catch { continue; }
+            if (evt.type === 'assistant' && evt.message?.content) {
+              if (evt.message.model) realModel = evt.message.model;
+              for (const block of evt.message.content) {
+                if (block.type === 'text' && block.text) {
+                  finalText += block.text;
+                  res.write(`data: ${JSON.stringify({ type: 'delta', content: block.text })}\n\n`);
+                } else if (block.type === 'tool_use') {
+                  toolCount++;
+                  res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_name: block.name, tool_args: block.input })}\n\n`);
+                }
+              }
+            } else if (evt.type === 'user' && evt.message?.content) {
+              for (const block of evt.message.content) {
+                if (block.type === 'tool_result') {
+                  const resultText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+                  res.write(`data: ${JSON.stringify({ type: 'tool_result', result: (resultText || '').slice(0, 4000) })}\n\n`);
+                }
+              }
+            } else if (evt.type === 'result') {
+              if (evt.result) finalText = evt.result;
+              if (evt.total_cost_usd) costUsd = evt.total_cost_usd;
+              if (evt.usage) usage = evt.usage;
+              if (evt.is_error) {
+                res.write(`data: ${JSON.stringify({ type: 'error', error: finalText || 'claude-cli run failed' })}\n\n`);
+              }
+            }
+          }
+        });
+        child.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+        const cleanupSysPromptFile = () => { if (sysPromptFile) { try { fs.unlinkSync(sysPromptFile); } catch {} } };
+        child.on('error', (err) => { if (!settled) { settled = true; clearTimeout(timeoutTimer); cleanupSysPromptFile(); reject(err); } });
+        child.on('close', (code) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutTimer);
+          cleanupSysPromptFile();
+          if (timedOut) reject(new Error(`claude-cli timed out after ${AGENT_TIMEOUT_MS / 1000}s (killed)`));
+          else if (code !== 0 && !finalText) reject(new Error(stderrBuf.slice(0, 500) || `claude exited with code ${code}`));
+          else resolve({ finalText, toolCount, realModel, costUsd, usage });
+        });
+      });
+    }
+
+    try {
+      const result = await runClaudeCliAgent();
+      // Real identity of what answered — model name + cost claude-cli itself
+      // reported, not the config alias ("sonnet") that was requested.
+      res.write(`data: ${JSON.stringify({
+        type: 'done',
+        provider: 'claude-cli',
+        model: result.realModel || agentModel,
+        toolCalls: result.toolCount,
+        inputTokens: result.usage?.input_tokens || 0,
+        outputTokens: result.usage?.output_tokens || 0,
+        cost: result.costUsd || 0,
+      })}\n\n`);
+      incrementUsage(user);
+    } catch (err) {
+      console.error('[claude-cli] run failed:', err.message || err);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: (err.message || String(err)).slice(0, 500) })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', provider: 'claude-cli', model: agentModel })}\n\n`);
     } finally {
       clearInterval(heartbeat);
       res.end();
