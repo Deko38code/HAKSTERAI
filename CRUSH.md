@@ -4,10 +4,10 @@
 - Handle: @Ghost
 - Identity: pentester under haksterAi
 ## Client Machine (auto-detected)
-- OS: Linux
-- Browser: Chrome 150.0.0.0
+- OS: Unknown
+- Browser: Chrome 136.0.0.0
 - Device: desktop
-- IP: 2601:205:4a7e:3da0::db9b
+- IP: 4.155.131.182
 ## Server Machine
 - OS: Linux (Ubuntu, AMD A12-9720P, 4 cores, ~7GB RAM)
 - Working directory: /home/ghost/haksterAi
@@ -17,8 +17,7 @@
 - filesystem: File operations on /home/ghost
 ## Additional MCP Tools (via haksterAi agent API)
 - nmap: Network scanning and port detection
-- sqlite: SQLite database queries on /home/ghost/haksterAi/data/mcp.db — EMPTY scratch DB, no
-  fixed schema. Call list_tables before querying; never assume a table (e.g. "apps") exists.
+- sqlite: SQLite database queries on /home/ghost/haksterAi/data/mcp.db
 - memory: Persistent memory across sessions
 - sequential-thinking: Step-by-step reasoning for complex problems
 ## Instructions
