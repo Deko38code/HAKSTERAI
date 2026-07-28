@@ -74,8 +74,17 @@ const PROVIDERS = {
   ollama: {
     name: 'Ollama',
     baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    defaultModel: process.env.DEFAULT_MODEL || 'glm-5.2:cloud',
+    defaultModel: process.env.DEFAULT_MODEL || 'hp-1000:latest',
     type: 'openai-compat',
+  },
+  // Second ollama instance for gpt-oss:120b-cloud — same backend, different model,
+  // so the waterfall can rotate between hp-1000 (local custom) and gpt-oss (cloud) without conflict.
+  'gpt-oss': {
+    name: 'GPT-OSS 120B Cloud',
+    baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+    defaultModel: 'gpt-oss:120b-cloud',
+    type: 'openai-compat',
+    apiKey: 'ollama',
   },
   anthropic: {
     name: 'Anthropic Claude',
@@ -175,9 +184,9 @@ Object.assign(PROVIDERS, {
   'puter-4o':  { name: 'Puter GPT-4o', baseURL: 'https://api.puter.com',                            defaultModel: 'gpt-4o',                                   apiKey: 'free',                                              apiKeyEnv: '',                     type: 'openai-compat' },
 });
 
-// Waterfall order: ollama 1st (the default, free+local), then sambanova + groq (cloud-free)
-// and on down — rotates to the next on rate-limit to stretch tokens across all free keys.
-const WATERFALL_ORDER = ['ollama','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o'];
+// Waterfall order: ollama 1st (hp-1000, custom local), gpt-oss 2nd (cloud backup),
+// then sambanova + groq (cloud-free) and on down — rotates to the next on rate-limit.
+const WATERFALL_ORDER = ['ollama','gpt-oss','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o'];
 const _rateLimited = new Map(); // provider -> until ms
 function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
 function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }
