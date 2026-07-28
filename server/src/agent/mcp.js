@@ -118,11 +118,30 @@ function handleServerData(serverName, data) {
 /**
  * Spawn an MCP server process and connect via stdio.
  */
-// This box is single-operator (ghost). MCP child processes (claude, uvx/serena, ...) read
+// Each box here is single-operator. MCP child processes (claude, uvx/serena, ...) read
 // per-user config from $HOME, but hakster is sometimes launched as root — which points them
-// at /root instead of ghost's real config/credentials (e.g. claude-code auth). Pin HOME so
-// MCP servers always resolve to ghost's config no matter which user started the parent process.
-const GHOST_HOME = '/home/ghost';
+// at /root instead of the real operator's config/credentials (e.g. claude-code auth). Pin HOME
+// so MCP servers always resolve to the operator's config no matter which user started the
+// parent process, without hardcoding a path that only exists on one machine.
+function resolveGhostHome() {
+  if (process.env.HAKSTER_HOME) return process.env.HAKSTER_HOME;
+  if (process.getuid && process.getuid() === 0) {
+    if (process.env.SUDO_USER) {
+      try {
+        const { execFileSync } = require('child_process');
+        const home = execFileSync('getent', ['passwd', process.env.SUDO_USER]).toString().trim().split(':')[5];
+        if (home) return home;
+      } catch { /* getent unavailable or user not found — fall through */ }
+    }
+    // Single-operator box: exactly one non-root home dir under /home.
+    try {
+      const users = fs.readdirSync('/home').filter((u) => u !== 'lost+found');
+      if (users.length === 1) return path.join('/home', users[0]);
+    } catch { /* /home unreadable — fall through */ }
+  }
+  return require('os').homedir();
+}
+const GHOST_HOME = resolveGhostHome();
 
 function connectServer(serverName, config) {
   return new Promise((resolve, reject) => {

@@ -1772,6 +1772,18 @@ function workingPhrase() {
   const arr = WORKING_PHRASES[_agentActivity] || ['Working...'];
   return arr[Math.floor(Date.now() / 800) % arr.length];  // cycle ~every 800ms
 }
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+// Truncates by VISIBLE width, not raw string length — ANSI color codes are
+// zero-width on screen but inflate .length, so a naive slice() either cuts
+// mid-escape-sequence (garbage colors bleeding into the rest of the line) or
+// under-truncates and still lets the line wrap. Falls back to plain text
+// (colors stripped) once truncation is needed — simplest way to keep the
+// cut point accurate without re-deriving which codes are still "open".
+function truncateVisible(s, max) {
+  const visible = s.replace(ANSI_RE, '');
+  if (visible.length <= max) return s;
+  return visible.slice(0, Math.max(0, max - 1)) + '…';
+}
 let _statusBarInterval = null;   // Interval for bottom status bar rendering
 let _pendingTools    = [];       // [{name, id}] — tool calls queued for execution
 
@@ -7058,10 +7070,16 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       const _greenPulse = processing && _blinkOn;  // kept for compat
       const _blinkPrompt = ((_isBad || _greenPulse) ? _pulseCol + C.bold : C.fgMuted) + ' haksterAI ' + C.reset + (_blinkOn ? (_isBad ? _pulseCol + C.bold : (processing ? _pulseCol + C.bold : C.primary + C.bold)) : C.fgSubtle) + '\u276f' + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ';
       const waitingInfo = _messageQueue.length > 0 ? ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.mustard + '📬' + C.reset + C.fgBase + _messageQueue.length + ' waiting' + C.reset : '';
-      process.stdout.write('\r' + _blinkPrompt + (_currentTopic ? C.fgSubtle + '\ud83c\udfaf ' + _currentTopic.slice(0, 35) + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ' : '') + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + primaryText + C.reset + detail + ' ' + C.fgSubtle + frame + C.reset + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + waitingInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + servicesChip() + mcpChip() + smartCompact() + ' ' + C.reset + ' ' + (_isBad ? (_blinkOn ? C.error + C.bold + '\u25cf' + C.reset : C.error + '\u25cf' + C.reset) : (_greenPulse ? C.success + C.bold + '\u25cf' + C.reset : (processing ? C.fgSubtle + '\u25cf' + C.reset : C.fgSubtle + '\u25cb' + C.reset))) + '   ');
+      const _fullLine = _blinkPrompt + (_currentTopic ? C.fgSubtle + '\ud83c\udfaf ' + _currentTopic.slice(0, 35) + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ' : '') + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + primaryText + C.reset + detail + ' ' + C.fgSubtle + frame + C.reset + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + waitingInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + servicesChip() + mcpChip() + smartCompact() + ' ' + C.reset + ' ' + (_isBad ? (_blinkOn ? C.error + C.bold + '\u25cf' + C.reset : C.error + '\u25cf' + C.reset) : (_greenPulse ? C.success + C.bold + '\u25cf' + C.reset : (processing ? C.fgSubtle + '\u25cf' + C.reset : C.fgSubtle + '\u25cb' + C.reset))) + '   ';
+      // Bound to terminal width before writing. Field lengths (burnRate, tokInfo,
+      // pendingStr, topic) change every tick — an unbounded line silently crosses
+      // the column count, the terminal auto-wraps to a real new physical line, and
+      // the next tick's bare '\r' only rewinds to THAT line, stranding the old
+      // content in scrollback forever (looks like a scrolling log, not one line).
+      process.stdout.write('\r\x1b[2K' + truncateVisible(_fullLine, (process.stdout.columns || 120) - 1));
     }, 500);
     // Clear status bar on exit
-    process.on('SIGINT', () => { if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; } process.stdout.write('\r' + ' '.repeat(120) + '\r'); });
+    process.on('SIGINT', () => { if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; } process.stdout.write('\r\x1b[2K'); });
   }
   // ── TUI dashboard: reset state at start of each user request ──
   if (!silent) tuiReset();

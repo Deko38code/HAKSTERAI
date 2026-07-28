@@ -375,6 +375,12 @@ function initBots() {
         }, 12000);
       } else if (msg.includes('EFATAL') || msg.includes('fetch failed')) {
         console.warn(`[telegram] ${ROLES[key].name}: network error — will auto-retry`);
+      } else if (msg.includes('401') || msg.includes('Unauthorized')) {
+        // Invalid/revoked token — the library retries with no backoff on 401,
+        // which busy-loops getUpdates and pegs the event loop. Retrying is
+        // pointless (token won't fix itself), so stop this bot's polling for good.
+        console.error(`[telegram] ${ROLES[key].name}: 401 Unauthorized (bad/revoked token) — stopping polling permanently`);
+        bot.stopPolling().catch(() => {});
       } else {
         console.error(`[telegram] ${ROLES[key].name} polling error:`, msg);
       }
