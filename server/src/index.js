@@ -2381,6 +2381,10 @@ app.post('/api/agent/run', async (req, res) => {
   const TOOL_ERROR_LOOP_LIMIT = 3;   // Same tool erroring this many times → break
   const DUPE_CALL_WINDOW = 6;        // How many recent tool calls to check for dupes (was 4)
   const DUPE_CALL_LIMIT = 4;         // Same tool+args repeating this many times → loop (was 3)
+  const READ_ONLY_TOOLS = new Set(['read_file','search_files','list_dir','grep','find','cat','head','tail','ls','Glob','Grep']);
+  const READ_ONLY_LIMIT = 8;         // Max consecutive read-only calls before forcing action
+  let readOnlyCount = 0;             // Consecutive read-only calls without a state-modifying action
+  let readOnlyWarnings = 0;          // How many times we've warned
 
   // ── 6-Phase Loop State (THINK→PLAN→ACT→OBSERVE→REFLECT→CONSOLIDATE) ──
   let currentPhase = AgentLoopPhase.THINK;
@@ -3339,11 +3343,17 @@ ${dirListing}
         lastHadToolCalls = false;
         loopDetect.noProgressCount = 0;
 
-        // ── Full-auto nudge: if model replies with text only before using any tools, push it to act ──
-        if (effectiveApprovalMode === 'full-auto' && requestToolCalls === 0 && turn < 3 && assistantContent.trim().length > 0) {
-          agentMessages.push({ role: 'user', content: 'You responded with text only and did not use any tools. In full-auto mode, you MUST use tools to make progress. Do not explain what you plan to do — DO it now. Call list_dir, read_file, exec_shell, or whatever tool is appropriate to start working on the task immediately.' });
-          res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\n\n`);
-          continue;
+        // ── Full-auto nudge: if model replies with text only, push it to act ──
+        // Extended: nudge on ANY turn where the model talks but doesn't act (not just first 3).
+        // This fixes "let me finish sorry" loops where hp-1000 apologizes instead of using tools.
+        if (effectiveApprovalMode === 'full-auto' && toolCalls.length === 0 && assistantContent.trim().length > 0 && turn < maxTurns - 2) {
+          // Count how many times we've nudged already to avoid infinite apologizing
+          const nudgeCount = agentMessages.filter(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('You responded with text only')).length;
+          if (nudgeCount < 5) {
+            agentMessages.push({ role: 'user', content: 'You responded with text only and did not use any tools. Stop apologizing and DO the work now. Call list_dir, read_file, exec_shell, write_file, or whatever tool is appropriate. Do not explain — execute. The task is NOT done until you have used tools to complete it.' });
+            res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\\n\\n`);
+            continue;
+          }
         }
 
         // Phase: ACT→OBSERVE→CONSOLIDATE (session end)
@@ -3507,6 +3517,40 @@ ${dirListing}
           return;
         }
         loopDetect.totalToolCalls++;
+      }
+
+      // ── Diagnosis timeout: too many consecutive read-only calls without acting ──
+      const hasStateModifying = toolCalls.some(tc => !READ_ONLY_TOOLS.has(tc.name));
+      if (toolCalls.length > 0 && !hasStateModifying) {
+        readOnlyCount++;
+      } else if (hasStateModifying) {
+        readOnlyCount = 0;
+        readOnlyWarnings = 0;
+      }
+      if (readOnlyCount >= READ_ONLY_LIMIT) {
+        readOnlyWarnings++;
+        console.warn(`[agent] DIAGNOSIS TIMEOUT: ${readOnlyCount} consecutive read-only calls (turn ${turn}, warning #${readOnlyWarnings})`);
+        if (agentMessages[agentMessages.length - 1] === assistantMsg) {
+          agentMessages.pop();
+        }
+        if (readOnlyWarnings >= 3) {
+          // Hard stop after 3 ignored warnings
+          clearInterval(heartbeat);
+          res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'diagnosis_timeout', message: `Model made ${readOnlyCount} consecutive read-only calls and ignored ${readOnlyWarnings - 1} warnings. Stopping to avoid infinite read loop.` })}\\n\\n`);
+          recordThisAgentUsage();
+          res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\\n\\n`);
+          res.end();
+          return;
+        }
+        const _diagMsg = readOnlyWarnings === 1
+          ? `DIAGNOSIS TIMEOUT: ${readOnlyCount} consecutive read-only calls (read_file, search_files, list_dir) without a single state-modifying action. STOP DIAGNOSING. You already have the information. ACT NOW: use write_file, patch, exec_shell, or another state-modifying tool to make the change. Do not call another read-only tool.`
+          : `DIAGNOSIS TIMEOUT (#${readOnlyWarnings}): You ignored the previous warning and kept reading. You have MORE than enough information. Your next tool call MUST be state-modifying (write_file, patch_file, exec_shell). Another read_file/search_files wastes the user's turns. ACT NOW or give your final answer.`;
+        res.write(`data: ${JSON.stringify({ type: 'loop_nudge', reason: 'diagnosis_timeout', message: _diagMsg })}\\n\\n`);
+        agentMessages.push({ role: 'system', content: _diagMsg });
+        readOnlyCount = 0; // reset so it has to do READ_ONLY_LIMIT more before firing again
+        lastHadToolCalls = false;
+        res.write(`data: ${JSON.stringify({ type: 'turn_end', turn, reason: 'diagnosis_timeout' })}\\n\\n`);
+        continue;
       }
 
       const phantomNudge = detectPhantomLoopNudge(loopDetect, assistantContent, toolCalls, workDir);
@@ -4523,6 +4567,31 @@ app.post('/api/generate', async (req, res) => {
         loopDetect.totalToolCalls++;
       }
       if (duplicateToolLoop) break;
+
+      // ── Diagnosis timeout for /api/generate loop ──
+      const _genHasModify = toolCalls.some(tc => !READ_ONLY_TOOLS.has(tc.name));
+      if (toolCalls.length > 0 && !_genHasModify) {
+        readOnlyCount++;
+      } else if (_genHasModify) {
+        readOnlyCount = 0;
+        readOnlyWarnings = 0;
+      }
+      if (readOnlyCount >= READ_ONLY_LIMIT) {
+        readOnlyWarnings++;
+        console.warn(`[generate] DIAGNOSIS TIMEOUT: ${readOnlyCount} read-only calls (warning #${readOnlyWarnings})`);
+        if (readOnlyWarnings >= 3) {
+          res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'diagnosis_timeout', message: `Model made ${readOnlyCount} consecutive read-only calls and ignored ${readOnlyWarnings - 1} warnings. Stopping.` })}\\n\\n`);
+          break;
+        }
+        if (messages[messages.length - 1] === assistantMsg) messages.pop();
+        const _genDiagMsg = readOnlyWarnings === 1
+          ? `DIAGNOSIS TIMEOUT: ${readOnlyCount} consecutive read-only calls without acting. STOP reading. You have enough info. ACT NOW: use write_file, patch, exec_shell, or another state-modifying tool.`
+          : `DIAGNOSIS TIMEOUT (#${readOnlyWarnings}): You ignored the warning. Your next tool MUST be state-modifying. ACT NOW or give your final answer.`;
+        res.write(`data: ${JSON.stringify({ type: 'loop_nudge', reason: 'diagnosis_timeout', message: _genDiagMsg })}\\n\\n`);
+        messages.push({ role: 'system', content: _genDiagMsg });
+        readOnlyCount = 0;
+        continue;
+      }
 
       loopDetect.lastAssistantContent = assistantContent || '';
 

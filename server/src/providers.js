@@ -74,7 +74,7 @@ const PROVIDERS = {
   ollama: {
     name: 'Ollama',
     baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    defaultModel: process.env.DEFAULT_MODEL || 'hp-1000:latest',
+    defaultModel: process.env.DEFAULT_MODEL || 'gpt-oss:120b-cloud',
     type: 'openai-compat',
   },
   // Second ollama instance for gpt-oss:120b-cloud — same backend, different model,
@@ -184,9 +184,9 @@ Object.assign(PROVIDERS, {
   'puter-4o':  { name: 'Puter GPT-4o', baseURL: 'https://api.puter.com',                            defaultModel: 'gpt-4o',                                   apiKey: 'free',                                              apiKeyEnv: '',                     type: 'openai-compat' },
 });
 
-// Waterfall order: ollama 1st (hp-1000, custom local), gpt-oss 2nd (cloud backup),
+// Waterfall order: gpt-oss 1st (120b cloud, primary), ollama 2nd (hp-1000, local backup),
 // then sambanova + groq (cloud-free) and on down — rotates to the next on rate-limit.
-const WATERFALL_ORDER = ['ollama','gpt-oss','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o'];
+const WATERFALL_ORDER = ['gpt-oss','ollama','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o'];
 const _rateLimited = new Map(); // provider -> until ms
 function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
 function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }
