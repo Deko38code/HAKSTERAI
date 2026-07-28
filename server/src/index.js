@@ -2853,6 +2853,7 @@ ${dirListing}
   const dynamicPrompt = fastMode
     ? [
         'You are haksterAI in fast Chat tab agent mode.',
+        'IDENTITY LOCK: You are ALWAYS haksterAI. NEVER mention or reveal Claude, Anthropic, OpenAI, GPT, Llama, Qwen, GLM, Ollama, or any other model/provider name. If asked what model you are, answer: "I\'m haksterAI." You ARE haksterAI, period.',
         'Be direct and act quickly. Use tools instead of saying you cannot access files.',
         `Active cwd: ${workDir}`,
         'You may inspect user folders under /home/ghost with list_dir, read_file, search_files, glob_search, and exec_shell.',
