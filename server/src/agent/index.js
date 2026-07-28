@@ -9143,6 +9143,7 @@ async function repl() {
 
   const savedSession = loadSession();   // full cleaned history incl. leading system msg
   let history;
+  let _resumeFirstInput = false;  // true only on the first input after a resume
   if (savedSession && savedSession.length > 1) {
     // Show the REAL size + REAL last user message from the full saved session.
     const userMsgs = savedSession.filter(m => m.role === 'user');
@@ -9165,6 +9166,7 @@ async function repl() {
       focus: 0,
     })) || 'fresh';   // Esc = fresh
     if (ans === 'resume') {
+      _resumeFirstInput = true;  // flag: first input after resume triggers the "resume or new?" question
       // Trim to recent turns ONLY on resume, logged here (after the choice), and
       // orphan-safe: drop any leading `tool` messages in the slice.
       if (realCount > 100) {
@@ -9181,7 +9183,10 @@ async function repl() {
       console.log(`  ${C.fgSubtle}Type /clear to start fresh${C.reset}`);
       // Prime the agent: on resume, ASK if the user wants to continue the last
       // project or start a new task instead of auto-continuing.
-      history.push({ role: 'system', content: 'Session resumed from disk. The user may or may not want to continue the previous task. When they send their first message (even a casual yo or hey), greet them BRIEFLY and ASK: would you like to resume the last project or start something new? Do NOT assume they want to continue where you left off. Wait for their direction.' });
+      // Use role 'user' instead of 'system' — many providers strip/ignore
+      // mid-conversation system messages, so the instruction never reaches the
+      // model. A user-role message is always visible to the model.
+      history.push({ role: 'user', content: '[SYSTEM INSTRUCTION — not from the real user, follow these rules for the next response only]\n\nSession resumed from disk. The user is about to send their first message. When they do (even a casual "yo", "hey", "yop", or just hitting Enter), greet them BRIEFLY with one line and ASK: "Would you like to resume the last project or start something new?" Then STOP. Do NOT assume they want to continue where you left off. Do NOT start working on anything. Wait for their direction.\n\nIMPORTANT: This instruction applies to the VERY FIRST user message after resume only. After that, behave normally.' });
     } else if (ans === 'clear') {
       try { fs.unlinkSync(SESSION_FILE); } catch (_) {}
       _currentTopic = '';
@@ -9397,7 +9402,18 @@ async function repl() {
   // ── Handle input ────────────────────────────────────────────────────
   function handleInput(input) {
     input = (input || '').trim();
-    if (!input) { rl.prompt(); return; }
+    // On the very first input after a resume, even empty (Enter) or casual
+    // greetings should trigger the agent so it asks "resume or new?".
+    if (!input) {
+      if (_resumeFirstInput) {
+        _resumeFirstInput = false;
+        input = 'hey';  // send something so the agent responds with the resume question
+      } else {
+        rl.prompt();
+        return;
+      }
+    }
+    _resumeFirstInput = false;  // consume the flag on first real input too
 
     // ── Auto-detect "take note" / "note that" / "remember this" ──
     const notePhrases = /^(take note|note that|remember this|make a note|save that|note:|remember:|jot down|write down|keep in mind)/i;
