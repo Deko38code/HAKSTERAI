@@ -2379,10 +2379,11 @@ app.post('/api/agent/run', async (req, res) => {
   const SEMANTIC_LOOP_THRESHOLD = 3;  // How many similar prefixes → loop (was 2)
   const SEMANTIC_SIMILARITY_RATIO = 0.4; // Word overlap ratio to count as similar
   const TOOL_ERROR_LOOP_LIMIT = 3;   // Same tool erroring this many times → break
-  const DUPE_CALL_WINDOW = 6;        // How many recent tool calls to check for dupes (was 4)
-  const DUPE_CALL_LIMIT = 4;         // Same tool+args repeating this many times → loop (was 3)
+  const DUPE_CALL_WINDOW = 8;        // How many recent tool calls to check for dupes (was 6)
+  const DUPE_CALL_LIMIT = 3;         // Same tool+normalized-args repeating 3x → loop (was 4)
   const READ_ONLY_TOOLS = new Set(['read_file','search_files','list_dir','grep','find','cat','head','tail','ls','Glob','Grep']);
-  const READ_ONLY_LIMIT = 8;         // Max consecutive read-only calls before forcing action
+  const READ_ONLY_LIMIT = 5;         // Max consecutive read-only calls before forcing action (was 8)
+  const READ_ONLY_HARD_STOP = 2;     // Hard stop after 2 ignored warnings (was 3)
   let readOnlyCount = 0;             // Consecutive read-only calls without a state-modifying action
   let readOnlyWarnings = 0;          // How many times we've warned
 
@@ -3498,9 +3499,15 @@ ${dirListing}
         loopDetect.noProgressCount = 0;
       }
 
-      // 4. Duplicate tool call detection — same tool+args appearing repeatedly
+      // 4. Duplicate tool call detection — same tool+normalized-args appearing repeatedly
       for (const tc of toolCalls) {
-        const callSig = `${tc.name}:${(tc.arguments || '').substring(0, 100)}`;
+        // Normalize args: strip offset/limit/page variations so reading same file
+        // with different pagination doesn't escape dupe detection
+        const rawArgs = (tc.arguments || '').substring(0, 200);
+        const normArgs = rawArgs.replace(/"[io]ffset"\s*:\s*\d+/gi, '"offset":0')
+                                .replace(/"limit"\s*:\s*\d+/gi, '"limit":0')
+                                .replace(/"page"\s*:\s*\d+/gi, '"page":0');
+        const callSig = `${tc.name}:${normArgs}`;
         loopDetect.recentToolCalls.push(callSig);
         if (loopDetect.recentToolCalls.length > DUPE_CALL_WINDOW) {
           loopDetect.recentToolCalls.shift();
@@ -3533,8 +3540,8 @@ ${dirListing}
         if (agentMessages[agentMessages.length - 1] === assistantMsg) {
           agentMessages.pop();
         }
-        if (readOnlyWarnings >= 3) {
-          // Hard stop after 3 ignored warnings
+        if (readOnlyWarnings >= READ_ONLY_HARD_STOP) {
+          // Hard stop after 2 ignored warnings
           clearInterval(heartbeat);
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'diagnosis_timeout', message: `Model made ${readOnlyCount} consecutive read-only calls and ignored ${readOnlyWarnings - 1} warnings. Stopping to avoid infinite read loop.` })}\\n\\n`);
           recordThisAgentUsage();
@@ -4383,9 +4390,15 @@ app.post('/api/generate', async (req, res) => {
     totalToolCalls: 0,
   };
   const NO_PROGRESS_LIMIT = 15;      // was 4 — too aggressive for complex prompts
-  const DUPE_CALL_WINDOW = 6;        // was 4
-  const DUPE_CALL_LIMIT = 4;         // was 3
+  const DUPE_CALL_WINDOW = 8;        // was 6
+  const DUPE_CALL_LIMIT = 3;         // was 4 — same tool+normalized-args 3x → loop
   const MAX_OUTPUT_TOKENS = 16384;
+  // Local read-only loop detection (mirrors /api/agent/run constants)
+  const READ_ONLY_TOOLS_GEN = new Set(['read_file','search_files','list_dir','grep','find','cat','head','tail','ls','Glob','Grep']);
+  const READ_ONLY_LIMIT_GEN = 5;
+  const READ_ONLY_HARD_STOP_GEN = 2;
+  let _genReadOnlyCount = 0;
+  let _genReadOnlyWarnings = 0;
 
   try {
     let fullContent = '';
@@ -4552,10 +4565,14 @@ app.post('/api/generate', async (req, res) => {
         loopDetect.noProgressCount = 0;
       }
 
-      // Loop detection: duplicate tool calls
+      // Loop detection: duplicate tool calls (normalized args)
       let duplicateToolLoop = false;
       for (const tc of toolCalls) {
-        const callSig = `${tc.name}:${(tc.arguments || '').substring(0, 100)}`;
+        const rawArgs = (tc.arguments || '').substring(0, 200);
+        const normArgs = rawArgs.replace(/"[io]ffset"\s*:\s*\d+/gi, '"offset":0')
+                                .replace(/"limit"\s*:\s*\d+/gi, '"limit":0')
+                                .replace(/"page"\s*:\s*\d+/gi, '"page":0');
+        const callSig = `${tc.name}:${normArgs}`;
         loopDetect.recentToolCalls.push(callSig);
         if (loopDetect.recentToolCalls.length > DUPE_CALL_WINDOW) loopDetect.recentToolCalls.shift();
         const dupes = loopDetect.recentToolCalls.filter(c => c === callSig).length;
@@ -4569,27 +4586,27 @@ app.post('/api/generate', async (req, res) => {
       if (duplicateToolLoop) break;
 
       // ── Diagnosis timeout for /api/generate loop ──
-      const _genHasModify = toolCalls.some(tc => !READ_ONLY_TOOLS.has(tc.name));
+      const _genHasModify = toolCalls.some(tc => !READ_ONLY_TOOLS_GEN.has(tc.name));
       if (toolCalls.length > 0 && !_genHasModify) {
-        readOnlyCount++;
+        _genReadOnlyCount++;
       } else if (_genHasModify) {
-        readOnlyCount = 0;
-        readOnlyWarnings = 0;
+        _genReadOnlyCount = 0;
+        _genReadOnlyWarnings = 0;
       }
-      if (readOnlyCount >= READ_ONLY_LIMIT) {
-        readOnlyWarnings++;
-        console.warn(`[generate] DIAGNOSIS TIMEOUT: ${readOnlyCount} read-only calls (warning #${readOnlyWarnings})`);
-        if (readOnlyWarnings >= 3) {
-          res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'diagnosis_timeout', message: `Model made ${readOnlyCount} consecutive read-only calls and ignored ${readOnlyWarnings - 1} warnings. Stopping.` })}\\n\\n`);
+      if (_genReadOnlyCount >= READ_ONLY_LIMIT_GEN) {
+        _genReadOnlyWarnings++;
+        console.warn(`[generate] DIAGNOSIS TIMEOUT: ${_genReadOnlyCount} read-only calls (warning #${_genReadOnlyWarnings})`);
+        if (_genReadOnlyWarnings >= READ_ONLY_HARD_STOP_GEN) {
+          res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'diagnosis_timeout', message: `Model made ${_genReadOnlyCount} consecutive read-only calls and ignored ${_genReadOnlyWarnings - 1} warnings. Stopping.` })}\\n\\n`);
           break;
         }
         if (messages[messages.length - 1] === assistantMsg) messages.pop();
-        const _genDiagMsg = readOnlyWarnings === 1
-          ? `DIAGNOSIS TIMEOUT: ${readOnlyCount} consecutive read-only calls without acting. STOP reading. You have enough info. ACT NOW: use write_file, patch, exec_shell, or another state-modifying tool.`
-          : `DIAGNOSIS TIMEOUT (#${readOnlyWarnings}): You ignored the warning. Your next tool MUST be state-modifying. ACT NOW or give your final answer.`;
+        const _genDiagMsg = _genReadOnlyWarnings === 1
+          ? `DIAGNOSIS TIMEOUT: ${_genReadOnlyCount} consecutive read-only calls without acting. STOP reading. You have enough info. ACT NOW: use write_file, patch, exec_shell, or another state-modifying tool.`
+          : `DIAGNOSIS TIMEOUT (#${_genReadOnlyWarnings}): You ignored the warning. Your next tool MUST be state-modifying. ACT NOW or give your final answer.`;
         res.write(`data: ${JSON.stringify({ type: 'loop_nudge', reason: 'diagnosis_timeout', message: _genDiagMsg })}\\n\\n`);
         messages.push({ role: 'system', content: _genDiagMsg });
-        readOnlyCount = 0;
+        _genReadOnlyCount = 0;
         continue;
       }
 

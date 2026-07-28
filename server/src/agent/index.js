@@ -1638,6 +1638,8 @@ const TOOL_ERROR_LOOP_LIMIT = 3;    // Same tool erroring this many times → br
 const TOOL_REPEAT_LIMIT = 3;       // Same tool called with identical args this many times → break loop (tighten tool loops)
 let _recentToolSigs = [];          // Recent normalized tool-call signatures (for repeat-tool-loop detection)
 let _repeatToolSigCount = 0;        // Consecutive identical tool-call signatures
+let _readOnlyFileHits = {};         // { 'read_file|/path/to/file': count } — per-target read-only call counter (HARD skip at 3)
+const READ_ONLY_HARD_SKIP = 3;      // After reading the same file/path 3x, SKIP execution entirely (not just nudge)
 
 // ── Grep/search command loop detection ──
 // Track consecutive shell commands that are grep/rg/find/search — if the model
@@ -2551,7 +2553,10 @@ function _writePanel(name, text) {
   // bug) or unrelated screen content. Falling back to a fresh append is safe.
   const canScrollUp = prev > 0 && _lastPanelName === name && prevCols === realCols && prevRlSeq === _rlWriteSeq;
   if (canScrollUp) {
-    // Move cursor up `prev` lines, then clear from cursor to end of screen
+    // Move cursor up `prev` lines, then clear from cursor to end of screen.
+    // This also erases the status bar line that was below the panel — the
+    // status bar's next tick will \r\x1b[2K on the current line (below the
+    // fresh panel content) and write itself there. No stranded lines.
     process.stdout.write(`\x1b[${prev}A\x1b[0J`);
   }
   process.stdout.write(text + '\n');
@@ -6920,6 +6925,10 @@ function compactHistory(history, lowToken = false) {
 }
 let _logFn = (text) => console.log(text);
 function log(text) {
+  // Clear the status bar line before writing log output — otherwise the
+  // status bar's \r-locked line gets pushed into scrollback by this log line,
+  // creating the "stacking status bars" effect.
+  if (_statusBarInterval) process.stdout.write('\r\x1b[2K');
   _logFn(text);
   // Any regular log output invalidates in-place panel scroll — the next
   // panel render can't scroll up over random log lines, it must append below.
@@ -6978,6 +6987,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
   _explorationCalls = [];
   _recentToolSigs = [];
   _repeatToolSigCount = 0;  // reset per-call too — prevent cross-call false positives
+  _readOnlyFileHits = {};   // reset per-file read counter per agent run
   _repeatHardBreakCount = 0;  // reset hard-break counter per agent run
   _hadLoopBreak = false;  // reset loop-break flag per agent run
   _announceRutCount = 0; _forcedFinish = false;  // reset announce-rut + forced-finish flags per agent run
@@ -8222,6 +8232,29 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
         try { spawnSync(HAKSTER_GUARDRAILS, ['reset'], { timeout: 2000 }); } catch (_) {}
       } else {
         _diagCount++;
+
+        // ── HARD SKIP: per-file read-only repeat detection ──
+        // Track each (tool, target) pair. After READ_ONLY_HARD_SKIP hits to the
+        // SAME target, SKIP execution entirely — return a stub result instead of
+        // actually reading the file again. This is the kill switch for the
+        // "read mcp-bridge.js 14 times" loop: the model gets the same content
+        // back but never actually re-reads the file, and the stub message tells
+        // it to STOP and act.
+        const _roTarget = (fnArgs && (fnArgs.path || fnArgs.query || fnArgs.pattern || fnArgs.directory || fnArgs.url)) || '';
+        const _roKey = fnName + '|' + String(_roTarget).slice(0, 120);
+        _readOnlyFileHits[_roKey] = (_readOnlyFileHits[_roKey] || 0) + 1;
+        if (_readOnlyFileHits[_roKey] >= READ_ONLY_HARD_SKIP) {
+          const _hits = _readOnlyFileHits[_roKey];
+          log(`\n${C.red}${C.bold}⛔ HARD SKIP: ${fnName}("${_roTarget}") called ${_hits}x. Returning stub — file already read.${C.reset}\n`);
+          bumpSmart(-10, 'read-only-hard-skip');
+          // Inject a hard system message
+          history.push({ role: 'system', content: `⛔ HARD LOOP BREAK: You have called ${fnName}("${_roTarget}") ${_hits} times this task. The file has NOT been re-read. You already have its full contents from the first read. STOP calling ${fnName} on this path. Either (a) run the fix now in one shell call, (b) write/edit a file, or (c) give the user a direct answer. Re-reading the same file is blocked.` });
+          // Return a stub tool result — do NOT execute the tool
+          history.push({ role: 'tool', name: fnName, content: `[BLOCKED] ${fnName}("${_roTarget}") was called ${_hits}x — this is a read-only loop. The file contents are already in your context from the first read. Do not call this tool on this path again. ACT NOW: run the fix, edit a file, or answer the user.` });
+          tuiAddChain(`#${callNum} ${fnName} → BLOCKED (#${_hits})`, '⛔');
+          continue;
+        }
+
         // Stable per-call signature for loop detection: fnName + primary
         // target (command for shell, path for read_file/list_dir, query for
         // search_files). Offset/limit deliberately excluded so paginating the
@@ -8269,7 +8302,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
           // every fire after that at +1 — so the nudge stays on, not a one-shot
           // the model can ignore and then do 5 more read-only calls.
           // Adaptive: when he's struggling/sleeping, break read-only stalls sooner.
-          const _threshold = _smartScore < 25 ? 1 : _smartScore < 40 ? (_diagFires === 0 ? 3 : 1) : (_diagFires === 0 ? 5 : _diagFires === 1 ? 2 : 1);
+          const _threshold = _smartScore < 25 ? 1 : _smartScore < 40 ? (_diagFires === 0 ? 2 : 1) : (_diagFires === 0 ? 3 : _diagFires === 1 ? 1 : 1);
           if (_diagCount >= _threshold) {
             _diagFires++;
             bumpSmart(_diagFires === 1 ? -3 : _diagFires === 2 ? -5 : -8, 'diagnosis-timeout');  // tuned down: exploration is normal — was -5/-10/-15, which tanked smartness on healthy read-only streaks
