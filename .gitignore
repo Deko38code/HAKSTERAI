@@ -52,3 +52,4 @@ pentest-agents/
 test-results/
 .git.broken/
 .git.old-root/
+logs/

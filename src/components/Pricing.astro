@@ -5,6 +5,8 @@ const plans = [
     price: '$0',
     cadence: 'trial',
     tag: 'haksterai_free',
+    planId: 'free',
+    priceCatalogId: 'free',
     tone: 'text-[#94a3b8]',
     border: 'border-[#1e1e2e]',
     button: 'border border-[#1e1e2e] bg-[#111118] text-[#e2e8f0] hover:border-[#7c3aed]/50',
@@ -16,6 +18,8 @@ const plans = [
     price: '$4',
     cadence: 'month',
     tag: 'haksterai_starter_monthly',
+    planId: 'pro',
+    priceCatalogId: 'starter_monthly',
     tone: 'text-[#22d3ee]',
     border: 'border-[#22d3ee]/35',
     button: 'bg-[#0891b2] text-white hover:bg-[#0e7490]',
@@ -26,6 +30,8 @@ const plans = [
     price: '$19',
     cadence: 'month',
     tag: 'haksterai_pro_monthly',
+    planId: 'pro',
+    priceCatalogId: 'pro_monthly',
     tone: 'text-[#a855f7]',
     border: 'border-[#7c3aed]/50',
     button: 'bg-[#7c3aed] text-white hover:bg-[#6d28d9]',
@@ -37,6 +43,8 @@ const plans = [
     price: '$99',
     cadence: 'month',
     tag: 'haksterai_enterprise_monthly',
+    planId: 'enterprise',
+    priceCatalogId: 'enterprise_monthly',
     tone: 'text-[#fbbf24]',
     border: 'border-[#fbbf24]/35',
     button: 'border border-[#fbbf24]/35 bg-[#111118] text-[#f8fafc] hover:border-[#fbbf24]/70',
@@ -55,14 +63,14 @@ const plans = [
           Pricing
         </div>
         <h2 class="text-3xl md:text-4xl font-bold text-[#e2e8f0] tracking-normal">
-          Plans grouped for Stripe.
+          Plans that scale with you.
         </h2>
         <p class="mt-3 max-w-2xl text-sm md:text-base text-[#64748b]">
-          Use these names and lookup keys when creating Stripe products and prices.
+          Start free with 10 questions. Upgrade anytime for unlimited access.
         </p>
       </div>
-      <div class="rounded-lg border border-[#1e1e2e] bg-[#111118] px-4 py-3 text-xs text-[#94a3b8]">
-        Monthly prices shown. Yearly Pro and Enterprise tags are also in `/api/pricing`.
+      <div id="stripe-status-badge" class="hidden rounded-lg border border-[#1e1e2e] bg-[#111118] px-4 py-3 text-xs text-[#94a3b8]">
+        Secure payments powered by Stripe
       </div>
     </div>
 
@@ -93,11 +101,104 @@ const plans = [
               </li>
             ))}
           </ul>
-          <a href="/build" class={`inline-flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${plan.button}`}>
+          <button
+            data-plan-id={plan.planId}
+            data-price-catalog-id={plan.priceCatalogId}
+            data-plan-name={plan.name}
+            class={`stripe-checkout-btn inline-flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${plan.button}`}
+          >
             Choose {plan.name}
-          </a>
+          </button>
         </div>
       ))}
     </div>
   </div>
+
+  <script>
+    (async () => {
+      const API = window.location.origin;
+      const buttons = document.querySelectorAll('.stripe-checkout-btn');
+      if (!buttons.length) return;
+
+      // Fetch pricing catalog to get Stripe price IDs
+      let catalog = null;
+      try {
+        const res = await fetch(`${API}/api/pricing`);
+        catalog = await res.json();
+      } catch {}
+
+      // Show Stripe badge if configured
+      if (catalog?.stripe?.configured) {
+        const badge = document.getElementById('stripe-status-badge');
+        if (badge) badge.classList.remove('hidden');
+      }
+
+      buttons.forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const planId = btn.dataset.planId;
+          const priceCatalogId = btn.dataset.priceCatalogId;
+          const planName = btn.dataset.planName;
+
+          // Free plan — just go to /build
+          if (planId === 'free') {
+            window.location.href = '/build';
+            return;
+          }
+
+          // Find the stripePriceId from the catalog
+          let stripePriceId = null;
+          if (catalog?.plans) {
+            for (const plan of catalog.plans) {
+              if (plan.id === planId) {
+                for (const price of plan.prices) {
+                  if (price.id === priceCatalogId) {
+                    stripePriceId = price.stripePriceId;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          if (!stripePriceId) {
+            btn.textContent = 'Not configured yet';
+            btn.style.opacity = '0.5';
+            setTimeout(() => { btn.textContent = `Choose ${planName}`; btn.style.opacity = ''; }, 2000);
+            return;
+          }
+
+          // Get auth token
+          const token = localStorage.getItem('hakster_google_token');
+          if (!token) {
+            // Redirect to sign in, then back to pricing
+            window.location.href = '/?signin=1&redirect=' + encodeURIComponent(window.location.pathname + '#pricing');
+            return;
+          }
+
+          // Create checkout session
+          btn.textContent = 'Redirecting...';
+          btn.style.opacity = '0.7';
+          try {
+            const res = await fetch(`${API}/api/stripe/checkout`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': token },
+              body: JSON.stringify({ priceId: stripePriceId, planId }),
+            });
+            const data = await res.json();
+            if (data.url) {
+              window.location.href = data.url;
+            } else {
+              btn.textContent = data.error || 'Checkout failed';
+              btn.style.opacity = '';
+              setTimeout(() => { btn.textContent = `Choose ${planName}`; }, 3000);
+            }
+          } catch (err) {
+            btn.textContent = 'Network error';
+            btn.style.opacity = '';
+            setTimeout(() => { btn.textContent = `Choose ${planName}`; }, 3000);
+          }
+        });
+      });
+    })();
+  </script>
 </section>

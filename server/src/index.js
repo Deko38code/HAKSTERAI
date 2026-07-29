@@ -111,6 +111,8 @@ async function initWebMcp() {
 const { saveMemory, getMemory, searchMemories, listMemories, deleteMemory, getMemoryContext, getMemoryStats, compactMemories, CATEGORIES: MEMORY_CATEGORIES } = require('./memory');
 const { runSecurityAudit, startSecurityScanner, getSecurityNotifications, acknowledgeSecurityNotification, acknowledgeAllSecurityNotifications, SEVERITY: SECURITY_SEVERITY } = require('./security');
 const compression = require('compression');
+let Stripe = null;
+try { Stripe = require('stripe'); } catch (e) { console.log('[stripe] module not available'); }
 const telegramBots = require('./telegramBots');
 
 function seedPersistentProjectMemory() {
@@ -231,7 +233,7 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:4321,http://
 const FS_ROOT = process.env.FS_ROOT || process.cwd();
 
 // ── Usage limits ─────────────────────────────────────────────────
-const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED === 'true'; // default: off
+const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED !== 'false'; // default: ON — free users get 10 questions
 const FREE_USAGE_LIMIT = 10;
 const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
 const REFERRAL_REWARD_TOKENS = parseInt(process.env.REFERRAL_REWARD_TOKENS || '10000', 10);
@@ -622,6 +624,124 @@ function getToolInventory() {
 const app = express();
 app.use(compression());
 app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
+
+// ── Stripe webhook — MUST be before express.json() for raw body verification ──
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+let stripeInstance = null;
+function getStripe() {
+  if (!Stripe || !STRIPE_SECRET_KEY) return null;
+  if (!stripeInstance) stripeInstance = Stripe(STRIPE_SECRET_KEY);
+  return stripeInstance;
+}
+
+// Reverse lookup: price ID → plan id from PRICING_CATALOG
+function planFromPriceId(priceId) {
+  for (const plan of PRICING_CATALOG) {
+    for (const price of plan.prices) {
+      if (price.stripePriceId === priceId) return plan.id;
+    }
+  }
+  return null;
+}
+
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+
+  let event;
+  if (STRIPE_WEBHOOK_SECRET) {
+    const sig = req.headers['stripe-signature'];
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+      console.error('[stripe] webhook signature verification failed:', err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+  } else {
+    // Dev mode — no signature verification
+    try { event = JSON.parse(req.body.toString()); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+  }
+
+  const db = getDb();
+  (async () => {
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed': {
+          const session = event.data.object;
+          const customerId = session.customer;
+          const subId = session.subscription;
+          const userId = session.metadata?.userId;
+          if (userId) {
+            db.prepare('UPDATE users SET stripe_customer_id = ? WHERE id = ?').run(customerId, userId);
+          }
+          if (subId) {
+            const sub = await stripe.subscriptions.retrieve(subId);
+            const priceId = sub.items.data[0]?.price?.id;
+            const planId = planFromPriceId(priceId) || 'pro';
+            db.prepare("UPDATE subscriptions SET status = 'expired' WHERE user_id = ? AND status = 'active'").run(userId);
+            db.prepare(`INSERT INTO subscriptions (id, user_id, plan, billing_cycle, status, current_period_start, current_period_end, provider_sub_id, metadata) VALUES (?, ?, ?, 'monthly', 'active', ?, ?, ?, ?)`)
+              .run(subId, userId, planId, sub.current_period_start, sub.current_period_end, JSON.stringify({ stripe_customer_id: customerId, price_id: priceId }));
+            db.prepare('UPDATE users SET plan = ?, updated_at = unixepoch() WHERE id = ?').run(planId, userId);
+            // Record payment
+            const receiptId = 'rcpt_' + crypto.randomBytes(16).toString('hex');
+            db.prepare(`INSERT INTO payments (id, user_id, amount, currency, plan, billing_cycle, status, payment_method, provider_id, description) VALUES (?, ?, ?, 'usd', ?, 'monthly', 'completed', 'stripe', ?, 'Stripe checkout')`)
+              .run(receiptId, userId, session.amount_total || 0, planId, subId);
+          }
+          console.log(`[stripe] checkout.session.completed for user ${userId}, plan ${planFromPriceId(session.metadata?.priceId) || 'unknown'}`);
+          break;
+        }
+        case 'customer.subscription.updated': {
+          const sub = event.data.object;
+          const priceId = sub.items.data[0]?.price?.id;
+          const planId = planFromPriceId(priceId);
+          if (planId) {
+            const user = db.prepare('SELECT id FROM users WHERE stripe_customer_id = ?').get(sub.customer);
+            if (user) {
+              db.prepare('UPDATE users SET plan = ?, updated_at = unixepoch() WHERE id = ?').run(planId, user.id);
+              db.prepare("UPDATE subscriptions SET status = ?, current_period_start = ?, current_period_end = ? WHERE provider_sub_id = ?")
+                .run(sub.status === 'active' ? 'active' : sub.status, sub.current_period_start, sub.current_period_end, sub.id);
+            }
+          }
+          break;
+        }
+        case 'customer.subscription.deleted': {
+          const sub = event.data.object;
+          const user = db.prepare('SELECT id FROM users WHERE stripe_customer_id = ?').get(sub.customer);
+          if (user) {
+            db.prepare("UPDATE users SET plan = 'free', updated_at = unixepoch() WHERE id = ?").run(user.id);
+            db.prepare("UPDATE subscriptions SET status = 'expired' WHERE provider_sub_id = ?").run(sub.id);
+          }
+          console.log(`[stripe] subscription deleted — user downgraded to free`);
+          break;
+        }
+        case 'invoice.payment_failed': {
+          const invoice = event.data.object;
+          const user = db.prepare('SELECT id FROM users WHERE stripe_customer_id = ?').get(invoice.customer);
+          if (user) {
+            db.prepare("UPDATE subscriptions SET status = 'past_due' WHERE provider_sub_id = ?").run(invoice.subscription);
+          }
+          break;
+        }
+        case 'invoice.payment_succeeded': {
+          const invoice = event.data.object;
+          if (invoice.subscription) {
+            db.prepare("UPDATE subscriptions SET status = 'active' WHERE provider_sub_id = ? AND status = 'past_due'").run(invoice.subscription);
+          }
+          break;
+        }
+        default:
+          // Unhandled event — log but don't error
+          break;
+      }
+      res.json({ received: true });
+    } catch (err) {
+      console.error('[stripe] webhook handler error:', err);
+      res.status(500).json({ error: 'Webhook handler failed' });
+    }
+  })();
+});
+
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '50mb' }));
 app.use((err, req, res, next) => {
@@ -5738,6 +5858,139 @@ app.get('/api/pricing', (_req, res) => {
       publishableKeyConfigured: Boolean(process.env.STRIPE_PUBLISHABLE_KEY),
     },
   });
+});
+
+// ── Stripe Checkout ── create a Checkout Session for a plan ─────────────
+app.post('/api/stripe/checkout', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(503).json({ error: 'Stripe not configured. Set STRIPE_SECRET_KEY in .env' });
+
+  const { priceId, planId, billingCycle } = req.body;
+  if (!priceId) return res.status(400).json({ error: 'priceId required' });
+
+  // Look up the plan from PRICING_CATALOG to validate
+  let plan = null;
+  let priceObj = null;
+  for (const p of PRICING_CATALOG) {
+    for (const pr of p.prices) {
+      if (pr.stripePriceId === priceId || pr.id === priceId) {
+        plan = p;
+        priceObj = pr;
+        break;
+      }
+    }
+    if (plan) break;
+  }
+  if (!plan) return res.status(400).json({ error: `No plan found for priceId: ${priceId}` });
+  if (!priceObj.stripePriceId) return res.status(400).json({ error: `Plan "${plan.id}" has no Stripe price ID configured. Set the STRIPE_PRICE_* env var.` });
+
+  // Get the user
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required. Sign in to subscribe.' });
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      customer: user.stripe_customer_id || undefined,
+      customer_email: user.email || undefined,
+      line_items: [{ price: priceObj.stripePriceId, quantity: 1 }],
+      metadata: {
+        userId: String(user.id),
+        planId: plan.id,
+        priceId: priceObj.stripePriceId,
+      },
+      subscription_data: {
+        metadata: { userId: String(user.id), planId: plan.id },
+      },
+      success_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}/build?checkout=success&plan=${plan.id}`,
+      cancel_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}/?checkout=cancelled`,
+    });
+    console.log(`[stripe] checkout session created for user ${user.id}, plan ${plan.id}, session ${session.id}`);
+    res.json({ url: session.url, sessionId: session.id });
+  } catch (err) {
+    console.error('[stripe] checkout error:', err.message);
+    res.status(500).json({ error: 'Failed to create checkout session', details: err.message });
+  }
+});
+
+// ── Stripe Billing Portal ── let subscribers manage their subscription ──
+app.post('/api/stripe/portal', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  if (!user.stripe_customer_id) return res.status(400).json({ error: 'No Stripe customer account found. Subscribe first.' });
+
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: user.stripe_customer_id,
+      return_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}/build`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error('[stripe] portal error:', err.message);
+    res.status(500).json({ error: 'Failed to create portal session', details: err.message });
+  }
+});
+
+// ── Stripe Subscription Status ── check current user's subscription ─────
+app.get('/api/stripe/status', (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.json({ configured: false });
+
+  const user = getUserByApiKey(req);
+  if (!user) return res.json({ configured: true, subscribed: false, plan: 'free' });
+
+  const db = getDb();
+  const sub = db.prepare("SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1").get(user.id);
+
+  res.json({
+    configured: true,
+    subscribed: Boolean(sub),
+    plan: user.plan || 'free',
+    subscription: sub ? {
+      id: sub.id,
+      plan: sub.plan,
+      billingCycle: sub.billing_cycle,
+      status: sub.status,
+      currentPeriodEnd: sub.current_period_end,
+    } : null,
+    customerId: user.stripe_customer_id || null,
+  });
+});
+
+// ── Stripe Subscription Detail ── full sub info from Stripe API ──────────
+app.get('/api/stripe/subscription', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  if (!user.stripe_customer_id) return res.json({ subscription: null, plan: user.plan || 'free' });
+
+  try {
+    const subs = await stripe.subscriptions.list({ customer: user.stripe_customer_id, status: 'active', limit: 1 });
+    if (subs.data.length === 0) return res.json({ subscription: null, plan: user.plan || 'free' });
+    const sub = subs.data[0];
+    const priceId = sub.items.data[0]?.price?.id;
+    const planId = planFromPriceId(priceId);
+    res.json({
+      subscription: {
+        id: sub.id,
+        status: sub.status,
+        plan: planId,
+        currentPeriodStart: sub.current_period_start,
+        currentPeriodEnd: sub.current_period_end,
+        cancelAtPeriodEnd: sub.cancel_at_period_end,
+      },
+      plan: planId || user.plan || 'free',
+    });
+  } catch (err) {
+    console.error('[stripe] subscription detail error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch subscription', details: err.message });
+  }
 });
 
 // ── Google OAuth ──────────────────────────────────────────────────
