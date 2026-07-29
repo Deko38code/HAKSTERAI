@@ -53,3 +53,4 @@ test-results/
 .git.broken/
 .git.old-root/
 logs/
+cli/.phantom-ai-config.json
