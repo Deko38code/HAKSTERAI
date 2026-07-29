@@ -35,6 +35,7 @@ import Layout from '../layouts/Layout.astro';
       <button onclick="document.getElementById('hakster-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#7c3aed]/10 text-[#7c3aed] border border-[#7c3aed]/30 px-3 py-1.5 rounded-lg hover:bg-[#7c3aed]/20 transition-colors whitespace-nowrap">🧠 haksterAi Stats</button>
       <button onclick="document.getElementById('tools-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🔧 Tool Breakdown</button>
       <button onclick="document.getElementById('system-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">💻 System Info</button>
+ <button onclick="document.getElementById('license-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🔑 Licenses</button>
       <button onclick="document.getElementById('terminal-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">⌨️ Terminal</button>
       <button onclick="document.getElementById('services-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">📡 Services</button>
       <button onclick="document.getElementById('providers-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🧪 Providers</button>
@@ -998,4 +999,138 @@ import Layout from '../layouts/Layout.astro';
     }
     initSkillsToolsModels();
   </script>
+<!-- License Management Section -->
+<div id="license-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mt-6">
+ <div class="flex items-center gap-3 mb-4">
+ <div class="w-2 h-6 bg-[#22d3ee] rounded-full"></div>
+ <h2 class="text-lg font-bold">🔑 License Management</h2>
+ <span class="text-xs text-[#64748b] bg-[#0a0a0f] px-2 py-1 rounded-full border border-[#1e1e2e]" id="license-count-badge">Loading...</span>
+ </div>
+
+ <!-- Stats row -->
+ <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+ <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3 text-center">
+ <div class="text-2xl font-bold text-[#22d3ee]" id="lic-total">—</div>
+ <div class="text-xs text-[#64748b] mt-1">Total</div>
+ </div>
+ <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3 text-center">
+ <div class="text-2xl font-bold text-[#22d3ee]" id="lic-active">—</div>
+ <div class="text-xs text-[#64748b] mt-1">Active</div>
+ </div>
+ <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3 text-center">
+ <div class="text-2xl font-bold text-[#a78bfa]" id="lic-pro">—</div>
+ <div class="text-xs text-[#64748b] mt-1">Pro Plans</div>
+ </div>
+ <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3 text-center">
+ <div class="text-2xl font-bold text-[#fbbf24]" id="lic-revenue">—</div>
+ <div class="text-xs text-[#64748b] mt-1">Est. Revenue</div>
+ </div>
+ </div>
+
+ <!-- License table -->
+ <div class="overflow-x-auto">
+ <table class="w-full text-sm">
+ <thead>
+ <tr class="text-[#64748b] text-xs border-b border-[#1e1e2e]">
+ <th class="text-left py-2 px-3">Key</th>
+ <th class="text-left py-2 px-3">Email</th>
+ <th class="text-left py-2 px-3">Plan</th>
+ <th class="text-left py-2 px-3">Machines</th>
+ <th class="text-left py-2 px-3">Status</th>
+ <th class="text-left py-2 px-3">Created</th>
+ <th class="text-left py-2 px-3">Actions</th>
+ </tr>
+ </thead>
+ <tbody id="license-table-body">
+ <tr><td colspan="7" class="text-center text-[#64748b] py-8">Loading licenses...</td></tr>
+ </tbody>
+ </table>
+ </div>
+
+ <!-- Manual key generation -->n <div class="mt-5 pt-5 border-t border-[#1e1e2e]">
+ <h3 class="text-sm font-semibold text-[#e2e8f0] mb-3">Generate Manual License</h3>
+ <div class="flex flex-col sm:flex-row gap-3">
+ <input id="manual-email" type="email" placeholder="customer@email.com" class="flex-1 bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] focus:border-[#22d3ee] outline-none" />
+ <select id="manual-plan" class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] focus:border-[#22d3ee] outline-none">
+ <option value="starter">Starter ($9.99)</option>
+ <option value="pro">Pro ($29.99)</option>
+ <option value="enterprise">Enterprise ($99.99)</option>
+ </select>
+ <button onclick="generateManualLicense()" class="bg-[#0891b2] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#0e7490] transition-colors whitespace-nowrap">Generate Key</button>
+ </div>
+ <div id="manual-result" class="mt-3 hidden">
+ <div class="bg-[#0a0a0f] border border-[#22d3ee]/30 rounded-lg p-3 flex items-center justify-between">
+ <code id="manual-key" class="text-[#22d3ee] font-mono text-sm"></code>
+ <button onclick="copyManualKey()" class="text-xs bg-[#1e1e2e] text-[#94a3b8] px-2 py-1 rounded hover:bg-[#22d3ee] hover:text-[#0a0a0f] transition-colors">Copy</button>
+ </div>
+ </div>
+ </div>
+</div>
+
+<script is:inline>
+async function loadLicenses() {
+ try {
+ const resp = await fetch('/api/admin/licenses');
+ const data = await resp.json();
+ if (!data.licenses) { document.getElementById('license-table-body').innerHTML = '<tr><td colspan="7" class="text-center text-[#64748b] py-8">No licenses yet</td></tr>'; return; }
+
+ const stats = data.stats || {};
+ document.getElementById('lic-total').textContent = stats.total || 0;
+ document.getElementById('lic-active').textContent = stats.active || 0;
+ document.getElementById('lic-pro').textContent = stats.pro || 0;
+ document.getElementById('lic-revenue').textContent = '$' + (stats.revenue || 0).toFixed(2);
+ document.getElementById('license-count-badge').textContent = (stats.total || 0) + ' total';
+
+ const tbody = document.getElementById('license-table-body');
+ tbody.innerHTML = data.licenses.map(l => `
+ <tr class="border-b border-[#1e1e2e]/50 hover:bg-[#0a0a0f]/50">
+ <td class="py-2 px-3 font-mono text-xs text-[#22d3ee]">${l.key}</td>
+ <td class="py-2 px-3 text-[#94a3b8]">${l.email}</td>
+ <td class="py-2 px-3"><span class="text-xs px-2 py-0.5 rounded-full ${l.plan === 'enterprise' ? 'bg-[#fbbf24]/10 text-[#fbbf24]' : l.plan === 'pro' ? 'bg-[#a78bfa]/10 text-[#a78bfa]' : 'bg-[#22d3ee]/10 text-[#22d3ee]'}">${l.plan}</span></td>
+ <td class="py-2 px-3 text-[#94a3b8]">${l.machines_used || 0}/${l.max_machines}</td>
+ <td class="py-2 px-3">${l.active ? '<span class="text-xs text-green-400">● Active</span>' : '<span class="text-xs text-red-400">● Inactive</span>'}</td>
+ <td class="py-2 px-3 text-[#64748b] text-xs">${l.created_at || ''}</td>
+ <td class="py-2 px-3">
+ ${l.active ? `<button onclick="deactivateLicense('${l.key}')" class="text-xs text-red-400 hover:text-red-300">Deactivate</button>` : '<span class="text-xs text-[#64748b]">—</span>'}
+ </td>
+ </tr>
+ `).join('');
+ } catch (e) {
+ document.getElementById('license-table-body').innerHTML = '<tr><td colspan="7" class="text-center text-red-400 py-8">Failed to load</td></tr>';
+ }
+}
+
+async function deactivateLicense(key) {
+ if (!confirm('Deactivate license ' + key + '?')) return;
+ try {
+ await fetch('/api/admin/licenses/deactivate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key }) });
+ loadLicenses();
+ } catch (e) { alert('Failed to deactivate'); }
+}
+
+async function generateManualLicense() {
+ const email = document.getElementById('manual-email').value.trim();
+ const plan = document.getElementById('manual-plan').value;
+ if (!email) { alert('Enter an email'); return; }
+ try {
+ const resp = await fetch('/api/admin/licenses/create', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email, plan }) });
+ const data = await resp.json();
+ if (data.key) {
+ document.getElementById('manual-key').textContent = data.key;
+ document.getElementById('manual-result').classList.remove('hidden');
+ loadLicenses();
+ } else { alert(data.error || 'Failed to generate'); }
+ } catch (e) { alert('Error: ' + e.message); }
+}
+
+function copyManualKey() {
+ const key = document.getElementById('manual-key').textContent;
+ navigator.clipboard.writeText(key);
+}
+
+// Load on page load
+loadLicenses();
+setInterval(loadLicenses, 30000); // refresh every 30s
+</script>
+
 </Layout>

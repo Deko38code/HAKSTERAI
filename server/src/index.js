@@ -6,6 +6,10 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
+// License gate — server won't start without valid license
+const { checkLicense } = require('./license');
+const { initLicenseTables, verifyLicense, stripeWebhookHandler, createCheckoutSession, getLicenseFromSession, deactivateLicense, createLicense } = require("./stripe-license");
+
 const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -7184,4 +7188,99 @@ function startServer(delay = 2000) {
   });
 }
 
+// License gate — check before server starts
+(async () => {
+  const lic = await checkLicense(true);
+  if (!lic.valid) {
+    console.error('\n' + lic.message + '\n');
+    process.exit(1);
+  }
+  if (lic.message) console.log(lic.message);
+  // === Stripe License API Routes (additive) ===
+// Verify license key (called by CLI/TUI at startup)
+app.post('/api/license/verify', (req, res) => {
+  const { key, fingerprint } = req.body;
+  const result = verifyLicense(getDb(), key, fingerprint);
+  res.json(result);
+});
+
+// Create Stripe checkout session (called by frontend Buy button)
+app.post('/api/stripe/checkout', async (req, res) => {
+  if (!Stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  const handler = createCheckoutSession(Stripe(process.env.STRIPE_SECRET_KEY));
+  return handler(req, res);
+});
+
+// Get license key after successful payment (called from success page)
+app.get('/api/license/from-session', async (req, res) => {
+  const handler = getLicenseFromSession(getDb());
+  return handler(req, res);
+});
+
+// Stripe webhook (payment → auto-generate license)
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!Stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  const handler = stripeWebhookHandler(getDb(), Stripe(process.env.STRIPE_SECRET_KEY));
+  return handler(req, res);
+});
+
+// Admin: deactivate license
+app.post('/api/license/deactivate', (req, res) => {
+  const { key, adminToken } = req.body;
+  if (adminToken !== process.env.HAKSTER_ADMIN_TOKEN) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+  deactivateLicense(getDb(), key);
+  res.json({ success: true });
+});
+
+// Admin: list all licenses
+app.get('/api/admin/licenses', (req, res) => {
+  try {
+    const db = getDb();
+    const licenses = db.prepare(`
+      SELECT l.*, (SELECT COUNT(*) FROM license_machines WHERE key = l.key) as machines_used
+      FROM licenses l ORDER BY created_at DESC LIMIT 100
+    `).all();
+    const stats = {
+      total: db.prepare('SELECT COUNT(*) as c FROM licenses').get().c,
+      active: db.prepare('SELECT COUNT(*) as c FROM licenses WHERE active = 1').get().c,
+      pro: db.prepare("SELECT COUNT(*) as c FROM licenses WHERE plan = 'pro' AND active = 1").get().c,
+      revenue: db.prepare("SELECT SUM(CASE WHEN plan='enterprise' THEN 99.99 WHEN plan='pro' THEN 29.99 WHEN plan='starter' THEN 9.99 ELSE 0 END) as r FROM licenses WHERE active = 1").get().r || 0,
+    };
+    res.json({ licenses, stats });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: create manual license
+app.post('/api/admin/licenses/create', (req, res) => {
+  const { email, plan } = req.body;
+  if (!email || !plan) return res.status(400).json({ error: 'Missing email or plan' });
+  try {
+    const maxMachines = plan === 'enterprise' ? 10 : plan === 'pro' ? 3 : 1;
+    const key = createLicense(getDb(), { email, plan, maxMachines });
+    res.json({ key, plan, email });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: deactivate license via admin panel
+app.post('/api/admin/licenses/deactivate', (req, res) => {
+  const { key } = req.body;
+  if (!key) return res.status(400).json({ error: 'Missing key' });
+  try {
+    deactivateLicense(getDb(), key);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Initialize license tables in DB
+try { initLicenseTables(getDb()); } catch (e) { console.warn('License tables init deferred:', e.message); }
+
 startServer();
+})();

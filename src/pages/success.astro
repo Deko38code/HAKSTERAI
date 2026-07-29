@@ -1,0 +1,213 @@
+---
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>License Activated — haksterAi</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      max-width: 560px;
+      width: 100%;
+      padding: 2rem;
+    }
+    .card {
+      background: #111118;
+      border: 1px solid #1e1e2e;
+      border-radius: 16px;
+      padding: 2.5rem;
+      text-align: center;
+    }
+    .icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 1.5rem;
+      background: linear-gradient(135deg, #22d3ee, #7c3aed);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+    }
+    h1 {
+      font-size: 1.75rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #22d3ee, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      color: #94a3b8;
+      margin-bottom: 2rem;
+    }
+    .license-box {
+      background: #0a0a0f;
+      border: 1px solid #22d3ee/30;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.1rem;
+      color: #22d3ee;
+      letter-spacing: 2px;
+      cursor: pointer;
+      position: relative;
+    }
+    .license-box:hover { border-color: #22d3ee; }
+    .license-label {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 0.5rem;
+      font-family: system-ui;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 0.75rem;
+      right: 0.75rem;
+      background: #1e1e2e;
+      border: none;
+      color: #94a3b8;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+    .copy-btn:hover { background: #22d3ee; color: #0a0a0f; }
+    .instructions {
+      text-align: left;
+      background: #0a0a0f;
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin: 1.5rem 0;
+    }
+    .instructions h3 {
+      font-size: 0.875rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 0.75rem;
+    }
+    .instructions code {
+      display: block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: #a78bfa;
+      background: #111118;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      margin: 0.25rem 0;
+    }
+    .btn-home {
+      display: inline-block;
+      margin-top: 1rem;
+      background: linear-gradient(135deg, #0891b2, #7c3aed);
+      color: white;
+      padding: 0.75rem 2rem;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .btn-home:hover { opacity: 0.9; }
+    .pending { color: #fbbf24; }
+    .error { color: #ef4444; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="icon">✓</div>
+      <h1>Payment Successful!</h1>
+      <p class="subtitle">Your haksterAi license is ready</p>
+
+      <!-- License key display -->
+      <div id="license-display" class="hidden">
+        <div class="license-box" onclick="copyLicense()">
+          <div class="license-label">Your License Key</div>
+          <span id="license-key">Loading...</span>
+          <button class="copy-btn" onclick="copyLicense(event)">Copy</button>
+        </div>
+
+        <div class="instructions">
+          <h3>Quick Start</h3>
+          <code>export HAKSTER_LICENSE_KEY=<span id="key-inline">your-key</span></code>
+          <code>haksterai</code>
+          <p style="color:#94a3b8;font-size:0.8rem;margin-top:0.5rem;">Add the export to your ~/.bashrc or ~/.zshrc to persist.</p>
+        </div>
+
+        <a href="/" class="btn-home">Back to haksterAi</a>
+      </div>
+
+      <!-- Pending state -->
+      <div id="pending-display" class="hidden">
+        <p class="pending">Your license is being generated...</p>
+        <p class="subtitle" style="margin-top:1rem;">Check your email shortly, or refresh this page in a moment.</p>
+        <button onclick="location.reload()" class="btn-home" style="border:none;cursor:pointer;">Refresh</button>
+      </div>
+
+      <!-- Error state -->
+      <div id="error-display" class="hidden">
+        <p class="error">Could not retrieve your license.</p>
+        <p class="subtitle" style="margin-top:1rem;">Contact support@haksterai.com with your payment receipt.</p>
+        <a href="/" class="btn-home">Back to haksterAi</a>
+      </div>
+    </div>
+  </div>
+
+  <script is:inline>
+    async function loadLicense() {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session_id');
+
+      if (!sessionId) {
+        document.getElementById('error-display').classList.remove('hidden');
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/license/from-session?sessionId=' + sessionId);
+        const data = await resp.json();
+
+        if (data.key) {
+          document.getElementById('license-display').classList.remove('hidden');
+          document.getElementById('license-key').textContent = data.key;
+          document.getElementById('key-inline').textContent = data.key;
+        } else if (data.pending) {
+          document.getElementById('pending-display').classList.remove('hidden');
+        } else {
+          document.getElementById('error-display').classList.remove('hidden');
+        }
+      } catch (err) {
+        document.getElementById('error-display').classList.remove('hidden');
+      }
+    }
+
+    function copyLicense(e) {
+      if (e) e.stopPropagation();
+      const key = document.getElementById('license-key').textContent;
+      navigator.clipboard.writeText(key).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 2000);
+      });
+    }
+
+    loadLicense();
+  </script>
+</body>
+</html>

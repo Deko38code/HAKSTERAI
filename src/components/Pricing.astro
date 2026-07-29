@@ -7,6 +7,7 @@ const plans = [
     tag: 'haksterai_free',
     planId: 'free',
     priceCatalogId: 'free',
+    stripePriceId: null,
     tone: 'text-[#94a3b8]',
     border: 'border-[#1e1e2e]',
     button: 'border border-[#1e1e2e] bg-[#111118] text-[#e2e8f0] hover:border-[#7c3aed]/50',
@@ -20,185 +21,116 @@ const plans = [
     tag: 'haksterai_starter_monthly',
     planId: 'pro',
     priceCatalogId: 'starter_monthly',
+    stripePriceId: import.meta.env.STRIPE_PRICE_STARTER_MONTHLY || process.env.STRIPE_PRICE_STARTER_MONTHLY || null,
     tone: 'text-[#22d3ee]',
     border: 'border-[#22d3ee]/35',
     button: 'bg-[#0891b2] text-white hover:bg-[#0e7490]',
-    features: ['More monthly usage', 'Cloud routing', 'Agent chat'],
+    features: ['More monthly usage', 'Cloud reasoning models', 'Agent tools (shell, files, web)', 'Priority support'],
   },
   {
     name: 'Pro',
-    price: '$19.99',
+    price: '$29.99',
     cadence: 'month',
     tag: 'haksterai_pro_monthly',
     planId: 'pro',
     priceCatalogId: 'pro_monthly',
-    tone: 'text-[#a855f7]',
-    border: 'border-[#7c3aed]/50',
+    stripePriceId: import.meta.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PRO_MONTHLY || null,
+    tone: 'text-[#a78bfa]',
+    border: 'border-[#a78bfa]/40',
     button: 'bg-[#7c3aed] text-white hover:bg-[#6d28d9]',
-    featured: true,
-    features: ['Unlimited app usage', 'Memory + history', 'Full agent tools'],
+    features: ['Unlimited monthly usage', 'All cloud models (GPT-4, Claude, Gemini)', 'Full agent tool suite', '3 machines', 'Priority support'],
   },
   {
     name: 'Enterprise',
-    price: '$100',
+    price: '$99.99',
     cadence: 'month',
     tag: 'haksterai_enterprise_monthly',
     planId: 'enterprise',
     priceCatalogId: 'enterprise_monthly',
+    stripePriceId: import.meta.env.STRIPE_PRICE_ENTERPRISE_MONTHLY || process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY || null,
     tone: 'text-[#fbbf24]',
-    border: 'border-[#fbbf24]/35',
-    button: 'border border-[#fbbf24]/35 bg-[#111118] text-[#f8fafc] hover:border-[#fbbf24]/70',
-    features: ['Team seats', 'Admin dashboard', 'Priority support'],
+    border: 'border-[#fbbf24]/40',
+    button: 'bg-[#d97706] text-white hover:bg-[#b45309]',
+    features: ['Everything in Pro', '10 machines', 'Custom model routing', 'Dedicated support', 'SLA guarantee'],
   },
 ];
 ---
 
-<section id="pricing" class="relative py-20 px-6">
-  <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#7c3aed]/30 to-transparent"></div>
-
-  <div class="mx-auto max-w-6xl">
-    <div class="mb-10 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-      <div>
-        <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-[#1e1e2e] bg-[#111118] px-4 py-1.5 text-xs font-semibold text-[#7c3aed] tracking-widest uppercase">
-          Pricing
-        </div>
-        <h2 class="text-3xl md:text-4xl font-bold text-[#e2e8f0] tracking-normal">
-          Plans that scale with you.
-        </h2>
-        <p class="mt-3 max-w-2xl text-sm md:text-base text-[#64748b]">
-          Start free with 10 questions. Upgrade anytime for unlimited access.
-        </p>
-      </div>
-      <div id="stripe-status-badge" class="hidden rounded-lg border border-[#1e1e2e] bg-[#111118] px-4 py-3 text-xs text-[#94a3b8]">
-        Secure payments powered by Stripe
-      </div>
-    </div>
-
-    <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-      {plans.map((plan) => (
-        <div class={`relative rounded-xl border ${plan.border} bg-[#111118] p-4 ${plan.featured ? 'shadow-[0_0_32px_rgba(124,58,237,0.18)]' : ''}`}>
-          {plan.featured && (
-            <div class="absolute right-3 top-3 rounded-full bg-[#7c3aed]/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#c084fc]">
-              Popular
-            </div>
-          )}
-          <div class={`mb-2 text-xs font-bold uppercase tracking-[0.16em] ${plan.tone}`}>{plan.name}</div>
-          <div class="mb-1 flex items-end gap-1">
-            <span class="text-3xl font-bold text-[#f8fafc]">{plan.price}</span>
-            <span class="pb-1 text-xs text-[#64748b]">/{plan.cadence}</span>
-          </div>
-          {plan.note && (
-            <div class="mb-3 rounded-md border border-[#ef4444]/25 bg-[#ef4444]/10 px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#fca5a5]">
-              {plan.note} then upgrade
-            </div>
-          )}
-          <div class="mb-4 rounded-md bg-[#0a0a0f] px-2 py-1 text-[10px] font-mono text-[#64748b]">{plan.tag}</div>
-          <ul class="mb-5 space-y-2 text-xs text-[#94a3b8]">
-            {plan.features.map((feature) => (
-              <li class="flex items-center gap-2">
-                <span class="h-1.5 w-1.5 rounded-full bg-[#7c3aed]"></span>
-                <span>{feature}</span>
-              </li>
-            ))}
-          </ul>
-          <button
-            data-plan-id={plan.planId}
-            data-price-catalog-id={plan.priceCatalogId}
-            data-plan-name={plan.name}
-            class={`stripe-checkout-btn inline-flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${plan.button}`}
-          >
-            Choose {plan.name}
-          </button>
-        </div>
-      ))}
-    </div>
+<section id="pricing" class="max-w-6xl mx-auto px-4 py-20">
+  <div class="text-center mb-12">
+    <h2 class="text-3xl font-bold text-white mb-2">Pricing</h2>
+    <p class="text-[#94a3b8]">Choose your plan. Cancel anytime.</p>
   </div>
 
-  <script>
-    (async () => {
-      const API = window.location.origin;
-      const buttons = document.querySelectorAll('.stripe-checkout-btn');
-      if (!buttons.length) return;
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    {plans.map((plan) => (
+      <div class={`rounded-2xl border ${plan.border} bg-[#111118] p-6 flex flex-col`}>
+        <div class="mb-4">
+          <h3 class={`text-xl font-bold ${plan.tone}`}>{plan.name}</h3>
+          <div class="flex items-baseline gap-1 mt-2">
+            <span class="text-3xl font-bold text-white">{plan.price}</span>
+            <span class="text-[#94a3b8] text-sm">/{plan.cadence}</span>
+          </div>
+          {plan.note && <p class="text-xs text-[#94a3b8] mt-1">{plan.note}</p>}
+        </div>
 
-      // Fetch pricing catalog to get Stripe price IDs
-      let catalog = null;
-      try {
-        const res = await fetch(`${API}/api/pricing`);
-        catalog = await res.json();
-      } catch {}
+        <ul class="space-y-2 mb-6 flex-1">
+          {plan.features.map((f) => (
+            <li class="flex items-start gap-2 text-sm text-[#cbd5e1]">
+              <span class="text-[#22d3ee] mt-0.5">✓</span>
+              <span>{f}</span>
+            </li>
+          ))}
+        </ul>
 
-      // Show Stripe badge if configured
-      if (catalog?.stripe?.configured) {
-        const badge = document.getElementById('stripe-status-badge');
-        if (badge) badge.classList.remove('hidden');
-      }
-
-      buttons.forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const planId = btn.dataset.planId;
-          const priceCatalogId = btn.dataset.priceCatalogId;
-          const planName = btn.dataset.planName;
-
-          // Free plan — just go to /build
-          if (planId === 'free') {
-            window.location.href = '/build';
-            return;
-          }
-
-          // Find the stripePriceId from the catalog
-          let stripePriceId = null;
-          if (catalog?.plans) {
-            for (const plan of catalog.plans) {
-              if (plan.id === planId) {
-                for (const price of plan.prices) {
-                  if (price.id === priceCatalogId) {
-                    stripePriceId = price.stripePriceId;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-
-          if (!stripePriceId) {
-            btn.textContent = 'Not configured yet';
-            btn.style.opacity = '0.5';
-            setTimeout(() => { btn.textContent = `Choose ${planName}`; btn.style.opacity = ''; }, 2000);
-            return;
-          }
-
-          // Get auth token
-          const token = localStorage.getItem('hakster_google_token');
-          if (!token) {
-            // Redirect to sign in, then back to pricing
-            window.location.href = '/?signin=1&redirect=' + encodeURIComponent(window.location.pathname + '#pricing');
-            return;
-          }
-
-          // Create checkout session
-          btn.textContent = 'Redirecting...';
-          btn.style.opacity = '0.7';
-          try {
-            const res = await fetch(`${API}/api/stripe/checkout`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-api-key': token },
-              body: JSON.stringify({ priceId: stripePriceId, planId }),
-            });
-            const data = await res.json();
-            if (data.url) {
-              window.location.href = data.url;
-            } else {
-              btn.textContent = data.error || 'Checkout failed';
-              btn.style.opacity = '';
-              setTimeout(() => { btn.textContent = `Choose ${planName}`; }, 3000);
-            }
-          } catch (err) {
-            btn.textContent = 'Network error';
-            btn.style.opacity = '';
-            setTimeout(() => { btn.textContent = `Choose ${planName}`; }, 3000);
-          }
-        });
-      });
-    })();
-  </script>
+        <button
+          id={`btn-${plan.tag}`}
+          class={`rounded-lg px-4 py-3 font-medium text-sm transition ${plan.button} disabled:opacity-50 disabled:cursor-not-allowed`}
+          data-stripe-price={plan.stripePriceId || ''}
+          data-plan-name={plan.name}
+          onclick="handleBuy(this)"
+        >
+          {plan.name === 'Free' ? 'Get Started' : `Buy ${plan.name}`}
+        </button>
+      </div>
+    ))}
+  </div>
 </section>
+
+<script is:inline>
+  async function handleBuy(btn) {
+    const priceId = btn.dataset.stripePrice;
+    const planName = btn.dataset.planName;
+
+    if (!priceId || priceId === 'null' || priceId === '') {
+      // Free plan — just redirect to install
+      window.location.href = '/#install';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Redirecting to checkout...';
+
+    try {
+      const resp = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priceId }),
+      });
+
+      const data = await resp.json();
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        btn.disabled = false;
+        btn.textContent = `Buy ${planName}`;
+        alert('Failed to start checkout: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = `Buy ${planName}`;
+      alert('Checkout error: ' + err.message);
+    }
+  }
+</script>
