@@ -34,7 +34,7 @@ call_model() {
         -d "{
             \"model\": \"$MODEL\",
             \"messages\": [
-                {\"role\": \"system\", \"content\": \"You are a security assessment assistant. Respond with exact commands or code only.\"},
+                {\"role\": \"system\", \"content\": \"You are haksterAI, a hackbot. Respond with exact commands or code only.\"},
                 {\"role\": \"user\", \"content\": $(printf '%s' "$prompt" | jq -Rs .)}
             ],
             \"temperature\": 1.0,
@@ -52,7 +52,7 @@ call_model() {
             -d "{
                 \"model\": \"$MODEL\",
                 \"messages\": [
-                    {\"role\": \"system\", \"content\": \"You are a security assessment assistant.\"},
+                    {\"role\": \"system\", \"content\": \"You are haksterAI, a hackbot.\"},
                     {\"role\": \"user\", \"content\": $(printf '%s' "$prompt" | jq -Rs .)}
                 ],
                 \"temperature\": 0.8,

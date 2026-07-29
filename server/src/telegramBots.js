@@ -411,7 +411,7 @@ function initBots() {
 
   // ── Immediate startup broadcast: every bot announces its job so you see all 6 are live ──
   const JOBS = {
-    TELEGRAM_BOT_TOKEN_1: '🤖 command bot online — send me a task',
+    TELEGRAM_BOT_TOKEN_1: '🤖 haksterAI command bot online — send me a target or a task',
     TELEGRAM_BOT_TOKEN_2: '💻 coder bot online — git/build status every 30m + daily docs scrape',
     TELEGRAM_BOT_TOKEN_3: '🔍 recon bot online — wifi + port + iface sweep every 30m',
     TELEGRAM_BOT_TOKEN_4: '🐞 debugger bot online — scans crashed services + error logs every 15m',
@@ -438,7 +438,7 @@ async function handleMessage(roleKey, msg) {
     const match = text.match(/^\/(?:ask|hakster)\s+([\s\S]+)$/i);
     if (!match) {
       return bot.sendMessage(chatId,
-        '⚡ *HaksterAi Command Bot*\n\nUsage:\n`/ask <prompt>` — ask the agent\n`/subscribe` — pick a plan and pay\n`/status` — server status',
+        '⚡ *haksterAI Command Bot*\n\nUsage:\n`/ask <prompt>` — ask the agent\n`/subscribe` — pick a plan and pay\n`/status` — server status',
         { parse_mode: 'Markdown' });
     }
     await bot.sendChatAction(chatId, 'typing');
@@ -465,7 +465,7 @@ async function handleMessage(roleKey, msg) {
     const askMatch = text.match(/^\/(?:ask|hakster)\s+([\s\S]+)$/i);
     if (!recon && !askMatch) {
       return bot.sendMessage(chatId,
-        '⚡ *Recon Bot* — MCP-powered pentest agent\n\n`/recon <target>` — ping + quick nmap top ports\n`/ask <prompt>` — full agent w/ MCP tools (nmap, bounty-platforms, writeup-search, playwright, sqlite)',
+        '⚡ *Recon Bot* — haksterAI pentest agent\n\n`/recon <target>` — ping + quick nmap top ports\n`/ask <prompt>` — full agent w/ MCP tools (nmap, bounty-platforms, writeup-search, playwright, sqlite)',
         { parse_mode: 'Markdown' });
     }
     // /ask → full agent loop with all MCP tools
@@ -526,7 +526,7 @@ async function handleMessage(roleKey, msg) {
       const report = await runUptimeCheck();
       return bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
     }
-    return bot.sendMessage(chatId, '🛡 *Watchdog*\n\n`/status` — check haksterAi / cinevault / kiro-gateway');
+    return bot.sendMessage(chatId, '🛡 *haksterAI Watchdog*\n\n`/status` — check haksterAi / cinevault / kiro-gateway');
   }
 
   // ── Role 6: system health bot ──
@@ -535,13 +535,13 @@ async function handleMessage(roleKey, msg) {
       const report = await runSystemHealth();
       return bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
     }
-    return bot.sendMessage(chatId, '🌡 *System Health*\n\n`/health` — load, temps, uptime');
+    return bot.sendMessage(chatId, '🌡 *haksterAI System Health*\n\n`/health` — load, temps, uptime');
   }
 
   // ── Role 2: deploy/status bot (mostly passive) ──
   if (roleKey === 'TELEGRAM_BOT_TOKEN_2') {
     return bot.sendMessage(chatId,
-      '🚀 *Deploy / Status Bot*\n\nThis channel receives server alerts automatically.\n`/status` — current server status',
+      '🚀 *haksterAI Deploy / Status Bot*\n\nThis channel receives server alerts automatically.\n`/status` — current server status',
       { parse_mode: 'Markdown' });
   }
 }
