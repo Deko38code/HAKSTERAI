@@ -153,7 +153,7 @@ export default function App() {
       if (thinkBatchRef.current.timer) { clearTimeout(thinkBatchRef.current.timer); thinkBatchRef.current.timer = null; }
       const parts = full.split('\n');
       for (let i = 0; i < parts.length - 1; i++) {
-        setOutput(prev => { const last = prev[prev.length - 1]; if (last && last.type === 'thinking') { return [...prev.slice(0, -1), { type: 'thinking', text: parts[i] }].slice(-MAX_OUTPUT); } return [...prev, { type: 'thinking', text: parts[i] }].slice(-MAX_OUTPUT); });
+        setOutput(prev => { const filtered = prev.filter(e => e.type !== 'thinking'); return [...filtered, { type: 'thinking', text: parts[i] }].slice(-MAX_OUTPUT); });
       }
       liveThinkRef.current = parts[parts.length - 1];
       forceTick(n => n + 1);
@@ -189,7 +189,7 @@ agent.onThinking(text => {
       if (liveThinkRef.current) {
         const t = liveThinkRef.current;
         liveThinkRef.current = '';
-        setOutput(prev => [...prev, { type: 'thinking', text: t }].slice(-MAX_OUTPUT));
+        setOutput(prev => { const filtered = prev.filter(e => e.type !== 'thinking'); return [...filtered, { type: 'thinking', text: t }].slice(-MAX_OUTPUT); });
       }
     });
     agent.onToolStart(name => {
@@ -249,14 +249,14 @@ agent.onThinking(text => {
     agent.onError(err => {
       flushTokens(); flushThinking();
       if (liveTextRef.current) { const t = liveTextRef.current; liveTextRef.current = ''; setOutput(p => [...p, { type: 'assistant', text: t }].slice(-MAX_OUTPUT)); }
-      if (liveThinkRef.current) { const t = liveThinkRef.current; liveThinkRef.current = ''; setOutput(p => [...p, { type: 'thinking', text: t }].slice(-MAX_OUTPUT)); }
+      setOutput(prev => { const filtered = prev.filter(e => e.type !== 'thinking'); return [...filtered, { type: 'thinking', text: t }].slice(-MAX_OUTPUT); })
       setOutput(p => [...p, { type: 'error', text: typeof err === 'string' ? err : (err?.message || 'Unknown error') }].slice(-MAX_OUTPUT));
       setThinking(false);
     });
     agent.onDone(() => {
       flushTokens(); flushThinking();
       if (liveTextRef.current) { const t = liveTextRef.current; liveTextRef.current = ''; setOutput(p => [...p, { type: 'assistant', text: t }].slice(-MAX_OUTPUT)); }
-      if (liveThinkRef.current) { const t = liveThinkRef.current; liveThinkRef.current = ''; setOutput(p => [...p, { type: 'thinking', text: t }].slice(-MAX_OUTPUT)); }
+      setOutput(prev => { const filtered = prev.filter(e => e.type !== 'thinking'); return [...filtered, { type: 'thinking', text: t }].slice(-MAX_OUTPUT); })
       setThinking(false);
       setStatus(p => ({ ...p, phase: 'done' }));
     });

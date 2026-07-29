@@ -778,8 +778,8 @@ function ModelDialog({
   }, [selectedRow]);
   useEffect(() => {
     if (!saving) return;
-    const t = setInterval(() => setSpinFrame((f) => (f + 1) % SPIN_FRAMES.length), 80);
-    return () => clearInterval(t);
+    const t2 = setInterval(() => setSpinFrame((f) => (f + 1) % SPIN_FRAMES.length), 80);
+    return () => clearInterval(t2);
   }, [saving]);
   useInput((raw, key) => {
     if (needsAPIKey) {
@@ -846,7 +846,7 @@ function ModelDialog({
       return;
     }
     if (key.tab) {
-      setModelType((t) => t === "large" ? "small" : "large");
+      setModelType((t2) => t2 === "large" ? "small" : "large");
       return;
     }
     if (key.upArrow) {
@@ -1019,7 +1019,7 @@ function CommandsDialog({ cols = 80, rows = 24, onSelect, onDismiss }) {
       return;
     }
     if (key.tab) {
-      setTab((t) => t === "system" ? "user" : "system");
+      setTab((t2) => t2 === "system" ? "user" : "system");
       setFilter("");
       setIdx(0);
       return;
@@ -1916,11 +1916,8 @@ function App() {
       const parts = full.split("\n");
       for (let i = 0; i < parts.length - 1; i++) {
         setOutput((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && last.type === "thinking") {
-            return [...prev.slice(0, -1), { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT);
-          }
-          return [...prev, { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT);
+          const filtered = prev.filter((e) => e.type !== "thinking");
+          return [...filtered, { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT);
         });
       }
       liveThinkRef.current = parts[parts.length - 1];
@@ -1950,9 +1947,12 @@ function App() {
       setThinkingText("");
       flushThinking();
       if (liveThinkRef.current) {
-        const t = liveThinkRef.current;
+        const t2 = liveThinkRef.current;
         liveThinkRef.current = "";
-        setOutput((prev) => [...prev, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
+        setOutput((prev) => {
+          const filtered = prev.filter((e) => e.type !== "thinking");
+          return [...filtered, { type: "thinking", text: t2 }].slice(-MAX_OUTPUT);
+        });
       }
     });
     agent_default.onToolStart((name) => {
@@ -1960,7 +1960,7 @@ function App() {
     });
     agent_default.onToolEnd((name, result) => {
       setTools((p) => {
-        const idx = [...p].reverse().findIndex((t) => t.name === name && t.status === "running");
+        const idx = [...p].reverse().findIndex((t2) => t2.name === name && t2.status === "running");
         if (idx === -1) return [...p, { name, status: "done", result: String(result || "").slice(0, 80), start: Date.now() }].slice(-MAX_TOOLS);
         const real = p.length - 1 - idx;
         const next = [...p];
@@ -2016,15 +2016,14 @@ function App() {
       flushTokens();
       flushThinking();
       if (liveTextRef.current) {
-        const t = liveTextRef.current;
+        const t2 = liveTextRef.current;
         liveTextRef.current = "";
-        setOutput((p) => [...p, { type: "assistant", text: t }].slice(-MAX_OUTPUT));
+        setOutput((p) => [...p, { type: "assistant", text: t2 }].slice(-MAX_OUTPUT));
       }
-      if (liveThinkRef.current) {
-        const t = liveThinkRef.current;
-        liveThinkRef.current = "";
-        setOutput((p) => [...p, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
-      }
+      setOutput((prev) => {
+        const filtered = prev.filter((e) => e.type !== "thinking");
+        return [...filtered, { type: "thinking", text: t }].slice(-MAX_OUTPUT);
+      });
       setOutput((p) => [...p, { type: "error", text: typeof err === "string" ? err : err?.message || "Unknown error" }].slice(-MAX_OUTPUT));
       setThinking(false);
     });
@@ -2032,15 +2031,14 @@ function App() {
       flushTokens();
       flushThinking();
       if (liveTextRef.current) {
-        const t = liveTextRef.current;
+        const t2 = liveTextRef.current;
         liveTextRef.current = "";
-        setOutput((p) => [...p, { type: "assistant", text: t }].slice(-MAX_OUTPUT));
+        setOutput((p) => [...p, { type: "assistant", text: t2 }].slice(-MAX_OUTPUT));
       }
-      if (liveThinkRef.current) {
-        const t = liveThinkRef.current;
-        liveThinkRef.current = "";
-        setOutput((p) => [...p, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
-      }
+      setOutput((prev) => {
+        const filtered = prev.filter((e) => e.type !== "thinking");
+        return [...filtered, { type: "thinking", text: t }].slice(-MAX_OUTPUT);
+      });
       setThinking(false);
       setStatus((p) => ({ ...p, phase: "done" }));
     });
@@ -2339,10 +2337,10 @@ function App() {
     })), cols, theme }),
     tools.length > 0 && /* @__PURE__ */ jsxs17(Box16, { width: cols, flexDirection: "row", overflow: "hidden", children: [
       /* @__PURE__ */ jsx16(Text17, { color: "gray", dim: true, children: "tools: " }),
-      tools.slice(-6).map((t, i) => /* @__PURE__ */ jsxs17(Text17, { color: t.status === "running" ? "yellow" : theme.success, children: [
-        t.status === "running" ? "\u25C9" : "\u2713",
-        t.name,
-        t.duration ? `(${t.duration})` : "",
+      tools.slice(-6).map((t2, i) => /* @__PURE__ */ jsxs17(Text17, { color: t2.status === "running" ? "yellow" : theme.success, children: [
+        t2.status === "running" ? "\u25C9" : "\u2713",
+        t2.name,
+        t2.duration ? `(${t2.duration})` : "",
         " "
       ] }, i))
     ] }),
