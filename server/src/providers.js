@@ -74,7 +74,7 @@ const PROVIDERS = {
   ollama: {
     name: 'Ollama',
     baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    defaultModel: process.env.DEFAULT_MODEL || 'glm-5.2:cloud',
+    defaultModel: process.env.DEFAULT_MODEL || 'glm-uncensored:latest',
     type: 'openai-compat',
   },
   // Second ollama instance for gpt-oss:120b-cloud — same backend, different model,
