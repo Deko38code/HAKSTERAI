@@ -54,3 +54,4 @@ test-results/
 .git.old-root/
 logs/
 cli/.phantom-ai-config.json
+.serena/

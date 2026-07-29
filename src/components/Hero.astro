@@ -402,5 +402,15 @@
       console.error('Google auth error:', googleError);
       window.history.replaceState({}, '', window.location.pathname);
     }
+
+    // Handle signin=1 redirect from pricing/build pages
+    const signinRequested = params.get('signin');
+    if (signinRequested === '1') {
+      const redirect = params.get('redirect') || window.location.pathname;
+      sessionStorage.setItem('hakster_post_auth_redirect', redirect);
+      // Auto-trigger Google OAuth
+      window.location.href = `${API}/api/auth/google/redirect`;
+      return;
+    }
   })();
 </script>
