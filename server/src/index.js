@@ -939,7 +939,40 @@ app.get('/api/points', (_req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', version: '1.0.0', providers: Object.keys(PROVIDERS) });
+  // Deep health check: test DB + Stripe connectivity
+  const checks = { db: 'ok', stripe: 'ok' };
+  let allOk = true;
+
+  // DB check
+  try {
+    const db = getDb();
+    db.prepare('SELECT 1 as ok').get();
+  } catch (e) {
+    checks.db = 'fail: ' + e.message;
+    allOk = false;
+  }
+
+  // Stripe check
+  try {
+    if (!Stripe) {
+      checks.stripe = 'not configured';
+    } else {
+      // Just verify the client was constructed with a key
+      const hasKey = !!(process.env.STRIPE_SECRET_KEY);
+      checks.stripe = hasKey ? 'ok' : 'no secret key';
+      if (!hasKey) allOk = false;
+    }
+  } catch (e) {
+    checks.stripe = 'fail: ' + e.message;
+    allOk = false;
+  }
+
+  res.status(allOk ? 200 : 503).json({
+    status: allOk ? 'ok' : 'degraded',
+    version: '1.0.0',
+    checks,
+    providers: Object.keys(PROVIDERS),
+  });
 });
 
 // ── Stuck-Loop Monitor endpoints ─────────────────────────────────────────

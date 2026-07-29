@@ -1,8 +1,24 @@
 'use strict';
-const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+
+// Pre-start safety: crash early if better-sqlite3 native module can't load.
+// PM2 will auto-restart. This prevents the server running as a zombie where
+// every DB call throws silently (e.g. after a Node.js version upgrade).
+let Database;
+try {
+  Database = require('better-sqlite3');
+  // Smoke test: actually open an in-memory DB and run a query
+  const _smoke = new Database(':memory:');
+  _smoke.prepare('SELECT 1 as ok').get();
+  _smoke.close();
+} catch (e) {
+  console.error('[FATAL] better-sqlite3 native module failed to load:', e.message);
+  console.error('[FATAL] Run "npm rebuild better-sqlite3" in the server/ directory.');
+  console.error('[FATAL] Aborting startup — PM2 will auto-restart.');
+  process.exit(1);
+}
 
 const DB_PATH = path.join(__dirname, '../../data/hakster.db');
 
