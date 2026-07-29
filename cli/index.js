@@ -18,6 +18,24 @@ const os = require('os');
 const http = require('http');
 const https = require('https');
 
+// License check — must pass before anything else runs
+const { checkLicense } = require('../server/src/license');
+async function _haksterLicenseGate() {
+  const lic = await checkLicense(true); // allowTrial = true
+  if (!lic.valid) {
+    console.error('\n' + lic.message + '\n');
+    process.exit(1);
+  }
+  if (lic.message) console.log(lic.message + '\n');
+}
+// Run gate before CLI starts (non-blocking for --help/--version)
+const _rawArgs = process.argv.slice(2);
+if (_rawArgs.includes('--help') || _rawArgs.includes('-h') || _rawArgs.includes('--version') || _rawArgs.includes('-V')) {
+  // Allow help/version without license
+} else {
+  _haksterLicenseGate().catch((e) => { console.error('License check failed:', e.message); process.exit(1); });
+} = require('https');
+
 const pkg = require('./package.json');
 const { showIntro, C: logoC } = require('./logo');
 
@@ -2479,4 +2497,5 @@ if (process.argv.length <= 2) {
   process.argv.push('chat');
 }
 
+// License gate is checked at top of file before program.parse
 program.parse();

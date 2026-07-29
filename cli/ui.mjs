@@ -1,12 +1,12 @@
 // Built by esbuild — do not edit. Run: node build.mjs
 
 // src/index.jsx
-import React15 from "react";
+import React18 from "react";
 import { render } from "ink";
 
 // src/App.jsx
-import React14, { useState as useState7, useEffect as useEffect4, useRef, useCallback, useMemo as useMemo4 } from "react";
-import { Box as Box13, Text as Text14, useInput as useInput4, useApp, useStdout } from "ink";
+import React17, { useState as useState9, useEffect as useEffect6, useRef as useRef3, useCallback, useMemo as useMemo4 } from "react";
+import { Box as Box16, Text as Text17, useInput as useInput5, useApp, useStdout } from "ink";
 
 // src/agent.jsx
 import { EventEmitter } from "events";
@@ -1464,37 +1464,209 @@ function SplashScreen({ onDone, version = "0.1.0" }) {
   ] });
 }
 
-// src/components/TokenBar.jsx
-import React13 from "react";
+// src/components/ThinkingBox.jsx
+import React13, { useState as useState7, useEffect as useEffect4, useRef } from "react";
 import { Box as Box12, Text as Text13 } from "ink";
 import { jsx as jsx12, jsxs as jsxs13 } from "react/jsx-runtime";
-function TokenBar({ used = 0, chars = 0, max = 128e3, cols = 80 }) {
-  const pct = Math.min(100, Math.round(used / max * 100));
-  const barWidth = Math.max(10, cols - 30);
-  const filled = Math.floor(pct / 100 * barWidth);
-  const bar = "\u2588".repeat(filled).padEnd(barWidth, "\u2591");
-  const color = pct > 85 ? "red" : pct > 60 ? "yellow" : "green";
-  const label = `${(used / 1e3).toFixed(1)}K/${(max / 1e3).toFixed(0)}K`;
-  const charLabel = chars > 0 ? ` \xB7 ${(chars / 1e3).toFixed(1)}k chars` : "";
-  return /* @__PURE__ */ jsxs13(Box12, { width: cols, paddingX: 1, children: [
-    /* @__PURE__ */ jsx12(Text13, { color: "gray", dim: true, children: "tokens " }),
-    /* @__PURE__ */ jsxs13(Text13, { color, children: [
-      "[",
-      bar,
-      "]"
-    ] }),
-    /* @__PURE__ */ jsxs13(Text13, { color, bold: true, children: [
-      " ",
-      pct,
-      "%"
-    ] }),
-    /* @__PURE__ */ jsxs13(Text13, { color: "gray", dim: true, children: [
-      " ",
-      label,
-      charLabel
-    ] })
+function ThinkingBox({ thinking = "", phase = "", cols = 80, theme }) {
+  const [offset, setOffset] = useState7(0);
+  const [dots, setDots] = useState7(0);
+  const textRef = useRef("");
+  useEffect4(() => {
+    textRef.current = thinking ? thinking.trim() : "";
+    setOffset(0);
+  }, [thinking]);
+  useEffect4(() => {
+    if (!textRef.current) return;
+    const id = setInterval(() => {
+      setOffset((o) => {
+        const textLen = textRef.current.length;
+        const maxOffset = textLen + 20;
+        return o >= maxOffset ? 0 : o + 1;
+      });
+    }, 120);
+    return () => clearInterval(id);
+  }, [thinking]);
+  useEffect4(() => {
+    if (!phase) return;
+    const id = setInterval(() => setDots((d) => (d + 1) % 4), 400);
+    return () => clearInterval(id);
+  }, [phase]);
+  if (!thinking && !phase) return null;
+  const fullText = textRef.current;
+  const availWidth = Math.max(0, cols - 22);
+  let viewport = "";
+  if (fullText) {
+    const padded = "   " + fullText + "   ";
+    if (padded.length <= availWidth) {
+      viewport = padded.trim();
+    } else {
+      let window = "";
+      for (let i = 0; i < availWidth; i++) {
+        const idx = (offset + i) % padded.length;
+        window += padded[idx];
+      }
+      viewport = window;
+    }
+  }
+  const phaseLabel = phase ? ` ${phase}${".".repeat(dots)}` : "";
+  const accentColor = theme?.accent || theme?.primary || "cyan";
+  return /* @__PURE__ */ jsxs13(Box12, { flexDirection: "row", alignItems: "center", children: [
+    /* @__PURE__ */ jsx12(Box12, { marginRight: 1, children: /* @__PURE__ */ jsx12(Spinner, {}) }),
+    /* @__PURE__ */ jsx12(Text13, { color: accentColor, bold: true, children: "\u27E1" }),
+    /* @__PURE__ */ jsx12(Text13, { color: "gray", dim: true, children: " thinking" }),
+    /* @__PURE__ */ jsx12(Text13, { color: accentColor, children: phaseLabel ? ` ${phaseLabel}` : "" }),
+    /* @__PURE__ */ jsx12(Box12, { flexGrow: 1, marginLeft: 1, overflow: "hidden", children: /* @__PURE__ */ jsx12(Text13, { color: "gray", wrap: "truncate", children: viewport }) })
   ] });
 }
+
+// src/components/InputBox.jsx
+import React14, { useState as useState8, useEffect as useEffect5, useRef as useRef2 } from "react";
+import { Box as Box13, Text as Text14, useInput as useInput4, useStdin } from "ink";
+import { jsx as jsx13, jsxs as jsxs14 } from "react/jsx-runtime";
+function InputBox({
+  value = "",
+  onChange,
+  onSubmit,
+  placeholder = "Type a message\u2026 (Enter to send, Shift+Enter for newline)",
+  cols = 80,
+  disabled = false,
+  queueCount = 0,
+  theme
+}) {
+  const { isRawModeSupported } = useStdin();
+  const cursorRef = useRef2(value.length);
+  useInput4((input, key) => {
+    if (disabled) return;
+    if (key.return && !key.shift) {
+      if (onSubmit) onSubmit(value);
+      return;
+    }
+    if (key.backspace || key.delete) {
+      const newVal = value.slice(0, -1);
+      if (onChange) onChange(newVal);
+      return;
+    }
+    if (key.ctrl && input === "u") {
+      if (onChange) onChange("");
+      return;
+    }
+    if (key.ctrl && input === "w") {
+      const parts = value.split(/\s+/);
+      parts.pop();
+      const newVal = parts.join(" ");
+      if (onChange) onChange(newVal);
+      return;
+    }
+    if (input && !key.ctrl && !key.meta && !key.escape && input.length === 1) {
+      const newVal = value + input;
+      if (onChange) onChange(newVal);
+      return;
+    }
+  });
+  const borderColor = disabled ? "gray" : theme?.primary || "green";
+  const labelColor = disabled ? "gray" : theme?.primary || "green";
+  const promptChar = disabled ? "\u25CB" : "\u25B6";
+  const displayValue = value || "";
+  const showCursor = !disabled;
+  return /* @__PURE__ */ jsxs14(
+    Box13,
+    {
+      flexDirection: "column",
+      borderStyle: "round",
+      borderColor,
+      paddingX: 1,
+      width: cols,
+      flexShrink: 0,
+      children: [
+        queueCount > 0 && /* @__PURE__ */ jsxs14(Box13, { justifyContent: "space-between", children: [
+          /* @__PURE__ */ jsxs14(Text14, { color: "cyan", bold: true, children: [
+            "\u{1F4E8} ",
+            queueCount,
+            " message",
+            queueCount > 1 ? "s" : "",
+            " queued"
+          ] }),
+          /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: "press Tab to cycle" })
+        ] }),
+        /* @__PURE__ */ jsxs14(Box13, { children: [
+          /* @__PURE__ */ jsxs14(Text14, { color: labelColor, bold: true, children: [
+            promptChar,
+            " "
+          ] }),
+          /* @__PURE__ */ jsx13(Text14, { color: disabled ? "gray" : "white", children: displayValue }),
+          showCursor && displayValue.length < cols - 6 && /* @__PURE__ */ jsx13(Text14, { color: labelColor, children: "\u2588" }),
+          !displayValue && /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: placeholder })
+        ] }),
+        /* @__PURE__ */ jsxs14(Box13, { justifyContent: "space-between", children: [
+          /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: "\u21B5 send  \u21E7\u21B5 newline  \u2303U clear  \u2303W del-word  /commands  ?help" }),
+          /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: disabled ? "\u23F8 busy" : "\u25CF ready" })
+        ] })
+      ]
+    }
+  );
+}
+
+// src/components/MessageGrid.jsx
+import React15 from "react";
+import { Box as Box14, Text as Text15 } from "ink";
+import { jsx as jsx14, jsxs as jsxs15 } from "react/jsx-runtime";
+function MessageGrid({ messages = [], cols = 80, theme }) {
+  if (!messages.length) return null;
+  const borderColor = theme?.border || "green";
+  const maxContentWidth = cols - 4;
+  return /* @__PURE__ */ jsx14(Box14, { flexDirection: "column", width: cols, children: messages.map((msg, i) => {
+    const isUser = msg.role === "user";
+    const isAssistant = msg.role === "assistant" || msg.role === "model";
+    const isTool = msg.role === "tool" || msg.role === "system";
+    const isThinking = msg.role === "thinking";
+    const roleLabel = isUser ? "\u{1F464} YOU" : isAssistant ? "\u{1F916} AI" : isTool ? "\u{1F527} TOOL" : isThinking ? "\u{1F9E0} THINK" : "\u25C6";
+    const roleColor = isUser ? theme?.primary || "green" : isAssistant ? theme?.secondary || "cyan" : isThinking ? "yellow" : "gray";
+    const cardBorder = isUser ? theme?.primary || "green" : isThinking ? "yellow" : theme?.secondary || "cyan";
+    let content = msg.content || msg.text || "";
+    if (typeof content === "object") content = JSON.stringify(content);
+    const lines = content.split("\n");
+    const maxLines = isThinking ? 4 : 20;
+    const truncated = lines.length > maxLines;
+    const shownLines = lines.slice(0, maxLines);
+    const shownContent = shownLines.join("\n") + (truncated ? `
+\u2026 +${lines.length - maxLines} more lines` : "");
+    return /* @__PURE__ */ jsxs15(
+      Box14,
+      {
+        flexDirection: "column",
+        borderStyle: isThinking ? "single" : "round",
+        borderColor: cardBorder,
+        paddingX: 1,
+        width: cols,
+        marginBottom: 0,
+        marginTop: 0,
+        children: [
+          /* @__PURE__ */ jsxs15(Box14, { justifyContent: "space-between", alignItems: "center", children: [
+            /* @__PURE__ */ jsx14(Text15, { color: roleColor, bold: true, children: roleLabel }),
+            msg.model && /* @__PURE__ */ jsx14(Text15, { color: "gray", dim: true, children: msg.model }),
+            msg.timestamp && /* @__PURE__ */ jsx14(Text15, { color: "gray", dim: true, children: msg.timestamp })
+          ] }),
+          /* @__PURE__ */ jsx14(Box14, { marginTop: 0, children: /* @__PURE__ */ jsx14(
+            Text15,
+            {
+              color: isThinking ? "gray" : "white",
+              dim: isThinking,
+              wrap: "truncate",
+              children: shownContent
+            }
+          ) })
+        ]
+      },
+      i
+    );
+  }) });
+}
+
+// src/components/TokenBar.jsx
+import React16 from "react";
+import { Box as Box15, Text as Text16 } from "ink";
+import { jsx as jsx15, jsxs as jsxs16 } from "react/jsx-runtime";
 
 // src/components/ThemeManager.js
 var THEMES = {
@@ -1622,7 +1794,7 @@ var THEMES = {
 var THEME_NAMES = Object.keys(THEMES);
 
 // src/App.jsx
-import { jsx as jsx13, jsxs as jsxs14 } from "react/jsx-runtime";
+import { jsx as jsx16, jsxs as jsxs17 } from "react/jsx-runtime";
 var MAX_OUTPUT = 500;
 var MAX_TOOLS = 50;
 var TOKEN_BATCH_MS = 16;
@@ -1653,33 +1825,34 @@ function App() {
   const cols = stdout?.columns || 80;
   const rows = stdout?.rows || 24;
   const outputHeight = Math.max(5, rows - 10);
-  const [showSplash, setShowSplash] = useState7(true);
-  const [themeName, setThemeName] = useState7("default");
+  const [showSplash, setShowSplash] = useState9(true);
+  const [themeName, setThemeName] = useState9("default");
   const theme = useMemo4(() => THEMES[themeName] || THEMES.default, [themeName]);
-  const [output, setOutput] = useState7([]);
-  const [tools, setTools] = useState7([]);
-  const [input, setInput] = useState7("");
-  const [thinking, setThinking] = useState7(false);
-  const [status, setStatus] = useState7({ task: "idle", model: agent_default.model || "unknown", phase: "IDLE", tokens: 0, trust: 0, provider: "ollama" });
-  const [phase, setPhase] = useState7("IDLE");
-  const [queue, setQueue] = useState7([]);
-  const [scrollOffset, setScrollOffset] = useState7(0);
-  const [blink, setBlink] = useState7(false);
-  const [showHelp, setShowHelp] = useState7(false);
-  const [showModelDialog, setShowModelDialog] = useState7(false);
-  const [showCommandsDialog, setShowCommandsDialog] = useState7(false);
-  const [showSlashMenu, setShowSlashMenu] = useState7(false);
-  const [showPlan, setShowPlan] = useState7(false);
-  const [showSessions, setShowSessions] = useState7(false);
-  const [showDiff, setShowDiff] = useState7(false);
-  const [diffData, setDiffData] = useState7(null);
-  const [plan, setPlan] = useState7(null);
-  const [sessions, setSessions] = useState7([]);
-  const [approval, setApproval] = useState7(null);
-  const [contextMax, setContextMax] = useState7(128e3);
-  const [contextChars, setContextChars] = useState7(0);
-  const inputRef = useRef("");
-  const batchRef = useRef({ timer: null, text: "" });
+  const [output, setOutput] = useState9([]);
+  const [tools, setTools] = useState9([]);
+  const [input, setInput] = useState9("");
+  const [thinkingText, setThinkingText] = useState9("");
+  const [thinking, setThinking] = useState9(false);
+  const [status, setStatus] = useState9({ task: "idle", model: agent_default.model || "unknown", phase: "IDLE", tokens: 0, trust: 0, provider: "ollama" });
+  const [phase, setPhase] = useState9("IDLE");
+  const [queue, setQueue] = useState9([]);
+  const [scrollOffset, setScrollOffset] = useState9(0);
+  const [blink, setBlink] = useState9(false);
+  const [showHelp, setShowHelp] = useState9(false);
+  const [showModelDialog, setShowModelDialog] = useState9(false);
+  const [showCommandsDialog, setShowCommandsDialog] = useState9(false);
+  const [showSlashMenu, setShowSlashMenu] = useState9(false);
+  const [showPlan, setShowPlan] = useState9(false);
+  const [showSessions, setShowSessions] = useState9(false);
+  const [showDiff, setShowDiff] = useState9(false);
+  const [diffData, setDiffData] = useState9(null);
+  const [plan, setPlan] = useState9(null);
+  const [sessions, setSessions] = useState9([]);
+  const [approval, setApproval] = useState9(null);
+  const [contextMax, setContextMax] = useState9(128e3);
+  const [contextChars, setContextChars] = useState9(0);
+  const inputRef = useRef3("");
+  const batchRef = useRef3({ timer: null, text: "" });
   const maxScroll = Math.max(0, output.length - outputHeight);
   const effectiveOffset = Math.min(maxScroll, scrollOffset);
   const olderAbove = maxScroll - effectiveOffset;
@@ -1690,9 +1863,9 @@ function App() {
     Math.max(0, output.length - newerBelow - visCount),
     output.length - newerBelow
   );
-  const liveTextRef = useRef("");
-  const liveThinkRef = useRef("");
-  const [, forceTick] = useState7(0);
+  const liveTextRef = useRef3("");
+  const liveThinkRef = useRef3("");
+  const [, forceTick] = useState9(0);
   const flushTokens = useCallback(() => {
     const b = batchRef.current;
     if (!b.text) return;
@@ -1722,7 +1895,7 @@ function App() {
       batchRef.current.timer = setTimeout(flushTokens, TOKEN_BATCH_MS);
     }
   }, [flushTokens]);
-  const thinkBatchRef = useRef({ timer: null, text: "" });
+  const thinkBatchRef = useRef3({ timer: null, text: "" });
   const flushThinking = useCallback(() => {
     const b = thinkBatchRef.current;
     if (!b.text) return;
@@ -1740,10 +1913,17 @@ function App() {
         clearTimeout(thinkBatchRef.current.timer);
         thinkBatchRef.current.timer = null;
       }
-      // ── Keep only the latest line in liveThinkRef (1 line, in-place at bottom).
-      //    Do NOT push into setOutput — that was causing 15+ lines to push screen up. ──
-      const parts = full.split("\n").map(l => l.trim()).filter(Boolean);
-      liveThinkRef.current = parts[parts.length - 1] || "";
+      const parts = full.split("\n");
+      for (let i = 0; i < parts.length - 1; i++) {
+        setOutput((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.type === "thinking") {
+            return [...prev.slice(0, -1), { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT);
+          }
+          return [...prev, { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT);
+        });
+      }
+      liveThinkRef.current = parts[parts.length - 1];
       forceTick((n) => n + 1);
       return;
     }
@@ -1752,23 +1932,28 @@ function App() {
     }
   }, [flushThinking]);
   const _working = thinking || ["PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE", "THINK"].includes(phase);
-  useEffect4(() => {
+  useEffect6(() => {
     const id = setInterval(() => setBlink((b) => !b), 480);
     return () => clearInterval(id);
   }, []);
-  useEffect4(() => {
+  useEffect6(() => {
     if (showSplash) return;
     agent_default.onToken((token) => appendToken(token));
     agent_default.onThinking((text) => {
       setThinking(true);
+      setThinkingText(text);
+      setOutput((prev) => [...prev, { type: "thinking", text }].slice(-MAX_OUTPUT));
       appendThinking(text);
     });
     agent_default.onThinkingEnd(() => {
       setThinking(false);
+      setThinkingText("");
       flushThinking();
-      // Clear the live thinking line — don't push into setOutput (keeps scrollback clean)
-      liveThinkRef.current = "";
-      forceTick((n) => n + 1);
+      if (liveThinkRef.current) {
+        const t = liveThinkRef.current;
+        liveThinkRef.current = "";
+        setOutput((prev) => [...prev, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
+      }
     });
     agent_default.onToolStart((name) => {
       setTools((p) => [...p, { name, status: "running", start: Date.now(), result: "" }].slice(-MAX_TOOLS));
@@ -1836,7 +2021,9 @@ function App() {
         setOutput((p) => [...p, { type: "assistant", text: t }].slice(-MAX_OUTPUT));
       }
       if (liveThinkRef.current) {
+        const t = liveThinkRef.current;
         liveThinkRef.current = "";
+        setOutput((p) => [...p, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
       }
       setOutput((p) => [...p, { type: "error", text: typeof err === "string" ? err : err?.message || "Unknown error" }].slice(-MAX_OUTPUT));
       setThinking(false);
@@ -1849,8 +2036,11 @@ function App() {
         liveTextRef.current = "";
         setOutput((p) => [...p, { type: "assistant", text: t }].slice(-MAX_OUTPUT));
       }
-      // Clear live thinking line without pushing to output (keeps scrollback clean)
-      liveThinkRef.current = "";
+      if (liveThinkRef.current) {
+        const t = liveThinkRef.current;
+        liveThinkRef.current = "";
+        setOutput((p) => [...p, { type: "thinking", text: t }].slice(-MAX_OUTPUT));
+      }
       setThinking(false);
       setStatus((p) => ({ ...p, phase: "done" }));
     });
@@ -1981,7 +2171,7 @@ function App() {
         setOutput((p) => [...p, { type: "system", text: `Unknown command: ${command}` }].slice(-MAX_OUTPUT));
     }
   }, [approval, status, phase, exit]);
-  useInput4((raw, key) => {
+  useInput5((raw, key) => {
     if (showSplash) return;
     if (showModelDialog || showCommandsDialog) return;
     if (showHelp && (key.escape || raw === "q")) {
@@ -2085,10 +2275,10 @@ function App() {
     }
   });
   if (showSplash) {
-    return /* @__PURE__ */ jsx13(SplashScreen, { version: "0.1.0", onDone: () => setShowSplash(false) });
+    return /* @__PURE__ */ jsx16(SplashScreen, { version: "0.1.0", onDone: () => setShowSplash(false) });
   }
-  return /* @__PURE__ */ jsxs14(Box13, { flexDirection: "column", height: rows, width: cols, children: [
-    /* @__PURE__ */ jsx13(
+  return /* @__PURE__ */ jsxs17(Box16, { flexDirection: "column", height: rows, width: cols, children: [
+    /* @__PURE__ */ jsx16(
       StatusBar,
       {
         model: status.model,
@@ -2102,58 +2292,92 @@ function App() {
         sessionId: agent_default.sessionId || ""
       }
     ),
-    /* @__PURE__ */ jsxs14(Box13, { flexDirection: "column", height: outputHeight + 1, width: cols, overflow: "hidden", children: [
-      olderAbove > 0 && /* @__PURE__ */ jsxs14(Text14, { color: theme.primary, bold: true, reverse: true, children: [
+    /* @__PURE__ */ jsxs17(Box16, { flexDirection: "column", height: outputHeight + 1, width: cols, overflow: "hidden", children: [
+      olderAbove > 0 && /* @__PURE__ */ jsxs17(Text17, { color: theme.primary, bold: true, reverse: true, children: [
         " \u2191 ",
         olderAbove,
         " line(s) above (older) \u2014 Shift+\u2191 for more "
       ] }),
       visible.map((line, i) => {
         if (line.type === "user") {
-          return /* @__PURE__ */ jsx13(Text14, { color: "green", bold: true, children: "> " + line.text }, i);
+          return /* @__PURE__ */ jsx16(Text17, { color: "green", bold: true, children: "> " + line.text }, i);
         }
         if (line.type === "assistant") {
-          return /* @__PURE__ */ jsx13(Text14, { color: "white", children: line.text }, i);
+          return /* @__PURE__ */ jsx16(Text17, { color: "white", children: line.text }, i);
         }
         if (line.type === "thinking") {
           const cls = classifyReasoning(line.text);
           const color = cls ? cls.color : theme.dim;
-          return /* @__PURE__ */ jsxs14(Text14, { color, dim: true, children: [
+          return /* @__PURE__ */ jsxs17(Text17, { color, dim: true, children: [
             "  ",
             line.text
           ] }, i);
         }
         if (line.type === "system") {
-          return /* @__PURE__ */ jsx13(Text14, { color: "cyan", dim: true, children: "[sys] " + line.text }, i);
+          return /* @__PURE__ */ jsx16(Text17, { color: "cyan", dim: true, children: "[sys] " + line.text }, i);
         }
-        return /* @__PURE__ */ jsx13(Text14, { color: "white", children: line.text }, i);
+        return /* @__PURE__ */ jsx16(Text17, { color: "white", children: line.text }, i);
       }),
-      _working && liveTextRef.current && /* @__PURE__ */ jsx13(Text14, { color: blink ? theme.accent : theme.primary, bold: true, children: liveTextRef.current }),
-      thinking && liveThinkRef.current && /* @__PURE__ */ jsxs14(Text14, { color: blink ? theme.secondary : theme.primary, bold: true, children: [
-        "  💭 ",
+      _working && liveTextRef.current && /* @__PURE__ */ jsx16(Text17, { color: blink ? theme.accent : theme.primary, bold: true, children: liveTextRef.current }),
+      thinking && liveThinkRef.current && /* @__PURE__ */ jsxs17(Text17, { color: blink ? theme.secondary : theme.primary, dim: true, children: [
+        "  ",
         liveThinkRef.current
       ] }),
-      newerBelow > 0 && /* @__PURE__ */ jsxs14(Text14, { color: theme.secondary, bold: true, reverse: true, children: [
+      newerBelow > 0 && /* @__PURE__ */ jsxs17(Text17, { color: theme.secondary, bold: true, reverse: true, children: [
         " \u2193 ",
         newerBelow,
         " line(s) below (newer) \u2014 \u2193 to return to bottom "
       ] }),
-      thinking && !liveThinkRef.current && /* @__PURE__ */ jsx13(Spinner, { label: currentPhrase, color: theme.primary })
+      thinking && !liveThinkRef.current && /* @__PURE__ */ jsx16(Spinner, { label: currentPhrase, color: theme.primary })
     ] }),
-    tools.length > 0 && /* @__PURE__ */ jsxs14(Box13, { width: cols, flexDirection: "row", overflow: "hidden", children: [
-      /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: "tools: " }),
-      tools.slice(-6).map((t, i) => /* @__PURE__ */ jsxs14(Text14, { color: t.status === "running" ? "yellow" : theme.success, children: [
+    /* @__PURE__ */ jsx16(ThinkingBox, { thinking: thinkingText, phase: status.phase, cols, theme }),
+    output.length > 0 && /* @__PURE__ */ jsx16(MessageGrid, { messages: output.slice(-8).map((o) => ({
+      role: o.type === "user" ? "user" : o.type === "thinking" ? "thinking" : o.type === "tool" ? "tool" : "assistant",
+      content: o.text || o.content || "",
+      model: o.model,
+      timestamp: o.timestamp
+    })), cols, theme }),
+    tools.length > 0 && /* @__PURE__ */ jsxs17(Box16, { width: cols, flexDirection: "row", overflow: "hidden", children: [
+      /* @__PURE__ */ jsx16(Text17, { color: "gray", dim: true, children: "tools: " }),
+      tools.slice(-6).map((t, i) => /* @__PURE__ */ jsxs17(Text17, { color: t.status === "running" ? "yellow" : theme.success, children: [
         t.status === "running" ? "\u25C9" : "\u2713",
         t.name,
         t.duration ? `(${t.duration})` : "",
         " "
       ] }, i))
     ] }),
-    queue && queue.length > 0 && /* @__PURE__ */ jsx13(QueueBox, { items: queue, cols }),
-    showPlan && plan && /* @__PURE__ */ jsx13(PlanDisplay, { plan, cols }),
-    /* @__PURE__ */ jsx13(TokenBar, { used: status.tokens, chars: contextChars, max: contextMax, cols }),
-    showDiff && diffData && /* @__PURE__ */ jsx13(DiffPreview, { diff: diffData.text || diffData, cols, onApprove: diffData.onApprove, onDeny: diffData.onDeny }),
-    approval && /* @__PURE__ */ jsx13(
+    queue && queue.length > 0 && /* @__PURE__ */ jsx16(QueueBox, { items: queue, cols }),
+    showPlan && plan && /* @__PURE__ */ jsx16(PlanDisplay, { plan, cols }),
+    /* @__PURE__ */ jsx16(
+      InputBox,
+      {
+        value: input,
+        onChange: setInput,
+        onSubmit: (text) => {
+          if (text.trim()) {
+            agent_default.send(text);
+            setInput("");
+          }
+        },
+        cols,
+        disabled: status.phase === "thinking" || status.phase === "working" || !!approval,
+        queueCount: queue?.length || 0,
+        theme
+      }
+    ),
+    /* @__PURE__ */ jsx16(
+      StatusBar,
+      {
+        model: status.model,
+        phase: status.phase,
+        trust: status.trust,
+        cols,
+        connected: status.connected,
+        tokens: status.tokens
+      }
+    ),
+    showDiff && diffData && /* @__PURE__ */ jsx16(DiffPreview, { diff: diffData.text || diffData, cols, onApprove: diffData.onApprove, onDeny: diffData.onDeny }),
+    approval && /* @__PURE__ */ jsx16(
       ApprovalPrompt,
       {
         action: approval.action,
@@ -2179,13 +2403,13 @@ function App() {
         }
       }
     ),
-    showSessions && /* @__PURE__ */ jsx13(SessionList, { sessions, cols, onSelect: (s) => {
+    showSessions && /* @__PURE__ */ jsx16(SessionList, { sessions, cols, onSelect: (s) => {
       agent_default.resume?.(s.id);
       setShowSessions(false);
     } }),
-    showHelp && /* @__PURE__ */ jsx13(HelpOverlay, { onDismiss: () => setShowHelp(false) }),
-    showSlashMenu && /* @__PURE__ */ jsx13(SlashMenu, { input, cols }),
-    showModelDialog && /* @__PURE__ */ jsx13(
+    showHelp && /* @__PURE__ */ jsx16(HelpOverlay, { onDismiss: () => setShowHelp(false) }),
+    showSlashMenu && /* @__PURE__ */ jsx16(SlashMenu, { input, cols }),
+    showModelDialog && /* @__PURE__ */ jsx16(
       ModelDialog,
       {
         cols,
@@ -2206,7 +2430,7 @@ function App() {
         }
       }
     ),
-    showCommandsDialog && /* @__PURE__ */ jsx13(
+    showCommandsDialog && /* @__PURE__ */ jsx16(
       CommandsDialog,
       {
         cols,
@@ -2246,27 +2470,27 @@ function App() {
         }
       }
     ),
-    /* @__PURE__ */ jsxs14(Box13, { width: cols, borderStyle: "bold", borderColor: _working ? blink ? theme.secondary : theme.primary : theme.primary, paddingX: 1, children: [
-      /* @__PURE__ */ jsxs14(Text14, { color: phase === "ACT" ? theme.warning : theme.primary, bold: true, reverse: true, children: [
+    /* @__PURE__ */ jsxs17(Box16, { width: cols, borderStyle: "bold", borderColor: _working ? blink ? theme.secondary : theme.primary : theme.primary, paddingX: 1, children: [
+      /* @__PURE__ */ jsxs17(Text17, { color: phase === "ACT" ? theme.warning : theme.primary, bold: true, reverse: true, children: [
         _working ? blink ? "\u25C6" : "\u25C7" : phase === "ACT" ? "\u25C6" : ">",
         " "
       ] }),
-      /* @__PURE__ */ jsxs14(Text14, { color: "white", bold: true, children: [
+      /* @__PURE__ */ jsxs17(Text17, { color: "white", bold: true, children: [
         input,
         blink ? "\u258D" : " "
       ] }),
-      /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: showSlashMenu ? "" : "  (/help, Tab for commands, Ctrl+C to exit)" })
+      /* @__PURE__ */ jsx16(Text17, { color: "gray", dim: true, children: showSlashMenu ? "" : "  (/help, Tab for commands, Ctrl+C to exit)" })
     ] })
   ] });
 }
 
 // src/index.jsx
-import { jsx as jsx14 } from "react/jsx-runtime";
+import { jsx as jsx17 } from "react/jsx-runtime";
 var rendered = false;
 function start() {
   if (rendered) return;
   rendered = true;
-  render(/* @__PURE__ */ jsx14(App, {}));
+  render(/* @__PURE__ */ jsx17(App, {}));
 }
 export {
   start

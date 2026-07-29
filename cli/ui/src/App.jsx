@@ -13,6 +13,9 @@ import SessionList from './components/SessionList.jsx';
 import QueueBox from './components/QueueBox.jsx';
 import Spinner from './components/Spinner.jsx';
 import SplashScreen from './components/SplashScreen.jsx';
+import ThinkingBox from './components/ThinkingBox.jsx';
+import InputBox from './components/InputBox.jsx';
+import MessageGrid from './components/MessageGrid.jsx';
 import TokenBar from './components/TokenBar.jsx';
 import { getTheme, THEMES } from './components/ThemeManager.js';
 
@@ -58,6 +61,7 @@ export default function App() {
   const [output, setOutput] = useState([]);
   const [tools, setTools] = useState([]);
   const [input, setInput] = useState('');
+  const [thinkingText, setThinkingText] = useState('');
   const [thinking, setThinking] = useState(false);
   const [status, setStatus] = useState({ task: 'idle', model: agent.model || 'unknown', phase: 'IDLE', tokens: 0, trust: 0, provider: 'ollama' });
   const [phase, setPhase] = useState('IDLE');
@@ -149,7 +153,7 @@ export default function App() {
       if (thinkBatchRef.current.timer) { clearTimeout(thinkBatchRef.current.timer); thinkBatchRef.current.timer = null; }
       const parts = full.split('\n');
       for (let i = 0; i < parts.length - 1; i++) {
-        setOutput(prev => [...prev, { type: 'thinking', text: parts[i] }].slice(-MAX_OUTPUT));
+        setOutput(prev => { const last = prev[prev.length - 1]; if (last && last.type === 'thinking') { return [...prev.slice(0, -1), { type: 'thinking', text: parts[i] }].slice(-MAX_OUTPUT); } return [...prev, { type: 'thinking', text: parts[i] }].slice(-MAX_OUTPUT); });
       }
       liveThinkRef.current = parts[parts.length - 1];
       forceTick(n => n + 1);
@@ -172,12 +176,15 @@ export default function App() {
     if (showSplash) return; // wait for splash done
 
     agent.onToken(token => appendToken(token));
-    agent.onThinking(text => {
-      setThinking(true);
-      appendThinking(text);
-    });
+agent.onThinking(text => {
+ setThinking(true);
+ setThinkingText(text);
+ setOutput(prev => [...prev, { type: 'thinking', text }].slice(-MAX_OUTPUT));
+ appendThinking(text);
+ });
     agent.onThinkingEnd(() => {
       setThinking(false);
+    setThinkingText('');
       flushThinking();
       if (liveThinkRef.current) {
         const t = liveThinkRef.current;
@@ -483,15 +490,28 @@ export default function App() {
       </Box>
 
       {/* Tools strip */}
+      {/* Thinking box — shows current AI thinking phase */}
+      <ThinkingBox thinking={thinkingText} phase={status.phase} cols={cols} theme={theme} />
+
+      {/* Message grid — nice bordered cards for each message */}
+      {output.length > 0 && (
+        <MessageGrid messages={output.slice(-8).map(o => ({
+          role: o.type === 'user' ? 'user' : o.type === 'thinking' ? 'thinking' : o.type === 'tool' ? 'tool' : 'assistant',
+          content: o.text || o.content || '',
+          model: o.model,
+          timestamp: o.timestamp,
+        }))} cols={cols} theme={theme} />
+      )}
+
       {tools.length > 0 && (
-        <Box width={cols} flexDirection="row" overflow="hidden">
-          <Text color="gray" dim>tools: </Text>
-          {tools.slice(-6).map((t, i) => (
-            <Text key={i} color={t.status === 'running' ? 'yellow' : theme.success}>
-              {t.status === 'running' ? '◉' : '✓'}{t.name}{t.duration ? `(${t.duration})` : ''}{' '}
-            </Text>
-          ))}
-        </Box>
+      <Box width={cols} flexDirection="row" overflow="hidden">
+      <Text color="gray" dim>tools: </Text>
+      {tools.slice(-6).map((t, i) => (
+      <Text key={i} color={t.status === 'running' ? 'yellow' : theme.success}>
+      {t.status === 'running' ? '◉' : '✓'}{t.name}{t.duration ? `(${t.duration})` : ''}{' '}
+      </Text>
+      ))}
+      </Box>
       )}
 
       {/* Queue / waiting box */}
@@ -504,8 +524,26 @@ export default function App() {
         <PlanDisplay plan={plan} cols={cols} />
       )}
 
-      {/* Token bar */}
-      <TokenBar used={status.tokens} chars={contextChars} max={contextMax} cols={cols} />
+      {/* Input box at bottom with message queue */}
+      <InputBox
+        value={input}
+        onChange={setInput}
+        onSubmit={(text) => { if (text.trim()) { agent.send(text); setInput(''); } }}
+        cols={cols}
+        disabled={status.phase === 'thinking' || status.phase === 'working' || !!approval}
+        queueCount={queue?.length || 0}
+        theme={theme}
+      />
+
+      {/* Status bar at very bottom */}
+      <StatusBar
+        model={status.model}
+        phase={status.phase}
+        trust={status.trust}
+        cols={cols}
+        connected={status.connected}
+        tokens={status.tokens}
+      />
 
       {/* Diff preview */}
       {showDiff && diffData && (
