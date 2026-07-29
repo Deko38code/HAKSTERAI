@@ -626,6 +626,56 @@ function getToolInventory() {
 
 // ── Express app ───────────────────────────────────────────────────
 const app = express();
+
+// ===== TUI MCP Server API Endpoints =====
+// These endpoints power the TUI MCP server (tui-server.mjs)
+app.use(express.json());
+const tuiState = {
+  messages: [],
+  thinking: '',
+  queue: [],
+  status: { phase: 'idle', model: 'sonnet', tokens: 0, trust: 0, connected: false },
+};
+
+app.get('/api/tui/messages', (req, res) => {
+  const limit = parseInt(req.query.limit) || 20;
+  res.json({ messages: tuiState.messages.slice(-limit) });
+});
+
+app.post('/api/tui/send', (req, res) => {
+  const { message } = req.body || {};
+  if (!message) return res.status(400).json({ error: 'message required' });
+  tuiState.messages.push({ type: 'user', text: message, timestamp: Date.now() });
+  res.json({ ok: true, queued: tuiState.queue.length });
+});
+
+app.get('/api/tui/thinking', (_req, res) => {
+  res.json({ thinking: tuiState.thinking, phase: tuiState.status.phase });
+});
+
+app.get('/api/tui/queue', (_req, res) => {
+  res.json({ queue: tuiState.queue });
+});
+
+app.post('/api/tui/clear', (_req, res) => {
+  tuiState.messages = [];
+  tuiState.thinking = '';
+  res.json({ ok: true });
+});
+
+app.post('/api/tui/model', (req, res) => {
+  const { model } = req.body || {};
+  if (!model) return res.status(400).json({ error: 'model required' });
+  tuiState.status.model = model;
+  res.json({ ok: true, model });
+});
+
+app.get('/api/tui/status', (_req, res) => {
+  res.json(tuiState.status);
+});
+
+global.__tuiUpdate = (state) => { Object.assign(tuiState, state); };
+
 app.use(compression());
 app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
 
@@ -943,6 +993,8 @@ app.get('/api/points', (_req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
+
+
   // Deep health check: test DB + Stripe connectivity
   const checks = { db: 'ok', stripe: 'ok' };
   let allOk = true;
@@ -5983,25 +6035,109 @@ app.post('/api/stripe/checkout', async (req, res) => {
 
 // ── Stripe Billing Portal ── let subscribers manage their subscription ──
 app.post('/api/stripe/portal', async (req, res) => {
-  const stripe = getStripe();
-  if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
-
+ const stripe = getStripe();
+ if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
   const user = getUserByApiKey(req);
   if (!user) return res.status(401).json({ error: 'Authentication required' });
   if (!user.stripe_customer_id) return res.status(400).json({ error: 'No Stripe customer account found. Subscribe first.' });
 
   try {
-    const session = await stripe.billingPortal.sessions.create({
-      customer: user.stripe_customer_id,
-      return_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}/build`,
-    });
-    res.json({ url: session.url });
+  const session = await stripe.billingPortal.sessions.create({
+  customer: user.stripe_customer_id,
+  return_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}/build`,
+  });
+  res.json({ url: session.url });
   } catch (err) {
-    console.error('[stripe] portal error:', err.message);
-    res.status(500).json({ error: 'Failed to create portal session', details: err.message });
+  console.error('[stripe] portal error:', err.message);
+  res.status(500).json({ error: 'Failed to create portal session', details: err.message });
   }
 });
 
+// === Stripe License API Routes (additive) ===
+// Verify license key (called by CLI/TUI at startup)
+app.post('/api/license/verify', (req, res) => {
+  const { key, fingerprint } = req.body;
+  const result = verifyLicense(getDb(), key, fingerprint);
+  res.json(result);
+});
+
+// Create Stripe checkout session (called by frontend Buy button)
+app.post('/api/stripe/checkout', async (req, res) => {
+  if (!Stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  const handler = createCheckoutSession(Stripe(process.env.STRIPE_SECRET_KEY));
+  return handler(req, res);
+});
+
+// Get license key after successful payment (called from success page)
+app.get('/api/license/from-session', async (req, res) => {
+  const handler = getLicenseFromSession(getDb());
+  return handler(req, res);
+});
+
+// Stripe webhook (payment → auto-generate license)
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!Stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  const handler = stripeWebhookHandler(getDb(), Stripe(process.env.STRIPE_SECRET_KEY));
+  return handler(req, res);
+});
+
+// Admin: deactivate license
+app.post('/api/license/deactivate', (req, res) => {
+  const { key, adminToken } = req.body;
+  if (adminToken !== process.env.HAKSTER_ADMIN_TOKEN) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+  deactivateLicense(getDb(), key);
+  res.json({ success: true });
+});
+
+// Admin: list all licenses
+app.get('/api/admin/licenses', (req, res) => {
+  try {
+    const db = getDb();
+    const licenses = db.prepare(`
+      SELECT l.*, (SELECT COUNT(*) FROM license_machines WHERE key = l.key) as machines_used
+      FROM licenses l ORDER BY created_at DESC LIMIT 100
+    `).all();
+    const stats = {
+      total: db.prepare('SELECT COUNT(*) as c FROM licenses').get().c,
+      active: db.prepare('SELECT COUNT(*) as c FROM licenses WHERE active = 1').get().c,
+      pro: db.prepare("SELECT COUNT(*) as c FROM licenses WHERE plan = 'pro' AND active = 1").get().c,
+      revenue: db.prepare("SELECT SUM(CASE WHEN plan='enterprise' THEN 99.99 WHEN plan='pro' THEN 29.99 WHEN plan='starter' THEN 9.99 ELSE 0 END) as r FROM licenses WHERE active = 1").get().r || 0,
+    };
+    res.json({ licenses, stats });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: create manual license
+app.post('/api/admin/licenses/create', (req, res) => {
+  const { email, plan } = req.body;
+  if (!email || !plan) return res.status(400).json({ error: 'Missing email or plan' });
+  try {
+    const maxMachines = plan === 'enterprise' ? 10 : plan === 'pro' ? 3 : 1;
+    const key = createLicense(getDb(), { email, plan, maxMachines });
+    res.json({ key, plan, email });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin: deactivate license via admin panel
+app.post('/api/admin/licenses/deactivate', (req, res) => {
+  const { key } = req.body;
+  if (!key) return res.status(400).json({ error: 'Missing key' });
+  try {
+    deactivateLicense(getDb(), key);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Initialize license tables in DB
+try { initLicenseTables(getDb()); } catch (e) { console.warn('License tables init deferred:', e.message); }
 // ── Stripe Subscription Status ── check current user's subscription ─────
 app.get('/api/stripe/status', (req, res) => {
   const stripe = getStripe();
@@ -7158,9 +7294,10 @@ seedGoogleIdentityMemoriesFromDb();
 promoteOwnerAccountsFromDb();
 initWebMcp();
 
-// Graceful port handling — infinite retry with capped backoff (prevents PM2 crash loops)
+// Graceful port handling infinite retry with capped backoff (prevents PM2 crash loops)
 function startServer(delay = 2000) {
-  const MAX_DELAY = 30000; // cap at 30s between retries
+ const MAX_DELAY = 30000; // cap at 30s between retries
+
   server.listen(PORT, () => {
     console.log(`\n  ╔══════════════════════════════════════════╗`);
     console.log(`  ║  haksterAi server v1.0                   ║`);
@@ -7196,91 +7333,5 @@ function startServer(delay = 2000) {
     process.exit(1);
   }
   if (lic.message) console.log(lic.message);
-  // === Stripe License API Routes (additive) ===
-// Verify license key (called by CLI/TUI at startup)
-app.post('/api/license/verify', (req, res) => {
-  const { key, fingerprint } = req.body;
-  const result = verifyLicense(getDb(), key, fingerprint);
-  res.json(result);
-});
-
-// Create Stripe checkout session (called by frontend Buy button)
-app.post('/api/stripe/checkout', async (req, res) => {
-  if (!Stripe) return res.status(500).json({ error: 'Stripe not configured' });
-  const handler = createCheckoutSession(Stripe(process.env.STRIPE_SECRET_KEY));
-  return handler(req, res);
-});
-
-// Get license key after successful payment (called from success page)
-app.get('/api/license/from-session', async (req, res) => {
-  const handler = getLicenseFromSession(getDb());
-  return handler(req, res);
-});
-
-// Stripe webhook (payment → auto-generate license)
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  if (!Stripe) return res.status(500).json({ error: 'Stripe not configured' });
-  const handler = stripeWebhookHandler(getDb(), Stripe(process.env.STRIPE_SECRET_KEY));
-  return handler(req, res);
-});
-
-// Admin: deactivate license
-app.post('/api/license/deactivate', (req, res) => {
-  const { key, adminToken } = req.body;
-  if (adminToken !== process.env.HAKSTER_ADMIN_TOKEN) {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
-  deactivateLicense(getDb(), key);
-  res.json({ success: true });
-});
-
-// Admin: list all licenses
-app.get('/api/admin/licenses', (req, res) => {
-  try {
-    const db = getDb();
-    const licenses = db.prepare(`
-      SELECT l.*, (SELECT COUNT(*) FROM license_machines WHERE key = l.key) as machines_used
-      FROM licenses l ORDER BY created_at DESC LIMIT 100
-    `).all();
-    const stats = {
-      total: db.prepare('SELECT COUNT(*) as c FROM licenses').get().c,
-      active: db.prepare('SELECT COUNT(*) as c FROM licenses WHERE active = 1').get().c,
-      pro: db.prepare("SELECT COUNT(*) as c FROM licenses WHERE plan = 'pro' AND active = 1").get().c,
-      revenue: db.prepare("SELECT SUM(CASE WHEN plan='enterprise' THEN 99.99 WHEN plan='pro' THEN 29.99 WHEN plan='starter' THEN 9.99 ELSE 0 END) as r FROM licenses WHERE active = 1").get().r || 0,
-    };
-    res.json({ licenses, stats });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Admin: create manual license
-app.post('/api/admin/licenses/create', (req, res) => {
-  const { email, plan } = req.body;
-  if (!email || !plan) return res.status(400).json({ error: 'Missing email or plan' });
-  try {
-    const maxMachines = plan === 'enterprise' ? 10 : plan === 'pro' ? 3 : 1;
-    const key = createLicense(getDb(), { email, plan, maxMachines });
-    res.json({ key, plan, email });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Admin: deactivate license via admin panel
-app.post('/api/admin/licenses/deactivate', (req, res) => {
-  const { key } = req.body;
-  if (!key) return res.status(400).json({ error: 'Missing key' });
-  try {
-    deactivateLicense(getDb(), key);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Initialize license tables in DB
-try { initLicenseTables(getDb()); } catch (e) { console.warn('License tables init deferred:', e.message); }
-
 startServer();
 })();

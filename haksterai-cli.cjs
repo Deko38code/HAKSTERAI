@@ -10,6 +10,9 @@
 
 'use strict';
 
+// License gate — TUI won't start without valid license
+const { checkLicense } = require('./server/src/license');
+
 const blessed = require('blessed');
 const http = require('http');
 const fs = require('fs');
@@ -112,6 +115,16 @@ async function postConfirm(toolCallId, approved, permanent = false) {
 const fmtUptime = s => { const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return d>0?`${d}d ${h}h ${m}m`:h>0?`${h}h ${m}m`:`${m}m`; };
 
 // ── Screen ────────────────────────────────────────────────────────
+// License gate — TUI won't start without valid license
+(async () => {
+  const lic = await checkLicense(true);
+  if (!lic.valid) {
+    console.error('\n' + lic.message + '\n');
+    process.exit(1);
+  }
+  if (lic.message) console.log(lic.message + '\n');
+})();
+
 const screen = blessed.screen({ smartCSR: true, title: 'haksterAi CLI', fullUnicode: true, dockBorders: true });
 screen.key(['escape', 'q', 'C-c'], () => process.exit(0));
 

@@ -269,8 +269,8 @@ function getLicenseFromSession(db) {
 
     // Look up license by stripe customer
     // The webhook should have already created it
-    const { Stripe } = require('stripe');
-    const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+    const Stripe = require('stripe');
+ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
     try {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
