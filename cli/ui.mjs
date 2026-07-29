@@ -1939,7 +1939,10 @@ function App() {
     agent_default.onThinking((text) => {
       setThinking(true);
       setThinkingText(text);
-      setOutput((prev) => [...prev, { type: "thinking", text }].slice(-MAX_OUTPUT));
+      setOutput((prev) => {
+        const filtered = prev.filter((e) => e.type !== "thinking");
+        return [...filtered, { type: "thinking", text }].slice(-MAX_OUTPUT);
+      });
       appendThinking(text);
     });
     agent_default.onThinkingEnd(() => {
