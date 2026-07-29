@@ -208,6 +208,25 @@ function connectServer(serverName, config) {
       }
       server.pending.clear();
       mcpServers.delete(serverName);
+
+      // Auto-retry heavy servers killed by OOM (code null = signal death).
+      // Serena is the heaviest (~300MB with TypeScript LSP) and most likely to
+      // get OOM-killed when all 15 MCP servers spawn simultaneously on a 7GB box.
+      // Retry once after a 5s delay to let memory settle, with a flag to prevent
+      // infinite retry loops.
+      if (code === null && !server._retried && serverName === 'serena') {
+        server._retried = true;
+        _logFn(`  [MCP:${serverName}] likely OOM-killed — retrying in 5s...`);
+        setTimeout(() => {
+          try {
+            connectServer(serverName, config)
+              .then(() => _logFn(`  [MCP:${serverName}] retry succeeded`))
+              .catch(err => _logFn(`  [MCP:${serverName}] retry failed: ${err.message}`));
+          } catch (err) {
+            _logFn(`  [MCP:${serverName}] retry error: ${err.message}`);
+          }
+        }, 5000);
+      }
     });
 
     // Initialize the server (with startup delay for npx to finish installing)
@@ -326,18 +345,29 @@ async function loadMcpServers(configDirs) {
   // Staggered by 250ms per server — spawning 10 interpreters (node/python/uv)
   // at the exact same instant creates a CPU/IO spike that's cheap to avoid and
   // gets worse when a heavy local Ollama model is also running on the same box.
+  //
+  // Heavy servers (serena) get extra delay — they spawn Python + a TypeScript
+  // language server + web dashboard (~300MB) and are prone to OOM kills when
+  // all 15 servers fire at once on a 7GB box. Spawning serena last gives the
+  // lighter servers time to settle first.
+  const HEAVY_SERVERS = new Set(['serena']);
+  const sortedConfigs = [...configs].sort((a, b) => {
+    const aH = HEAVY_SERVERS.has(a.name) ? 1 : 0;
+    const bH = HEAVY_SERVERS.has(b.name) ? 1 : 0;
+    return aH - bH; // heavy servers go last
+  });
   const results = await Promise.allSettled(
-    configs.map(({ name, config }, i) =>
-      new Promise(r => setTimeout(r, i * 250)).then(() => connectServer(name, config))
+    sortedConfigs.map(({ name, config }, i) =>
+      new Promise(r => setTimeout(r, i * 250 + (HEAVY_SERVERS.has(name) ? 2000 : 0))).then(() => connectServer(name, config))
     )
   );
 
   const connected = [];
   for (let i = 0; i < results.length; i++) {
     if (results[i].status === 'fulfilled') {
-      connected.push(configs[i].name);
+      connected.push(sortedConfigs[i].name);
     } else {
-      _logFn(`  [MCP] Failed to connect "${configs[i].name}": ${results[i].reason?.message || results[i].reason}`);
+      _logFn(`  [MCP] Failed to connect "${sortedConfigs[i].name}": ${results[i].reason?.message || results[i].reason}`);
     }
   }
 
