@@ -299,14 +299,16 @@ function streamAgent(prompt) {
               if (clean) chatBox.log(clean);
             }
           } else if (data.type === 'thinking_start') {
-            updateThinkingLine(`{${C.secondary}}🧠 thinking…{/${C.secondary}}`);
+            updateThinkingLine(`🧠 thinking…`);
           } else if (data.type === 'thinking') {
-            // Calculate available width: 75% of screen - padding - prefix "  " (2 chars) - border (2 chars)
-            const availWidth = Math.max(40, Math.floor((chatBox.width || 120) * 0.75) - 8);
-            const content = (data.content || '').replace(/\n/g, ' ').slice(0, availWidth);
-            updateThinkingLine(`{${C.fgSubtle}}  ${content}{/${C.fgSubtle}}`);
+            // Calculate available width: box width - borders (2) - padding (4) - prefix "  " (2) - color tag overhead (~30)
+            const boxWidth = chatBox.width || 120;
+            const availWidth = Math.max(40, boxWidth - 40);
+            const rawContent = (data.content || '').replace(/\n/g, ' ').trim();
+            const content = rawContent.length > availWidth ? rawContent.slice(0, availWidth - 1) + '…' : rawContent;
+            updateThinkingLine(`  ${content}`);
           } else if (data.type === 'thinking_end') {
-            endThinkingLine(`{${C.secondary}}🧠 done{/${C.secondary}}`);
+            endThinkingLine(`🧠 done`);
           } else if (data.type === 'tool_call_start') {
             chatBox.log(`{${C.mustard}}⚡ tool{/${C.mustard}} {${C.accent}}${data.tool_name || '?'}{/${C.accent}}`);
           } else if (data.type === 'tool_call_result') {
