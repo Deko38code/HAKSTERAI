@@ -502,17 +502,27 @@ function updateThinkingLine(text) {
   // otherwise the tail belongs to unrelated content (tool output, deltas,
   // phase changes) and popping would silently delete it. Skipping the pop
   // just leaves one stale "thinking" line behind — cosmetic, not data loss.
-  if (_thinkingActive && _thinkingRows > 0 && !_thinkingInterrupted) popLines(logBox, _thinkingRows);
+  if (_thinkingActive && _thinkingRows > 0 && !_thinkingInterrupted) {
+    // Pop ALL previous thinking rows (could be multiple if wrapping happened)
+    for (let i = 0; i < _thinkingRows; i++) {
+      try { logBox.popLine(1); } catch {}
+    }
+  }
   _writingLiveLine = true;
-  const before = logBox.getLines().length;
   logBox.log(text);
   _writingLiveLine = false;
-  _thinkingRows = Math.max(1, logBox.getLines().length - before);
+  // Force single line - if blessed wrapped it anyway, we'll just pop more next time
+  _thinkingRows = 1;
   _thinkingActive = true;
   _thinkingInterrupted = false;
 }
 function endThinkingLine(finalText) {
-  if (_thinkingActive && _thinkingRows > 0 && !_thinkingInterrupted) popLines(logBox, _thinkingRows);
+  if (_thinkingActive && _thinkingRows > 0 && !_thinkingInterrupted) {
+    // Pop ALL previous thinking rows
+    for (let i = 0; i < _thinkingRows; i++) {
+      try { logBox.popLine(1); } catch {}
+    }
+  }
   _thinkingActive = false;
   _thinkingRows = 0;
   _thinkingInterrupted = false;
