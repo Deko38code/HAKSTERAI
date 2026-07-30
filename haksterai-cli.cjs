@@ -165,6 +165,7 @@ const statusBox = blessed.box({ bottom:1, left:0, width:'25%', height:3,
 // Auto-scroll chat
 let _thinkingActive = false;
 let _thinkingInterrupted = false;
+let _thinkingBuffer = '';
 let _writingLiveLine = false;
 const _origChatLog = chatBox.log.bind(chatBox);
 chatBox.log = (...args) => {
@@ -309,16 +310,20 @@ function streamAgent(prompt) {
               if (clean) chatBox.log(clean);
             }
           } else if (data.type === 'thinking_start') {
-            updateThinkingLine(`🧠 thinking…`);
+            // Don't show anything - Claude Code style hides thinking by default
+            _thinkingActive = true;
+            _thinkingBuffer = '';
           } else if (data.type === 'thinking') {
-            // Calculate available width: box width - borders (2) - padding (4) - prefix "  " (2) - color tag overhead (~30)
-            const boxWidth = chatBox.width || 120;
-            const availWidth = Math.max(40, boxWidth - 40);
-            const rawContent = (data.content || '').replace(/\n/g, ' ').trim();
-            const content = rawContent.length > availWidth ? rawContent.slice(0, availWidth - 1) + '…' : rawContent;
-            updateThinkingLine(`  ${content}`);
+            // Accumulate thinking content but don't display it
+            if (data.content) _thinkingBuffer += data.content;
           } else if (data.type === 'thinking_end') {
-            endThinkingLine(`🧠 done`);
+            // Show a single summary line after thinking completes
+            _thinkingActive = false;
+            if (_thinkingBuffer.trim()) {
+              const summary = _thinkingBuffer.trim().split('\n')[0].slice(0, 80);
+              chatBox.log(`💭 ${summary}${_thinkingBuffer.length > 80 ? '…' : ''}`);
+            }
+            _thinkingBuffer = '';
           } else if (data.type === 'tool_call_start') {
             chatBox.log(`{${C.mustard}}⚡ tool{/${C.mustard}} {${C.accent}}${data.tool_name || '?'}{/${C.accent}}`);
           } else if (data.type === 'tool_call_result') {
