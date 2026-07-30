@@ -301,7 +301,10 @@ function streamAgent(prompt) {
           } else if (data.type === 'thinking_start') {
             updateThinkingLine(`{${C.secondary}}🧠 thinking…{/${C.secondary}}`);
           } else if (data.type === 'thinking') {
-            updateThinkingLine(`{${C.fgSubtle}}  ${(data.content || '').replace(/\n/g, ' ').slice(0, 200)}{/${C.fgSubtle}}`);
+            // Calculate available width: 75% of screen - padding - prefix "  " (2 chars) - border (2 chars)
+            const availWidth = Math.max(40, Math.floor((chatBox.width || 120) * 0.75) - 8);
+            const content = (data.content || '').replace(/\n/g, ' ').slice(0, availWidth);
+            updateThinkingLine(`{${C.fgSubtle}}  ${content}{/${C.fgSubtle}}`);
           } else if (data.type === 'thinking_end') {
             endThinkingLine(`{${C.secondary}}🧠 done{/${C.secondary}}`);
           } else if (data.type === 'tool_call_start') {

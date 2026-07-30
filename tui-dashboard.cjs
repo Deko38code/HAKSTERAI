@@ -209,16 +209,20 @@ function handleWSEvent(msg) {
 
   // Thinking lifecycle — one live line, updated in place (see updateThinkingLine)
   if (t === 'thinking_start') {
-    updateThinkingLine(`{${C.secondary}}🧠 {/${C.secondary}}{${C.fg}}${ts}{/${C.fg}} {${C.secondary}}THINKING{/${C.secondary}} {${C.fgSubtle}}started{/${C.fgSubtle}}`);
+    const line = `{${C.secondary}}🧠 {/${C.secondary}}{${C.fg}}${ts}{/${C.fg}} {${C.secondary}}THINKING{/${C.secondary}} {${C.fgSubtle}}started{/${C.fgSubtle}}`;
+    updateThinkingLine(line);
     return;
   }
   if (t === 'thinking') {
-    const snippet = truncate(msg.content, 120);
+    // Calculate available width: box width - padding - prefix "  " (2 chars) - border (2 chars)
+    const availWidth = Math.max(40, (logBox.width || 120) - 8);
+    const snippet = truncate(msg.content, availWidth);
     if (snippet) updateThinkingLine(`{${C.secondary}}  {/${C.secondary}} {${C.fgSubtle}}${snippet}{/${C.fgSubtle}}`);
     return;
   }
   if (t === 'thinking_end') {
-    endThinkingLine(`{${C.secondary}}🧠{/${C.secondary}} {${C.fg}}${ts}{/${C.fg}} {${C.secondary}}THINKING{/${C.secondary}} {${C.fgSubtle}}done{/${C.fgSubtle}}`);
+    const line = `{${C.secondary}}🧠{/${C.secondary}} {${C.fg}}${ts}{/${C.fg}} {${C.secondary}}THINKING{/${C.secondary}} {${C.fgSubtle}}done{/${C.fgSubtle}}`;
+    endThinkingLine(line);
     return;
   }
 
