@@ -154,7 +154,7 @@ const machinesBox = blessed.list({ top:'50%', left:0, width:'25%', height:'50%-2
 
 const chatBox = blessed.log({ top:1, left:'25%', width:'75%', height:'100%-4',
   label:` {${C.primary}}◆{/} CHAT `, border:{type:'line'}, style:bdrStyle, tags:true, scrollable:true,
-  alwaysScroll:true, scrollback:MAX_LOG_LINES, scrollbar:{ch:'█',style:{fg:C.primary}} });
+  alwaysScroll:true, scrollback:MAX_LOG_LINES, scrollbar:{ch:'█',style:{fg:C.primary}}, wrap: false });
 
 const inputBox = blessed.textbox({ bottom:1, left:'25%', width:'75%', height:3,
   label:` {${C.primary}}◆{/} MESSAGE {${C.fgSubtle}}(Tab←entities, Enter→send){/${C.fgSubtle}} `, border:{type:'line'}, style:{...bdrStyle, focus:{border:{fg:C.accent}}}, tags:true, input:true, keys:true });

@@ -455,7 +455,7 @@ const integrationsBox = blessed.box({ top:'55%', left:'67%', width:'33%', height
 
 const logBox = blessed.log({ top:'68%', left:0, width:'100%', height:'32%-1',
   label:` {${C.primary}}◆{/} AGENT ACTIVITY (thinking / tool output) `, border:{type:'line'}, style:bdrStyle(), tags:true,
-  ...scrollOpts, scrollback:MAX_LOG_LINES });
+  ...scrollOpts, scrollback:MAX_LOG_LINES, wrap: false });
 
 // Auto-scroll: force logBox to bottom after every message.
 // Every WS-driven event (tool calls, deltas, thinking, phase changes) funnels through this
