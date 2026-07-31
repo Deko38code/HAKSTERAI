@@ -26,7 +26,7 @@ const { formatProjectInventory } = require('./projectInventory');
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
 const stuckMonitor = require('./agent/stuckMonitor');
 // ── Autoflow: 6-phase loop + autolearn + approval modules ──
-const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName } = require('./agent/loop');
+const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName, kiroRoundBudget } = require('./agent/loop');
 const autolearn = require('./agent/autolearn');
 const taskState = require('./agent/task-state');
 
@@ -2101,7 +2101,8 @@ app.delete('/api/sessions/:id', (req, res) => {
 
 // ── Chat (non-streaming) ──────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
-  const { provider = 'ollama', model, messages, system, sessionId } = req.body;
+  const defaultCfg = getHaksterModelConfig();
+  const { provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId } = req.body;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -2154,7 +2155,8 @@ app.post('/api/chat', async (req, res) => {
 
 // ── Chat (SSE streaming) ─────────────────────────────────────────
 app.post('/api/chat/stream', async (req, res) => {
-  const { provider = 'ollama', model, messages, system, sessionId, thinking = false } = req.body;
+  const defaultCfg = getHaksterModelConfig();
+  const { provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId, thinking = false } = req.body;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -2595,6 +2597,7 @@ app.post('/api/agent/run', async (req, res) => {
   const READ_ONLY_HARD_STOP = 2;     // Hard stop after 2 ignored warnings (was 3)
   let readOnlyCount = 0;             // Consecutive read-only calls without a state-modifying action
   let readOnlyWarnings = 0;          // How many times we've warned
+  const roundBudgetNotified = new Set(); // which convergence phases we've already nudged for ('narrow' | 'converge')
 
   // ── 6-Phase Loop State (THINK→PLAN→ACT→OBSERVE→REFLECT→CONSOLIDATE) ──
   let currentPhase = AgentLoopPhase.THINK;
@@ -3380,6 +3383,19 @@ ${dirListing}
         res.write(`data: ${JSON.stringify({ type: 'aborted' })}\n\n`);
         res.end();
         return;
+      }
+
+      // ── Kiro round budget: convergence nudges at 67% / 80% of maxTurns ──
+      // (100%/exhausted is handled naturally by the for-loop ending + the
+      // existing 'max_turns' event below — no separate hard stop needed here.)
+      {
+        const rb = kiroRoundBudget({ round: turn, maxRounds: maxTurns });
+        if (rb.nudge && rb.phase !== 'build' && !roundBudgetNotified.has(rb.phase)) {
+          roundBudgetNotified.add(rb.phase);
+          console.warn(`[agent] Round budget nudge: phase=${rb.phase} (turn ${turn}/${maxTurns})`);
+          res.write(`data: ${JSON.stringify({ type: 'loop_nudge', reason: 'round_budget', phase: rb.phase, message: rb.nudge })}\n\n`);
+          agentMessages.push({ role: 'system', content: `⏱️ Round budget: ${rb.nudge} (round ${turn}/${maxTurns})` });
+        }
       }
 
       // ── Enforce context ceiling before every model call ──
@@ -4512,7 +4528,8 @@ function parseArtifacts(content) {
 
 // POST /api/generate — Generate an app from description with full agent loop + tools
 app.post('/api/generate', async (req, res) => {
-  const { provider = 'ollama', model, description, thinking = false, images = [] } = req.body;
+  const defaultCfg = getHaksterModelConfig();
+  const { provider = defaultCfg.provider, model = defaultCfg.model, description, thinking = false, images = [] } = req.body;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -6392,7 +6409,9 @@ app.get('/api/auth/google/callback', async (req, res) => {
       user: { id: user.id, username: user.username, displayName, name: displayName, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
       apiKey: user.api_key,
     }));
-    res.redirect(`/build?google_auth=${userData}`);
+    // Redirect to pricing section so users can select a plan after login
+ // Query params must come BEFORE the hash fragment so the browser can parse them
+ res.redirect(`/?google_auth=${userData}#pricing`);
   } catch (err) {
     console.error('Google OAuth callback error:', err);
     res.redirect(`/build?google_error=${encodeURIComponent(err.message || 'unknown')}`);
@@ -6401,7 +6420,9 @@ app.get('/api/auth/google/callback', async (req, res) => {
 
 // ── Usage tracking & limits ───────────────────────────────────────
 function getUserByApiKey(req) {
-  const apiKey = req.headers['x-api-key'] || req.body?.apiKey;
+  const authHeader = req.headers['authorization'] || '';
+  const bearerKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const apiKey = req.headers['x-api-key'] || bearerKey || req.body?.apiKey;
   if (!apiKey) return null;
   const db = getDb();
   return db.prepare('SELECT * FROM users WHERE api_key = ?').get(apiKey);
@@ -6900,7 +6921,8 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    const { action, provider = 'ollama', model, messages, system, sessionId } = msg;
+    const defaultCfg = getHaksterModelConfig();
+    const { action, provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId } = msg;
 
     if (action === 'subscribe') {
       const types = Array.isArray(msg.types) && msg.types.length ? msg.types : ['notification', 'agent'];

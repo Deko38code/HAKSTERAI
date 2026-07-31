@@ -1,4 +1,4 @@
 {
   "provider": "ollama",
-  "model": "glm-uncensored:latest"
+  "model": "glm-5.2:cloud"
 }

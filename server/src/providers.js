@@ -186,7 +186,7 @@ Object.assign(PROVIDERS, {
 
 // Waterfall order: gpt-oss 1st (120b cloud, primary), ollama 2nd (hp-1000, local backup),
 // then sambanova + groq (cloud-free) and on down — rotates to the next on rate-limit.
-const WATERFALL_ORDER = ['gpt-oss','ollama','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o'];
+const WATERFALL_ORDER = ['gpt-oss','ollama','claude-cli','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o'];
 const _rateLimited = new Map(); // provider -> until ms
 function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
 function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }
@@ -606,8 +606,9 @@ const SYSTEM_PROMPT = 'You are haksterAi, an expert coding assistant. You always
 // the CLI always resolves against the authenticated ghost account.
 const CLAUDE_CLI_HOME = '/home/ghost';
 function claudeCliEnv() {
+  const { ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ...rest } = process.env;
   return {
-    ...process.env,
+    ...rest,
     HOME: CLAUDE_CLI_HOME,
     USER: 'ghost',
     PATH: `${CLAUDE_CLI_HOME}/.local/bin:${process.env.PATH || ''}`,
@@ -2945,12 +2946,26 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
                 TERM: process.env.TERM || 'xterm-256color',
               },
               stdio: ['ignore', 'pipe', 'pipe'],
+              detached: true, // own process group -> kill the whole tree on timeout
             });
+
+            // Kill the entire process group (descendants included), same pattern as
+            // exec_shell — a naked child.kill() only signals the immediate bash
+            // process; a grandchild holding stdout open keeps `close` from ever
+            // firing and the promise hangs forever.
+            function killGroup(signal) {
+              try { process.kill(-child.pid, signal); } catch (_) { try { child.kill(signal); } catch {} }
+            }
 
             const timer = setTimeout(() => {
               killed = true;
-              child.kill('SIGTERM');
-              setTimeout(() => child.kill('SIGKILL'), 2000);
+              killGroup('SIGTERM');
+              setTimeout(() => killGroup('SIGKILL'), 2000);
+              // Safety net: resolve no matter what shortly after the kill so the
+              // agent can never hang waiting on a guardian command that won't die.
+              setTimeout(() => {
+                resolve(`exit_code: timeout\nGuardian command timed out after ${guardianTimeout}ms (force-killed).\nstdout:\n${chunks.join('')}\nstderr:\n${errChunks.join('')}`);
+              }, 2500);
             }, guardianTimeout);
 
             child.stdout.on('data', (data) => {
@@ -2959,8 +2974,8 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
               if (totalBytes > maxBytes) {
                 if (!killed) {
                   killed = true;
-                  child.kill('SIGTERM');
-                  setTimeout(() => child.kill('SIGKILL'), 500);
+                  killGroup('SIGTERM');
+                  setTimeout(() => killGroup('SIGKILL'), 500);
                 }
                 return;
               }
@@ -2996,31 +3011,49 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
           });
         }
 
-        // Non-streaming fallback
-        const { exec } = require('child_process');
-        const util = require('util');
-        const execAsync = util.promisify(exec);
+        // Non-streaming fallback: spawn in its own process group (same as exec_shell)
+        // instead of promisify(exec) — exec's timeout only signals the direct shell
+        // child, so a descendant holding the pipe open leaves the promise hanging.
         try {
-          const { stdout, stderr } = await execAsync(fullCmd, {
-            cwd,
-            timeout: guardianTimeout,
-            killSignal: 'SIGTERM',
-            maxBuffer: 6 * 1024 * 1024,
-            encoding: 'utf8',
-            env: { ...process.env, CI: process.env.CI || '1' },
+          const r = await new Promise((resolve) => {
+            const child = spawn('bash', ['-c', fullCmd], {
+              cwd,
+              env: { ...process.env, CI: process.env.CI || '1' },
+              stdio: ['ignore', 'pipe', 'pipe'],
+              detached: true,
+            });
+            let stdout = '', stderr = '', totalBytes = 0, killed = false;
+            const MAX_BYTES = 6 * 1024 * 1024;
+            const killGroup = (signal) => { try { process.kill(-child.pid, signal); } catch (_) { try { child.kill(signal); } catch {} } };
+            const timer = setTimeout(() => {
+              killed = true;
+              killGroup('SIGTERM');
+              setTimeout(() => killGroup('SIGKILL'), 2000);
+              setTimeout(() => resolve({ stdout, stderr, killed: true, code: null }), 2500);
+            }, guardianTimeout);
+            child.stdout.on('data', (d) => {
+              totalBytes += d.length;
+              if (totalBytes > MAX_BYTES) { if (!killed) { killed = true; killGroup('SIGTERM'); setTimeout(() => killGroup('SIGKILL'), 500); } return; }
+              stdout += d.toString('utf8');
+            });
+            child.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
+            child.on('error', (err) => { clearTimeout(timer); resolve({ stdout, stderr, killed: false, code: `error:${err.message}` }); });
+            child.on('close', (code, signal) => { clearTimeout(timer); resolve({ stdout, stderr, killed, code: code ?? (signal ? `signal:${signal}` : 1) }); });
           });
-          const output = (stdout || '').trim().replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
-          const errput = (stderr || '').trim().replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
-          if (output && errput) return `exit_code: 0\nstdout:\n${output}\nstderr:\n${errput}`;
-          if (output) return `exit_code: 0\nstdout:\n${output}`;
-          if (errput) return `exit_code: 0\nstderr:\n${errput}`;
-          return `exit_code: 0\n(empty output)`;
+          const output = (r.stdout || '').trim().replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+          const errput = (r.stderr || '').trim().replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+          if (r.killed) {
+            return `exit_code: timeout\nGuardian command timed out after ${guardianTimeout}ms.\nstdout:\n${output}\nstderr:\n${errput}`;
+          }
+          if (r.code === 0 || r.code === null) {
+            if (output && errput) return `exit_code: 0\nstdout:\n${output}\nstderr:\n${errput}`;
+            if (output) return `exit_code: 0\nstdout:\n${output}`;
+            if (errput) return `exit_code: 0\nstderr:\n${errput}`;
+            return `exit_code: 0\n(empty output)`;
+          }
+          return `exit_code: ${r.code}\nstdout:\n${output}\nstderr:\n${errput}`;
         } catch (err) {
-          const stdout = (err.stdout || '').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
-          const stderr = (err.stderr || '').replace(/\x00/g, '').replace(/\x1b\[[0-9;]*m/g, '');
-          const code = err.killed ? 'timeout' : (err.code ?? 1);
-          if (err.killed) return `exit_code: timeout\nGuardian command timed out after ${guardianTimeout}ms.\nstdout:\n${stdout}\nstderr:\n${stderr}`;
-          return `exit_code: ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`;
+          return `exit_code: error\n${err.message}`;
         }
       }
       case 'list_skills': {

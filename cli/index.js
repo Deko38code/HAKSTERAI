@@ -34,7 +34,7 @@ if (_rawArgs.includes('--help') || _rawArgs.includes('-h') || _rawArgs.includes(
   // Allow help/version without license
 } else {
   _haksterLicenseGate().catch((e) => { console.error('License check failed:', e.message); process.exit(1); });
-} = require('https');
+}
 
 const pkg = require('./package.json');
 const { showIntro, C: logoC } = require('./logo');
@@ -1506,7 +1506,7 @@ program
               else if (evt.type === 'tool_call_result') {
                 const tname = evt.tool_name || '';
                 const result = (evt.tool_result || '').toString();
-                const preview = result.slice(0, 150).replace(/\n/g, ' ');
+                const preview = result.slice(0, 500).replace(/\n/g, ' ');
                 const dur = todoState._toolStart ? Date.now() - todoState._toolStart : 0;
                 if (dur > 0) gridToolTimes.push(dur);
                 if (gridToolTimes.length > 20) gridToolTimes.shift();
@@ -1526,7 +1526,7 @@ program
                   _tocEntry.preview = preview;
                   _tocEntry.ms = dur;
                 }
-                process.stdout.write(`\n${C.gray}  ↳ ${C.green}✓${C.reset}${_tocId ? ` ${C.bold}#${_tocId}${C.reset}` : ''} ${C.gray}${preview}${result.length > 150 ? '...' : ''}${C.reset}\n`);
+                process.stdout.write(`\n${C.gray}  ↳ ${C.green}✓${C.reset}${_tocId ? ` ${C.bold}#${_tocId}${C.reset}` : ''} ${C.gray}${preview}${result.length > 500 ? '...' : ''}${C.reset}\n`);
                 // ── Plan grid: show plan as read back from server ──────────────
                 if (tname === 'plan' && planState.steps.length === 0 && result.includes('\n')) {
                   const rawSteps = result.split('\n')
@@ -1548,10 +1548,10 @@ program
               }
               else if (evt.type === 'tool_result') {
                 const result = (evt.result || evt.tool_result || '').toString();
-                const preview = result.slice(0, 150).replace(/\n/g, ' ');
+                const preview = result.slice(0, 500).replace(/\n/g, ' ');
                 showTodo({ completedTools: Math.max(todoState.completedTools, toolCount) });
                 startSpinner('OBSERVE', 'reading tool output');
-                process.stdout.write(`${C.gray}  ↳ ${C.green}✓${C.reset} ${C.gray}${preview}${result.length > 150 ? '...' : ''}${C.reset}\n`);
+                process.stdout.write(`${C.gray}  ↳ ${C.green}✓${C.reset} ${C.gray}${preview}${result.length > 500 ? '...' : ''}${C.reset}\n`);
               }
               else if (evt.type === 'file_created') {
                 stopSpinner();

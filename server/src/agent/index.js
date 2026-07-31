@@ -123,23 +123,35 @@ const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdown
 const { generateImage } = require('../providers');
 
 // ── Auto-escalation safety net ──────────────────────────────────────────
-// Escalates to a frontier model (claude-code's Agent tool, falling back to
-// codex) when the local model is provably stuck — diagnosis-timeout tier 3
-// or a redundant-modify final warning both mean the loop-break nudges have
-// already been ignored twice. This is the automatic half of escalation;
-// the explicit half is just the model choosing to call the
+// Escalates to a frontier model when the local model is provably stuck —
+// diagnosis-timeout tier 3 or a redundant-modify final warning both mean the
+// loop-break nudges have already been ignored twice. This is the automatic
+// half of escalation; the explicit half is just the model choosing to call the
 // mcp__claude-code__* / mcp__codex__* tools itself, same as any other tool.
-function pickEscalationTool() {
+//
+// Proxy chain: claude-code → codex → kiro. Tries each in order; the first one
+// that succeeds wins. Only falls through to the next if the current one fails
+// (error, timeout, quota — anything thrown).
+const ESCALATION_CHAIN = [
+  'mcp__claude-code__Agent',
+  'mcp__codex__codex',
+  'mcp__kiro__kiro',
+];
+function availableEscalationTools() {
   const names = getMcpTools().map(t => t.function.name);
-  if (names.includes('mcp__claude-code__Agent')) return 'mcp__claude-code__Agent';
-  if (names.includes('mcp__codex__codex')) return 'mcp__codex__codex';
-  if (names.includes('mcp__kiro__kiro')) return 'mcp__kiro__kiro';
-  return null;
+  return ESCALATION_CHAIN.filter(n => names.includes(n));
+}
+function _escalationArgs(toolName, reasonTag, prompt) {
+  if (toolName === 'mcp__claude-code__Agent')
+    return { description: `Escalation: ${reasonTag}`, prompt, run_in_background: false };
+  if (toolName === 'mcp__codex__codex')
+    return { prompt, sandbox: 'workspace-write' };
+  return { prompt, trustAllTools: true }; // mcp__kiro__kiro
 }
 
 async function attemptAutoEscalation(history, reasonTag) {
-  const toolName = pickEscalationTool();
-  if (!toolName) return; // no escalation-capable MCP server connected — nothing to do
+  const chain = availableEscalationTools();
+  if (chain.length === 0) return; // no escalation-capable MCP server connected
 
   const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
   const recentContext = history.slice(-14)
@@ -148,18 +160,24 @@ async function attemptAutoEscalation(history, reasonTag) {
 
   const prompt = `You are being called in as an escalation because a local coding agent got stuck (reason: ${reasonTag}) and its own loop-break warnings were ignored twice.\n\nOriginal task:\n${lastUserMsg ? lastUserMsg.content : '(unknown — not found in recent history)'}\n\nRecent transcript (most recent last):\n${recentContext}\n\nDiagnose what's actually blocking progress and either fix it directly (you have real tool access) or state precisely what information/decision is missing. Be concise — this hands control back to the local agent afterward.`;
 
-  try {
-    const args = toolName === 'mcp__claude-code__Agent'
-      ? { description: `Escalation: ${reasonTag}`, prompt, run_in_background: false }
-      : toolName === 'mcp__codex__codex'
-        ? { prompt, sandbox: 'workspace-write' }
-        : { prompt, trustAllTools: true }; // mcp__kiro__kiro
-    const result = await callMcpTool(toolName, args);
-    const text = typeof result === 'string' ? result : JSON.stringify(result);
-    history.push({ role: 'system', content: `🆘 AUTO-ESCALATED to ${toolName} (${reasonTag}) — here is what it found:\n${text.slice(0, 4000)}\n\nUse this to unblock yourself. Do not escalate again immediately — act on this first.` });
-  } catch (err) {
-    history.push({ role: 'system', content: `🆘 AUTO-ESCALATION to ${toolName} failed (${err.message}). You're on your own for this one — try a structurally different approach.` });
+  let lastErr = null;
+  for (let i = 0; i < chain.length; i++) {
+    const toolName = chain[i];
+    try {
+      const args = _escalationArgs(toolName, reasonTag, prompt);
+      const result = await callMcpTool(toolName, args);
+      const text = typeof result === 'string' ? result : JSON.stringify(result);
+      history.push({ role: 'system', content: `🆘 AUTO-ESCALATED to ${toolName} (${reasonTag}) — here is what it found:\n${text.slice(0, 4000)}\n\nUse this to unblock yourself. Do not escalate again immediately — act on this first.` });
+      return; // success — stop the chain
+    } catch (err) {
+      lastErr = err;
+      if (i < chain.length - 1) {
+        console.log(`${C.mustard}⚠ ${toolName} escalation failed (${err.message}) — falling back to ${chain[i + 1]}${C.reset}`);
+      }
+    }
   }
+  // All escalation tools failed
+  history.push({ role: 'system', content: `🆘 AUTO-ESCALATION failed across all ${chain.length} tools (last error: ${lastErr ? lastErr.message : 'unknown'}). You're on your own for this one — try a structurally different approach.` });
 }
 const { SUGGEST, AUTO_EDIT, FULL_AUTO, shouldConfirm } = require('./approval');
 const { AgentLoopPhase, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition , claudePreCompactGuard, codexSandboxPolicy, reactCycleValidator, hermesMemoryConsolidation } = require('./loop');
@@ -1790,6 +1808,36 @@ function workingPhrase() {
   const arr = WORKING_PHRASES[_agentActivity] || ['Working...'];
   return arr[Math.floor(Date.now() / 800) % arr.length];  // cycle ~every 800ms
 }
+
+// ── Ice spinner (ported from cli/ui.js thinkingAnimation) ────────────────
+const ICE_FRAMES  = ['❄', '✦', '✧', '✶', '✧', '✦'];
+const ICE_SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
+const ICE_GRAD    = [51, 87, 117, 153, 117, 87];
+const ICE_PHASE_COL = {
+  THINK:       '\x1b[38;5;75m',   // bright blue
+  PLAN:        '\x1b[38;5;141m',  // purple
+  ACT:         '\x1b[38;5;118m',  // green
+  OBSERVE:     '\x1b[38;5;81m',   // cyan
+  REFLECT:     '\x1b[38;5;215m',  // orange
+  CONSOLIDATE: '\x1b[38;5;220m',  // gold
+  DEFAULT:     '\x1b[38;5;75m',
+};
+const ICE_PHRASES = {
+  THINK:       ['Analyzing the codebase...', 'Thinking through this...', 'Connecting the dots...', 'Working it out...', 'Tracing the execution path...', 'Mapping out the solution...', 'Breaking this down...', 'Considering edge cases...', 'Looking at the full picture...'],
+  PLAN:        ['Planning the approach...', 'Mapping out the steps...', 'Structuring the solution...', 'Deciding what tools to use...', 'Ordering the operations...', 'Figuring out the best path...'],
+  ACT:         ['Executing tools...', 'Running commands...', 'Making changes...', 'Working on it...', 'Calling tools...', 'Building the solution...', 'Applying fixes...'],
+  OBSERVE:     ['Reviewing results...', 'Observing the output...', 'Checking what came back...', 'Analyzing the response...', 'Looking at the data...'],
+  REFLECT:     ['Reflecting on progress...', 'Evaluating the approach...', 'Did that work?', 'Assessing the outcome...', 'Learning from this step...'],
+  CONSOLIDATE: ['Consolidating findings...', 'Summarizing results...', 'Wrapping up the turn...', 'Compiling the answer...', 'Putting it all together...'],
+  DEFAULT:     ['Working on it...', 'Processing...', 'Hold tight...'],
+};
+let _icePhraseIdx = 0;
+let _iceShimF = 0;
+function icePhrase() {
+  const phase = _tuiPhase || 'DEFAULT';
+  const arr = ICE_PHRASES[phase] || ICE_PHRASES.DEFAULT;
+  return arr[_icePhraseIdx % arr.length];
+}
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 // Truncates by VISIBLE width, not raw string length — ANSI color codes are
 // zero-width on screen but inflate .length, so a naive slice() either cuts
@@ -1797,10 +1845,46 @@ const ANSI_RE = /\x1b\[[0-9;]*m/g;
 // under-truncates and still lets the line wrap. Falls back to plain text
 // (colors stripped) once truncation is needed — simplest way to keep the
 // cut point accurate without re-deriving which codes are still "open".
+//
+// CRITICAL: emoji/pictographic chars (🎯🧠💰🏠✅🔌 etc.) are 1 char in JS but
+// 2 columns in the terminal.  If we don't account for this, a "119-char"
+// string with 10 emojis is actually ~129 columns — it wraps past the PTY
+// width (120), \r only returns to the start of the wrapped portion, and
+// \x1b[2K clears only that fragment.  The first 120 cols stay in scrollback
+// and every status bar tick stacks a new line.  This was the root cause of
+// the duplicate spinner lines bug.
+
+// Returns the visible column width of a string (ANSI stripped, emoji = 2 cols).
+function visualWidth(s) {
+  const plain = s.replace(ANSI_RE, '');
+  let w = 0;
+  for (const ch of [...plain]) {
+    const cp = ch.codePointAt(0);
+    // Skip zero-width variation selectors (U+FE0F) and combining marks
+    if (cp === 0xFE0F) continue;
+    // Emoji ranges: U+1F000+ (pictographic), U+2600-27BF (misc symbols/dingbats)
+    // U+1F300-1FAFF (supplemental symbols), U+2B00-2BFF (misc symbols arrows)
+    if (cp >= 0x1F000 || (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x2B00 && cp <= 0x2BFF)) w += 2;
+    else w += 1;
+  }
+  return w;
+}
+
 function truncateVisible(s, max) {
   const visible = s.replace(ANSI_RE, '');
-  if (visible.length <= max) return s;
-  return visible.slice(0, Math.max(0, max - 1)) + '…';
+  if (visualWidth(visible) <= max) return s;
+  // Truncate by visual width, char by char, then add ellipsis
+  let result = '';
+  let curW = 0;
+  for (const ch of [...visible]) {
+    const cp = ch.codePointAt(0);
+    if (cp === 0xFE0F) continue;
+    const charW = (cp >= 0x1F000 || (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x2B00 && cp <= 0x2BFF)) ? 2 : 1;
+    if (curW + charW > max - 1) break;
+    result += ch;
+    curW += charW;
+  }
+  return result + '…';
 }
 let _statusBarInterval = null;   // Interval for bottom status bar rendering
 let _pendingTools    = [];       // [{name, id}] — tool calls queued for execution
@@ -2574,6 +2658,11 @@ function _writePanel(name, text) {
     // status bar's next tick will \r\x1b[2K on the current line (below the
     // fresh panel content) and write itself there. No stranded lines.
     process.stdout.write(`\x1b[${prev}A\x1b[0J`);
+  } else {
+    // Clear the status bar before appending — otherwise the status bar's
+    // \r-locked line gets mixed with panel content and pushed into scrollback
+    // (the "stacking status bar lines" bug). Same pattern as log() at line 6968.
+    if (_statusBarInterval) process.stdout.write('\r\x1b[2K');
   }
   process.stdout.write(text + '\n');
   // Redraw the readline input line right below the fresh panel content so
@@ -6631,7 +6720,10 @@ function callClaudeCli(messages, tools, { onToken, modelOverride } = {}) {
             if (block.type === 'text' && block.text) {
               finalText += block.text;
               if (onToken) onToken(block.text);
-              else log(block.text);
+              // Don't log text blocks when onToken is null — the agent loop
+              // already prints the full response once at line ~7431.  Logging
+              // here too causes duplicate responses AND each log() call pushes
+              // the \r-locked status bar into scrollback (stacking spinners).
             } else if (block.type === 'tool_use') {
               log(`${C.magenta}🔧 ${block.name}${C.reset} ${C.dim}${JSON.stringify(block.input).slice(0, 200)}${C.reset}`);
               if (block.id) toolUseNames.set(block.id, block.name);
@@ -6689,7 +6781,8 @@ function logContextUsage(history, label = '', lowToken = false) {
   const msgs = history.length - 1; // exclude system
   const pctNum = parseFloat(pct);
   const color = pctNum > 80 ? C.red : pctNum > 50 ? C.yellow : C.green;
-  log(`${color}📐 Context: ${pct}% (${(chars/1000).toFixed(0)}k chars, ${msgs} msgs)${label ? ' ' + label : ''}${C.reset}`);
+  // Write to stderr — does NOT interfere with the \r-overwrite status bar on stdout
+  process.stderr.write(`${color}📐 Context: ${pct}% (${(chars/1000).toFixed(0)}k chars, ${msgs} msgs)${label ? ' ' + label : ''}${C.reset}\n`);
 }
 
 // Check if history has in-progress tool calls (assistant message with tool_calls
@@ -6957,20 +7050,31 @@ function log(text) {
 let _statusFn = null; // set by TUI to update status bar
 function startSpinner(label) {
   if (_statusFn) {
-    const frames = ['◇','◆','◇','◆','◈','◇','◆','◈','◇','◆'];
     const startMs = Date.now();
     let i = 0;
     const interval = setInterval(() => {
       const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
-      _statusFn(`${frames[i % frames.length]} ${label} (${elapsed}s)`);
-      i++;
+      const frame   = ICE_FRAMES[i % ICE_FRAMES.length];
+      const gradC   = `\x1b[38;5;${ICE_GRAD[i % ICE_GRAD.length]}m`;
+      const pcol    = ICE_PHASE_COL[_tuiPhase] || ICE_PHASE_COL.DEFAULT;
+      const s0      = ICE_SHIMMER[_iceShimF % ICE_SHIMMER.length];
+      const s1      = ICE_SHIMMER[(_iceShimF + 1) % ICE_SHIMMER.length];
+      const s2      = ICE_SHIMMER[(_iceShimF + 2) % ICE_SHIMMER.length];
+      _statusFn(`${gradC}⟦${pcol}\x1b[1m${frame}\x1b[0m${gradC}⟧\x1b[0m ${label} (${elapsed}s) ${gradC}${s0}${s1}${s2}\x1b[0m`);
+      i++; _iceShimF++;
+      if (i % 8 === 0) _icePhraseIdx++;
     }, Math.round(80 / SCROLL_SPEED));
     return { stop(msg) { clearInterval(interval); _statusFn('Ready'); if (msg) log(msg); } };
   }
   // Fallback for non-TUI mode (module import)
-  const frames = ['◇','◆','◇','◆','◈','◇','◆','◈','◇','◆'];
   let i = 0;
-  const interval = setInterval(() => { process.stdout.write(`\r${C.primary}${frames[i % frames.length]}${C.reset} ${C.fgMuted}${label}${C.reset}   `); i++; }, Math.round(80 / SCROLL_SPEED));
+  const interval = setInterval(() => {
+    const frame = ICE_FRAMES[i % ICE_FRAMES.length];
+    const gradC = `\x1b[38;5;${ICE_GRAD[i % ICE_GRAD.length]}m`;
+    process.stdout.write(`\r${gradC}${frame}${C.reset} ${C.fgMuted}${label}${C.reset}   `);
+    i++; _iceShimF++;
+    if (i % 8 === 0) _icePhraseIdx++;
+  }, Math.round(80 / SCROLL_SPEED));
   return { stop(msg) { clearInterval(interval); process.stdout.write(`\r${' '.repeat(50)}\r`); if (msg) process.stdout.write(msg); } };
 }
 
@@ -7063,13 +7167,20 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
 
   // ── Status bar: bottom line showing what the agent is doing + pending tools ──
   if (!silent && !_statusBarInterval) {
-    const statusBarFrames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⏏'];
+    const statusBarFrames = ICE_FRAMES;
     let sbarIdx = 0;
     _statusBarInterval = setInterval(() => {
       if (_awaitingConfirm) return;  // Don't clobber the open y/N readline prompt
       const elapsed = ((Date.now() - _activityStart) / 1000).toFixed(0);
       const frame = statusBarFrames[sbarIdx % statusBarFrames.length];
       sbarIdx++;
+      _iceShimF++;
+      if (sbarIdx % 8 === 0) _icePhraseIdx++;
+      const _iceGradC = `\x1b[38;5;${ICE_GRAD[sbarIdx % ICE_GRAD.length]}m`;
+      const _icePhaseC = ICE_PHASE_COL[_tuiPhase] || ICE_PHASE_COL.DEFAULT;
+      const _s0 = ICE_SHIMMER[_iceShimF % ICE_SHIMMER.length];
+      const _s1 = ICE_SHIMMER[(_iceShimF + 1) % ICE_SHIMMER.length];
+      const _iceShimmer = `${_iceGradC}${_s0}${_s1}\x1b[0m`;
       const icon = _agentActivity === 'Thinking' ? '🧠' : _agentActivity === 'Executing' ? '⚡' : _agentActivity === 'Patching' ? '🔧' : _agentActivity === 'Talking' ? '💬' : _agentActivity === 'Explaining' ? '📖' : _agentActivity === 'Reading' ? '📄' : _agentActivity === 'Writing' ? '✏️' : '⏸';
       const actColor = _agentActivity === 'Patching' ? C.primary : _agentActivity === 'Thinking' ? C.tertiary : _agentActivity === 'Executing' ? C.secondary : C.fgBase;
       // Prefer showing the ACTUAL work (real file/command/arg from _activityDetail) over
@@ -7096,7 +7207,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       const _greenPulse = processing && _blinkOn;  // kept for compat
       const _blinkPrompt = ((_isBad || _greenPulse) ? _pulseCol + C.bold : C.fgMuted) + ' haksterAI ' + C.reset + (_blinkOn ? (_isBad ? _pulseCol + C.bold : (processing ? _pulseCol + C.bold : C.primary + C.bold)) : C.fgSubtle) + '\u276f' + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ';
       const waitingInfo = _messageQueue.length > 0 ? ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.mustard + '📬' + C.reset + C.fgBase + _messageQueue.length + ' waiting' + C.reset : '';
-      const _fullLine = _blinkPrompt + (_currentTopic ? C.fgSubtle + '\ud83c\udfaf ' + _currentTopic.slice(0, 35) + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ' : '') + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + primaryText + C.reset + detail + ' ' + C.fgSubtle + frame + C.reset + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + waitingInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + servicesChip() + mcpChip() + smartCompact() + ' ' + C.reset + ' ' + (_isBad ? (_blinkOn ? C.error + C.bold + '\u25cf' + C.reset : C.error + '\u25cf' + C.reset) : (_greenPulse ? C.success + C.bold + '\u25cf' + C.reset : (processing ? C.fgSubtle + '\u25cf' + C.reset : C.fgSubtle + '\u25cb' + C.reset))) + '   ';
+      const _fullLine = _blinkPrompt + (_currentTopic ? C.fgSubtle + '\ud83c\udfaf ' + _currentTopic.slice(0, 35) + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ' : '') + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + primaryText + C.reset + detail + ' ' + _iceGradC + _icePhaseC + C.bold + frame + C.reset + _iceShimmer + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + waitingInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + servicesChip() + mcpChip() + smartCompact() + ' ' + C.reset + ' ' + (_isBad ? (_blinkOn ? C.error + C.bold + '\u25cf' + C.reset : C.error + '\u25cf' + C.reset) : (_greenPulse ? C.success + C.bold + '\u25cf' + C.reset : (processing ? C.fgSubtle + '\u25cf' + C.reset : C.fgSubtle + '\u25cb' + C.reset))) + '   ';
       // Bound to terminal width before writing. Field lengths (burnRate, tokInfo,
       // pendingStr, topic) change every tick — an unbounded line silently crosses
       // the column count, the terminal auto-wraps to a real new physical line, and
@@ -7165,9 +7276,8 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     let _historyForCall = history;
     // Stream tokens to TUI status bar in real-time (150ms throttle built into callOllama).
     // Declared outside the try block — the retry/catch logic below also needs it.
-    const tokenCallback = _statusFn
-      ? (preview) => _statusFn(`${C.info}◇${C.reset} ${preview}`)
-      : null;
+    // Claude Code style: don't show live thinking updates, only final summary
+    const tokenCallback = null;
     try {
       // Only compact when the previous turn did NOT end with tool calls
       // (i.e., we're not in the middle of a tool chain)
@@ -7392,8 +7502,27 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
 
     if (msg.content && msg.content.trim()) {
       // cleanContent was already computed above (hoisted) — use it for display
+      // BUG FIX: When tool calls are present, the agent is still working —
+      // the text content is narration/commentary, NOT a final response.
+      // Printing it as white text makes it look like a second agent is
+      // responding while the first is still thinking.  Only print as a
+      // full response when there are no tool calls (agent is done).
       if (cleanContent) {
-        log(`\n${C.white}${cleanContent}${C.reset}\n`);
+        if (msg.tool_calls && msg.tool_calls.length > 0) {
+          // Still working — show as dim narration, not a final answer
+          log(`${C.fgMuted}${cleanContent}${C.reset}`);
+        } else if (_verifyRetried) {
+          // This is the verification pass response — the original answer was
+          // already printed in full white above.  Don't print a second full
+          // response (the model often generates something unrelated like
+          // "Yo, still idling" when confused by the verify nudge).  Show it
+          // dim so the user knows the agent said something, but it's clearly
+          // NOT a second final answer.
+          log(`${C.fgMuted}${cleanContent}${C.reset}`);
+        } else {
+          // No tool calls, not a verification pass — this IS the final response
+          log(`\n${C.white}${cleanContent}${C.reset}\n`);
+        }
       }
     }
 
@@ -8708,15 +8837,21 @@ async function repl() {
 
   // ── Status line (overwritten in-place) ────────────────────────────────
   let statusText = 'Ready';
-  let spinnerFrames = ['◇','◆','◇','◆','◈','◇','◆','◈','◇','◆'];
+  let spinnerFrames = ICE_FRAMES;
   let spinnerIdx = 0;
   let spinnerInterval = null;
 
   function startSpinner(label) {
     spinnerIdx = 0;
     spinnerInterval = setInterval(() => {
-      process.stdout.write(`\r${C.fgMuted}${spinnerFrames[spinnerIdx % spinnerFrames.length]} ${label}...${C.reset}   `);
-      spinnerIdx++;
+      const frame = spinnerFrames[spinnerIdx % spinnerFrames.length];
+      const gradC = `\x1b[38;5;${ICE_GRAD[spinnerIdx % ICE_GRAD.length]}m`;
+      const pcol  = ICE_PHASE_COL[_tuiPhase] || ICE_PHASE_COL.DEFAULT;
+      const s0    = ICE_SHIMMER[_iceShimF % ICE_SHIMMER.length];
+      const s1   = ICE_SHIMMER[(_iceShimF + 1) % ICE_SHIMMER.length];
+      process.stdout.write(`\r${gradC}⟦${pcol}\x1b[1m${frame}\x1b[0m${gradC}⟧\x1b[0m ${C.fgMuted}${label}...${C.reset} ${gradC}${s0}${s1}\x1b[0m   `);
+      spinnerIdx++; _iceShimF++;
+      if (spinnerIdx % 8 === 0) _icePhraseIdx++;
     }, Math.round(80 / SCROLL_SPEED));
   }
   function stopSpinner() {
@@ -9229,7 +9364,7 @@ async function repl() {
       // Use role 'user' instead of 'system' — many providers strip/ignore
       // mid-conversation system messages, so the instruction never reaches the
       // model. A user-role message is always visible to the model.
-      history.push({ role: 'user', content: '[SYSTEM INSTRUCTION — not from the real user, follow these rules for the next response only]\n\nSession resumed from disk. The user is about to send their first message. When they do (even a casual "yo", "hey", "yop", or just hitting Enter), greet them BRIEFLY with one line and ASK: "Would you like to resume the last project or start something new?" Then STOP. Do NOT assume they want to continue where you left off. Do NOT start working on anything. Wait for their direction.\n\nIMPORTANT: This instruction applies to the VERY FIRST user message after resume only. After that, behave normally.' });
+      history.push({ role: 'user', content: 'Session resumed from disk. The user is about to send their first message. When they do (even a casual "yo", "hey", "yop", or just hitting Enter), greet them BRIEFLY with one line and ASK: "Would you like to resume the last project or start something new?" Then STOP. Do NOT assume they want to continue where you left off. Do NOT start working on anything. Wait for their direction. This applies to the very first user message after resume only — after that, behave normally.' });
     } else if (ans === 'clear') {
       try { fs.unlinkSync(SESSION_FILE); } catch (_) {}
       _currentTopic = '';

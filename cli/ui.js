@@ -127,7 +127,6 @@ function thinkingAnimation(modelHint, phase) {
   let currentModel = modelHint || '';
   let currentPhase = phase || 'DEFAULT';
   let currentActivity = '';
-  let lastLen = 0;
 
   const colorForElapsed = (ms) => {
     if (ms < 5000)  return '\x1b[38;5;118m'; // green
@@ -157,12 +156,11 @@ function thinkingAnimation(modelHint, phase) {
     const s2 = SHIMMER[(shimF + 2) % SHIMMER.length];
     const shimmer = `${s0}${s1}${s2}`;
 
-    const line = `  ${gradC}⟦${col}\x1b[1m${spinner}\x1b[0m${gradC}⟧\x1b[0m ${pcol}${emoji} ${C.bold}${currentPhase}${C.reset} \x1b[38;5;240mice\x1b[0m ${mtag}${col}${phrase}\x1b[0m  ${gradC}${shimmer}\x1b[0m  \x1b[38;5;240m${time}\x1b[0m`;
+    const line = `  ${gradC}⟦${col}\x1b[1m${spinner}\x1b[0m${gradC}⟧\x1b[0m ${pcol}${emoji} ${C.bold}${currentPhase}${C.reset} ${mtag}${col}${phrase}\x1b[0m  ${gradC}${shimmer}\x1b[0m  \x1b[38;5;240m${time}\x1b[0m`;
 
-    const visLen = line.replace(/\x1b\[[0-9;]*m/g, '').length;
-    const clear  = '\r' + ' '.repeat(Math.max(lastLen, visLen) + 2) + '\r';
-    process.stdout.write(clear + line);
-    lastLen = visLen;
+    // \x1b[2K erases the whole line in one atomic terminal op — no manual
+    // space-padding/repeat() allocation, no two-step erase-then-paint flicker.
+    process.stdout.write('\r\x1b[2K' + line);
     frame++;
     shimF++;
     tick++;
@@ -170,7 +168,7 @@ function thinkingAnimation(modelHint, phase) {
   };
 
   render();
-  const timer = setInterval(render, 60);
+  const timer = setInterval(render, 50);
   timer.updateModel = (m) => { currentModel = m; };
   timer.updatePhase = (p) => {
     currentPhase = p || 'DEFAULT';
@@ -182,8 +180,7 @@ function thinkingAnimation(modelHint, phase) {
   };
   timer.stop = (finalLabel) => {
     clearInterval(timer);
-    const clear = '\r' + ' '.repeat(Math.max(lastLen, 80)) + '\r';
-    process.stdout.write(clear);
+    process.stdout.write('\r\x1b[2K');
     if (finalLabel) process.stdout.write(finalLabel + '\n');
   };
   return timer;

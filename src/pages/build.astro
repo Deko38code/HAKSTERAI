@@ -2708,6 +2708,24 @@ import Layout from '../layouts/Layout.astro';
       const body = thinking.querySelector('.thinking-body') as HTMLElement;
       return { root: thinking, body };
     }
+    // RAF-coalesced thinking bar update — accumulates chunks in a ref and only
+    // syncs to DOM once per animation frame (max 60fps).  Old code did
+    // t.body.textContent += text + full.split('\n').map().filter() on EVERY
+    // token chunk (100+/sec), which is O(n²) on the growing string → lag.
+    let _thinkRafPending = false;
+    let _thinkAccumulated = '';   // raw accumulated text (grows once, never re-parsed per chunk)
+    let _thinkLatestPhrase = '';  // latest non-empty line, tracked incrementally
+    let _thinkChunkBuf = '';      // tiny buffer for phrase extraction between RAF ticks
+    function _syncThinkingBar() {
+      _thinkRafPending = false;
+      const bar = document.getElementById('thinking-bar');
+      if (!bar) return;
+      bar.classList.remove('thinking-bar-hidden');
+      const barText = bar.querySelector('.thinking-bar-text') as HTMLElement | null;
+      if (barText && _thinkLatestPhrase) {
+        barText.textContent = _thinkLatestPhrase.slice(0, 200);
+      }
+    }
     function appendThinking(bodyEl: HTMLElement | null, text: string) {
       if (!text) return;
       const t = ensureThinkingBlock(bodyEl);
@@ -2715,23 +2733,45 @@ import Layout from '../layouts/Layout.astro';
       t.root.classList.add('streaming');
       const label = t.root.querySelector('.thinking-label');
       if (label) label.textContent = 'Thinking';
-      // Stash full text in the thinking-body (hidden while streaming) for later review
-      t.body.textContent += text;
-      // ── Update the fixed bottom bar — 1 line, in-place, no screen push ──
-      const bar = document.getElementById('thinking-bar');
-      if (bar) {
-        bar.classList.remove('thinking-bar-hidden');
-        const barText = bar.querySelector('.thinking-bar-text');
-        if (barText) {
-          // Show the latest phrase — last non-empty line of the accumulated text
-          const full = t.body.textContent || '';
-          const lines = full.split('\n').map(l => l.trim()).filter(Boolean);
-          const latest = lines[lines.length - 1] || text.trim() || 'Thinking...';
-          (barText as HTMLElement).textContent = latest.slice(0, 200);
+      // Accumulate raw text — single append, no re-parse
+      _thinkAccumulated += text;
+      // Track latest phrase incrementally: append to chunk buf, extract last line
+      _thinkChunkBuf += text;
+      const nlIdx = _thinkChunkBuf.lastIndexOf('\n');
+      if (nlIdx >= 0) {
+        // Newline(s) arrived — extract everything after the last newline
+        const after = _thinkChunkBuf.slice(nlIdx + 1).trim();
+        if (after) _thinkLatestPhrase = after;
+        else {
+          // Multiple newlines — find the last non-empty line before them
+          const before = _thinkChunkBuf.slice(0, nlIdx);
+          const lines = before.split('\n').map(l => l.trim()).filter(Boolean);
+          if (lines.length) _thinkLatestPhrase = lines[lines.length - 1];
         }
+        _thinkChunkBuf = '';
+      } else if (!_thinkLatestPhrase) {
+        // No newline yet and no phrase set — use what we have so far
+        _thinkLatestPhrase = _thinkChunkBuf.trim() || 'Thinking...';
+      }
+      // Stash full text in the thinking-body (hidden while streaming) — write
+      // to DOM only on RAF tick, not on every chunk
+      t.body.textContent = _thinkAccumulated;
+      // Coalesce bar update to once per frame (max 60fps instead of 100+/sec)
+      if (!_thinkRafPending) {
+        _thinkRafPending = true;
+        requestAnimationFrame(_syncThinkingBar);
       }
     }
     function setThinkingFinished(bodyEl: HTMLElement | null) {
+      // Flush any pending RAF so the final phrase shows before we hide
+      if (_thinkRafPending) {
+        _thinkRafPending = false;
+        _syncThinkingBar();
+      }
+      // Reset accumulation state for next thinking session
+      _thinkAccumulated = '';
+      _thinkLatestPhrase = '';
+      _thinkChunkBuf = '';
       const bubble = getAssistantBubbleRoot(bodyEl);
       const thinking = bubble?.querySelector('.thinking-inline') as HTMLElement | null;
       if (!thinking) {
@@ -3404,7 +3444,9 @@ import Layout from '../layouts/Layout.astro';
                 if (event.type === 'content' || event.type === 'delta') {
                   if (lastBubble) lastBubble.textContent += event.content || '';
                   assistantMsg.content += event.content || ''; tokenCount++;
-                  setThinkingFinished(lastBubble);
+                  // NOTE: do NOT call setThinkingFinished here — it resets thinking
+                  // accumulation state and does synchronous DOM writes.  Only
+                  // thinking_end / done events should finalise thinking.
                   // Debounced code block re-render — only when we detect a closing fence
                   if (assistantMsg.content.includes('```')) {
                     if (renderTimer) clearTimeout(renderTimer);
@@ -3417,9 +3459,25 @@ import Layout from '../layouts/Layout.astro';
                     }, 300);
                   }
                   _scrollThrottle();
+                } else if (event.type === 'thinking_start') {
+                  // Reset accumulation state for a new thinking session
+                  _thinkAccumulated = '';
+                  _thinkLatestPhrase = '';
+                  _thinkChunkBuf = '';
+                  if (_thinkRafPending) {
+                    _thinkRafPending = false;
+                  }
+                  const bar = document.getElementById('thinking-bar');
+                  if (bar) {
+                    bar.classList.remove('thinking-bar-hidden');
+                    const barText = bar.querySelector('.thinking-bar-text') as HTMLElement | null;
+                    if (barText) barText.textContent = 'Thinking...';
+                  }
                 } else if (event.type === 'thinking' || event.type === 'thought') {
                   setAgentLoopStatus(lastBubble, 'Reasoning...');
                   appendThinking(lastBubble, event.content || event.message || '');
+                } else if (event.type === 'thinking_end') {
+                  setThinkingFinished(lastBubble);
                 } else if (event.type === 'tool_call_start') {
                   const toolName = event.tool_name || '';
                   const args = event.tool_args || {};
@@ -3563,10 +3621,12 @@ import Layout from '../layouts/Layout.astro';
                 } else if (event.type === 'max_turns') {
                   setAgentLoopStatus(lastBubble, 'Stopped at turn limit', true);
                   setLiveStatus('⏹ Turn limit reached');
+                  setThinkingFinished(lastBubble);
                   document.getElementById('thinking-bar')?.classList.add('thinking-bar-hidden');
                 } else if (event.type === 'loop_detected') {
                   setAgentLoopStatus(lastBubble, event.message || 'Loop stopped', true);
                   setLiveStatus('⏹ Loop stopped');
+                  setThinkingFinished(lastBubble);
                   document.getElementById('thinking-bar')?.classList.add('thinking-bar-hidden');
                 } else if (event.type === 'error') {
                   const errText = event.error || event.message || 'Unknown error';

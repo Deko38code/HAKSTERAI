@@ -98,9 +98,27 @@ const plans = [
 </section>
 
 <script is:inline>
-  async function handleBuy(btn) {
-    const priceId = btn.dataset.stripePrice;
-    const planName = btn.dataset.planName;
+ // Parse google_auth param from URL after OAuth login redirect and store session
+ (function() {
+ const params = new URLSearchParams(window.location.search);
+ const googleAuth = params.get('google_auth');
+ if (googleAuth) {
+ try {
+ const auth = JSON.parse(decodeURIComponent(googleAuth));
+ if (auth.ok && auth.apiKey) {
+ localStorage.setItem('hakster_api_key', auth.apiKey);
+ localStorage.setItem('hakster_user', JSON.stringify(auth.user || {}));
+ // Clean the URL so the param doesn't persist on refresh
+ const cleanUrl = window.location.origin + window.location.pathname + '#pricing';
+ window.history.replaceState({}, document.title, cleanUrl);
+ }
+ } catch (e) { console.error('Failed to parse auth data', e); }
+ }
+ })();
+
+ async function handleBuy(btn) {
+ const priceId = btn.dataset.stripePrice;
+ const planName = btn.dataset.planName;
 
     if (!priceId || priceId === 'null' || priceId === '') {
       // Free plan — just redirect to install
@@ -112,10 +130,14 @@ const plans = [
     btn.textContent = 'Redirecting to checkout...';
 
     try {
+      const apiKey = localStorage.getItem('hakster_api_key');
       const resp = await fetch('/api/stripe/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priceId }),
+      method: 'POST',
+      headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify({ priceId }),
       });
 
       const data = await resp.json();

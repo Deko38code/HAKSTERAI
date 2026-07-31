@@ -2328,8 +2328,7 @@ function App() {
         " \u2193 ",
         newerBelow,
         " line(s) below (newer) \u2014 \u2193 to return to bottom "
-      ] }),
-      thinking && !liveThinkRef.current && /* @__PURE__ */ jsx16(Spinner, { label: currentPhrase, color: theme.primary })
+      ] })
     ] }),
     /* @__PURE__ */ jsx16(ThinkingBox, { thinking: thinkingText, phase: status.phase, cols, theme }),
     output.length > 0 && /* @__PURE__ */ jsx16(MessageGrid, { messages: output.slice(-8).map((o) => ({

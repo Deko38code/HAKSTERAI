@@ -1,4 +1,4 @@
 {
-  "provider": "ollama",
-  "model": "glm-uncensored:latest"
+  "provider": "claude-cli",
+  "model": "sonnet"
 }
