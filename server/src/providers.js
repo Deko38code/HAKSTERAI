@@ -2200,13 +2200,22 @@ function getDangerReason(command) {
 
 
 // ── Sudo password: read from CLI config (~/.hakster/config.json) or env, expose via SUDO_ASKPASS ──
-const _dangerConfigPath = require('path').join(process.env.HOME || '/home/ghost', '.hakster', 'config.json');
+// NOTE: this server runs under PM2 as root, whose HOME is /root — not the ghost user's
+// /home/ghost. `hakster config sudo` (run interactively by the ghost user) always writes to
+// /home/ghost/.hakster/config.json, so we must read from there too, not process.env.HOME,
+// or the two never agree on where the password lives.
+const _dangerConfigCandidates = [
+  '/home/ghost/.hakster/config.json',
+  require('path').join(process.env.HOME || '/home/ghost', '.hakster', 'config.json'),
+];
 let _dangerPwCache = null;
 let _dangerPwMtime = 0;
+let _dangerConfigPath = _dangerConfigCandidates[0];
 function getDangerPassword() {
   try {
     if (process.env.HAKSTER_DANGER_PASSWORD) return process.env.HAKSTER_DANGER_PASSWORD;
     const fs = require('fs');
+    _dangerConfigPath = _dangerConfigCandidates.find(p => { try { fs.accessSync(p); return true; } catch { return false; } }) || _dangerConfigCandidates[0];
     const st = fs.statSync(_dangerConfigPath);
     if (_dangerPwCache && st.mtimeMs === _dangerPwMtime) return _dangerPwCache;
     const cfg = JSON.parse(fs.readFileSync(_dangerConfigPath, 'utf8'));

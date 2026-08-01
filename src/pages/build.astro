@@ -4081,6 +4081,40 @@ import Layout from '../layouts/Layout.astro';
     }
     checkGoogleCallback();
 
+    // Check for Stripe checkout redirect result (?checkout=success|cancelled&plan=X).
+    // The checkout success_url lands back here with no visible confirmation and a
+    // stale cached plan badge unless we surface it and re-fetch the account.
+    function showCheckoutBanner(text, color) {
+      const banner = document.createElement('div');
+      banner.textContent = text;
+      banner.style.cssText = `position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;background:${color};color:#fff;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,0.4);`;
+      document.body.appendChild(banner);
+      setTimeout(() => banner.remove(), 5000);
+    }
+    async function checkStripeCheckoutResult() {
+      const params = new URLSearchParams(window.location.search);
+      const checkout = params.get('checkout');
+      if (!checkout) return;
+      const plan = params.get('plan');
+      window.history.replaceState({}, '', window.location.pathname);
+      if (checkout === 'success') {
+        showCheckoutBanner(`✓ Payment successful${plan ? ' — ' + plan + ' plan activated' : ''}`, '#16a34a');
+        const token = localStorage.getItem('hakster_google_token');
+        if (token) {
+          try {
+            const res = await fetch(`${API}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const data = await res.json();
+            if (data.user) {
+              const accountPlan = document.getElementById('sidebar-account-plan') as HTMLSpanElement | null;
+              if (accountPlan) accountPlan.textContent = data.user.plan || 'free';
+            }
+          } catch {}
+        }
+      } else if (checkout === 'cancelled') {
+        showCheckoutBanner('Checkout cancelled', '#374151');
+      }
+    }
+
     document.getElementById('sidebar-referral-link')?.addEventListener('click', async (event) => {
       const btn = event.currentTarget as HTMLButtonElement;
       const link = btn.dataset.link || btn.textContent || '';
@@ -4135,6 +4169,7 @@ import Layout from '../layouts/Layout.astro';
     initGoogleButton(); // Check for existing Google session
     checkGoogleCallback(); // Handle OAuth redirect result
     checkTelegramMiniApp(); // Handle Telegram Mini App auto-login (no-op outside Telegram)
+    checkStripeCheckoutResult(); // Handle Stripe checkout redirect result
 
     // ===== Init =====
     loadModels(); loadProjects(); loadCapabilities(); renderHistoryList();

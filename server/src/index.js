@@ -629,7 +629,15 @@ const app = express();
 
 // ===== TUI MCP Server API Endpoints =====
 // These endpoints power the TUI MCP server (tui-server.mjs)
-app.use(express.json());
+// Skip the Stripe webhook path — it needs the untouched raw body for
+// signature verification (express.raw() further down). If this parses
+// it first, the webhook route gets an empty buffer and every
+// checkout.session.completed event fails verification silently, so
+// paid plans never actually apply.
+app.use((req, res, next) => {
+  if (req.path === '/api/stripe/webhook') return next();
+  return express.json()(req, res, next);
+});
 const tuiState = {
   messages: [],
   thinking: '',

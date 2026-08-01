@@ -35,7 +35,8 @@ function checkServiceHealth() {
     sock.connect(svc.port, '127.0.0.1');
   }
 }
-checkServiceHealth();
+// checkServiceHealth();  // Defer first check — module load lag in Terminator
+setTimeout(checkServiceHealth, 2000);  // First check after 2s, then every 20s
 setInterval(checkServiceHealth, 20000);
 function mcpChip() {
   try {
