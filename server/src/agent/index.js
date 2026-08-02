@@ -326,7 +326,7 @@ You should behave like a senior local coding agent:
 11. Never expose secrets, API keys, OAuth secrets, cookies, playlist credentials, signed URLs, DB passwords, raw user/admin data, tokens, or private logs.
 
 ## FULL MACHINE TOOL ACCESS
-You have exec_shell and it runs ANY command on Ghost's real machine as Ghost — every installed build, data, and dev tool is yours. Use what's listed in the MACHINE CONTEXT below (gcc/g++/clang/make/cmake/ninja, node/npm/python3/pip, cargo/go, docker, jq, ffmpeg, sqlite3, nmap, etc.). If a tool isn't listed, check with 'command -v <tool>' or 'which <tool>' before assuming it's missing. Install missing tools with apt/pip/npm only when the user asks.
+You have shell (exec_shell) and it runs ANY command on Ghost's real machine as Ghost — every installed build, data, and dev tool is yours. Use what's listed in the MACHINE CONTEXT below (gcc/g++/clang/make/cmake/ninja, node/npm/python3/pip, cargo/go, docker, jq, ffmpeg, sqlite3, nmap, etc.). If a tool isn't listed, check with 'command -v <tool>' or 'which <tool>' before assuming it's missing. Install missing tools with apt/pip/npm only when the user asks.
 
 ## REQUEST ECONOMY (you have a limited request budget per session)
 Every model turn = one request. Treat requests as scarce: do MORE per turn, use FEWER turns.
@@ -1959,6 +1959,7 @@ function truncateVisible(s, max) {
   return result + '…';
 }
 let _statusBarInterval = null;   // Interval for bottom status bar rendering
+let _sigIntHandlerRegistered = false; // Guard to prevent SIGINT listener leak
 let _pendingTools    = [];       // [{name, id}] — tool calls queued for execution
 
 // ── Token burn & cost tracking ──
@@ -6745,6 +6746,12 @@ To call a tool, output EXACTLY this format on its own line:
 {"argument":"value"}
 </tool>
 
+For the shell tool, you can also use this shorthand:
+
+<shell>
+{"command":"your command here"}
+</shell>
+
 RULES:
 - ALWAYS use tools to take action. Don't describe what you would do — DO it.
 - You can call multiple tools in one response using multiple <tool> blocks.
@@ -6796,11 +6803,15 @@ ${toolList}
     }
   }
 
+  // max_tokens: 16384 — agentic tool-calling needs room for reasoning + full
+  // <tool> blocks with complete commands. 4096 was cutting commands mid-output
+  // (finish_reason: "length"), leaving </tool> unclosed so the parser dropped them.
+  const HACKBOT_MAX_TOKENS = parseInt(process.env.HACKBOT_MAX_TOKENS || '16384', 10);
   const body = JSON.stringify({
     model: HACKBOT_MODEL,
     messages: finalMessages,
     stream: true,
-    max_tokens: 16384,
+    max_tokens: HACKBOT_MAX_TOKENS,
   });
 
   return new Promise((resolve, reject) => {
@@ -6831,10 +6842,17 @@ ${toolList}
           if (data === '[DONE]') continue;
           try {
             const evt = JSON.parse(data);
-            const delta = evt.choices?.[0]?.delta?.content || '';
+            const choice = evt.choices?.[0];
+            const delta = choice?.delta?.content || '';
             if (delta) {
               finalText += delta;
               if (onToken) onToken(delta);
+            }
+            // Detect truncation — model hit max_tokens mid-output
+            if (choice?.finish_reason === 'length') {
+              const msg = `[⚠️ HACKBOT TRUNCATED: finish_reason=length — response cut at ${finalText.length} chars. Partial tool blocks may be lost.]`;
+              if (typeof log === 'function') log(`${C.yellow}${msg}${C.reset}`);
+              finalText += `\n${msg}`;
             }
           } catch {}
         }
@@ -6884,9 +6902,93 @@ ${toolList}
           toolIdx++;
         }
 
-        // Strip tool call blocks from text content for display
+        // ── Fallback: parse <shell> blocks the model emits directly ──
+        // Models like gpt-oss sometimes output <shell>{"command":"..."}</shell>
+        // instead of <tool name="shell">...</tool>. Parse these as tool_calls
+        // so the agent loop actually executes them instead of stalling.
+        const shellBlockRegex = /<shell>\s*(\{[\s\S]*?\})\s*<\/shell>/g;
+        let shellMatch;
+        while ((shellMatch = shellBlockRegex.exec(finalText)) !== null) {
+          let shellArgsStr = shellMatch[1].trim();
+          try {
+            JSON.parse(shellArgsStr);
+          } catch {
+            shellArgsStr = '{}';
+          }
+          parsedToolCalls.push({
+            id: `call_hackbot_${toolIdx}`,
+            type: 'function',
+            function: {
+              name: 'shell',
+              arguments: shellArgsStr,
+            },
+          });
+          toolIdx++;
+        }
+
+        // ── Fallback: recover INCOMPLETE tool blocks (truncated by max_tokens) ──
+        // If the response was cut mid-<tool>, the closing </tool> is missing.
+        // Try to salvage the partial JSON so the command still runs instead of
+        // being silently dropped.
+        if (parsedToolCalls.length === 0) {
+          const incompleteToolRegex = /<tool\s+name="([^"]+)">\s*([\s\S]*?)(?:<\/tool>)?$/;
+          const incMatch = incompleteToolRegex.exec(finalText);
+          if (incMatch) {
+            const toolName = incMatch[1].trim();
+            let partialArgs = incMatch[2].trim();
+            // Try to parse whatever JSON we have — if it's incomplete, try to
+            // close it heuristically
+            try {
+              JSON.parse(partialArgs);
+            } catch {
+              // Attempt to extract a command string even from partial JSON
+              const cmdMatch = partialArgs.match(/"command"\s*:\s*"([^"]*(?:\\"[^"]*)*)/);
+              if (cmdMatch) {
+                partialArgs = JSON.stringify({ command: cmdMatch[1] });
+              } else {
+                // Last resort: wrap as-is
+                partialArgs = '{}';
+              }
+            }
+            parsedToolCalls.push({
+              id: `call_hackbot_${toolIdx}`,
+              type: 'function',
+              function: { name: toolName, arguments: partialArgs },
+            });
+            toolIdx++;
+            if (typeof log === 'function') {
+              log(`${C.yellow}⚠️ Recovered partial tool call: ${toolName} (response was truncated)${C.reset}`);
+            }
+          }
+        }
+
+        // Also check for incomplete <shell> blocks
+        if (parsedToolCalls.length === 0) {
+          const incompleteShellRegex = /<shell>\s*(\{[\s\S]*?)(?:<\/shell>)?$/;
+          const incShellMatch = incompleteShellRegex.exec(finalText);
+          if (incShellMatch) {
+            let partialShellArgs = incShellMatch[1].trim();
+            const cmdMatch = partialShellArgs.match(/"command"\s*:\s*"([^"]*(?:\\"[^"]*)*)/);
+            if (cmdMatch) {
+              partialShellArgs = JSON.stringify({ command: cmdMatch[1] });
+            } else {
+              partialShellArgs = '{}';
+            }
+            parsedToolCalls.push({
+              id: `call_hackbot_${toolIdx}`,
+              type: 'function',
+              function: { name: 'shell', arguments: partialShellArgs },
+            });
+            toolIdx++;
+            if (typeof log === 'function') {
+              log(`${C.yellow}⚠️ Recovered partial shell call (response was truncated)${C.reset}`);
+            }
+          }
+        }
+
+        // Strip tool call AND shell blocks from text content for display
         if (parsedToolCalls.length > 0) {
-          textContent = finalText.replace(toolCallRegex, '').trim();
+          textContent = finalText.replace(toolCallRegex, '').replace(shellBlockRegex, '').trim();
         }
 
         // Log tool calls to TUI if we have them
@@ -7562,8 +7664,11 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       // content in scrollback forever (looks like a scrolling log, not one line).
       process.stdout.write('\r\x1b[2K' + truncateVisible(_fullLine, (process.stdout.columns || 120) - 1));
     }, 500);
-    // Clear status bar on exit
-    process.on('SIGINT', () => { if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; } process.stdout.write('\r\x1b[2K'); });
+    // Clear status bar on exit — use once + guard to prevent listener leak
+    if (!_sigIntHandlerRegistered) {
+      _sigIntHandlerRegistered = true;
+      process.on('SIGINT', () => { if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; } process.stdout.write('\r\x1b[2K'); });
+    }
   }
   // ── TUI dashboard: reset state at start of each user request ──
   if (!silent) tuiReset();
