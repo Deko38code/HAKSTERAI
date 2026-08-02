@@ -6761,6 +6761,25 @@ RULES:
 - Use the available tools to complete tasks directly.
 - Be concise. Output your plan, call the tool, get the result, give the answer.
 
+CRITICAL FORMAT RULE — VIOLATING THIS MEANS YOUR TOOLS WILL NOT EXECUTE:
+- You MUST wrap tool calls in <tool name="..."> JSON </tool> tags. EXACTLY this format.
+- Do NOT write tool calls as plain text like "search_files:{...}" — that will NOT execute.
+- Do NOT write "Starting now:search_files:{...}" — that will NOT execute.
+- Do NOT inline tool calls in prose. Use the XML tags. Every. Single. Time.
+
+CORRECT example:
+<tool name="search_files">
+{"pattern":"smashy","path":"/home/ghost/cine-vault-live"}
+</tool>
+
+<tool name="web_search">
+{"query":"smashy server cracked 2026"}
+</tool>
+
+WRONG (will NOT execute):
+search_files:{"pattern":"smashy","path":"/home/ghost/cine-vault-live"}
+Starting now:search_files:{"pattern":"smashy"}web_search:{"query":"smashy"}
+
 Available tools:
 ${toolList}
 `;
@@ -6924,6 +6943,44 @@ ${toolList}
             },
           });
           toolIdx++;
+        }
+
+        // ── Fallback: parse inline tool_name:{json} shorthand ──
+        // Some hackbots emit tool calls as plain text like:
+        //   search_files:{"pattern":"smashy","path":"/home/ghost"}
+        //   web_search:{"query":"smashy server"}
+        //   Starting now:search_files:{"pattern":"smashy"}web_search:{"query":"x"}
+        // Instead of using <tool> XML tags. Parse these as real tool calls
+        // so the agent loop actually executes them instead of treating
+        // the response as "final answer text" and stopping.
+        if (parsedToolCalls.length === 0) {
+          // Build a set of known tool names to match against
+          const knownToolNames = (tools || []).map(t => (t.function || t).name).filter(Boolean);
+          if (knownToolNames.length > 0) {
+            // Match: tool_name:{json} with boundary at next tool_name: or end of string
+            // Handles glued patterns like "search_files:{...}web_search:{...}"
+            const nameAlt = knownToolNames.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+            const inlineRegex = new RegExp(`((?:${nameAlt}))\\s*:\\s*(\\{.*?\\})(?=\\s|(?:${nameAlt}):|$)`, 'g');
+            let inlineMatch;
+            while ((inlineMatch = inlineRegex.exec(finalText)) !== null) {
+              const toolName = inlineMatch[1];
+              let argsStr = inlineMatch[2].trim();
+              try {
+                JSON.parse(argsStr);
+              } catch {
+                argsStr = '{}';
+              }
+              parsedToolCalls.push({
+                id: `call_hackbot_${toolIdx}`,
+                type: 'function',
+                function: { name: toolName, arguments: argsStr },
+              });
+              toolIdx++;
+            }
+            if (parsedToolCalls.length > 0 && typeof log === 'function') {
+              log(`${C.yellow}⚠️ Parsed ${parsedToolCalls.length} inline tool call(s) from shorthand format — bot didn't use <tool> XML tags${C.reset}`);
+            }
+          }
         }
 
         // ── Fallback: recover INCOMPLETE tool blocks (truncated by max_tokens) ──
