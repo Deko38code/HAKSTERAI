@@ -7330,8 +7330,7 @@ process.stdout.write(`\r\x1b[K${C.mustard}◇ Dropping ${toDrop.length} oldest m
     logContextUsage(history, 'after drop', lowToken);
   }
 
-  logContextUsage(history, 'checking compact', lowToken);
-
+  // PERF: only log context usage when compaction actually happens — was writing to stderr every call
   // Progressive truncation — shrink message content, never drop messages
   let msgs = [...history];  // ALWAYS copy — never alias the original array
   let perMsgLimit = msgStartLimit;
