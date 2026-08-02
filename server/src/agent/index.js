@@ -215,7 +215,7 @@ async function getBrowser() {
     const puppeteer = require('puppeteer');
     _browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--headless=new'],
     });
   }
   return _browser;
