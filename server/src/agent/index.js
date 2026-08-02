@@ -6472,7 +6472,21 @@ async function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
     return callClaudeCli(messages, tools, { onToken });
   }
   if (_familyFor(MODEL) === 'hackbot') {
-    return callHackbot(messages, tools, { onToken });
+    try {
+      return await callHackbot(messages, tools, { onToken });
+    } catch (hackbotErr) {
+      // Hackbot (Miniforge) failed — credits, keys, or service down.
+      // Fall back to Phantom's 19+ provider waterfall on port 4000.
+      console.log(`${C.mustard}⚠ hackbot failed (${hackbotErr.message?.slice(0, 80)}) — falling back to Phantom API waterfall${C.reset}`);
+      try {
+        const resp = await callPhantomChat(messages, tools, { onToken });
+        console.log(`${C.success}✓ Phantom fallback served the request${C.reset}`);
+        return resp;
+      } catch (phantomErr) {
+        console.error(`${C.error}× Both hackbot and Phantom failed — hackbot: ${hackbotErr.message?.slice(0, 60)} | phantom: ${phantomErr.message?.slice(0, 60)}${C.reset}`);
+        throw phantomErr; // Phantom's error propagates to retry logic
+      }
+    }
   }
   const chain = _modelChainFor();
   let lastErr = null;
@@ -7116,7 +7130,179 @@ ${toolList}
   });
 }
 
-// ── Claude CLI backend (Pro/Max subscription, real native tool-calling) ──
+// ── Phantom CLI API backend (port 4000 — 19+ provider waterfall) ──
+// When hackbot/Miniforge fails (credits, keys, down), fall back to Phantom's
+// /api/ai/chat which has its own waterfall: groq → openrouter → gemini →
+// anthropic → openai → sambanova → cerebras → ollama → ... (15+ providers).
+// Returns the same { message: { role, content, tool_calls } } shape as
+// callHackbot so the agent loop doesn't know which brain answered.
+// Tool injection + parsing is identical to callHackbot (same XML tag format).
+async function callPhantomChat(messages, tools, { onToken } = {}) {
+  const PHANTOM_URL = process.env.PHANTOM_API_URL || 'http://localhost:4000';
+  const PHANTOM_PROVIDER = process.env.PHANTOM_FALLBACK_PROVIDER || 'groq';
+  const PHANTOM_MODEL = process.env.PHANTOM_FALLBACK_MODEL || '';
+  const PHANTOM_MAX_TOKENS = parseInt(process.env.HACKBOT_MAX_TOKENS || '16384', 10);
+
+  // ── Build the same tool injection prompt as callHackbot ──
+  // (Duplicate the injection logic so Phantom fallback is self-contained)
+  const toolList = tools.map(t => {
+    const name = t.function?.name || t.name || 'unknown';
+    const params = t.function?.parameters || {};
+    const props = params.properties || {};
+    const required = params.required || [];
+    const propStr = Object.entries(props)
+      .map(([k, v]) => `${k}: ${v.type || 'string'}${required.includes(k) ? ' (required)' : ''}`)
+      .join(', ');
+    return `  <tool name="${name}">{"${propStr || 'no params'}"}</tool>`;
+  }).join('\n');
+
+  const toolRules = `
+
+=== CRITICAL FORMAT RULE — TOOL CALLS ===
+You have these tools available. To call a tool, output EXACTLY this format:
+<tool name="tool_name">
+{"param1":"value1","param2":"value2"}
+</tool>
+
+CORRECT: <tool name="shell">{"command":"ls -la"}</tool>
+CORRECT: <tool name="search_files">{"pattern":"smashy","path":"/home/ghost"}</tool>
+WRONG (will NOT execute): search_files:{"pattern":"smashy"}
+WRONG (will NOT execute): I will search for smashy
+
+Available tools:
+${toolList}
+
+RULES:
+1. ALWAYS use <tool name="..."> XML tags — NOT inline text
+2. Put each tool call on its own line with its JSON args inside the tags
+3. You can call multiple tools in one response
+4. After tool results come back, continue with the next step
+=== END FORMAT RULE ===
+`;
+
+  // Build messages — same logic as callHackbot
+  const finalMessages = [];
+  let injected = false;
+  for (const m of messages) {
+    if (m.role === 'system' && !injected) {
+      finalMessages.push({ role: 'system', content: m.content + toolRules });
+      injected = true;
+    } else {
+      finalMessages.push({ role: m.role, content: m.content || '' });
+    }
+  }
+  if (!injected) {
+    finalMessages.unshift({ role: 'system', content: toolRules });
+  }
+
+  const body = JSON.stringify({
+    provider: PHANTOM_PROVIDER,
+    model: PHANTOM_MODEL || undefined,
+    messages: finalMessages,
+    max_tokens: PHANTOM_MAX_TOKENS,
+  });
+
+  return new Promise((resolve, reject) => {
+    const url = new URL('/api/ai/chat', PHANTOM_URL);
+    const isHttps = url.protocol === 'https:';
+    const reqLib = isHttps ? require('https') : require('http');
+    const timeoutMs = 120000;
+    let settled = false;
+    let responseData = '';
+
+    const req = reqLib.request(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: timeoutMs,
+    }, (res) => {
+      res.on('data', (chunk) => { responseData += chunk.toString(); });
+      res.on('end', () => {
+        if (settled) return;
+        settled = true;
+        if (res.statusCode !== 200) {
+          return reject(new Error(`Phantom API returned ${res.statusCode}: ${responseData.slice(0, 200)}`));
+        }
+        try {
+          const result = JSON.parse(responseData);
+          const text = result.reply || result.text || result.content || '';
+          if (onToken && text) onToken(text);
+
+          // ── Parse tool calls (same logic as callHackbot) ──
+          const parsedToolCalls = [];
+          let textContent = text;
+          const toolCallRegex = /<tool\s+name="([^"]+)">\s*([\s\S]*?)\s*<\/tool>/g;
+          let match;
+          let toolIdx = 0;
+          while ((match = toolCallRegex.exec(text)) !== null) {
+            const toolName = match[1];
+            let argsStr = match[2].trim();
+            try { JSON.parse(argsStr); } catch { try { argsStr = JSON.stringify(argsStr); JSON.parse(argsStr); } catch { argsStr = '{}'; } }
+            parsedToolCalls.push({ id: `call_phantom_${toolIdx}`, type: 'function', function: { name: toolName, arguments: argsStr } });
+            toolIdx++;
+          }
+
+          // <shell> shorthand
+          const shellBlockRegex = /<shell>\s*(\{[\s\S]*?\})\s*<\/shell>/g;
+          let shellMatch;
+          while ((shellMatch = shellBlockRegex.exec(text)) !== null) {
+            parsedToolCalls.push({ id: `call_phantom_${toolIdx}`, type: 'function', function: { name: 'shell', arguments: shellMatch[1] } });
+            toolIdx++;
+          }
+
+          // Inline tool_name:{json} shorthand fallback
+          if (parsedToolCalls.length === 0) {
+            const knownTools = tools.map(t => t.function?.name || t.name).filter(Boolean);
+            if (knownTools.length > 0) {
+              const nameAlt = knownTools.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+              const inlineRe = new RegExp(`(?:^|\\n|\\s)(?:(${nameAlt})):\\s*(\\{[^}]*\\})(?=\\s|(?:${nameAlt}):|$)`, 'g');
+              let inlineMatch;
+              while ((inlineMatch = inlineRe.exec(text)) !== null) {
+                let argsStr = inlineMatch[2].trim();
+                try { JSON.parse(argsStr); } catch { try { argsStr = JSON.stringify(argsStr); JSON.parse(argsStr); } catch { argsStr = '{}'; } }
+                parsedToolCalls.push({ id: `call_phantom_${toolIdx}`, type: 'function', function: { name: inlineMatch[1], arguments: argsStr } });
+                toolIdx++;
+              }
+              if (parsedToolCalls.length > 0 && typeof log === 'function') {
+                log(`${C.yellow}⚠️ Phantom fallback: parsed ${parsedToolCalls.length} inline tool calls${C.reset}`);
+              }
+            }
+          }
+
+          if (parsedToolCalls.length > 0) {
+            textContent = text.replace(toolCallRegex, '').replace(shellBlockRegex, '').trim();
+          }
+
+          resolve({
+            message: {
+              role: 'assistant',
+              content: textContent || '',
+              thinking: '',
+              tool_calls: parsedToolCalls,
+            },
+            _provider: 'phantom',
+          });
+        } catch (e) {
+          reject(new Error(`Phantom API parse error: ${e.message}`));
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
+
+    req.on('timeout', () => {
+      settled = true;
+      req.destroy();
+      reject(new Error(`Phantom API timed out after ${timeoutMs / 1000}s`));
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
 // Delegates the WHOLE turn to `claude -p` with its own tools + this project's
 // MCP servers, rather than trying to fit it into callOllama's Ollama-proxied
 // /api/chat protocol (glm-5.2:cloud etc. are also just Ollama-hosted cloud
