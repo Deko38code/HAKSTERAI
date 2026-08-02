@@ -4516,6 +4516,34 @@ const toolExecutors = {
     // ── Auto-wrap unbounded grep/rg/find commands with output limits ──
     let finalCmd = command;
     const cmdLower = command.trim().toLowerCase();
+
+    // ── Extract complex node -e / python -c scripts to temp files ──
+    // Bash chokes on unescaped parens/braces inside double-quoted `node -e "..."`
+    // or `python -c "..."` when chained with &&. Extract the script to a temp
+    // file and rewrite the command to `node /tmp/xxx.js` instead.
+    // Match from `node -e "` (or python -c) to the LAST closing quote+boundary
+    // (end of string, or ` && `, ` || `, ` | `, ` ; `) to handle nested quotes.
+    const scriptMatch = command.match(/(node|python3?)\s+(?:-e|-c)\s+(["'])([\s\S]*?)\2(?=\s*(?:&&|\|\||;|\||$))/);
+    if (scriptMatch && (command.includes('&&') || command.includes('||') || command.includes('|'))) {
+      try {
+        const runtime = scriptMatch[1];
+        const scriptBody = scriptMatch[3];
+        const ext = runtime.startsWith('python') ? '.py' : '.js';
+        const tmpFile = `/tmp/hakster_cmd_${Date.now()}${ext}`;
+        require('fs').writeFileSync(tmpFile, scriptBody);
+        // Replace the `node -e "..."` or `python -c "..."` part with `runtime tmpFile`
+        finalCmd = command.replace(scriptMatch[0], `${runtime} ${tmpFile}`);
+        // Clean up after command runs
+        const _cleanup = () => { try { require('fs').unlinkSync(tmpFile); } catch (_) {} };
+        const result = await asyncShell(finalCmd, { timeout, sudoPassword });
+        _cleanup();
+        return result.output;
+      } catch {
+        // If temp file extraction fails, fall through to normal execution
+        finalCmd = command;
+      }
+    }
+
     const isGrepLike = /\b(rg|grep|egrep|fgrep|ag|ack|ripgrep)\b/i.test(cmdLower);
     const isFindLike = /\b(find|fd|locate)\b/i.test(cmdLower);
     const isSearchCmd = isGrepLike || isFindLike;
