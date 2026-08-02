@@ -6922,9 +6922,30 @@ ${toolList}
         if (settled) return;
         settled = true;
         if (timedOut) return; // timeout handler already rejected
-        if (res.statusCode && res.statusCode >= 400 && !finalText) {
-          reject(new Error(`hackbot API returned ${res.statusCode}`));
+        const trimmed = finalText.trim();  // used by both error checks below
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`hackbot API returned ${res.statusCode}: ${trimmed.slice(0, 120)}`));
           return;
+        }
+
+        // ── Detect Miniforge "all providers failed" error in 200 response ──
+        // Miniforge sometimes returns HTTP 200 with error text in the body
+        // instead of a proper error status. Detect and reject so Phantom
+        // fallback can kick in.
+        const HACKBOT_ERR_PATTERNS = [
+          /All bots and direct providers failed/i,
+          /All AI providers failed or rate limited/i,
+          /No available (?:bots|providers|models)/i,
+          /Miniapps\.ai credits?(?: expired| exhausted| insufficient)/i,
+          /Credit(?:s)? (?:exhausted|insufficient|expired)/i,
+        ];
+        if (trimmed.length < 300) {
+          for (const pat of HACKBOT_ERR_PATTERNS) {
+            if (pat.test(trimmed)) {
+              reject(new Error(`hackbot providers exhausted: ${trimmed.slice(0, 120)}`));
+              return;
+            }
+          }
         }
 
         // ── Parse tool calls from response ──
