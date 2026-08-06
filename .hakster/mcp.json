@@ -1,0 +1,97 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "mcp-server-filesystem",
+      "args": ["/home/ghost"],
+      "env": {},
+      "tier": 1
+    },
+    "sequential-thinking": {
+      "command": "mcp-server-sequential-thinking",
+      "args": [],
+      "env": {},
+      "tier": 1
+    },
+    "memory": {
+      "command": "mcp-server-memory",
+      "args": [],
+      "env": {},
+      "tier": 1
+    },
+    "playwright": {
+      "command": "playwright-mcp",
+      "args": [],
+      "env": {},
+      "tier": 2
+    },
+    "nmap": {
+      "command": "node",
+      "args": ["/usr/lib/node_modules/@ebowwa/mcp-nmap/dist/index.js"],
+      "env": {
+        "PATH": "/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      },
+      "tier": 2
+    },
+    "sqlite": {
+      "command": "mcp-server-sqlite-npx",
+      "args": ["/home/ghost/haksterAi/data/mcp.db"],
+      "env": {},
+      "tier": 1
+    },
+    "hermes": {
+      "command": "hermes",
+      "args": ["mcp", "serve"],
+      "env": {},
+      "tier": 1
+    },
+    "serena": {
+      "command": "/home/ghost/.local/bin/serena",
+      "args": ["start-mcp-server", "--context", "desktop-app", "--project", "/home/ghost/haksterAi"],
+      "env": {},
+      "tier": 2
+    },
+    "claude-code": {
+      "command": "claude",
+      "args": ["mcp", "serve"],
+      "env": {},
+      "tier": 3
+    },
+    "codex": {
+      "command": "/home/ghost/.npm-global/bin/codex",
+      "args": ["mcp-server"],
+      "env": {},
+      "tier": 3
+    },
+    "kiro": {
+      "command": "node",
+      "args": ["/home/ghost/haksterAi/server/src/agent/kiro-mcp-bridge.js"],
+      "env": {},
+      "tier": 1
+    },
+    "subagents": {
+      "command": "node",
+      "args": ["/home/ghost/haksterAi/server/src/agent/subagent-mcp-bridge.js"],
+      "env": {},
+      "tier": 3
+    },
+    "bounty-platforms": {
+      "command": "/home/ghost/.hakster/venvs/mcp-pentest/bin/python",
+      "args": ["/home/ghost/haksterAi/pentest-agents/mcp-bounty-server/server.py"],
+      "env": {},
+      "tier": 3
+    },
+    "writeup-search": {
+      "command": "/home/ghost/.hakster/venvs/mcp-pentest/bin/python",
+      "args": ["/home/ghost/haksterAi/pentest-agents/mcp-writeup-server/server.py"],
+      "env": {},
+      "tier": 3
+    },
+    "miniforge-bridge": {
+      "command": "node",
+      "args": ["/home/ghost/miniforge/mcp-bridge.js"],
+      "env": { "MINIFORGE_URL": "http://localhost:5555" },
+      "tier": 3
+    }
+  },
+  "_comment": "Add API keys in env to enable: shodan (SHODAN_API_KEY), github (GITHUB_TOKEN), brave-search (BRAVE_API_KEY). All servers use direct binaries (faster than npx). bounty-platforms/writeup-search merged in from pentest-agents/.mcp.json 2026-07-23 \u2014 see HACKERONE_*/BUGCROWD_*/INTIGRITI_*/YESWEHACK_* env vars in pentest-agents/mcp-bounty-server/server.py docstring, and WRITEUP_DB_DIR for writeup-search. 2026-07-24: serena/bounty-platforms/writeup-search switched from uvx/uv-run (re-resolve deps on every spawn, 8-15s and scales with machine load) to pre-installed fast paths \u2014 serena via `uv tool install --from git+https://github.com/oraios/serena serena-agent` (installs to ~/.local/bin/serena), bounty-platforms+writeup-search via a shared venv at ~/.hakster/venvs/mcp-pentest (`uv venv` + `uv pip install mcp`). To rebuild after a serena update: `uv tool upgrade serena-agent`. To rebuild the shared venv: `uv pip install --python ~/.hakster/venvs/mcp-pentest/bin/python -U mcp`."
+}

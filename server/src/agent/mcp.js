@@ -10,12 +10,16 @@ const path = require('path');
 
 // ── MCP Server Registry ─────────────────────────────────────────────────
 const mcpServers = new Map(); // serverName → { config, child, tools, requestId, buffer, pending }
+const _pendingConfigs = new Map(); // serverName → config (tier 2/3, not yet spawned)
+const _loadingPromises = new Map(); // serverName → Promise (in-progress lazy load)
 
 let _logFn = () => {};
 let _statusFn = () => {};
+let _onToolsChangedFn = () => {};
 
 function setLogFn(fn) { _logFn = fn || (() => {}); }
 function setStatusFn(fn) { _statusFn = fn || (() => {}); }
+function setOnToolsChangedFn(fn) { _onToolsChangedFn = fn || (() => {}); }
 
 // ── JSON-RPC helpers ─────────────────────────────────────────────────────
 let _nextId = 1;
@@ -314,6 +318,8 @@ async function loadMcpServers(configDirs) {
     } catch (_) {}
   }
   mcpServers.clear();
+  _pendingConfigs.clear();
+  _loadingPromises.clear();
 
   // Collect unique mcp.json paths
   const seenConfigs = new Set();
@@ -341,17 +347,31 @@ async function loadMcpServers(configDirs) {
     return { tools: [], servers: [] };
   }
 
-  // Connect to all servers in parallel (with individual error handling).
-  // Staggered by 250ms per server — spawning 10 interpreters (node/python/uv)
-  // at the exact same instant creates a CPU/IO spike that's cheap to avoid and
-  // gets worse when a heavy local Ollama model is also running on the same box.
-  //
-  // Heavy servers (serena) get extra delay — they spawn Python + a TypeScript
-  // language server + web dashboard (~300MB) and are prone to OOM kills when
-  // all 15 servers fire at once on a 7GB box. Spawning serena last gives the
-  // lighter servers time to settle first.
+  // Split configs by tier:
+  //   tier 1 = load immediately at startup (lightweight, frequently used)
+  //   tier 2 = lazy-load on first tool call (heavy or less frequent)
+  //   tier 3 = background load after startup rush (cloud agents, niche tools)
+  //   no tier field = default to tier 1 (backwards compat)
+  const tier1 = [];
+  const tier2 = [];
+  const tier3 = [];
+  for (const entry of configs) {
+    const tier = entry.config.tier || 1;
+    if (tier === 3) tier3.push(entry);
+    else if (tier === 2) tier2.push(entry);
+    else tier1.push(entry);
+  }
+
+  // Store tier 2/3 configs for lazy loading
+  for (const { name, config } of [...tier2, ...tier3]) {
+    _pendingConfigs.set(name, config);
+  }
+
+  // Connect tier 1 servers in parallel (with staggered delays)
+  // Heavy servers (serena) get extra delay — but serena is tier 2 now so
+  // this only applies if someone moves it back to tier 1.
   const HEAVY_SERVERS = new Set(['serena']);
-  const sortedConfigs = [...configs].sort((a, b) => {
+  const sortedConfigs = [...tier1].sort((a, b) => {
     const aH = HEAVY_SERVERS.has(a.name) ? 1 : 0;
     const bH = HEAVY_SERVERS.has(b.name) ? 1 : 0;
     return aH - bH; // heavy servers go last
@@ -371,7 +391,78 @@ async function loadMcpServers(configDirs) {
     }
   }
 
+  // Background-load tier 3 servers after a 10s delay (let the box settle)
+  if (tier3.length > 0) {
+    _logFn(`  [MCP] ${tier3.length} tier-3 server(s) will load in background after 10s`);
+    setTimeout(() => {
+      for (const { name, config } of tier3) {
+        ensureServerLoaded(name).catch(err => {
+          _logFn(`  [MCP] Background load failed for "${name}": ${err.message}`);
+        });
+      }
+    }, 10000);
+  }
+
+  // Background-load tier 2 servers after a 5s delay
+  // (not on-demand — the model needs to know they exist to call them)
+  if (tier2.length > 0) {
+    _logFn(`  [MCP] ${tier2.length} tier-2 server(s) will load in background after 5s: ${tier2.map(t => t.name).join(', ')}`);
+    setTimeout(() => {
+      for (const { name, config } of tier2) {
+        ensureServerLoaded(name).catch(err => {
+          _logFn(`  [MCP] Background load failed for "${name}": ${err.message}`);
+        });
+      }
+    }, 5000);
+  }
+
   return { tools: getMcpTools(), servers: connected };
+}
+
+/**
+ * Lazy-load a single MCP server on demand.
+ * Tier 2: spawned when first tool call targets them.
+ * Tier 3: spawned in background after 10s, or on-demand if called first.
+ * Deduplicates concurrent calls via _loadingPromises.
+ * @param {string} serverName
+ * @returns {Promise<void>}
+ */
+async function ensureServerLoaded(serverName) {
+  // Already connected?
+  const existing = mcpServers.get(serverName);
+  if (existing && existing.initialized) return;
+
+  // Already loading?
+  if (_loadingPromises.has(serverName)) return _loadingPromises.get(serverName);
+
+  // Have a pending config?
+  const config = _pendingConfigs.get(serverName);
+  if (!config) {
+    // Maybe it was tier 1 but failed — nothing we can do
+    if (!mcpServers.has(serverName)) {
+      throw new Error(`MCP server "${serverName}" not configured`);
+    }
+    return;
+  }
+
+  _logFn(`  [MCP:${serverName}] lazy-loading (on demand)...`);
+  _pendingConfigs.delete(serverName);
+
+  const promise = connectServer(serverName, config)
+    .then(() => {
+      _logFn(`  [MCP:${serverName}] lazy-load complete — ${mcpServers.get(serverName)?.tools.length || 0} tool(s) discovered`);
+      _loadingPromises.delete(serverName);
+      // Notify the agent that new tools are available so it can refresh TOOLS
+      try { _onToolsChangedFn(); } catch (_) {}
+    })
+    .catch(err => {
+      _logFn(`  [MCP:${serverName}] lazy-load failed: ${err.message}`);
+      _loadingPromises.delete(serverName);
+      throw err;
+    });
+
+  _loadingPromises.set(serverName, promise);
+  return promise;
 }
 
 /**
@@ -422,8 +513,17 @@ async function callMcpTool(fullFnName, args) {
   const [, serverName, toolName] = match;
   const server = mcpServers.get(serverName);
 
+  // If server not connected yet, try lazy-loading it (tier 2/3)
   if (!server || !server.initialized) {
-    throw new Error(`MCP server "${serverName}" not connected`);
+    if (_pendingConfigs.has(serverName)) {
+      _logFn(`  [MCP:${serverName}] not loaded yet — lazy-loading on demand...`);
+      await ensureServerLoaded(serverName);
+    } else if (_loadingPromises.has(serverName)) {
+      // Currently loading — wait for it
+      await _loadingPromises.get(serverName);
+    } else if (!server || !server.initialized) {
+      throw new Error(`MCP server "${serverName}" not connected`);
+    }
   }
 
   _logFn(`  [MCP:${serverName}] calling ${toolName}(${JSON.stringify(args).substring(0, 200)})`);
@@ -643,6 +743,8 @@ module.exports = {
   shutdownMcp,
   setLogFn,
   setStatusFn,
+  setOnToolsChangedFn,
   testServerConfig,
   diffConfiguredVsConnected,
+  ensureServerLoaded,
 };

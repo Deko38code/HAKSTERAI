@@ -120,7 +120,7 @@ function getPentesterFingerprint() {
   if (!_pentesterFp) _pentesterFp = getFingerprint();
   return _pentesterFp;
 }
-const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn, testServerConfig: testMcpServerConfig, diffConfiguredVsConnected: diffMcpConfiguredVsConnected } = require('./mcp');
+const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn, setOnToolsChangedFn: setMcpOnToolsChangedFn, testServerConfig: testMcpServerConfig, diffConfiguredVsConnected: diffMcpConfiguredVsConnected, ensureServerLoaded: ensureMcpServerLoaded } = require('./mcp');
 const { generateImage, pickLocalModel, getLocalFirstFallbackChain, isLocalModel, isCloudModel } = require('../providers');
 
 // ── Auto-escalation safety net ──────────────────────────────────────────
@@ -9586,8 +9586,48 @@ async function repl() {
   // TOOLS is a module-level `let` that gets reassigned when initMcpTools()
   // finishes, and the agent loop reads TOOLS fresh each call — so tools just
   // appear as servers come online. The REPL starts instantly.
-  console.log(`${C.cyan}🔌 Loading MCP servers (background)...${C.reset}`);
+  //
+  // Tiered loading (mcp.js):
+  //   tier 1 = loaded immediately (filesystem, memory, sqlite, hermes, kiro, sequential-thinking)
+  //   tier 2 = lazy-loaded on first tool call (playwright, nmap, serena)
+  //   tier 3 = background-loaded after 10s (claude-code, codex, subagents, bounty, writeup, miniforge)
+  console.log(`${C.cyan}🔌 Loading MCP servers (tiered)...${C.reset}`);
   let _mcpLoadDone = false;
+
+  // When a lazy-loaded server comes online, re-merge MCP tools into TOOLS
+  // so the agent loop sees them on the next turn.
+  setMcpOnToolsChangedFn(() => {
+    try {
+      const mcpToolDefs = getMcpTools();
+      if (mcpToolDefs.length > 0) {
+        const compressed = mcpToolDefs.map(t => {
+          const desc = t.function.description || '';
+          const shortDesc = desc.split('.')[0] + (desc.includes('.') ? '.' : '');
+          let params = { type: 'object', properties: {}, required: t.function.parameters?.required || [] };
+          if (t.function.parameters?.properties) {
+            for (const [key, schema] of Object.entries(t.function.parameters.properties)) {
+              const compressedProp = { type: schema.type || 'string' };
+              if (schema.enum) compressedProp.enum = schema.enum;
+              if (schema.description && schema.description.length < 60) {
+                compressedProp.description = schema.description;
+              }
+              params.properties[key] = compressedProp;
+            }
+          }
+          return {
+            type: 'function',
+            function: { name: t.function.name, description: shortDesc, parameters: params },
+            _mcpServer: t._mcpServer,
+            _mcpToolName: t._mcpToolName,
+          };
+        });
+        TOOLS = [...TOOLS.slice(0, _builtinToolCount), ...compressed];
+        const mcpInfo = mcpStatus();
+        console.log(`\r\x1b[K${C.green}↻ MCP tools refreshed: ${mcpInfo.length} server(s), ${mcpToolDefs.length} tool(s)${C.reset}`);
+      }
+    } catch (_) {}
+  });
+
   initMcpTools()
     .then(() => {
       _mcpLoadDone = true;
