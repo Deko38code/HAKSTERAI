@@ -121,7 +121,7 @@ function getPentesterFingerprint() {
   return _pentesterFp;
 }
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn, testServerConfig: testMcpServerConfig, diffConfiguredVsConnected: diffMcpConfiguredVsConnected } = require('./mcp');
-const { generateImage } = require('../providers');
+const { generateImage, pickLocalModel, getLocalFirstFallbackChain, isLocalModel, isCloudModel } = require('../providers');
 
 // ── Auto-escalation safety net ──────────────────────────────────────────
 // Escalates to a frontier model when the local model is provably stuck —
@@ -4628,6 +4628,24 @@ const toolExecutors = {
     return result.output;
   },
 
+  async parallel_shell({ commands = [], timeout = 30 }) {
+    if (!Array.isArray(commands) || commands.length === 0) {
+      return 'Error: commands array is required and must be non-empty';
+    }
+    const cmds = commands.slice(0, 5);
+    const results = await Promise.allSettled(
+      cmds.map(cmd => asyncShell(String(cmd), { timeout }))
+    );
+    const lines = [];
+    cmds.forEach((cmd, i) => {
+      const r = results[i];
+      const out = r.status === 'fulfilled' ? r.value.output : `Error: ${r.reason?.message || r.reason}`;
+      lines.push(`─── [${i + 1}] ${cmd.substring(0, 80)} ───`);
+      lines.push(out);
+    });
+    return lines.join('\n');
+  },
+
   // rg — the model sometimes calls an "rg" tool; ripgrep is installed, so honor
   // it (run via asyncShell with bounded output) instead of "Unknown tool rg".
   // rg — accepts BOTH call styles the model uses:
@@ -5076,7 +5094,7 @@ const toolExecutors = {
           const r = await fetch(base + path, { method: 'POST', headers: hdrs, body: JSON.stringify(body), signal: ctrl.signal });
           const txt = await r.text();
           let data; try { data = JSON.parse(txt); } catch (_) { data = { raw: txt }; }
-          if ([401, 403, 429].includes(r.status) || r.status >= 500) { _fcIdx++; continue; }  // rotate to next key
+          if ([401, 402, 403, 429].includes(r.status) || r.status >= 500) { _fcIdx++; continue; }  // rotate to next key (402 = insufficient credits)
           return { ok: r.ok, status: r.status, data };
         } catch (e) { _fcIdx++; continue; }
         finally { clearTimeout(t); }
@@ -5604,7 +5622,7 @@ process.stdout.write(`\r\x1b[K${C.primary} ◆ ${taskName}: ${task.goal.substrin
   }
  },
 
- async ollama({ prompt, model = 'glm-5.2:cloud', system, timeout = 60 }) {
+ async ollama({ prompt, model = 'hp-1000:latest', system, timeout = 60 }) {
   // Run prompt against local Ollama API at localhost:11434
   const body = {
    model,
@@ -6441,12 +6459,10 @@ const RATE_LIMIT_RE = /(?:\b429\b|rate.?limit|too many requests|quota|exceeded|o
 const MODEL_FALLBACK_CHAIN = (() => {
   const env = (process.env.HAKSTER_MODEL_FALLBACK || '').split(',').map(s => s.trim()).filter(Boolean);
   if (env.length) return env;
-  // Cross-vendor cloud fallback so a throttled 5.x model never dead-ends.
-  // claude-cli goes first — it's the only entry in this default chain with a
-  // real, working dispatch path (Pro/Max subscription via the `claude` CLI).
-  // The rest are placeholders with no API-key wiring yet; they'd 404 against
-  // Ollama's own endpoint if reached, same failure mode this chain exists to avoid.
-  return ['hackbot', 'claude-cli', 'gpt-4o', 'glm-5.2:cloud', 'gemini-2.5-flash', 'claude-haiku-3-5'];
+  // LOCAL-FIRST fallback chain — try free local models before burning cloud quota.
+  // Local models (your hardware, $0 per request) → Parrot Box (LAN, free) → Cloud (quota-limited).
+  // Cloud models are LAST RESORT only — they burn the weekly quota (1,937 req/wk on glm-5.2 alone).
+  return ['hermes3', 'mistral', 'llama3.2:3b', 'claude-pentest', 'llama3.2:1b', 'hackbot', 'claude-cli', 'glm-5.2:cloud', 'kimi-k2.7-code:cloud'];
 })();
 // Cloud models surfaced in the /model menu so the user can pick them directly
 // and sign in (paste an API key) without leaving the REPL. Add entries here to
@@ -6454,6 +6470,10 @@ const MODEL_FALLBACK_CHAIN = (() => {
 const CLOUD_MODELS = [
   { name: 'hackbot',            family: 'hackbot', size: 'cloud' },
   { name: 'glm-5.2:cloud',      family: 'charm',  size: 'cloud' },
+  { name: 'glm-5.1:cloud',      family: 'charm',  size: 'cloud' },
+  { name: 'glm-5.1:cloud-ctx',   family: 'charm',  size: 'cloud' },
+  { name: 'kimi-k2.7-code:cloud', family: 'charm',  size: 'cloud' },
+  { name: 'gpt-oss:120b-cloud',  family: 'charm',  size: 'cloud' },
   { name: 'gpt-4o',             family: 'openai',  size: 'cloud' },
   { name: 'gemini-2.5-flash',    family: 'gemini', size: 'cloud' },
   { name: 'claude-haiku-3-5',    family: 'anthropic', size: 'cloud' },
@@ -6469,27 +6489,43 @@ function _modelChainFor() {
 function _familyFor(model) { return (CLOUD_MODELS.find(m => m.name === model) || {}).family; }
 
 async function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
-  if (_familyFor(MODEL) === 'claude-cli') {
+  // ── SMART LOCAL MODEL ROUTING ──
+  // Auto-pick the best LOCAL model for this specific request based on task type.
+  // Only do this when the user hasn't explicitly switched to a cloud model.
+  let activeModel = MODEL;
+  if (MODEL === 'qwen3.5' || isLocalModel(MODEL)) {
+    // User is on a local model — use smart routing to pick the BEST local model
+    const picked = pickLocalModel(messages);
+    if (picked.model && picked.model !== MODEL) {
+      console.log(`${C.dim}◈ smart-route: ${MODEL} → ${picked.model} (${picked.reason})${C.reset}`);
+      activeModel = picked.model;
+    }
+  }
+
+  if (_familyFor(activeModel) === 'claude-cli') {
     return callClaudeCli(messages, tools, { onToken });
   }
-  if (_familyFor(MODEL) === 'hackbot') {
+  // ── Cloud-relay models (glm-*:cloud, kimi-*:cloud, gpt-oss:*cloud) route
+  //    through callHackbot → claude-proxy :8082 → zero-burn :11435 → 42 cracked
+  //    endpoints FIRST. Never hit raw Ollama :11434 for cloud models — that
+  //    burns real cloud API tokens on the upstream relay.
+  if (_familyFor(activeModel) === 'hackbot' || _familyFor(activeModel) === 'charm') {
     try {
-      return await callHackbot(messages, tools, { onToken });
+      return await callHackbot(messages, tools, { onToken, modelOverride: activeModel });
     } catch (hackbotErr) {
-      // Hackbot (Miniforge) failed — credits, keys, or service down.
-      // Fall back to Phantom's 19+ provider waterfall on port 4000.
-      console.log(`${C.mustard}⚠ hackbot failed (${hackbotErr.message?.slice(0, 80)}) — falling back to Phantom API waterfall${C.reset}`);
+      // Hackbot/claude-proxy failed — try Phantom's 19+ provider waterfall.
+      console.log(`${C.mustard}⚠ hackbot route failed (${hackbotErr.message?.slice(0, 80)}) — falling back to Phantom API waterfall${C.reset}`);
       try {
         const resp = await callPhantomChat(messages, tools, { onToken });
         console.log(`${C.success}✓ Phantom fallback served the request${C.reset}`);
         return resp;
       } catch (phantomErr) {
         console.error(`${C.error}× Both hackbot and Phantom failed — hackbot: ${hackbotErr.message?.slice(0, 60)} | phantom: ${phantomErr.message?.slice(0, 60)}${C.reset}`);
-        throw phantomErr; // Phantom's error propagates to retry logic
+        throw phantomErr;
       }
     }
   }
-  const chain = _modelChainFor();
+  const chain = [activeModel, ...MODEL_FALLBACK_CHAIN.filter(m => m !== activeModel)].filter((m, i, a) => a.indexOf(m) === i);
   let lastErr = null;
   for (let i = 0; i < chain.length; i++) {
     const tryModel = chain[i];
@@ -6500,11 +6536,11 @@ async function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
       const family = _familyFor(tryModel);
       const resp = family === 'claude-cli'
         ? await callClaudeCli(messages, tools, { onToken, modelOverride: tryModel === 'claude-cli' ? 'sonnet' : tryModel })
-        : family === 'hackbot'
-          ? await callHackbot(messages, tools, { onToken })
+        : (family === 'hackbot' || family === 'charm')
+          ? await callHackbot(messages, tools, { onToken, modelOverride: tryModel })
           : await _callOllamaOnce(tryModel, messages, tools, { onToken, lowToken });
       if (i > 0) {
-        console.log(`${C.success}✓ Rate-limit bypass: served by ${C.bold}${tryModel}${C.reset} ${C.dim}(after ${MODEL} was throttled)${C.reset}`);
+        console.log(`${C.success}✓ Rate-limit bypass: served by ${C.bold}${tryModel}${C.reset} ${C.dim}(after ${activeModel} was throttled)${C.reset}`);
       }
       return resp;
     } catch (e) {
@@ -6525,6 +6561,7 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
     const numPredict = lowToken
       ? Math.max(1024, parseInt(process.env.HAKSTER_LOW_TOKEN_NUM_PREDICT || '4096', 10) || 4096)
       : Math.max(1024, parseInt(process.env.HAKSTER_NUM_PREDICT || '4096', 10) || 4096);  // was 16384 — cap generation to stop runaway token burn
+    const numCtx = Math.max(4096, parseInt(process.env.HAKSTER_NUM_CTX || '32768', 10) || 32768);  // cap context window — modelfile defaults 200K which burns massive input tokens
     const body = JSON.stringify({
       model: model || MODEL,
       messages,
@@ -6532,6 +6569,7 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
       stream: true,   // ← STREAMING: tokens arrive in real-time instead of blocking until complete
       options: {
         num_predict: numPredict,
+        num_ctx: numCtx,
         temperature: 0.3,     // lower temp = faster convergence, less creative drift
         top_p: 0.9,
       },
@@ -6574,12 +6612,25 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
       let buffer = '';  // partial line buffer (NDJSON = newline-delimited)
       global._chunkLogCount = 0; // reset chunk debug counter
 
+      // ── Chunk-level idle timeout: if Ollama starts streaming then hangs
+      //    mid-generation (overloaded, model stuck, OOM), the connection
+      //    stays open with no data, no 'end', no 'error' — the await hangs
+      //    forever and HaksterAI freezes. Reset this timer on every chunk.
+      const STREAM_IDLE_TIMEOUT_MS = 90000; // 90s with no chunk = dead stream
+      let streamIdleTimer = setTimeout(() => {
+        if (!settled) { settled = true; }
+        try { res.destroy(); } catch {}
+        try { req.destroy(); } catch {}
+        reject(new Error('Stream idle timeout — Ollama stopped sending data mid-response'));
+      }, STREAM_IDLE_TIMEOUT_MS);
+
       // Throttle token display: update status bar at most every 150ms
       let lastStatusUpdate = 0;
       let pendingContent = '';
       let pendingThinking = '';
 
       res.on('data', (chunk) => {
+        if (streamIdleTimer) streamIdleTimer.refresh();
         buffer += chunk.toString();
         const lines = buffer.split('\n');
         buffer = lines.pop();  // keep incomplete line in buffer
@@ -6654,6 +6705,7 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
       });
 
       res.on('end', () => {
+        clearTimeout(streamIdleTimer);
         // Process any remaining buffer
         if (buffer.trim()) {
           try {
@@ -6695,8 +6747,8 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
       });
     });
 
-    req.on('error', reject);
-    req.setTimeout(maxTimeout, () => { req.destroy(new Error('Request timeout')); });
+    req.on('error', (err) => { clearTimeout(streamIdleTimer); reject(err); });
+    req.setTimeout(maxTimeout, () => { clearTimeout(streamIdleTimer); req.destroy(new Error('Request timeout')); });
     req.write(body);
     req.end();
   });
@@ -6746,10 +6798,10 @@ function _protectedIndices(msgs) {
 // Full tool-calling support: injects tool schemas as text, parses tool calls
 // from the response, and returns them in the same shape as callOllama/callClaudeCli
 // so the agent loop doesn't care which brain answered.
-async function callHackbot(messages, tools, { onToken } = {}) {
-  const HACKBOT_URL = process.env.HACKBOT_BASE_URL || 'http://localhost:5555';
+async function callHackbot(messages, tools, { onToken, modelOverride } = {}) {
+  const HACKBOT_URL = process.env.HACKBOT_BASE_URL || 'http://localhost:8082';
   const HACKBOT_KEY = process.env.HACKBOT_API_KEY || 'hk-universal-2026';
-  const HACKBOT_MODEL = process.env.HACKBOT_MODEL || 'auto';
+  const HACKBOT_MODEL = modelOverride || process.env.HACKBOT_MODEL || 'kimi-uncensored:latest';
 
   // ── Build tool injection prompt ──
   // The hack bots don't support OpenAI function-calling natively, so we inject
@@ -6865,13 +6917,27 @@ ${toolList}
     }
   }
 
+  // ── Context window trimming — cap input tokens ──
+  // The proxy forwards to cloud models that bill per input token. If the agent
+  // loop accumulates a long conversation, every request resends the entire
+  // history. Cap it to HAKSTER_HACKBOT_MAX_MSGS (default 12) most-recent
+  // messages to keep input token cost bounded.
+  const HACKBOT_MAX_MSGS = Math.max(2, parseInt(process.env.HAKSTER_HACKBOT_MAX_MSGS || '12', 10) || 12);
+  let trimmedMessages = finalMessages;
+  if (finalMessages.length > HACKBOT_MAX_MSGS) {
+    // Always keep the system message (first) + most recent N messages
+    const sys = finalMessages[0]?.role === 'system' ? [finalMessages[0]] : [];
+    const rest = finalMessages[0]?.role === 'system' ? finalMessages.slice(1) : finalMessages;
+    trimmedMessages = [...sys, ...rest.slice(-HACKBOT_MAX_MSGS)];
+  }
+
   // max_tokens: 16384 — agentic tool-calling needs room for reasoning + full
   // <tool> blocks with complete commands. 4096 was cutting commands mid-output
   // (finish_reason: "length"), leaving </tool> unclosed so the parser dropped them.
   const HACKBOT_MAX_TOKENS = parseInt(process.env.HACKBOT_MAX_TOKENS || '16384', 10);
   const body = JSON.stringify({
     model: HACKBOT_MODEL,
-    messages: finalMessages,
+    messages: trimmedMessages,
     stream: true,
     max_tokens: HACKBOT_MAX_TOKENS,
   });
@@ -6886,6 +6952,18 @@ ${toolList}
     let buf = '';
     let settled = false;
 
+    // ── Stream idle timeout — same fix as _callOllamaOnce ──
+    // req.timeout fires on connection-level idle (time to first byte), but if
+    // the proxy starts streaming then hangs mid-generation, no timeout fires.
+    // This timer resets on every chunk and fires if no data arrives for 90s.
+    const HACKBOT_STREAM_IDLE_MS = 90000;
+    let hackbotIdleTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { req.destroy(); } catch {}
+      reject(new Error('Stream idle timeout — hackbot proxy stopped sending data mid-response'));
+    }, HACKBOT_STREAM_IDLE_MS);
+
     const req = reqLib.request(url, {
       method: 'POST',
       headers: {
@@ -6895,6 +6973,7 @@ ${toolList}
       timeout: timeoutMs,
     }, (res) => {
       res.on('data', (chunk) => {
+        if (hackbotIdleTimer) hackbotIdleTimer.refresh();
         buf += chunk.toString();
         const lines = buf.split('\n');
         buf = lines.pop();
@@ -6920,6 +6999,7 @@ ${toolList}
         }
       });
       res.on('end', () => {
+        clearTimeout(hackbotIdleTimer);
         if (settled) return;
         settled = true;
         if (timedOut) return; // timeout handler already rejected
@@ -7135,12 +7215,14 @@ ${toolList}
     });
 
     req.on('error', (err) => {
+      clearTimeout(hackbotIdleTimer);
       if (settled) return;
       settled = true;
       reject(err);
     });
 
     req.on('timeout', () => {
+      clearTimeout(hackbotIdleTimer);
       timedOut = true;
       settled = true;
       req.destroy();
@@ -7217,10 +7299,19 @@ RULES:
     finalMessages.unshift({ role: 'system', content: toolRules });
   }
 
+  // ── Context window trimming — same as callHackbot ──
+  const PHANTOM_MAX_MSGS = Math.max(2, parseInt(process.env.HAKSTER_HACKBOT_MAX_MSGS || '12', 10) || 12);
+  let trimmedPhantomMessages = finalMessages;
+  if (finalMessages.length > PHANTOM_MAX_MSGS) {
+    const sys = finalMessages[0]?.role === 'system' ? [finalMessages[0]] : [];
+    const rest = finalMessages[0]?.role === 'system' ? finalMessages.slice(1) : finalMessages;
+    trimmedPhantomMessages = [...sys, ...rest.slice(-PHANTOM_MAX_MSGS)];
+  }
+
   const body = JSON.stringify({
     provider: PHANTOM_PROVIDER,
     model: PHANTOM_MODEL || undefined,
-    messages: finalMessages,
+    messages: trimmedPhantomMessages,
     max_tokens: PHANTOM_MAX_TOKENS,
   });
 
@@ -7824,7 +7915,7 @@ function startSpinner(label) {
 rotateTranscripts();  // prune old session transcripts (keep last 50)
 async function agentLoop(userMessage, history, silent = false, opts = {}) {
   const _lowToken = opts.lowToken || false;
-  const _maxTurns = _lowToken ? LOW_TOKEN_MAX_TURNS : MAX_TURNS;
+  let _maxTurns = _lowToken ? LOW_TOKEN_MAX_TURNS : MAX_TURNS;
   _currentMaxTurns = _maxTurns;
   // Reset tool call counter for each new user request
   _toolCallCount = 0;
@@ -9085,7 +9176,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
       });
     }
 
-    // ── Hard stop: soft repeat-breaks fired >= 2 times this run → the model is
+    // ── Hard stop: soft repeat-breaks fired >= 4 times this run → the model is
     // ignoring course corrections and ruts on the same call. End the run now
     // instead of looping up to MAX_TURNS and burning the whole token budget.
     if (_repeatHardBreakCount >= 2) {
@@ -9489,15 +9580,28 @@ async function repl() {
   setMcpLogFn((text) => { console.log(text); });
   setMcpStatusFn((text) => { /* status bar not used in REPL */ });
 
-  // Initialize MCP servers (non-fatal if fails)
-  console.log(`${C.cyan}🔌 Loading MCP servers...${C.reset}`);
-  await initMcpTools();
-  const mcpInfo = mcpStatus();
-  if (mcpInfo.length > 0) {
-    console.log(`${C.green}✓ ${mcpInfo.length} MCP server(s) connected, ${getMcpTools().length} tool(s) discovered${C.reset}`);
-  } else {
-    console.log(`${C.dim}  No MCP servers configured${C.reset}`);
-  }
+  // Initialize MCP servers — fire-and-forget (non-blocking).
+  // MCP servers are heavy (15 servers, serena spawns Python+LSP ~300MB).
+  // Blocking on `await` here would hang the REPL 30-60s on a 7GB box.
+  // TOOLS is a module-level `let` that gets reassigned when initMcpTools()
+  // finishes, and the agent loop reads TOOLS fresh each call — so tools just
+  // appear as servers come online. The REPL starts instantly.
+  console.log(`${C.cyan}🔌 Loading MCP servers (background)...${C.reset}`);
+  let _mcpLoadDone = false;
+  initMcpTools()
+    .then(() => {
+      _mcpLoadDone = true;
+      const mcpInfo = mcpStatus();
+      if (mcpInfo.length > 0) {
+        console.log(`${C.green}✓ ${mcpInfo.length} MCP server(s) connected, ${getMcpTools().length} tool(s) discovered${C.reset}`);
+      } else {
+        console.log(`${C.dim}  No MCP servers configured${C.reset}`);
+      }
+    })
+    .catch(err => {
+      _mcpLoadDone = true;
+      console.log(`${C.dim}  MCP init warning: ${err.message}${C.reset}`);
+    });
 
   // ── Check skills ──────────────────────────────────────────────────────
   console.log(`${C.cyan}📋 Loading skills...${C.reset}`);
@@ -9571,7 +9675,8 @@ async function repl() {
   const budgetPct = ((estimatedTokens / budgetMax) * 100).toFixed(1);
   const budgetColor = parseFloat(budgetPct) > 80 ? C.red : parseFloat(budgetPct) > 50 ? C.yellow : C.green;
   console.log(`${budgetColor}📐 Context: ~${estimatedTokens.toLocaleString()} / ${budgetMax.toLocaleString()} tokens (${budgetPct}%)${C.reset} ${C.dim}[sys:${Math.ceil(sysPromptSize/4)} tools:${Math.ceil(toolJsonSize/4)}]${C.reset}`);
-  console.log(`${C.bold}🔧 ${totalTools} tools${C.reset} (${builtInToolCount} built-in + ${mcpToolCount} MCP)${C.reset}`);
+  const mcpLabel = !_mcpLoadDone ? `${C.dim}+ MCP loading...${C.reset}` : (mcpToolCount > 0 ? `${C.dim}+ ${mcpToolCount} MCP${C.reset}` : '');
+  console.log(`${C.bold}🔧 ${totalTools} tools${C.reset} (${builtInToolCount} built-in${mcpLabel ? ' ' + mcpLabel : ''})${C.reset}`);
 
   const rl = readline.createInterface({
     input: process.stdin,
