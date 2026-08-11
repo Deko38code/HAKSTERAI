@@ -320,6 +320,23 @@
     const token = localStorage.getItem('hakster_google_token');
     const user = localStorage.getItem('hakster_google_user');
     if (token && user) {
+      const OWNER_EMAILS = ['dekekenneth840@gmail.com', 'dekoneed@gmail.com', 'dekeneed@yahoo.com', 'savannahscott899@gmail.com'];
+      let userEmail = '';
+      try { userEmail = (JSON.parse(user).email || '').toLowerCase(); } catch {}
+      const isOwner = OWNER_EMAILS.includes(userEmail);
+      // Owners skip the landing page entirely
+      if (isOwner) {
+        const postAuthRedirect = sessionStorage.getItem('hakster_post_auth_redirect');
+        if (postAuthRedirect) {
+          sessionStorage.removeItem('hakster_post_auth_redirect');
+          window.location.href = postAuthRedirect;
+          return;
+        }
+        if (!new URLSearchParams(window.location.search).get('google_auth') && !new URLSearchParams(window.location.search).get('signin') && window.location.pathname === '/') {
+          window.location.href = '/build';
+          return;
+        }
+      }
       const out = document.getElementById('hero-cta-logged-out');
       const inn = document.getElementById('hero-cta-logged-in');
       if (out) out.style.display = 'none';

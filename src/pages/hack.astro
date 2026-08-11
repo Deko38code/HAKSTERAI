@@ -604,7 +604,7 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
 
         <!-- Terminal -->
         <div id="term-body">
-          <HaksterTerminal id="hack-main" autoStart={true} ptyMode="shell" />
+          <HaksterTerminal id="hack-main" autoStart={true} ptyMode="shell" autoCommand="qwen -m hp-1000" />
           <div id="hack-checkpoint-flash">
             <span>💾</span>
             <span id="hack-checkpoint-flash-text">Checkpoint saved</span>

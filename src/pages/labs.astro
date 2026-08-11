@@ -383,4 +383,15 @@ import Layout from '../layouts/Layout.astro';
   <style>
     body { background: #0a0a0f; }
   </style>
+
+  <script is:inline>
+    // ── Auth gate: redirect to sign-in if not signed in ─────────
+    (function() {
+      const token = localStorage.getItem('hakster_google_token');
+      const authParam = new URLSearchParams(window.location.search).get('google_auth');
+      if (!token && !authParam) {
+        window.location.href = '/?signin=1&redirect=/labs';
+      }
+    })();
+  </script>
 </Layout>
