@@ -66,38 +66,44 @@ async function initWebMcp() {
   _mcpLoaded = true;
   mcpSetLogFn((msg) => console.log(msg));
 
-  // When a lazy-loaded tier 2/3 server comes online, refresh ALL_TOOLS
+  // Debounced tool refresh — coalesces rapid OOM-retry reconnects into one update
+  // so the TUI doesn't flicker when multiple servers come back within seconds.
+  let _toolsChangedTimer = null;
   mcpSetOnToolsChangedFn(() => {
-    try {
-      const mcpToolDefs = getMcpTools();
-      if (mcpToolDefs.length > 0) {
-        const compressed = mcpToolDefs.map(t => {
-          const desc = t.function.description || '';
-          const shortDesc = desc.split('.')[0] + (desc.includes('.') ? '.' : '');
-          let params = { type: 'object', properties: {}, required: t.function.parameters?.required || [] };
-          if (t.function.parameters?.properties) {
-            for (const [key, schema] of Object.entries(t.function.parameters.properties)) {
-              const compressedProp = { type: schema.type || 'string' };
-              if (schema.enum) compressedProp.enum = schema.enum;
-              if (schema.description && schema.description.length < 60) {
-                compressedProp.description = schema.description;
+    if (_toolsChangedTimer) clearTimeout(_toolsChangedTimer);
+    _toolsChangedTimer = setTimeout(() => {
+      _toolsChangedTimer = null;
+      try {
+        const mcpToolDefs = getMcpTools();
+        if (mcpToolDefs.length > 0) {
+          const compressed = mcpToolDefs.map(t => {
+            const desc = t.function.description || '';
+            const shortDesc = desc.split('.')[0] + (desc.includes('.') ? '.' : '');
+            let params = { type: 'object', properties: {}, required: t.function.parameters?.required || [] };
+            if (t.function.parameters?.properties) {
+              for (const [key, schema] of Object.entries(t.function.parameters.properties)) {
+                const compressedProp = { type: schema.type || 'string' };
+                if (schema.enum) compressedProp.enum = schema.enum;
+                if (schema.description && schema.description.length < 60) {
+                  compressedProp.description = schema.description;
+                }
+                params.properties[key] = compressedProp;
               }
-              params.properties[key] = compressedProp;
             }
-          }
-          return {
-            type: 'function',
-            function: { name: t.function.name, description: shortDesc, parameters: params },
-            _mcpServer: t._mcpServer,
-            _mcpToolName: t._mcpToolName,
-          };
-        });
-        ALL_TOOLS = [...AGENT_TOOLS, ...compressed];
-        console.log(`[MCP] Tools refreshed: ${mcpToolDefs.length} tools from ${mcpStatus().length} servers`);
+            return {
+              type: 'function',
+              function: { name: t.function.name, description: shortDesc, parameters: params },
+              _mcpServer: t._mcpServer,
+              _mcpToolName: t._mcpToolName,
+            };
+          });
+          ALL_TOOLS = [...AGENT_TOOLS, ...compressed];
+          console.log(`[MCP] Tools refreshed: ${mcpToolDefs.length} tools from ${mcpStatus().length} servers`);
+        }
+      } catch (e) {
+        console.warn(`[MCP] Tool refresh error: ${e.message}`);
       }
-    } catch (e) {
-      console.warn(`[MCP] Tool refresh error: ${e.message}`);
-    }
+    }, 2000); // 2s debounce — coalesce all reconnects within a 2s window
   });
 
   try {
@@ -676,7 +682,7 @@ const tuiState = {
   messages: [],
   thinking: '',
   queue: [],
-  status: { phase: 'idle', model: 'sonnet', tokens: 0, trust: 0, connected: false },
+  status: { phase: 'idle', model: getHaksterModelConfig().model, tokens: 0, trust: 0, connected: false },
 };
 
 app.get('/api/tui/messages', (req, res) => {
@@ -715,6 +721,48 @@ app.post('/api/tui/model', (req, res) => {
 app.get('/api/tui/status', (_req, res) => {
   res.json(tuiState.status);
 });
+
+// -- Agent Brain Net TUI extras: free meter + smartness + performance bars --
+app.get('/api/tui/free-meter', async (_req, res) => {
+  try {
+    const proxy = await fetch('http://127.0.0.1:8082/free-meter', { signal: AbortSignal.timeout(5000) });
+    const data = await proxy.json();
+    res.json({ ok: true, ...data });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/tui/smartness', async (_req, res) => {
+  try {
+    const perfFile = '/home/ghost/.hakster/perf_history.json';
+    let smartness = 100;
+    if (require('fs').existsSync(perfFile)) {
+      const hist = JSON.parse(require('fs').readFileSync(perfFile, 'utf8'));
+      const last = hist.sessions?.[hist.sessions.length - 1];
+      if (last && last.smartnessEnd != null) smartness = last.smartnessEnd;
+    }
+    res.json({ smartness, max: 100, level: smartness >= 90 ? 'elite' : smartness >= 70 ? 'strong' : 'learning' });
+  } catch (e) {
+    res.json({ smartness: 100, max: 100, level: 'elite', error: e.message });
+  }
+});
+
+app.get('/api/tui/performance', async (_req, res) => {
+  try {
+    const proxy = await fetch('http://127.0.0.1:8082/health', { signal: AbortSignal.timeout(5000) });
+    const data = await proxy.json();
+    const bars = {};
+    for (const [tier, info] of Object.entries(data.cluster || {})) {
+      bars[tier] = { status: info.status, score: info.status === 'up' ? 100 : info.status === 'not_configured' ? 0 : 30 };
+    }
+    res.json({ ok: true, bars, response_target_ms: 10000, response_current_ms: data.avg_latency_ms || 0 });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+
 
 global.__tuiUpdate = (state) => { Object.assign(tuiState, state); };
 
@@ -7338,11 +7386,79 @@ getSkillsInventory();
 getToolInventory();
 getMachineContext();
 
-// Initialize MCP servers (async, non-blocking)
+// Initialize seed data (sync, fast)
 seedPersistentProjectMemory();
 seedGoogleIdentityMemoriesFromDb();
 promoteOwnerAccountsFromDb();
-initWebMcp();
+
+// ── Boot sequence: MCP + model prewarm, then server starts ──────────
+// MCP servers and Ollama model prewarm run in parallel. The server starts
+// after a 30s head-start (fast MCP servers connect in ~2-5s, slow ones like
+// serena/hermes can take 120s). Slow servers lazy-load after the server is up.
+// Previously initWebMcp() was fire-and-forget (tools trickled in late,
+// causing TUI splitting) and prewarmOllama ran inside server.listen (first
+// request hit a cold model). Now fast servers + model warm are ready before
+// the server listens, and slow servers connect in the background.
+(async function bootAll() {
+  const MODEL = process.env.HAKSTER_MODEL || '';
+  const OLLAMA = process.env.OLLAMA_HOST || 'http://localhost:11434';
+  const isLocal = MODEL && MODEL !== 'claude-cli' && !MODEL.includes(':cloud');
+  let needPrewarm = false;
+  if (isLocal) {
+    try { const { isCloudModel } = require('./providers'); needPrewarm = !isCloudModel(MODEL); } catch { needPrewarm = true; }
+  }
+
+  // Kick off MCP load + model prewarm in parallel
+  const mcpReady = initWebMcp();
+  const prewarmModel = async (retries = 3, delayMs = 5000) => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const resp = await fetch(`${OLLAMA}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: MODEL,
+            prompt: 'ok',
+            stream: true,  // stream:true — ollama 0.32.x hangs on stream:false
+            keep_alive: '30m',
+            options: { num_predict: 1, temperature: 0.1 },
+          }),
+          signal: AbortSignal.timeout(600000), // 10 min — 6.6GB model on 7GB RAM w/ swap can take 5+ min
+        });
+        // Drain the streaming response — we only care that the model loaded
+        try {
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) { const { done } = await reader.read(); if (done) break; }
+        } catch (_) {}
+        console.log(`  ✓ ${MODEL} pre-warmed and ready (attempt ${attempt})`);
+        return;
+      } catch (err) {
+        console.warn(`  ⚠ ${MODEL} pre-warm attempt ${attempt}/${retries} failed: ${(err.message || err).slice(0, 80)}`);
+        if (attempt < retries) await new Promise(r => setTimeout(r, delayMs));
+      }
+    }
+  };
+  let prewarmDone = Promise.resolve();
+  if (needPrewarm) {
+    console.log(`  ⟳ Pre-warming ${MODEL}...`);
+    prewarmDone = prewarmModel();
+  }
+
+  // Wait for ALL MCP servers to finish connecting before starting the server.
+  // No 30s race cap — every tier (1/2/3) loads upfront so all tools are ready
+  // before the first request can arrive. Slow servers (serena ~120s) will
+  // delay server start, but the TUI prompt will show ALL tools from the get-go.
+  console.log('  ⟳ Loading all MCP servers (this may take a minute)...');
+  await mcpReady.catch(() => {}); // MCP failures are non-fatal
+  console.log(`  ✓ MCP loading complete — ${getMcpTools().length} tool(s) ready`);
+
+  // Start server — ALL MCP tools are available from the first request
+  startServer();
+
+  // Prewarm continues in background
+  prewarmDone.catch(() => {});
+})();
 
 // Graceful port handling infinite retry with capped backoff (prevents PM2 crash loops)
 function startServer(delay = 2000) {
@@ -7380,4 +7496,3 @@ function startServer(delay = 2000) {
 // its own startup on that same trial/license check would eventually lock the
 // whole backend out. The gate belongs only in the customer-facing CLI (cli/index.js)
 // and TUI (haksterai-cli.cjs) entry points.
-startServer();

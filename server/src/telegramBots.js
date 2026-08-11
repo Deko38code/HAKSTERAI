@@ -210,6 +210,28 @@ const ROLES = {
   TELEGRAM_BOT_TOKEN_6: { name: 'system health',   job: 'system health reporter',       username: null, bot: null, chatIds: new Set() },
 };
 
+// Track all active bot instances so we can gracefully stop polling on shutdown.
+// This prevents the 409 conflict where old process's getUpdates connection
+// is still alive when the new process starts after a PM2 restart.
+const _activeBots = [];
+let _shuttingDown = false;
+
+function gracefulShutdown(signal) {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  console.log(`[telegram] ${signal} received — stopping all bot polling gracefully`);
+  Promise.allSettled(_activeBots.map(b => b.stopPolling({ cancel: true })))
+    .then(() => {
+      console.log('[telegram] all polling stopped — exiting');
+      process.exit(0);
+    })
+    .catch(() => process.exit(0));
+  // Hard exit after 5s if stopPolling hangs
+  setTimeout(() => process.exit(0), 5000);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 const CHAT_IDS_FILE = path.join(ENV_ROOT, 'data', 'telegram_chat_ids.json');
 
 function loadChatIds() {
@@ -332,8 +354,9 @@ function initBots() {
     }
     // BUGFIX: 409 Conflict — "terminated by other getUpdates request"
     // Caused by PM2 restarts not killing old polling connections cleanly.
-    // Fix: use polling with interval + retry, and clear any existing webhook
-    // before starting polling (Telegram only allows one active connection).
+    // Fix: stagger startup by 2s per bot (avoids all 6 hitting Telegram at once),
+    // clear webhook before polling, and graceful-shutdown all bots on SIGTERM/SIGINT
+    // so the old long-poll connection is closed before the new process starts.
     const bot = new TelegramBot(token, {
       polling: {
         interval: 300,     // poll every 300ms
@@ -342,14 +365,19 @@ function initBots() {
       },
     });
     ROLES[key].bot = bot;
+    _activeBots.push(bot);
 
-    // Clear any existing webhook before starting polling — prevents 409
-    bot.deleteWebHook().then(() => {
-      return bot.startPolling();
-    }).catch(() => {
-      // deleteWebHook might fail if no webhook exists — that's fine
-      bot.startPolling().catch(() => {});
-    });
+    // Staggered start: wait (index × 2s) + 3s base to let old process polling die,
+    // then clear webhook and start polling. This eliminates the startup 409.
+    const botIndex = Object.keys(ROLES).indexOf(key);
+    const startDelay = 3000 + (botIndex * 2000);
+    setTimeout(() => {
+      bot.deleteWebHook().then(() => {
+        return bot.startPolling();
+      }).catch(() => {
+        bot.startPolling().catch(() => {});
+      });
+    }, startDelay);
 
     bot.getMe().then(me => {
       ROLES[key].username = me.username;
@@ -358,22 +386,32 @@ function initBots() {
 
     // Handle polling errors gracefully instead of crashing
     // 409 fix: the old 2s restart was SHORTER than the long-poll timeout (10s),
-    // so the stale getUpdates connection was still alive when we restarted →
-    // instant 409 → infinite loop (see log spam). Now back off 12s (> timeout),
-    // dedupe concurrent restarts, and clear any webhook first.
+    // so the stale getUpdates connection was still alive when we restarted ->
+    // instant 409 -> infinite loop (see log spam). Now back off 15s (> timeout),
+    // dedupe concurrent restarts, clear any webhook first, and cap retries at 3
+    // before giving up to avoid CPU-thrashing the box.
     let _poll409Busy = false;
+    let _poll409Count = 0;
+    let _poll409Dead = false;
     bot.on('polling_error', (error) => {
       const msg = error?.message || String(error);
       if (msg.includes('409') || msg.includes('terminated by other')) {
-        if (_poll409Busy) return;  // already mid-backoff — don't pile on more restarts
+        if (_poll409Busy || _poll409Dead) return;  // already mid-backoff or dead — don't pile on
+        _poll409Count++;
+        if (_poll409Count > 3) {
+          console.error(`[telegram] ${ROLES[key].name}: 409 conflict persisted ${_poll409Count}x — stopping polling to save CPU`);
+          _poll409Dead = true;
+          bot.stopPolling().catch(() => {});
+          return;
+        }
         _poll409Busy = true;
-        console.warn(`[telegram] ${ROLES[key].name}: 409 conflict (stale polling) — backing off 12s before restart`);
+        console.warn(`[telegram] ${ROLES[key].name}: 409 conflict (attempt ${_poll409Count}/3) — backing off 15s`);
         bot.stopPolling().catch(() => {});
         setTimeout(async () => {
           try { await bot.deleteWebHook(); } catch {}
           try { await bot.startPolling(); } catch {}
           _poll409Busy = false;
-        }, 12000);
+        }, 15000);
       } else if (msg.includes('EFATAL') || msg.includes('fetch failed')) {
         console.warn(`[telegram] ${ROLES[key].name}: network error — will auto-retry`);
       } else if (msg.includes('401') || msg.includes('Unauthorized')) {
@@ -382,6 +420,7 @@ function initBots() {
         // pointless (token won't fix itself), so stop this bot's polling for good.
         console.error(`[telegram] ${ROLES[key].name}: 401 Unauthorized (bad/revoked token) — stopping polling permanently`);
         bot.stopPolling().catch(() => {});
+        _poll409Dead = true;
       } else {
         console.error(`[telegram] ${ROLES[key].name} polling error:`, msg);
       }

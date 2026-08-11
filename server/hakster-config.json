@@ -1,4 +1,4 @@
 {
   "provider": "ollama",
-  "model": "glm-5.2:cloud"
+  "model": "hp-1000:latest"
 }

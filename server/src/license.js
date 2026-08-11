@@ -2,12 +2,15 @@
 
 /**
  * haksterAi License Verification System
- * 
- * Users must purchase a license key from https://haksterai.com
- * The CLI/TUI/server will not start without a valid key.
- * 
- * License keys are validated against the haksterai.com API.
- * Validation is cached locally for 24 hours for offline use.
+ *
+ * Entitlement is tied to the user's haksterAi account (the same api_key
+ * issued at Google sign-in / `hakster init`), not a separate machine-locked
+ * key. The CLI/TUI/server check the account's plan via the real, already-live
+ * Stripe checkout+webhook path (users.plan / GET /api/auth/me) — the same
+ * system the website dashboard uses. No key to copy-paste, no separate
+ * `licenses` table to keep in sync.
+ *
+ * Users without a paid plan (or not yet signed in) get a local 3-day trial.
  */
 
 const fs = require('fs');
@@ -15,51 +18,42 @@ const os = require('os');
 const path = require('path');
 const https = require('https');
 const http = require('http');
-const crypto = require('crypto');
 
-const LICENSE_SERVER = 'https://haksterai.com/api/license/verify';
-const LICENSE_FILE = path.join(os.homedir(), '.hakster', 'license.json');
+const LICENSE_SERVER = 'https://haksterai.com/api/auth/me';
+const CLI_CONFIG_FILE = path.join(os.homedir(), '.hakster', 'config.json');
+const CACHE_FILE = path.join(os.homedir(), '.hakster', 'license.json');
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 const TRIAL_DURATION = 3 * 24 * 60 * 60 * 1000; // 3-day trial
 
-// Machine fingerprint — ties license to hardware
-function getMachineFingerprint() {
-  const interfaces = os.networkInterfaces();
-  let mac = '';
-  for (const iface of Object.values(interfaces)) {
-    if (iface && iface[0] && !iface[0].internal) {
-      mac = iface[0].mac;
-      break;
-    }
-  }
-  const fingerprint = crypto
-    .createHash('sha256')
-    .update(`${os.hostname()}-${mac}-${os.platform()}-${os.arch()}`)
-    .digest('hex');
-  return fingerprint;
-}
-
-// Read cached license
-function readCache() {
+// Read the CLI's configured API key (set via `hakster init` / Google sign-in)
+function readCliApiKey() {
   try {
-    const data = JSON.parse(fs.readFileSync(LICENSE_FILE, 'utf8'));
-    return data;
+    const cfg = JSON.parse(fs.readFileSync(CLI_CONFIG_FILE, 'utf8'));
+    return cfg.apiKey || null;
   } catch {
     return null;
   }
 }
 
-// Write cached license
-function writeCache(data) {
-  const dir = path.dirname(LICENSE_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(LICENSE_FILE, JSON.stringify(data, null, 2));
+// Read cached account status
+function readCache() {
+  try {
+    return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
-// Validate license key against server
-function validateWithServer(licenseKey, fingerprint) {
+// Write cached account status
+function writeCache(data) {
+  const dir = path.dirname(CACHE_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
+}
+
+// Fetch account plan/status from the haksterai.com backend
+function fetchAccountStatus(apiKey) {
   return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({ key: licenseKey, fingerprint });
     const url = new URL(LICENSE_SERVER);
     const lib = url.protocol === 'https:' ? https : http;
 
@@ -68,11 +62,8 @@ function validateWithServer(licenseKey, fingerprint) {
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData),
-        },
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}` },
         timeout: 10000,
       },
       (res) => {
@@ -80,8 +71,7 @@ function validateWithServer(licenseKey, fingerprint) {
         res.on('data', (chunk) => (body += chunk));
         res.on('end', () => {
           try {
-            const data = JSON.parse(body);
-            resolve(data);
+            resolve({ status: res.statusCode, data: JSON.parse(body) });
           } catch {
             reject(new Error('Invalid server response'));
           }
@@ -94,12 +84,11 @@ function validateWithServer(licenseKey, fingerprint) {
       req.destroy();
       reject(new Error('License server timeout'));
     });
-    req.write(postData);
     req.end();
   });
 }
 
-// Check if user has a trial active
+// Check if user has a local trial active (used pre-signup and for free-plan accounts)
 function checkTrial() {
   const trialFile = path.join(os.homedir(), '.hakster', '.trial');
   try {
@@ -123,121 +112,92 @@ function startTrial() {
   return { active: true, remaining: 3 };
 }
 
+// Shared trial gate — used when there's no api key, or the signed-in account is on the free plan
+function trialGate(allowTrial, prefix) {
+  const lead = prefix ? prefix + '\n   ' : '';
+  if (!allowTrial) {
+    return { valid: false, message: `❌ ${lead}No paid plan found.\n   Purchase at https://haksterai.com/pricing` };
+  }
+  let trial = checkTrial();
+  if (trial === null) {
+    trial = startTrial();
+    return {
+      valid: true,
+      message: `🎉 Welcome to haksterAi! Your 3-day free trial has started.\n   ${trial.remaining} days remaining.\n   ${lead}Purchase a plan at https://haksterai.com/pricing to continue after trial.`,
+      trial,
+    };
+  }
+  if (trial.active) {
+    return {
+      valid: true,
+      message: `⏳ ${lead}Trial active: ${trial.remaining} day(s) remaining.\n   Purchase at https://haksterai.com/pricing`,
+      trial,
+    };
+  }
+  return {
+    valid: false,
+    message: `❌ ${lead}Your 3-day trial has expired.\n   Purchase a plan at https://haksterai.com/pricing\n   Then run: hakster init`,
+  };
+}
+
 /**
  * Main license check — call at startup of CLI, TUI, and server
- * @param {boolean} allowTrial - Whether to allow 3-day trial if no key
- * @returns {Promise<{valid: boolean, message: string, trial?: object}>}
+ * @param {boolean} allowTrial - Whether to allow 3-day trial if not on a paid plan
+ * @returns {Promise<{valid: boolean, message: string, plan?: string, email?: string, trial?: object}>}
  */
 async function checkLicense(allowTrial = true) {
-  const fingerprint = getMachineFingerprint();
+  const apiKey = readCliApiKey();
+
+  // Not signed in at all — local trial only
+  if (!apiKey) {
+    return trialGate(allowTrial, 'Not signed in — run `hakster init` after purchasing at https://haksterai.com/pricing.');
+  }
+
   const cache = readCache();
 
-  // Check for license key in env or cache
-  let licenseKey = process.env.HAKSTER_LICENSE_KEY;
-  if (!licenseKey && cache && cache.key) {
-    licenseKey = cache.key;
+  // Cached account status still fresh — skip the network round trip
+  if (cache && cache.apiKey === apiKey) {
+    const age = Date.now() - cache.validatedAt;
+    if (age < CACHE_DURATION) {
+      if (cache.paid) {
+        return { valid: true, message: `✅ Signed in — ${cache.plan} plan.`, plan: cache.plan, email: cache.email };
+      }
+      return trialGate(allowTrial, `Signed in as ${cache.email || 'your account'} (${cache.plan || 'free'} plan).`);
+    }
   }
 
-  // No key found — check trial
-  if (!licenseKey) {
-    if (allowTrial) {
-      let trial = checkTrial();
-      if (trial === null) {
-        // First run — start trial
-        trial = startTrial();
-        return {
-          valid: true,
-          message: `🎉 Welcome to haksterAi! Your 3-day free trial has started.\n   ${trial.remaining} days remaining.\n   Purchase a license at https://haksterai.com to continue after trial.`,
-          trial,
-        };
+  // Validate against the account backend
+  try {
+    const { status, data } = await fetchAccountStatus(apiKey);
+
+    if (status === 200 && data && data.user) {
+      const { plan, status: acctStatus, email } = data.user;
+      const paid = acctStatus === 'active' && (plan === 'pro' || plan === 'enterprise');
+      writeCache({ apiKey, paid, plan, email, validatedAt: Date.now() });
+
+      if (paid) {
+        return { valid: true, message: `✅ Signed in — ${plan} plan.`, plan, email };
       }
-      if (trial.active) {
-        return {
-          valid: true,
-          message: `⏳ Trial active: ${trial.remaining} day(s) remaining.\n   Purchase at https://haksterai.com`,
-          trial,
-        };
-      }
-      // Trial expired
-      return {
-        valid: false,
-        message: '❌ Your 3-day trial has expired.\n   Purchase a license at https://haksterai.com\n   Set it with: export HAKSTER_LICENSE_KEY=your-key',
-      };
+      return trialGate(allowTrial, `Signed in as ${email} (${plan} plan).`);
     }
+
+    // Bad/unknown API key
     return {
       valid: false,
-      message: '❌ No license key found.\n   Purchase at https://haksterai.com\n   Set it with: export HAKSTER_LICENSE_KEY=your-key',
+      message: `❌ API key not recognized.\n   Run: hakster init\n   Or purchase a plan at https://haksterai.com/pricing`,
     };
-  }
-
-  // Have a key — check cache first
-  if (cache && cache.key === licenseKey && cache.fingerprint === fingerprint) {
-    const age = Date.now() - cache.validatedAt;
-    if (age < CACHE_DURATION && cache.valid) {
-      return {
-        valid: true,
-        message: '✅ License valid (cached).',
-        plan: cache.plan,
-        email: cache.email,
-      };
-    }
-  }
-
-  // Validate with server
-  try {
-    const result = await validateWithServer(licenseKey, fingerprint);
-    if (result.valid) {
-      writeCache({
-        key: licenseKey,
-        fingerprint,
-        valid: true,
-        plan: result.plan,
-        email: result.email,
-        validatedAt: Date.now(),
-      });
-      return {
-        valid: true,
-        message: `✅ License valid — ${result.plan} plan.`,
-        plan: result.plan,
-        email: result.email,
-      };
-    } else {
-      // Server says invalid — but allow cached grace period
-      if (cache && cache.key === licenseKey && cache.valid) {
-        const age = Date.now() - cache.validatedAt;
-        if (age < CACHE_DURATION * 3) { // 72-hour grace period
-          return {
-            valid: true,
-            message: '⚠️ License server unreachable — using cached validation (grace period).',
-            plan: cache.plan,
-          };
-        }
-      }
-      return {
-        valid: false,
-        message: `❌ License invalid: ${result.reason || 'key not recognized'}\n   Purchase at https://haksterai.com`,
-      };
-    }
   } catch (err) {
-    // Server unreachable — use cache if available
-    if (cache && cache.key === licenseKey && cache.valid) {
+    // Server unreachable — fall back to cached account status if we have one
+    if (cache && cache.apiKey === apiKey) {
       const age = Date.now() - cache.validatedAt;
       if (age < CACHE_DURATION * 3) { // 72-hour offline grace period
-        return {
-          valid: true,
-          message: '⚠️ License server unreachable — using cached validation (offline grace).',
-          plan: cache.plan,
-        };
+        if (cache.paid) {
+          return { valid: true, message: '⚠️ Server unreachable — using cached account status (grace period).', plan: cache.plan };
+        }
+        return trialGate(allowTrial, '⚠️ Server unreachable — using cached account status (grace period).');
       }
-      return {
-        valid: false,
-        message: '❌ License server unreachable and cache expired.\n   Check your connection or contact support@haksterai.com',
-      };
     }
-    return {
-      valid: false,
-      message: `❌ Could not validate license: ${err.message}\n   Try again or contact support@haksterai.com`,
-    };
+    return trialGate(allowTrial, `⚠️ Could not verify account (${err.message}).`);
   }
 }
 
@@ -257,7 +217,6 @@ function licenseMiddleware(req, res, next) {
 module.exports = {
   checkLicense,
   licenseMiddleware,
-  getMachineFingerprint,
   startTrial,
   checkTrial,
 };

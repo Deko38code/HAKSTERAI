@@ -129,21 +129,39 @@ function handleServerData(serverName, data) {
 // parent process, without hardcoding a path that only exists on one machine.
 function resolveGhostHome() {
   if (process.env.HAKSTER_HOME) return process.env.HAKSTER_HOME;
-  if (process.getuid && process.getuid() === 0) {
-    if (process.env.SUDO_USER) {
-      try {
-        const { execFileSync } = require('child_process');
-        const home = execFileSync('getent', ['passwd', process.env.SUDO_USER]).toString().trim().split(':')[5];
-        if (home) return home;
-      } catch { /* getent unavailable or user not found — fall through */ }
-    }
-    // Single-operator box: exactly one non-root home dir under /home.
+  // Prefer SUDO_USER's home when running under sudo, regardless of current uid.
+  if (process.env.SUDO_USER) {
     try {
-      const users = fs.readdirSync('/home').filter((u) => u !== 'lost+found');
-      if (users.length === 1) return path.join('/home', users[0]);
-    } catch { /* /home unreadable — fall through */ }
+      const { execFileSync } = require('child_process');
+      const home = execFileSync('getent', ['passwd', process.env.SUDO_USER]).toString().trim().split(':')[5];
+      if (home) return home;
+    } catch { /* getent unavailable or user not found — fall through */ }
   }
-  return require('os').homedir();
+  // If the current process's HOME is inaccessible (e.g. PM2/npm dropped euid
+  // but left HOME pointing at /root), pick the first usable /home/* dir.
+  const currentHome = require('os').homedir();
+  let currentHomeUsable = false;
+  try {
+    fs.accessSync(currentHome, fs.constants.R_OK | fs.constants.X_OK);
+    currentHomeUsable = true;
+  } catch {}
+  // Root's $HOME is never the right place for per-user MCP creds/config.
+  // If we're root (or PM2/npm left HOME=/root while euid dropped), prefer the real operator home.
+  if (currentHomeUsable && currentHome !== '/root' && !currentHome.startsWith('/root/')) {
+    return currentHome;
+  }
+  try {
+    const users = fs.readdirSync('/home').filter((u) => u !== 'lost+found');
+    // Prefer the known operator account first, then any usable home directory.
+    for (const u of Array.from(new Set(['ghost', ...users]))) {
+      const candidate = path.join('/home', u);
+      try {
+        fs.accessSync(candidate, fs.constants.R_OK | fs.constants.X_OK);
+        return candidate;
+      } catch {}
+    }
+  } catch {}
+  return currentHome;
 }
 const GHOST_HOME = resolveGhostHome();
 
@@ -165,7 +183,7 @@ function connectServer(serverName, config) {
     const child = spawn(config.command, config.args || [], {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: '/tmp',  // Run from /tmp to avoid project .npmrc issues
+      cwd: config.cwd || '/tmp',  // Respect config.cwd (needed for relative-path servers); fall back to /tmp to avoid project .npmrc issues
       // Don't detach — we want the child to die when the parent dies
     });
 
@@ -362,14 +380,12 @@ async function loadMcpServers(configDirs) {
     else tier1.push(entry);
   }
 
-  // Store tier 2/3 configs for lazy loading
-  for (const { name, config } of [...tier2, ...tier3]) {
-    _pendingConfigs.set(name, config);
-  }
+  // ── Tier 1: load immediately at startup ──────────────────────────────
+  // Tier 2 & 3 servers are stored in _pendingConfigs and lazy-loaded
+  // on first tool call via ensureServerLoaded(). This saves ~800MB RAM
+  // and significant CPU on a 7GB box where all 17 MCP servers would
+  // otherwise spawn simultaneously.
 
-  // Connect tier 1 servers in parallel (with staggered delays)
-  // Heavy servers (serena) get extra delay — but serena is tier 2 now so
-  // this only applies if someone moves it back to tier 1.
   const HEAVY_SERVERS = new Set(['serena']);
   const sortedConfigs = [...tier1].sort((a, b) => {
     const aH = HEAVY_SERVERS.has(a.name) ? 1 : 0;
@@ -391,29 +407,18 @@ async function loadMcpServers(configDirs) {
     }
   }
 
-  // Background-load tier 3 servers after a 10s delay (let the box settle)
-  if (tier3.length > 0) {
-    _logFn(`  [MCP] ${tier3.length} tier-3 server(s) will load in background after 10s`);
-    setTimeout(() => {
-      for (const { name, config } of tier3) {
-        ensureServerLoaded(name).catch(err => {
-          _logFn(`  [MCP] Background load failed for "${name}": ${err.message}`);
-        });
-      }
-    }, 10000);
+  // ── Tier 2 & 3: defer to _pendingConfigs for lazy loading ────────────
+  // These servers will be spawned on-demand when a tool call targets them
+  // (see ensureServerLoaded / callMcpTool). This cuts startup RAM by ~800MB
+  // and reduces CPU contention during the initial boot rush.
+  for (const entry of [...tier2, ...tier3]) {
+    _pendingConfigs.set(entry.name, entry.config);
   }
-
-  // Background-load tier 2 servers after a 5s delay
-  // (not on-demand — the model needs to know they exist to call them)
   if (tier2.length > 0) {
-    _logFn(`  [MCP] ${tier2.length} tier-2 server(s) will load in background after 5s: ${tier2.map(t => t.name).join(', ')}`);
-    setTimeout(() => {
-      for (const { name, config } of tier2) {
-        ensureServerLoaded(name).catch(err => {
-          _logFn(`  [MCP] Background load failed for "${name}": ${err.message}`);
-        });
-      }
-    }, 5000);
+    _logFn(`  [MCP] ${tier2.length} tier-2 server(s) deferred (lazy-load on demand): ${tier2.map(t => t.name).join(', ')}`);
+  }
+  if (tier3.length > 0) {
+    _logFn(`  [MCP] ${tier3.length} tier-3 server(s) deferred (lazy-load on demand): ${tier3.map(t => t.name).join(', ')}`);
   }
 
   return { tools: getMcpTools(), servers: connected };
@@ -571,6 +576,18 @@ function mcpStatus() {
       toolCount: server.tools.length,
       tools: server.tools.map(t => t.name),
       pid: server.child?.pid || null,
+      status: 'connected',
+    });
+  }
+  // Include pending (lazy-loaded) servers so the UI/agent knows they exist
+  for (const [name] of _pendingConfigs) {
+    servers.push({
+      name,
+      initialized: false,
+      toolCount: 0,
+      tools: [],
+      pid: null,
+      status: 'pending',
     });
   }
   return servers;
@@ -698,10 +715,12 @@ function diffConfiguredVsConnected(configDirs) {
     }
   }
   const connectedNames = new Set(mcpServers.keys());
-  const missing = configured.filter(c => !connectedNames.has(c.name));
+  const pendingNames = new Set(_pendingConfigs.keys());
+  const missing = configured.filter(c => !connectedNames.has(c.name) && !pendingNames.has(c.name));
   return {
     configured: configured.map(c => c.name),
     connected: configured.filter(c => connectedNames.has(c.name)).map(c => c.name),
+    pending: configured.filter(c => pendingNames.has(c.name)).map(c => c.name),
     missing: missing.map(c => ({ name: c.name, config: c.config })),
   };
 }
