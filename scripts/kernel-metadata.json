@@ -1,0 +1,13 @@
+{
+  "id": "dekoneed/hp1000-gpu-live",
+  "title": "hp1000 GPU Live",
+  "code_file": "kaggle-remote-ollama.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}

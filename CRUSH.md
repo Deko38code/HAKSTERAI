@@ -4,10 +4,10 @@
 - Handle: @Ghost
 - Identity: pentester under haksterAi
 ## Client Machine (auto-detected)
-- OS: Linux
-- Browser: Firefox 149.0
+- OS: Unknown
+- Browser: Chrome 136.0.0.0
 - Device: desktop
-- IP: 2601:205:4a7e:3da0::db9b
+- IP: 40.77.179.4
 ## Server Machine
 - OS: Linux (Ubuntu, AMD A12-9720P, 4 cores, ~7GB RAM)
 - Working directory: /home/ghost/haksterAi

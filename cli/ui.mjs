@@ -51,7 +51,7 @@ var HaksterAgent = class extends EventEmitter {
   constructor() {
     super();
     this.ws = null;
-    this.model = process.env.HAKSTER_MODEL || "glm-5.2:cloud";
+    this.model = process.env.HAKSTER_MODEL || "hp-1000:latest";
     this.sessionId = null;
     this.connected = false;
     this.lowToken = process.env.HAKSTER_LOW_TOKEN === "1" || process.env.HAKSTER_LOW_TOKEN === "true";
