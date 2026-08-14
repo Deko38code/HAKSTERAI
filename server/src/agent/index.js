@@ -8562,24 +8562,33 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
       // Now: if not a forced finish (stuck loop), nudge the model to ACT and
       // continue the loop instead of breaking.
       if (!_forcedFinish) {
-        // ── QUESTION-TO-USER DETECTION ──
-        // If the agent's response is a question or waiting for user input,
-        // break the loop cleanly — don't nudge it to call tools when there's
-        // no task to act on. This prevents the "yo" → greet → nudge → repeat loop.
-        const _isQuestionToUser = (() => {
+        // ── CONVERSATIONAL DONE DETECTION ──
+        // If the agent's response is conversational (greeting, compliment,
+        // acknowledgment, waiting for user input) and contains NO task-action
+        // language, break the loop cleanly. Don't nudge it to call tools when
+        // there's no task to act on. This prevents:
+        //   "yo" → greet → nudge → greet → nudge → ... (11-round loop)
+        //   "great job" → "thanks!" → nudge → "thanks!" → nudge → ... (11-round loop)
+        const _isConversationalDone = (() => {
           const t = responseText.trim();
           if (!t) return false;
-          // Ends with a question mark and is reasonably short (not a code dump)
-          if (/\?\s*$/.test(t) && t.length < 500) return true;
-          // Clarifying question patterns (even 1 hit is enough for short responses)
-          if (t.length < 500 && _isClarifyingQuestion(responseAll)) return true;
-          // Explicit waiting patterns
-          if (/\b(waiting (for|on) (your|user|input|direction|response)|let me know|resume.*or.*start|what.*(would|do) you like|shall i|should i (start|begin|resume|continue))\b/i.test(t)) return true;
+          // Long responses with no tool call are likely mid-task narration — nudge.
+          if (t.length > 400) return false;
+          // Task-action language means the agent is about to do something — nudge.
+          if (/\b(let me|i'll|i will|i'm going to|i need to|let's (start|begin)|first i|step 1|checking|searching|running|analyzing|scanning|looking at|investigating|debugging|fixing|patching|updating|installing|deploying)\b/i.test(t)) return false;
+          // Ends with a question mark → waiting for user response
+          if (/\?\s*$/.test(t)) return true;
+          // Clarifying question patterns
+          if (_isClarifyingQuestion(responseAll)) return true;
+          // Explicit waiting/standing-by patterns
+          if (/\b(waiting (for|on) (your|user|input|direction|response)|let me know|resume.*or.*start|what.*(would|do) you like|shall i|should i (start|begin|resume|continue)|standing by|ready when|here when|no task|nothing (to do|pending|on the board)|idle and ready|just (vibing|chilling)|say the word)\b/i.test(t)) return true;
+          // Conversational acknowledgments / greetings / farewells (short, no action verbs)
+          if (t.length < 200 && /\b(thanks|thank you|got it|noted|saved|done|all good|no problem|sounds good|appreciate|always got your back|hit me (up|whenever)|ready for your next|what's up|hey|yo|sup|cheers|cool|awesome|nice|gotcha|understood|will do|on it)\b/i.test(t)) return true;
           return false;
         })();
 
-        if (_isQuestionToUser) {
-          // Clean break — agent asked the user a question, waiting for their response.
+        if (_isConversationalDone) {
+          // Clean break — agent gave a conversational response, waiting for user input.
           // Don't nudge, don't continue the loop, don't treat as stuck.
           if (_stallGuardTimer) { clearInterval(_stallGuardTimer); _stallGuardTimer = null; }
           if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; }
