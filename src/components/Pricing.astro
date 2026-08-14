@@ -19,7 +19,7 @@ const plans = [
     price: '$9.99',
     cadence: 'month',
     tag: 'haksterai_starter_monthly',
-    planId: 'starter',
+    planId: 'pro',
     priceCatalogId: 'starter_monthly',
     stripePriceId: import.meta.env.STRIPE_PRICE_STARTER_MONTHLY || process.env.STRIPE_PRICE_STARTER_MONTHLY || null,
     tone: 'text-[#22d3ee]',
@@ -106,8 +106,8 @@ const plans = [
  try {
  const auth = JSON.parse(decodeURIComponent(googleAuth));
  if (auth.ok && auth.apiKey) {
- localStorage.setItem('hakster_google_token', auth.apiKey);
- localStorage.setItem('hakster_google_user', JSON.stringify(auth.user || {}));
+ localStorage.setItem('hakster_api_key', auth.apiKey);
+ localStorage.setItem('hakster_user', JSON.stringify(auth.user || {}));
  // Clean the URL so the param doesn't persist on refresh
  const cleanUrl = window.location.origin + window.location.pathname + '#pricing';
  window.history.replaceState({}, document.title, cleanUrl);
@@ -121,13 +121,8 @@ const plans = [
  const planName = btn.dataset.planName;
 
     if (!priceId || priceId === 'null' || priceId === '') {
-      // Free plan — check if already signed in, otherwise trigger sign-in → /build
-      const token = localStorage.getItem('hakster_google_token');
-      if (token) {
-        window.location.href = '/build';
-      } else {
-        window.location.href = '/?signin=1&redirect=/build';
-      }
+      // Free plan — just redirect to install
+      window.location.href = '/#install';
       return;
     }
 
@@ -135,7 +130,7 @@ const plans = [
     btn.textContent = 'Redirecting to checkout...';
 
     try {
-      const apiKey = localStorage.getItem('hakster_google_token');
+      const apiKey = localStorage.getItem('hakster_api_key');
       const resp = await fetch('/api/stripe/checkout', {
       method: 'POST',
       headers: {

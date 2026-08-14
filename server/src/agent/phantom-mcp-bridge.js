@@ -3,43 +3,52 @@
  * MCP <-> Phantom IDE bridge.
  *
  * Exposes Phantom IDE's HTTP API (localhost:4000) as MCP tools so that
- * claude-cli / codex / any MCP consumer can use Phantom's file access,
- * shell execution, web search, and status endpoints.
+ * haksterAI / claude-cli / codex / any MCP consumer can use Phantom's
+ * file access, shell execution, web search, AI proxy, and status endpoints.
  *
  * Tools exposed:
- *   - phantom_read_file    : Read a file via Phantom's API
- *   - phantom_run_command  : Execute a shell command via Phantom's API
- *   - phantom_search_web    : Web search via Phantom's API
+ *   - phantom_read_file     : Read a file (with optional line range)
+ *   - phantom_write_file    : Write/create a file
+ *   - phantom_edit_file     : Targeted find-and-replace edit
+ *   - phantom_run_command   : Execute a shell command
+ *   - phantom_search_web    : Web search
+ *   - phantom_ai_chat       : Chat via Phantom's AI provider waterfall (Groq/Gemini/Ollama/etc.)
+ *   - phantom_grep          : Grep pattern across files
+ *   - phantom_list_files    : List directory contents
  *   - phantom_status        : Get Phantom server status
  */
+'use strict';
 const http = require('http');
 
 const PHANTOM_HOST = 'localhost';
 const PHANTOM_PORT = 4000;
+// Phantom identifies localhost as the owner — no token needed
+const OWNER_HEADERS = {
+  'Content-Type': 'application/json',
+  'x-phantom-terminal': '1',
+  'x-owner-email': 'deezykc1nun37@yahoo.com',
+};
 
 function phantomRequest(method, path, body) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
-    const opts = {
-      hostname: PHANTOM_HOST,
-      port: PHANTOM_PORT,
-      path,
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : {},
-      timeout: 30000,
-    };
-    if (data) opts.headers['Content-Length'] = Buffer.byteLength(data);
+    const headers = { ...OWNER_HEADERS };
+    if (!data) delete headers['Content-Type'];
+    else headers['Content-Length'] = String(Buffer.byteLength(data));
 
-    const req = http.request(opts, (res) => {
-      let out = '';
-      res.on('data', (d) => { out += d.toString(); });
-      res.on('end', () => {
-        try { resolve(JSON.parse(out)); }
-      catch (_) { resolve({ raw: out }); }
-      });
-    });
+    const req = http.request(
+      { hostname: PHANTOM_HOST, port: PHANTOM_PORT, path, method, headers, timeout: 45000 },
+      (res) => {
+        let out = '';
+        res.on('data', (d) => { out += d.toString(); });
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(out) }); }
+          catch (_) { resolve({ status: res.statusCode, body: { raw: out } }); }
+        });
+      }
+    );
     req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Phantom API timeout (30s)')); });
+    req.on('timeout', () => { req.destroy(); reject(new Error('Phantom API timeout (45s)')); });
     if (data) req.write(data);
     req.end();
   });
@@ -48,19 +57,48 @@ function phantomRequest(method, path, body) {
 const TOOLS = [
   {
     name: 'phantom_read_file',
-    description: 'Read a file from the local filesystem via Phantom IDE (localhost:4000). Returns file contents.',
+    description: 'Read a file from Phantom IDE (localhost:4000). Supports line ranges for large files.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute or relative path to the file.' },
+        file: { type: 'string', description: 'Filename relative to Phantom workspace or absolute path.' },
+        start: { type: 'number', description: 'Start line number (1-indexed, optional).' },
+        end: { type: 'number', description: 'End line number (inclusive, optional).' },
       },
-      required: ['path'],
+      required: ['file'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'phantom_write_file',
+    description: 'Create or overwrite a file via Phantom IDE. Wipe-protection is enforced on core files.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Filename relative to Phantom workspace or absolute path.' },
+        content: { type: 'string', description: 'Full file content to write.' },
+      },
+      required: ['file', 'content'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'phantom_edit_file',
+    description: 'Targeted find-and-replace edit in a file via Phantom IDE. old_str must be an exact unique match.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Filename relative to Phantom workspace or absolute path.' },
+        old_str: { type: 'string', description: 'Exact text to replace (must be unique in file).' },
+        new_str: { type: 'string', description: 'Replacement text.' },
+      },
+      required: ['file', 'old_str', 'new_str'],
       additionalProperties: false,
     },
   },
   {
     name: 'phantom_run_command',
-    description: 'Execute a shell command via Phantom IDE (localhost:4000). Returns stdout+stderr.',
+    description: 'Execute a shell command via Phantom IDE (localhost:4000). Returns stdout + stderr.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -73,7 +111,7 @@ const TOOLS = [
   },
   {
     name: 'phantom_search_web',
-    description: 'Search the web via Phantom IDE (localhost:4000). Returns search results.',
+    description: 'Search the web via Phantom IDE\'s search endpoint. Returns titles, URLs, and snippets.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -85,8 +123,47 @@ const TOOLS = [
     },
   },
   {
+    name: 'phantom_ai_chat',
+    description: 'Send a message through Phantom\'s AI provider waterfall (Groq → Gemini → Ollama → cloud). Uses Phantom\'s free API keys — zero token cost to haksterAI.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'User message to send.' },
+        system: { type: 'string', description: 'Optional system prompt override.' },
+        model: { type: 'string', description: 'Optional model name (e.g. llama-3.3-70b-versatile).' },
+      },
+      required: ['message'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'phantom_grep',
+    description: 'Grep a pattern across files in the Phantom workspace.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Search pattern (regex supported).' },
+        dir: { type: 'string', description: 'Directory to search (defaults to /home/ghost).' },
+        ext: { type: 'string', description: 'File extension filter (e.g. .js, .html).' },
+      },
+      required: ['pattern'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'phantom_list_files',
+    description: 'List files and directories in the Phantom workspace.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Directory path to list (defaults to /home/ghost).' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'phantom_status',
-    description: 'Get Phantom IDE server status (uptime, CPU, memory, providers, sessions).',
+    description: 'Get Phantom IDE server status: uptime, CPU/RAM, AI providers, sessions, peer sync.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -94,6 +171,26 @@ const TOOLS = [
     },
   },
 ];
+
+function formatResult(r) {
+  if (typeof r === 'string') return r;
+  if (r && typeof r === 'object') {
+    // Prefer human-readable fields over raw JSON
+    if (r.content) return String(r.content);
+    if (r.output) return String(r.output);
+    if (r.stdout !== undefined) {
+      const parts = [];
+      if (r.stdout) parts.push(r.stdout);
+      if (r.stderr) parts.push(`[stderr] ${r.stderr}`);
+      if (r.exit !== undefined) parts.push(`[exit ${r.exit}]`);
+      return parts.join('\n') || '(empty output)';
+    }
+    if (r.error) return `Error: ${r.error}`;
+    if (r.ok === false) return `Error: ${r.error || 'request failed'}`;
+    return JSON.stringify(r, null, 2);
+  }
+  return String(r);
+}
 
 const rl = require('readline').createInterface({ input: process.stdin, terminal: false });
 
@@ -114,35 +211,96 @@ rl.on('line', async (line) => {
       send({ jsonrpc: '2.0', id, result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'phantom-mcp-bridge', version: '1.0.0' },
+        serverInfo: { name: 'phantom-mcp-bridge', version: '2.0.0' },
       }});
-    } else if (method === 'tools/list') {
+      return;
+    }
+
+    if (method === 'tools/list') {
       send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
-    } else if (method === 'tools/call') {
+      return;
+    }
+
+    if (method === 'tools/call') {
       const { name, arguments: args } = params || {};
       let text;
 
-      if (name === 'phantom_read_file') {
-        const res = await phantomRequest('POST', '/api/agent/read-file', { path: args.path });
-        text = typeof res === 'string' ? res : (res.content || res.raw || JSON.stringify(res, null, 2));
-      } else if (name === 'phantom_run_command') {
-        const res = await phantomRequest('POST', '/api/agent/run', { cmd: args.cmd, cwd: args.cwd || '/home/ghost' });
-        text = typeof res === 'string' ? res : (res.output || res.stdout || res.raw || JSON.stringify(res, null, 2));
-      } else if (name === 'phantom_search_web') {
-        const res = await phantomRequest('POST', '/api/agent/search-web', { query: args.query, num: args.num || 8 });
-        text = JSON.stringify(res, null, 2);
-      } else if (name === 'phantom_status') {
-        const res = await phantomRequest('GET', '/api/status/full');
-        text = JSON.stringify(res, null, 2);
-      } else {
-        send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
-        return;
+      switch (name) {
+        case 'phantom_read_file': {
+          const body = { file: args.file };
+          if (args.start) body.start = args.start;
+          if (args.end) body.end = args.end;
+          const r = await phantomRequest('POST', '/api/agent/read', body);
+          text = formatResult(r.body);
+          break;
+        }
+        case 'phantom_write_file': {
+          const r = await phantomRequest('POST', '/api/agent/write', { file: args.file, content: args.content });
+          text = formatResult(r.body);
+          break;
+        }
+        case 'phantom_edit_file': {
+          const r = await phantomRequest('POST', '/api/agent/edit', { file: args.file, old_str: args.old_str, new_str: args.new_str });
+          text = formatResult(r.body);
+          break;
+        }
+        case 'phantom_run_command': {
+          const r = await phantomRequest('POST', '/api/agent/run', { cmd: args.cmd, cwd: args.cwd || '/home/ghost' });
+          text = formatResult(r.body);
+          break;
+        }
+        case 'phantom_search_web': {
+          const r = await phantomRequest('POST', '/api/agent/search-web', { query: args.query, num: args.num || 8 });
+          text = formatResult(r.body);
+          break;
+        }
+        case 'phantom_ai_chat': {
+          // Route through Phantom's bypass/chat endpoint — uses Phantom's own free provider keys
+          const messages = [{ role: 'user', content: args.message }];
+          const body = { messages, stream: false };
+          if (args.system) body.system = args.system;
+          if (args.model) body.model = args.model;
+          const r = await phantomRequest('POST', '/api/bypass/chat', body);
+          const resp = r.body;
+          // bypass/chat returns different shapes depending on provider
+          if (resp && resp.choices) {
+            text = resp.choices[0]?.message?.content || JSON.stringify(resp, null, 2);
+          } else if (resp && resp.content) {
+            text = Array.isArray(resp.content) ? resp.content.map(c => c.text || '').join('') : String(resp.content);
+          } else {
+            text = formatResult(resp);
+          }
+          break;
+        }
+        case 'phantom_grep': {
+          const r = await phantomRequest('POST', '/api/agent/grep', {
+            pattern: args.pattern,
+            dir: args.dir || '/home/ghost',
+            ext: args.ext || '',
+          });
+          text = formatResult(r.body);
+          break;
+        }
+        case 'phantom_list_files': {
+          const r = await phantomRequest('POST', '/api/agent/list', { dir: args.dir || '/home/ghost' });
+          text = formatResult(r.body);
+          break;
+        }
+        case 'phantom_status': {
+          const r = await phantomRequest('GET', '/api/status/full');
+          text = formatResult(r.body);
+          break;
+        }
+        default:
+          send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
+          return;
       }
 
-      send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } });
-    } else {
-      send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown method: ${method}` } });
+      send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: String(text) }] } });
+      return;
     }
+
+    send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown method: ${method}` } });
   } catch (e) {
     send({ jsonrpc: '2.0', id, error: { code: -32000, message: e.message } });
   }

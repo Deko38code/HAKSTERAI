@@ -1,4 +1,4 @@
 {
-  "provider": "ollama",
-  "model": "hp-1000:latest"
+  "provider": "claude-proxy",
+  "model": "claude-sonnet-4-5"
 }

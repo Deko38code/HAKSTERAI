@@ -74,7 +74,7 @@ const PROVIDERS = {
   ollama: {
     name: 'Ollama',
     baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    defaultModel: process.env.DEFAULT_MODEL || 'hp-1000:latest',
+    defaultModel: process.env.HAKSTER_MODEL || process.env.HP1000_MODEL || process.env.OLLAMA_MODEL || process.env.DEFAULT_MODEL || 'hp-1000:latest',
     type: 'openai-compat',
   },
   // Second ollama instance for gpt-oss:120b-cloud — same backend, different model,
@@ -156,7 +156,7 @@ const PROVIDERS = {
   'hackbot': {
     name: 'HackBot Cloud',
     baseURL: process.env.HACKBOT_BASE_URL || 'http://localhost:8082',
-    defaultModel: process.env.HACKBOT_MODEL || 'qwen3.5',
+    defaultModel: process.env.HACKBOT_MODEL || 'glm-5.2:cloud',
     apiKey: process.env.HACKBOT_API_KEY || 'hk-universal-2026',
     type: 'openai-compat',
   },
@@ -182,8 +182,8 @@ function _pmodel(name, fallback) { const e = loadPhantomKeys()[name]; return (e 
 
 // Add the phantom cloud providers into PROVIDERS (merge, don't overwrite existing).
 Object.assign(PROVIDERS, {
-  groq:        { name: 'Groq',        baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq', 'llama-3.3-70b-versatile'), apiKey: _pk('groq')        || process.env.GROQ_API_KEY,        apiKeyEnv: 'GROQ_API_KEY',        type: 'openai-compat' },
-  groq2:       { name: 'Groq 2',      baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq2','llama-3.1-8b-instant'),   apiKey: _pk('groq2')       || process.env.GROQ_API_KEY2,      apiKeyEnv: 'GROQ_API_KEY2',       type: 'openai-compat' },
+  groq:        { name: 'Groq',        baseURL: 'https://api.groq.com/openai',                 defaultModel: _pmodel('groq', 'llama-3.3-70b-versatile'), apiKey: _pk('groq')        || process.env.GROQ_API_KEY,        apiKeyEnv: 'GROQ_API_KEY',        type: 'openai-compat' },
+  groq2:       { name: 'Groq 2',      baseURL: 'https://api.groq.com/openai',                 defaultModel: _pmodel('groq2','llama-3.1-8b-instant'),   apiKey: _pk('groq2')       || process.env.GROQ_API_KEY2,      apiKeyEnv: 'GROQ_API_KEY2',       type: 'openai-compat' },
   sambanova:   { name: 'SambaNova',   baseURL: 'https://api.sambanova.ai/v1',                    defaultModel: _pmodel('sambanova','Meta-Llama-3.3-70B-Instruct'), apiKey: _pk('sambanova') || process.env.SAMBANOVA_API_KEY,   apiKeyEnv: 'SAMBANOVA_API_KEY',   type: 'openai-compat' },
   cerebras:    { name: 'Cerebras',    baseURL: 'https://api.cerebras.ai/v1',                      defaultModel: _pmodel('cerebras','llama3.1-8b'),          apiKey: _pk('cerebras')    || process.env.CEREBRAS_API_KEY,    apiKeyEnv: 'CEREBRAS_API_KEY',    type: 'openai-compat' },
   gemini:      { name: 'Google Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: _pmodel('gemini','gemini-2.5-flash'), apiKey: _pk('gemini') || process.env.GEMINI_API_KEY,  apiKeyEnv: 'GEMINI_API_KEY',  type: 'gemini' },
@@ -191,22 +191,30 @@ Object.assign(PROVIDERS, {
   pollinations:{ name: 'Pollinations', baseURL: 'https://text.pollinations.ai/openai',             defaultModel: 'openai',                                    apiKey: _pk('pollinations')|| 'free',                          apiKeyEnv: 'POLLINATIONS_API_KEY',type: 'openai-compat' },
   'puter-sonnet': { name: 'Puter Sonnet', baseURL: 'https://api.puter.com',                         defaultModel: 'claude-sonnet-4-20250514',                 apiKey: 'free',                                              apiKeyEnv: '',                     type: 'openai-compat' },
   'puter-4o':  { name: 'Puter GPT-4o', baseURL: 'https://api.puter.com',                            defaultModel: 'gpt-4o',                                   apiKey: 'free',                                              apiKeyEnv: '',                     type: 'openai-compat' },
- // ── Kaggle remote GPU Ollama (free, 16GB P100/T4, 12hr sessions) ──
- // OLLAMA_HOST env points to the cloudflare tunnel URL from the Kaggle notebook.
- // Same Ollama API, just remote — hp-1000 runs on Kaggle GPU instead of swapping locally.
- 'kaggle':    { name: 'Kaggle GPU',    baseURL: process.env.OLLAMA_HOST || 'http://localhost:11434',  defaultModel: 'hp-1000:latest',                            apiKey: 'ollama',                                             apiKeyEnv: '',                     type: 'openai-compat' },
 });
 
-// Waterfall order: ollama 1st (hp-1000, LOCAL — unlimited, zero token cost),
-// hackbot 2nd (claude-proxy cloud tier — free but quota-limited),
-// gpt-oss 3rd (120b cloud), then sambanova + groq (cloud-free) and on down.
-// Local-first saves cloud quota for when ollama is down or rate-limited.
-const WATERFALL_ORDER = ['ollama','kaggle','hackbot','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations'];
+// Waterfall order: ollama 1st (local, always free), then high-quota free-tier cloud
+// (claude-cli rides Pro sub, sambanova/groq reset every minute/day), THEN cloud-Ollama
+// models (hackbot=glm-5.2:cloud, gpt-oss=gpt-oss:120b-cloud) which have tight hourly/weekly
+// caps — keep them as last resort so they aren't burned on every Ollama hiccup.
+const WATERFALL_ORDER = ['ollama','claude-cli','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o','hackbot','gpt-oss'];
+
+// Cloud-Ollama providers that have tight hourly/weekly rate limits.
+// When they 429, cool them down for 2 hours instead of 2 minutes.
+const CLOUD_OLLAMA_PROVIDERS = new Set(['hackbot', 'gpt-oss']);
+
 const _rateLimited = new Map(); // provider -> until ms
-function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
+function markProviderRateLimited(name, ms = 60000) {
+  if (!name) return;
+  // Cloud Ollama models have hourly/weekly caps — use a much longer cooldown
+  // so the waterfall doesn't hammer them and burn the weekly allowance in minutes.
+  const cooldown = CLOUD_OLLAMA_PROVIDERS.has(name) ? Math.max(ms, 7200000) : ms; // 2h min for cloud Ollama
+  _rateLimited.set(name, Date.now() + cooldown);
+}
 function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }
 function providerHasKey(name) {
   const cfg = PROVIDERS[name]; if (!cfg) return false;
+  if (name === 'ollama' || cfg.baseURL?.match(/localhost|127\.0\.0\.1|::1/)) return true;
   if (cfg.type === 'gemini') return !!(cfg.apiKey);
   return !!cfg.apiKey || cfg.apiKey === 'free';
 }
@@ -221,146 +229,6 @@ function getWaterfallProvider(prefer) {
   }
   // fallback to ollama (local, keyless) — always usable
   return { provider: 'ollama', model: PROVIDERS.ollama.defaultModel };
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  SMART LOCAL MODEL ROUTER — pick the right LOCAL model per task type
-//  Local models are free (your hardware). Cloud models burn quota.
-//  Goal: 80%+ of requests served by local models, cloud only as fallback.
-// ═══════════════════════════════════════════════════════════════════
-
-// Local models installed on this machine
-// RAM-conscious: ~2.7GB available with services running. Models >4GB will swap.
-// Priority: models that fit in RAM → models that swap → cloud as last resort
-const LOCAL_MODELS = {
-  // ── FITS IN RAM (≤2GB) — fast, no swap ──
-  'qwen2.5:3b':           { size: '1.9GB', goodFor: ['code','programming','script','function','build','create','implement','refactor','debug','python','javascript','typescript','bash','quick','simple','fast','snippet','small'] },
-  'llama3.2:3b':          { size: '2.0GB', goodFor: ['quick','simple','fast','short','basic','convert','format','parse','list','chat','help'] },
-  'claude-pentest':       { size: '1.3GB', goodFor: ['pentest','security','nmap','scan','vulnerability','exploit','injection','xss','sqli','recon'] },
-  'llama3.2:1b':          { size: '1.3GB', goodFor: ['hello','hi','yes','no','thanks','ok','simple','fast','ultrafast','brief'] },
-  'qwen2.5:0.5b':         { size: '0.4GB', goodFor: ['hello','hi','yes','no','ok','brief','tiny'] },
-  'tinyllama':            { size: '0.6GB', goodFor: ['hello','hi','yes','no','ok'] },
-  // ── SWAPS (4-5GB) — slower but higher quality, used for complex tasks ──
-  'hermes3':              { size: '4.7GB', goodFor: ['reasoning','analyze','plan','design','architecture','review','audit','security','vulnerability','pentest','exploit'] },
-  'hermes3-65k':          { size: '4.7GB', goodFor: ['long','context','document','summary','summarize','report'] },
-  'mistral':              { size: '4.4GB', goodFor: ['general','chat','write','explain','describe','answer','help'] },
-  'mistral-ctx':          { size: '4.4GB', goodFor: ['long','context','document','conversation','history'] },
-  'mistral-hermes':       { size: '4.4GB', goodFor: ['code','chat','general','reasoning'] },
-  // ── HEAVY (6.6GB) — only for complex code tasks, will swap heavily ──
-  'qwen3.5':              { size: '6.6GB', goodFor: ['complex','large-scale','production','comprehensive','deep-analysis','full-rewrite','complete-refactor'] },
-  // ── REMOTE (Kaggle GPU) — served via OLLAMA_HOST tunnel, zero local RAM ──
-  'hp-1000:latest':       { size: '6.6GB', goodFor: ['complex','large-scale','production','comprehensive','deep-analysis','full-rewrite','complete-refactor','code','programming','script','function','build','create','implement','refactor','debug','python','javascript','typescript','bash','security','pentest','vulnerability','exploit','reasoning','analyze','plan','design','architecture','review','audit'], remote: true },
-};
-
-// Cloud models (payment-bypassed, quota-limited — use ONLY as fallback)
-const CLOUD_FALLBACK_MODELS = ['glm-5.2:cloud', 'kimi-k2.7-code:cloud', 'glm-5.1:cloud', 'gpt-oss:120b-cloud'];
-
-// Distributed models on Parrot Box (free, your hardware on LAN)
-const PARROT_MODELS = ['deepseek-coder-v2:16b', 'codellama:7b', 'phi3:mini'];
-
-/**
- * Detect task type from messages and pick the best LOCAL model for it.
- * Returns { model, tier, reason } — tier is 'local' | 'parrot' | 'kaggle' | 'cloud'
- */
-function pickLocalModel(messages) {
-  // Gather all user message content for keyword detection
-  const userText = (messages || [])
-    .filter(m => m.role === 'user')
-    .map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content || ''))
-    .join(' ')
-    .toLowerCase();
-
-  // If no user text, use a fast default
-  if (!userText.trim()) return { model: 'llama3.2:3b', tier: 'local', reason: 'empty-prompt-fast' };
-
-  // ── Score each local model by keyword overlap ──
-  let bestModel = null;
-  let bestScore = 0;
-  let bestReason = '';
-
-  for (const [modelName, info] of Object.entries(LOCAL_MODELS)) {
-    let score = 0;
-    for (const keyword of info.goodFor) {
-      if (userText.includes(keyword)) score++;
-    }
-    // Prefer smaller models for simple tasks (faster, less RAM)
-    // Penalty for large models when score is low
-    if (score === 0 && parseFloat(info.size) > 4) score = -1;
-    if (score > bestScore || (score === bestScore && bestModel && parseFloat(info.size) < parseFloat(LOCAL_MODELS[bestModel]?.size || '99'))) {
-      bestScore = score;
-      bestModel = modelName;
-      bestReason = score > 0 ? `keyword-match(${info.goodFor.filter(k => userText.includes(k)).join(',')})` : 'default-best-local';
-    }
-  }
-
-  // If no keyword match, use mistral (good general-purpose, moderate size)
-  if (bestScore <= 0 || !bestModel) {
-    return { model: 'mistral', tier: 'local', reason: 'general-purpose-default' };
-  }
-
-  // ── Escalation: check if task needs cloud/parrot/kaggle ──
-
-  // Heavy reasoning / large-scale → try Kaggle GPU or cloud
-  const HEAVY_KEYWORDS = ['complex', 'large-scale', 'production', 'enterprise', 'comprehensive',
-    'thor', 'detailed-report', 'deep-analysis', 'massive', 'huge', '32b', '70b',
-    'rewrite entire', 'full rewrite', 'complete refactor'];
-  const heavyScore = HEAVY_KEYWORDS.filter(k => userText.includes(k)).length;
-  if (heavyScore >= 2) {
-    // If Kaggle remote Ollama is configured, use hp-1000 on GPU (free, fast, no swap)
-    const ollamaHost = process.env.OLLAMA_HOST || '';
-    const isKaggleRemote = ollamaHost && !ollamaHost.includes('localhost') && !ollamaHost.includes('127.0.0.1');
-    if (isKaggleRemote) {
-      return { model: 'hp-1000:latest', tier: 'kaggle', reason: `heavy-task→Kaggle GPU(${heavyScore} keywords)` };
-    }
-    // Try Parrot Box first (free, on LAN), then cloud
-    return { model: 'deepseek-coder-v2:16b', tier: 'parrot', reason: `heavy-task-escalation(${heavyScore} keywords)` };
-  }
-
-  // Long context → use mistral-ctx or hermes3-65k
-  const estimatedInputSize = userText.length;
-  if (estimatedInputSize > 8000) {
-    return { model: 'mistral-ctx', tier: 'local', reason: `long-context(${estimatedInputSize} chars)` };
-  }
-  if (estimatedInputSize > 16000) {
-    return { model: 'hermes3-65k', tier: 'local', reason: `very-long-context(${estimatedInputSize} chars)` };
-  }
-
-  return { model: bestModel, tier: bestModel ? 'local' : 'local', reason: bestReason };
-}
-
-/**
- * Get the full fallback chain: local models first, then parrot, then cloud.
- * This is what callOllama uses when the primary model is rate-limited.
- */
-function getLocalFirstFallbackChain() {
-  // All local models (best to worst), then parrot models, then cloud
-  return [
-    'qwen3.5',           // best local code model
-    'hermes3',           // best local reasoning
-    'mistral',           // good general purpose
-    'llama3.2:3b',       // fast mid-tier
-    'claude-pentest',    // security/pentest
-    'llama3.2:1b',       // ultra-fast simple
-    'deepseek-coder-v2:16b', // parrot box (free, LAN)
-    'codellama:7b',      // parrot box
-    'glm-5.2:cloud',     // cloud fallback (quota-limited)
-    'kimi-k2.7-code:cloud', // cloud fallback
-    'glm-5.1:cloud',     // cloud last resort
-  ];
-}
-
-/**
- * Check if a model is a local model (not cloud)
- */
-function isLocalModel(model) {
-  return Boolean(LOCAL_MODELS[model]) || PARROT_MODELS.includes(model);
-}
-
-/**
- * Check if a model is a cloud model (quota-limited)
- */
-function isCloudModel(model) {
-  return CLOUD_FALLBACK_MODELS.includes(model) || String(model).includes(':cloud');
 }
 
 // ── Image Gen providers ────────────────────────────────────────────
@@ -582,7 +450,7 @@ function getClient(provider) {
 
     case 'openai-compat':
       return new OpenAI({
-        apiKey: 'ollama',
+        apiKey: cfg.apiKey || 'ollama',
         baseURL: `${cfg.baseURL}/v1`,
         timeout: 120000, // 2 minute timeout for model calls
       });
@@ -697,7 +565,7 @@ async function firecrawlRequest(endpoint, body, keysLeft = null) {
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
-          if ([401, 402, 403, 429].includes(res.statusCode) || res.statusCode >= 500 || json?.error?.includes?.('rate limit') || json?.error?.includes?.('Insufficient credits')) {
+          if ([401, 403, 429].includes(res.statusCode) || res.statusCode >= 500 || json?.error?.includes?.('rate limit')) {
             if (keys.length > 1) return resolve(firecrawlRequest(endpoint, body, keys.slice(1)));
           }
           resolve({ status: res.statusCode, json });
@@ -860,14 +728,8 @@ async function chat({ provider, model, messages, system, maxTokens = 4096 }) {
     const latency = Date.now() - start;
     const inputTokens = res.usage?.input_tokens ?? 0;
     const outputTokens = res.usage?.output_tokens ?? 0;
-    // Extract thinking from Claude extended thinking blocks
-    const thinkingContent = res.content
-      ?.filter(block => block.type === 'thinking')
-      ?.map(block => block.thinking || '')
-      ?.join('\n') || '';
     return {
       content: res.content[0]?.text ?? '',
-      thinking: thinkingContent,
       inputTokens,
       outputTokens,
       latency,
@@ -895,64 +757,6 @@ async function chat({ provider, model, messages, system, maxTokens = 4096 }) {
   const finalMessages = system
     ? [{ role: 'system', content: system }, ...messages]
     : messages;
-
-  // For Ollama models, request thinking output via /api/chat directly
-  // The OpenAI SDK doesn't support Ollama's thinking/reasoning fields,
-  // so we use a raw HTTP call for Ollama to capture thinking blocks.
-  const isOllama = (cfg.type === 'openai-compat' && cfg.baseURL && cfg.baseURL.includes('11434'));
-
-  if (isOllama) {
-    // Direct Ollama /api/chat call — captures thinking/reasoning from qwen3.5, glm-5.2, hp-1000
-    const http = require('http');
-    // ── Sonnet-level thinking: hp-1000 (GLM-5.2) gets extended thinking ──
-    const thinkingBudget = Math.floor(maxTokens * 0.15);
-    const body = JSON.stringify({
-      model,
-      messages: sanitizeMessagesForProvider(finalMessages, provider),
-      stream: false,
-      thinking: { type: 'enabled', budget_tokens: thinkingBudget },
-      options: { num_predict: maxTokens, temperature: 0.3, top_p: 0.9, num_ctx: 32768 },
-    });
-    const ollamaResult = await new Promise((resolve, reject) => {
-      const url = new URL(cfg.baseURL || 'http://localhost:11434');
-      const req = http.request({
-        hostname: url.hostname,
-        port: url.port || 11434,
-        path: '/api/chat',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-        timeout: 120000,
-      }, res => {
-        let data = '';
-        res.on('data', c => data += c);
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            resolve({
-              content: parsed.message?.content || parsed.response || '',
-              thinking: parsed.message?.thinking || '',
-            });
-          } catch { resolve({ content: data, thinking: '' }); }
-        });
-        res.on('error', reject);
-      });
-      req.on('error', reject);
-      req.on('timeout', () => { req.destroy(new Error('Ollama timeout')); });
-      req.write(body);
-      req.end();
-    });
-    const latency = Date.now() - start;
-    return {
-      content: ollamaResult.content || '',
-      thinking: ollamaResult.thinking || '',
-      inputTokens: 0,
-      outputTokens: 0,
-      latency,
-      cost: 0,
-      model,
-      provider,
-    };
-  }
 
   const res = await client.chat.completions.create({
     model,
@@ -3596,4 +3400,4 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
   }
 }
 
-module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv, pickLocalModel, getLocalFirstFallbackChain, isLocalModel, isCloudModel, LOCAL_MODELS };
+module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv };

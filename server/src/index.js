@@ -22,7 +22,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
-const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn, setOnToolsChangedFn: mcpSetOnToolsChangedFn } = require('./agent/mcp');
+const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
 const stuckMonitor = require('./agent/stuckMonitor');
 // ── Autoflow: 6-phase loop + autolearn + approval modules ──
 const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName, kiroRoundBudget } = require('./agent/loop');
@@ -61,51 +61,30 @@ function getFastChatTools() {
   return ALL_TOOLS.filter((tool) => FAST_CHAT_TOOL_NAMES.has(tool.function?.name) || tool._mcpServer);
 }
 
+// Some providers have a max tool count (Groq=128) AND tight TPD quotas.
+// For those, send only the fast-mode core tools to keep token usage low.
+// Groq's 100K TPD limit means 128 full-schema tools (63K tokens) blows the quota
+// on a single request. Send only core built-in tools to Groq.
+const PROVIDER_TOOL_LIMITS = { groq: 128, groq2: 128, sambanova: 128, cerebras: 128 };
+const PROVIDER_FAST_ONLY = new Set(['groq', 'groq2']); // only send fast core tools, no MCP
+function getToolsForProvider(providerName, useFastMode) {
+  // For providers with tight TPD quotas, force fast-mode (core built-in tools only, no MCP)
+  if (PROVIDER_FAST_ONLY.has(providerName)) {
+    return ALL_TOOLS.filter(t => !t._mcpServer).slice(0, PROVIDER_TOOL_LIMITS[providerName] || 128);
+  }
+  let tools = useFastMode ? getFastChatTools() : ALL_TOOLS;
+  const limit = PROVIDER_TOOL_LIMITS[providerName];
+  if (limit && tools.length > limit) {
+    const builtin = tools.filter(t => !t._mcpServer);
+    const mcp = tools.filter(t => t._mcpServer);
+    tools = [...builtin, ...mcp].slice(0, limit);
+  }
+  return tools;
+}
+
 async function initWebMcp() {
-  if (_mcpLoaded) return;
   _mcpLoaded = true;
   mcpSetLogFn((msg) => console.log(msg));
-
-  // Debounced tool refresh — coalesces rapid OOM-retry reconnects into one update
-  // so the TUI doesn't flicker when multiple servers come back within seconds.
-  let _toolsChangedTimer = null;
-  mcpSetOnToolsChangedFn(() => {
-    if (_toolsChangedTimer) clearTimeout(_toolsChangedTimer);
-    _toolsChangedTimer = setTimeout(() => {
-      _toolsChangedTimer = null;
-      try {
-        const mcpToolDefs = getMcpTools();
-        if (mcpToolDefs.length > 0) {
-          const compressed = mcpToolDefs.map(t => {
-            const desc = t.function.description || '';
-            const shortDesc = desc.split('.')[0] + (desc.includes('.') ? '.' : '');
-            let params = { type: 'object', properties: {}, required: t.function.parameters?.required || [] };
-            if (t.function.parameters?.properties) {
-              for (const [key, schema] of Object.entries(t.function.parameters.properties)) {
-                const compressedProp = { type: schema.type || 'string' };
-                if (schema.enum) compressedProp.enum = schema.enum;
-                if (schema.description && schema.description.length < 60) {
-                  compressedProp.description = schema.description;
-                }
-                params.properties[key] = compressedProp;
-              }
-            }
-            return {
-              type: 'function',
-              function: { name: t.function.name, description: shortDesc, parameters: params },
-              _mcpServer: t._mcpServer,
-              _mcpToolName: t._mcpToolName,
-            };
-          });
-          ALL_TOOLS = [...AGENT_TOOLS, ...compressed];
-          console.log(`[MCP] Tools refreshed: ${mcpToolDefs.length} tools from ${mcpStatus().length} servers`);
-        }
-      } catch (e) {
-        console.warn(`[MCP] Tool refresh error: ${e.message}`);
-      }
-    }, 2000); // 2s debounce — coalesce all reconnects within a 2s window
-  });
-
   try {
     // Use the same root discovery as the CLI agent
     const roots = Array.from(new Set([
@@ -682,7 +661,7 @@ const tuiState = {
   messages: [],
   thinking: '',
   queue: [],
-  status: { phase: 'idle', model: getHaksterModelConfig().model, tokens: 0, trust: 0, connected: false },
+  status: { phase: 'idle', model: 'sonnet', tokens: 0, trust: 0, connected: false },
 };
 
 app.get('/api/tui/messages', (req, res) => {
@@ -721,48 +700,6 @@ app.post('/api/tui/model', (req, res) => {
 app.get('/api/tui/status', (_req, res) => {
   res.json(tuiState.status);
 });
-
-// -- Agent Brain Net TUI extras: free meter + smartness + performance bars --
-app.get('/api/tui/free-meter', async (_req, res) => {
-  try {
-    const proxy = await fetch('http://127.0.0.1:8082/free-meter', { signal: AbortSignal.timeout(5000) });
-    const data = await proxy.json();
-    res.json({ ok: true, ...data });
-  } catch (e) {
-    res.json({ ok: false, error: e.message });
-  }
-});
-
-app.get('/api/tui/smartness', async (_req, res) => {
-  try {
-    const perfFile = '/home/ghost/.hakster/perf_history.json';
-    let smartness = 100;
-    if (require('fs').existsSync(perfFile)) {
-      const hist = JSON.parse(require('fs').readFileSync(perfFile, 'utf8'));
-      const last = hist.sessions?.[hist.sessions.length - 1];
-      if (last && last.smartnessEnd != null) smartness = last.smartnessEnd;
-    }
-    res.json({ smartness, max: 100, level: smartness >= 90 ? 'elite' : smartness >= 70 ? 'strong' : 'learning' });
-  } catch (e) {
-    res.json({ smartness: 100, max: 100, level: 'elite', error: e.message });
-  }
-});
-
-app.get('/api/tui/performance', async (_req, res) => {
-  try {
-    const proxy = await fetch('http://127.0.0.1:8082/health', { signal: AbortSignal.timeout(5000) });
-    const data = await proxy.json();
-    const bars = {};
-    for (const [tier, info] of Object.entries(data.cluster || {})) {
-      bars[tier] = { status: info.status, score: info.status === 'up' ? 100 : info.status === 'not_configured' ? 0 : 30 };
-    }
-    res.json({ ok: true, bars, response_target_ms: 10000, response_current_ms: data.avg_latency_ms || 0 });
-  } catch (e) {
-    res.json({ ok: false, error: e.message });
-  }
-});
-
-
 
 global.__tuiUpdate = (state) => { Object.assign(tuiState, state); };
 
@@ -909,7 +846,7 @@ function isCerebrasModel(model) {
 function getHaksterModelConfig() {
   // Priority: env vars > hakster-config.json > hardcoded defaults
   const envProvider = process.env.DEFAULT_PROVIDER;
-  const envModel = process.env.DEFAULT_MODEL;
+  const envModel = process.env.HAKSTER_MODEL || process.env.HP1000_MODEL || process.env.OLLAMA_MODEL || process.env.DEFAULT_MODEL;
   if (envProvider && PROVIDERS[envProvider]) {
     return { provider: envProvider, model: envModel || PROVIDERS[envProvider].defaultModel };
   }
@@ -1000,7 +937,7 @@ function recordUserTokenUsage(user, usage) {
   }
 }
 
-async function openAICompatStreamFetch(baseURL, payload, signal) {
+async function openAICompatStreamFetch(baseURL, payload, signal, apiKey) {
   const apiBase = String(baseURL || '').replace(/\/$/, '').replace(/\/v1$/, '');
   // Use undici dispatcher with long headersTimeout to avoid HeadersTimeoutError on slow cloud models.
   // GLM-5.2:cloud can take 60-120s to send first byte on cold starts.
@@ -1014,7 +951,7 @@ async function openAICompatStreamFetch(baseURL, payload, signal) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ollama',
+      'Authorization': `Bearer ${apiKey || 'ollama'}`,
     },
     body: JSON.stringify(payload),
     signal,
@@ -1238,6 +1175,28 @@ app.get('/api/agent/mcp-status', (_req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── MCP Reload: pick up mcp.json changes without restarting the server ──
+app.post('/api/agent/mcp-reload', async (_req, res) => {
+  try {
+    console.log('[MCP] Reload requested — shutting down existing servers...');
+    await shutdownMcp();
+    console.log('[MCP] Old servers shut down. Reloading...');
+    await initWebMcp();
+    const status = mcpStatus();
+    res.json({
+      ok: true,
+      message: `Reloaded ${status.length} MCP servers (${status.reduce((s, x) => s + x.toolCount, 0)} tools)`,
+      servers: status,
+      totalMcpTools: status.reduce((sum, s) => sum + s.toolCount, 0),
+      totalTools: ALL_TOOLS.length,
+      builtinTools: AGENT_TOOLS.length,
+    });
+  } catch (err) {
+    console.error('[MCP] Reload failed:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -3542,22 +3501,29 @@ ${dirListing}
       let stream;
       try {
         const isO1 = /^o1/i.test(agentModel);
+        // Only send thinking param for providers/models that support it (GLM cloud via ollama/hackbot).
+        // Groq, SambaNova, Cerebras, OpenRouter, etc. reject unknown params with 400.
+        const _supportsThinking = thinking && (
+          provider === 'ollama' || provider === 'hackbot' || provider === 'gpt-oss' ||
+          /glm|kimi|gpt-oss/.test(agentModel)
+        );
         const streamPayload = {
           model: agentModel,
           messages: sanitizeMessagesForProvider(agentMessages, provider),
-          tools: fastMode ? getFastChatTools() : ALL_TOOLS,
+          tools: getToolsForProvider(provider, fastMode),
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
-          ...(thinking ? { thinking: true } : {}),
-          ...(thinking && isO1 ? { reasoning_effort: 'high' } : {}),
+          ...(_supportsThinking ? { thinking: true } : {}),
+          ...(_supportsThinking && isO1 ? { reasoning_effort: 'high' } : {}),
         };
         stream = isAnthropicAgentProvider
           ? await anthropicAgentStream(streamPayload, streamAbort.signal)
           : cfg.type === 'openai-compat'
-          ? await openAICompatStreamFetch(cfg.baseURL, streamPayload, streamAbort.signal)
+          ? await openAICompatStreamFetch(cfg.baseURL, streamPayload, streamAbort.signal, cfg.apiKey)
           : await client.chat.completions.create(streamPayload, { signal: streamAbort.signal });
       } catch (streamErr) {
         clearTimeout(streamTimeout);
+        console.error(`[agent] stream error from provider=${provider} model=${agentModel} type=${cfg && cfg.type} baseURL=${cfg && cfg.baseURL}:`, streamErr && streamErr.message ? streamErr.message.slice(0, 500) : streamErr);
         if (streamErr.name === 'AbortError') {
           res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (300s). Try again.' })}\n\n`);
           break;
@@ -3565,7 +3531,19 @@ ${dirListing}
         // ── FAST BYPASS: on 429 / rate-limit / quota / 5xx, rotate to the next
         //    waterfall provider and RETRY THIS TURN immediately (don't fail the run).
         const _em = String(streamErr && (streamErr.message || streamErr.status || streamErr) || '').toLowerCase();
-        const _bypassable = /429|rate.?limit|too many requests|quota|insufficient|balance|credit|exceeded|50[0-9]|service unavailable|internal server error|bad gateway|gateway timeout|upstream|econnreset|socket hang up/.test(_em);
+        // For local providers (ollama, hackbot, gpt-oss on localhost), only bypass on
+        // hard cloud-style errors (quota/auth/balance). Connection errors (econnreset,
+        // socket hang up, ECONNREFUSED) on local providers mean Ollama is busy or
+        // loading a model — do NOT fall through to cloud and burn tokens.
+        const _isLocalProvider = cfg && (cfg.baseURL || '').match(/localhost|127\.0\.0\.1|::1/);
+        const _cloudRateLimitErrors = /429|rate.?limit|too many requests|quota|insufficient|balance|credit|exceeded/.test(_em);
+        const _cloudServerErrors = /50[0-9]|service unavailable|internal server error|bad gateway|gateway timeout|upstream/.test(_em);
+        const _connectionErrors = /econnreset|socket hang up|econnrefused|etimedout|connect timeout/.test(_em);
+        // Local: only bypass on cloud-style quota/auth errors (not connection issues)
+        // Cloud: bypass on rate-limits and server errors, but not connection drops (retry same provider)
+        const _bypassable = _isLocalProvider
+          ? _cloudRateLimitErrors  // ollama/hackbot: only quota/rate-limit triggers rotation
+          : (_cloudRateLimitErrors || _cloudServerErrors) && !_connectionErrors;
         if (_bypassable) {
           markProviderRateLimited(provider, 120000);
           // find the next waterfall provider we haven't tried yet this run
@@ -3579,6 +3557,7 @@ ${dirListing}
             _waterfallTried.add(_next);
             res.write(`data: ${JSON.stringify({ type: 'provider_rotate', from: provider, to: _next, reason: 'rate-limit/5xx fast bypass' })}\n\n`);
             provider = _next;
+            model = null; // reset model so buildAgentClient uses the new provider's default model
             if (!buildAgentClient()) { res.write(`data: ${JSON.stringify({ type: 'error', message: `Provider ${provider} unavailable — cannot build client.` })}\n\n`); break; }
             turn--;            // retry the SAME turn on the new provider
             continue;          // fast-bypass: immediately retry
@@ -4775,7 +4754,7 @@ app.post('/api/generate', async (req, res) => {
         stream = await client.chat.completions.create({
           model: agentModel,
           messages: sanitizeMessagesForProvider(messages, provider),
-          tools: ALL_TOOLS,
+          tools: getToolsForProvider(provider, false),
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
         }, { signal: streamAbort.signal });
@@ -5308,7 +5287,6 @@ app.get('/api/dashboard', (req, res) => {
          u.google_id as googleId,
          u.role,
          u.plan,
-         u.usage_count as usageCount,
          COUNT(utu.id) as requests,
          SUM(utu.input_tokens) as inputTokens,
          SUM(utu.output_tokens) as outputTokens,
@@ -5323,7 +5301,6 @@ app.get('/api/dashboard', (req, res) => {
       label: stableUserLabel(row),
       role: row.role || 'user',
       plan: row.plan || 'free',
-      usageCount: row.usageCount || 0,
       requests: row.requests || 0,
       inputTokens: row.inputTokens || 0,
       outputTokens: row.outputTokens || 0,
@@ -5629,7 +5606,7 @@ app.get('/api/crush/config', (_req, res) => {
       } catch {}
     }
 
-    const model = saved.model || crushCfg.models?.large?.model || 'hp-1000:latest';
+    const model = saved.model || crushCfg.models?.large?.model || 'gpt-oss:120b-cloud';
     const provider = saved.provider || crushCfg.models?.large?.provider || 'ollama';
     res.json({
       ok: true,
@@ -6504,7 +6481,6 @@ function getUserByApiKey(req) {
 function checkUsageLimit(user) {
   if (!USAGE_LIMIT_ENABLED) return { allowed: true };
   if (!user) return { allowed: true }; // no user = no tracking, let it through
-  if (isOwnerEmail(user.email)) return { allowed: true, plan: 'owner', used: 0, limit: -1 }; // owners bypass limits
   if (user.plan !== 'free') return { allowed: true, plan: user.plan }; // paid plans unlimited
   const now = Math.floor(Date.now() / 1000);
   // Reset count if reset period passed
@@ -6522,7 +6498,6 @@ function checkUsageLimit(user) {
 
 function incrementUsage(user) {
   if (!user) return;
-  if (isOwnerEmail(user.email)) return; // owners bypass usage tracking
   const db = getDb();
   // Set reset_at if not yet set
   if (!user.usage_reset_at) {
@@ -6549,12 +6524,11 @@ app.get('/api/usage', (req, res) => {
      FROM user_token_usage
      WHERE user_id = ?`
   ).get(user.id) || {};
-  const isOwner = isOwnerEmail(user.email);
   res.json({
-    plan: isOwner ? 'owner' : user.plan,
-    used: isOwner ? 0 : (user.usage_count || 0),
-    limit: isOwner ? -1 : (user.plan === 'free' ? FREE_USAGE_LIMIT : -1),
-    remaining: isOwner ? -1 : (user.plan === 'free' ? Math.max(0, FREE_USAGE_LIMIT - (user.usage_count || 0)) : -1),
+    plan: user.plan,
+    used: user.usage_count || 0,
+    limit: user.plan === 'free' ? FREE_USAGE_LIMIT : -1, // -1 = unlimited
+    remaining: user.plan === 'free' ? Math.max(0, FREE_USAGE_LIMIT - (user.usage_count || 0)) : -1,
     tokenBalance: user.token_balance || 0,
     tokenUsage: {
       requests: tokenUsage.requests || 0,
@@ -7386,84 +7360,34 @@ getSkillsInventory();
 getToolInventory();
 getMachineContext();
 
-// Initialize seed data (sync, fast)
+// Initialize MCP servers (async, non-blocking)
 seedPersistentProjectMemory();
 seedGoogleIdentityMemoriesFromDb();
 promoteOwnerAccountsFromDb();
+initWebMcp();
 
-// ── Boot sequence: MCP + model prewarm, then server starts ──────────
-// MCP servers and Ollama model prewarm run in parallel. The server starts
-// after a 30s head-start (fast MCP servers connect in ~2-5s, slow ones like
-// serena/hermes can take 120s). Slow servers lazy-load after the server is up.
-// Previously initWebMcp() was fire-and-forget (tools trickled in late,
-// causing TUI splitting) and prewarmOllama ran inside server.listen (first
-// request hit a cold model). Now fast servers + model warm are ready before
-// the server listens, and slow servers connect in the background.
-(async function bootAll() {
-  const MODEL = process.env.HAKSTER_MODEL || '';
-  const OLLAMA = process.env.OLLAMA_HOST || 'http://localhost:11434';
-  const isLocal = MODEL && MODEL !== 'claude-cli' && !MODEL.includes(':cloud');
-  let needPrewarm = false;
-  if (isLocal) {
-    try { const { isCloudModel } = require('./providers'); needPrewarm = !isCloudModel(MODEL); } catch { needPrewarm = true; }
-  }
-
-  // Kick off MCP load + model prewarm in parallel
-  const mcpReady = initWebMcp();
-  const prewarmModel = async (retries = 3, delayMs = 5000) => {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        const resp = await fetch(`${OLLAMA}/api/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: MODEL,
-            prompt: 'ok',
-            stream: true,  // stream:true — ollama 0.32.x hangs on stream:false
-            keep_alive: '30m',
-            options: { num_predict: 1, temperature: 0.1 },
-          }),
-          signal: AbortSignal.timeout(600000), // 10 min — 6.6GB model on 7GB RAM w/ swap can take 5+ min
-        });
-        // Drain the streaming response — we only care that the model loaded
-        try {
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          while (true) { const { done } = await reader.read(); if (done) break; }
-        } catch (_) {}
-        console.log(`  ✓ ${MODEL} pre-warmed and ready (attempt ${attempt})`);
-        return;
-      } catch (err) {
-        console.warn(`  ⚠ ${MODEL} pre-warm attempt ${attempt}/${retries} failed: ${(err.message || err).slice(0, 80)}`);
-        if (attempt < retries) await new Promise(r => setTimeout(r, delayMs));
-      }
+// Graceful port handling — kill stale process on port before listening (prevents PM2 crash loops)
+function killStaleProcessOnPort(port) {
+  try {
+    const { execSync } = require('child_process');
+    const pid = execSync(`lsof -ti:${port} 2>/dev/null`, { encoding: 'utf-8' }).trim();
+    if (pid && pid !== String(process.pid)) {
+      console.log(`  ⚠ Killing stale process ${pid} on port ${port}`);
+      execSync(`kill -9 ${pid} 2>/dev/null`, { stdio: 'ignore' });
+      // Give the OS a moment to release the port
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      return sleep(1000);
     }
-  };
-  let prewarmDone = Promise.resolve();
-  if (needPrewarm) {
-    console.log(`  ⟳ Pre-warming ${MODEL}...`);
-    prewarmDone = prewarmModel();
+  } catch (_) {
+    // lsof returns error if nothing on the port — that's fine
   }
+  return Promise.resolve();
+}
 
-  // Wait for ALL MCP servers to finish connecting before starting the server.
-  // No 30s race cap — every tier (1/2/3) loads upfront so all tools are ready
-  // before the first request can arrive. Slow servers (serena ~120s) will
-  // delay server start, but the TUI prompt will show ALL tools from the get-go.
-  console.log('  ⟳ Loading all MCP servers (this may take a minute)...');
-  await mcpReady.catch(() => {}); // MCP failures are non-fatal
-  console.log(`  ✓ MCP loading complete — ${getMcpTools().length} tool(s) ready`);
-
-  // Start server — ALL MCP tools are available from the first request
-  startServer();
-
-  // Prewarm continues in background
-  prewarmDone.catch(() => {});
-})();
-
-// Graceful port handling infinite retry with capped backoff (prevents PM2 crash loops)
 function startServer(delay = 2000) {
  const MAX_DELAY = 30000; // cap at 30s between retries
 
+  killStaleProcessOnPort(PORT).then(() => {
   server.listen(PORT, () => {
     console.log(`\n  ╔══════════════════════════════════════════╗`);
     console.log(`  ║  haksterAi server v1.0                   ║`);
@@ -7489,6 +7413,7 @@ function startServer(delay = 2000) {
       process.exit(1);
     }
   });
+  });  // close .then() from killStaleProcessOnPort
 }
 
 // Note: no license gate here. This process IS haksterai.com — the account/plan
@@ -7496,3 +7421,4 @@ function startServer(delay = 2000) {
 // its own startup on that same trial/license check would eventually lock the
 // whole backend out. The gate belongs only in the customer-facing CLI (cli/index.js)
 // and TUI (haksterai-cli.cjs) entry points.
+startServer();

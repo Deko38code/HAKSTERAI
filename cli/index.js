@@ -746,16 +746,22 @@ program
         } else if (server) {
           try {
             const data = await fetchJson(`${server}/api/agent/mcp-status`, { headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {} });
-            const servers = data.servers || data || {};
+            const rawServers = data.servers || data || {};
+            // Normalize: server returns array [{name, tools, ...}]; legacy/object format is {name: {tools, ...}}
+            const serverEntries = Array.isArray(rawServers)
+              ? rawServers.map(s => [s.name || 'unknown', s])
+              : Object.entries(rawServers);
             let total = 0;
-            for (const [name, info] of Object.entries(servers)) {
+            for (const [name, info] of serverEntries) {
               const toolList = info.tools || info || [];
               const count = Array.isArray(toolList) ? toolList.length : 0;
               total += count;
-              console.log(`  ${C.green}${name}${C.reset} ${C.gray}(${count})${C.reset}`);
+              const initTag = info.initialized === false ? ` ${C.red}!${C.reset}` : '';
+              console.log(`  ${C.green}${name}${C.reset} ${C.gray}(${count})${C.reset}${initTag}`);
               if (Array.isArray(toolList)) for (const t of toolList.slice(0, 5)) console.log(`    ${C.gray}•${C.reset} ${typeof t === 'string' ? t : t.name}`);
             }
-            console.log(`  ${C.cyan}Total: ${total} tools${C.reset}`);
+            const srvTotal = data.totalMcpTools != null ? data.totalMcpTools : total;
+            console.log(`  ${C.cyan}Total: ${srvTotal} tools${C.reset}`);
           } catch (e) { console.log(`${C.red}${e.message}${C.reset}`); }
         }
         rl.prompt();
@@ -1964,15 +1970,20 @@ program
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
     try {
       const data = await fetchJson(`${server}/api/agent/mcp-status`, { headers });
-      const servers = data.servers || data || {};
-      if (typeof servers === 'object') {
+      const rawServers = data.servers || data || {};
+      // Normalize: server returns array [{name, tools, ...}]; legacy/object format is {name: {tools, ...}}
+      const serverEntries = Array.isArray(rawServers)
+        ? rawServers.map(s => [s.name || 'unknown', s])
+        : Object.entries(rawServers);
+      if (serverEntries.length > 0) {
         console.log(`${C.cyan}MCP Servers & Tools:${C.reset}`);
         let total = 0;
-        for (const [name, info] of Object.entries(servers)) {
+        for (const [name, info] of serverEntries) {
           const toolList = info.tools || info || [];
           const count = Array.isArray(toolList) ? toolList.length : 0;
           total += count;
-          console.log(`\n  ${C.green}${name}${C.reset} ${C.gray}(${count} tools)${C.reset}`);
+          const initTag = info.initialized === false ? ` ${C.red}(not initialized)${C.reset}` : '';
+          console.log(`\n  ${C.green}${name}${C.reset} ${C.gray}(${count} tools)${C.reset}${initTag}`);
           if (Array.isArray(toolList)) {
             for (const t of toolList.slice(0, 8)) {
               const tName = typeof t === 'string' ? t : (t.name || '?');
@@ -1982,9 +1993,13 @@ program
             if (toolList.length > 8) console.log(`    ${C.gray}... and ${toolList.length - 8} more${C.reset}`);
           }
         }
-        console.log(`\n${C.cyan}Total: ${total} tools${C.reset}`);
+        const srvTotal = data.totalMcpTools != null ? data.totalMcpTools : total;
+        console.log(`\n${C.cyan}Total: ${srvTotal} MCP tools across ${serverEntries.length} servers${C.reset}`);
+        if (data.totalTools) {
+          console.log(`${C.gray}(${data.totalTools} total tools incl. ${data.builtinTools || 0} builtin)${C.reset}`);
+        }
       } else {
-        console.log(JSON.stringify(data, null, 2));
+        console.log(`${C.yellow}No MCP servers connected${C.reset}`);
       }
     } catch (err) {
       console.error(`${C.red}Error: ${err.message}${C.reset}`);

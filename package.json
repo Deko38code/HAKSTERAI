@@ -45,7 +45,7 @@
     "astro": "astro",
     "cli": "node cli/index.js",
     "dashboard": "node tui-dashboard.cjs",
-    "server": "cd server && unset HTTP_PROXY HTTPS_PROXY NO_PROXY && node src/index.js",
+    "server": "cd server && node src/index.js",
     "postinstall": "node -e \"try{require('fs').chmodSync(require('path').join(__dirname,'cli','index.js'),0o755)}catch{}\""
   },
   "dependencies": {

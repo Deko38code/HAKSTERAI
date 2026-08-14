@@ -3063,8 +3063,7 @@ import Layout from '../layouts/Layout.astro';
         sel.innerHTML = '';
         models.forEach((m: string) => { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; sel.appendChild(opt); });
         if (currentModel && models.includes(currentModel)) sel.value = currentModel;
-        else if (models.includes('hp-1000:latest')) sel.value = 'hp-1000:latest';
-        else if (models.includes('glm-uncensored:latest')) sel.value = 'glm-uncensored:latest';
+        else if (models.includes('glm-5.2:cloud')) sel.value = 'glm-5.2:cloud';
         else if (models.includes('gpt-oss:120b-cloud')) sel.value = 'gpt-oss:120b-cloud';
       };
       populate(modelSelect); populate(sidebarModelSelect);
@@ -3347,7 +3346,7 @@ import Layout from '../layouts/Layout.astro';
       const attachedImages = [...pendingImages];
       const userPrompt = prompt || (attachedImages.length ? 'Analyze the attached image(s) and help me with them.' : '');
       setBusyState(true); chatInput.disabled = true; if (sendState) sendState.textContent = 'Running';
-      const model = currentModel || modelSelect.value || 'hp-1000:latest';
+      const model = currentModel || modelSelect.value || 'glm-5.2:cloud';
       let activeId = getActiveId(); let convs = loadConversations(); let conv = convs.find(c => c.id === activeId);
       if (!conv) { conv = createConversation(userPrompt, model); activeId = conv.id; }
       else if (conv.messages.length === 0) { updateConversationTitle(conv.id, userPrompt); }
@@ -3686,7 +3685,6 @@ import Layout from '../layouts/Layout.astro';
         setBusyState(false); if (sendState) sendState.textContent = 'Ready'; chatInput.disabled = false; chatInput.value = '';
         pendingImages = []; renderAttachments();
         setReadyState(); renderHistoryList();
-        loadUsageStats();
       }
     }
 

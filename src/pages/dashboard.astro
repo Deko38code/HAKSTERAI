@@ -600,7 +600,7 @@ import Layout from '../layouts/Layout.astro';
               const total = (u.inputTokens || 0) + (u.outputTokens || 0);
               const pct = Math.max(2, Math.min(100, (total / maxTokens) * 100));
               const label = u.label || 'unknown user';
-              const sub = [u.role || 'user', u.plan || 'free', u.usageCount != null ? `${u.usageCount} uses` : null].filter(Boolean).join(' · ');
+              const sub = [u.role || 'user', u.plan || 'free'].join(' · ');
               const last = u.lastUsedAt ? new Date(u.lastUsedAt * 1000).toLocaleString() : 'never';
               return `<div>
                 <div class="flex justify-between gap-3 text-sm mb-1">

@@ -11,7 +11,8 @@
     "filesystem": {
       "command": "mcp-server-filesystem",
       "args": [
-        "/home/ghost"
+        "/home/ghost",
+        "/tmp"
       ],
       "env": {},
       "tier": 1
@@ -79,7 +80,9 @@
         "mcp",
         "serve"
       ],
-      "env": {},
+      "env": {
+        "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"
+      },
       "tier": 3
     },
     "codex": {
@@ -132,13 +135,24 @@
       },
       "tier": 3
     },
-    "hp-1000": {
+    "squad": {
       "command": "node",
       "args": [
-        "/home/ghost/haksterAi/server/src/agent/hp1000-mcp-bridge.js"
+        "/home/ghost/haksterAi/pentest-agents/hackbot-squad-mcp-server.cjs"
+      ],
+      "env": {
+        "MINIFORGE_URL": "http://localhost:5555",
+        "HACKSQUAD_WORK": "/tmp/hackbot-squad"
+      },
+      "tier": 3
+    },
+    "stealth-bot": {
+      "command": "node",
+      "args": [
+        "/home/ghost/haksterAi/pentest-agents/stealth-bot-mcp.cjs"
       ],
       "env": {},
-      "tier": 1
+      "tier": 2
     }
   }
 }

@@ -1,4 +1,1 @@
-{
-  "provider": "ollama",
-  "model": "hp-1000:latest"
-}
+{"provider":"ollama","model":"hp-1000:latest"}

@@ -210,28 +210,6 @@ const ROLES = {
   TELEGRAM_BOT_TOKEN_6: { name: 'system health',   job: 'system health reporter',       username: null, bot: null, chatIds: new Set() },
 };
 
-// Track all active bot instances so we can gracefully stop polling on shutdown.
-// This prevents the 409 conflict where old process's getUpdates connection
-// is still alive when the new process starts after a PM2 restart.
-const _activeBots = [];
-let _shuttingDown = false;
-
-function gracefulShutdown(signal) {
-  if (_shuttingDown) return;
-  _shuttingDown = true;
-  console.log(`[telegram] ${signal} received — stopping all bot polling gracefully`);
-  Promise.allSettled(_activeBots.map(b => b.stopPolling({ cancel: true })))
-    .then(() => {
-      console.log('[telegram] all polling stopped — exiting');
-      process.exit(0);
-    })
-    .catch(() => process.exit(0));
-  // Hard exit after 5s if stopPolling hangs
-  setTimeout(() => process.exit(0), 5000);
-}
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
 const CHAT_IDS_FILE = path.join(ENV_ROOT, 'data', 'telegram_chat_ids.json');
 
 function loadChatIds() {
@@ -354,9 +332,8 @@ function initBots() {
     }
     // BUGFIX: 409 Conflict — "terminated by other getUpdates request"
     // Caused by PM2 restarts not killing old polling connections cleanly.
-    // Fix: stagger startup by 2s per bot (avoids all 6 hitting Telegram at once),
-    // clear webhook before polling, and graceful-shutdown all bots on SIGTERM/SIGINT
-    // so the old long-poll connection is closed before the new process starts.
+    // Fix: use polling with interval + retry, and clear any existing webhook
+    // before starting polling (Telegram only allows one active connection).
     const bot = new TelegramBot(token, {
       polling: {
         interval: 300,     // poll every 300ms
@@ -365,19 +342,14 @@ function initBots() {
       },
     });
     ROLES[key].bot = bot;
-    _activeBots.push(bot);
 
-    // Staggered start: wait (index × 2s) + 3s base to let old process polling die,
-    // then clear webhook and start polling. This eliminates the startup 409.
-    const botIndex = Object.keys(ROLES).indexOf(key);
-    const startDelay = 3000 + (botIndex * 2000);
-    setTimeout(() => {
-      bot.deleteWebHook().then(() => {
-        return bot.startPolling();
-      }).catch(() => {
-        bot.startPolling().catch(() => {});
-      });
-    }, startDelay);
+    // Clear any existing webhook before starting polling — prevents 409
+    bot.deleteWebHook().then(() => {
+      return bot.startPolling();
+    }).catch(() => {
+      // deleteWebHook might fail if no webhook exists — that's fine
+      bot.startPolling().catch(() => {});
+    });
 
     bot.getMe().then(me => {
       ROLES[key].username = me.username;

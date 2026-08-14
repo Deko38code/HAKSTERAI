@@ -120,8 +120,8 @@ function getPentesterFingerprint() {
   if (!_pentesterFp) _pentesterFp = getFingerprint();
   return _pentesterFp;
 }
-const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn, setOnToolsChangedFn: setMcpOnToolsChangedFn, testServerConfig: testMcpServerConfig, diffConfiguredVsConnected: diffMcpConfiguredVsConnected, ensureServerLoaded: ensureMcpServerLoaded } = require('./mcp');
-const { generateImage, pickLocalModel, getLocalFirstFallbackChain, isLocalModel, isCloudModel } = require('../providers');
+const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: setMcpLogFn, setStatusFn: setMcpStatusFn, testServerConfig: testMcpServerConfig, diffConfiguredVsConnected: diffMcpConfiguredVsConnected } = require('./mcp');
+const { generateImage } = require('../providers');
 
 // ── Auto-escalation safety net ──────────────────────────────────────────
 // Escalates to a frontier model when the local model is provably stuck —
@@ -300,8 +300,8 @@ const HAKSTER_HOST = process.env.HAKSTER_HOST || 'http://localhost:3579';
 let MODEL = process.env.HAKSTER_MODEL || (() => {
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'hakster-config.json'), 'utf8'));
-    return cfg.model || 'hackbot';
-  } catch { return 'hackbot'; }
+    return cfg.model || 'claude-cli';
+  } catch { return 'claude-cli'; }
 })();
 // Brand label for the TUI (ollama forces lowercase handles; show the proper name).
 function modelLabel() { return /^hp-1000$/i.test(MODEL) ? 'HP-1000' : MODEL; }
@@ -1301,7 +1301,6 @@ function getSkillDirs() {
 const MAX_TURNS_DEFAULT = Math.max(10, parseInt(process.env.HAKSTER_AGENT_MAX_TURNS || '120', 10) || 120);  // 120-round single-use budget; guardrails (loop/timeout/redundant-modify) prevent the exploration loops that the old 15-cap was meant to force
 const LOW_TOKEN_MAX_TURNS = Math.max(20, parseInt(process.env.HAKSTER_LOW_TOKEN_MAX_TURNS || '30', 10) || 30);
 const MAX_TURNS = MAX_TURNS_DEFAULT;
-let _modelWarming = false;  // module-level so agentLoop() can see it (HTTP server path doesn't go through repl())
 let _currentMaxTurns = MAX_TURNS_DEFAULT;  // updated by agentLoop each run so tuiReset can read it
 const IDLE_TIMEOUT_MS = 120000; // 2 minutes idle → auto review
 
@@ -3955,7 +3954,7 @@ let TOOLS = [
          type: 'object',
          properties: {
           prompt: { type: 'string', description: 'The prompt/message to send to the model' },
-          model: { type: 'string', description: 'Ollama model name (default: glm-5.2:cloud). Available: glm-5.2:cloud, glm-5.1:cloud, kimi-k2.7-code:cloud, gpt-oss:120b-cloud, hermes3:latest, qwen3.5:latest, mistral:latest, llama3.2:3b' },
+          model: { type: 'string', description: 'Ollama model name (default: groq). Available: groq, sambanova, cerebras, glm-5.2:cloud, glm-5.1:cloud, kimi-k2.7-code:cloud, gpt-oss:120b-cloud, hermes3:latest, qwen3.5:latest, mistral:latest, llama3.2:3b' },
           system: { type: 'string', description: 'Optional system prompt for the model' },
           timeout: { type: 'number', description: 'Timeout in seconds (default 60)' },
          },
@@ -3972,7 +3971,7 @@ let TOOLS = [
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'The task/prompt for Crush to execute (e.g. "Fix the TypeScript type errors in server/src/agent/index.js")' },
-          model: { type: 'string', description: 'Model to use (default: glm-5.2:cloud via Ollama). Currently configured to use glm-5.2:cloud. Other models require separate provider configuration in crush.json.' },
+          model: { type: 'string', description: 'Model to use (default: groq via proxy (free)). Currently configured to use groq (free). Other models require separate provider configuration in crush.json.' },
           cwd: { type: 'string', description: 'Working directory for Crush (default: current project dir)' },
           timeout: { type: 'number', description: 'Timeout in seconds (default: 120, max: 300)' },
         },
@@ -4629,24 +4628,6 @@ const toolExecutors = {
     return result.output;
   },
 
-  async parallel_shell({ commands = [], timeout = 30 }) {
-    if (!Array.isArray(commands) || commands.length === 0) {
-      return 'Error: commands array is required and must be non-empty';
-    }
-    const cmds = commands.slice(0, 5);
-    const results = await Promise.allSettled(
-      cmds.map(cmd => asyncShell(String(cmd), { timeout }))
-    );
-    const lines = [];
-    cmds.forEach((cmd, i) => {
-      const r = results[i];
-      const out = r.status === 'fulfilled' ? r.value.output : `Error: ${r.reason?.message || r.reason}`;
-      lines.push(`─── [${i + 1}] ${cmd.substring(0, 80)} ───`);
-      lines.push(out);
-    });
-    return lines.join('\n');
-  },
-
   // rg — the model sometimes calls an "rg" tool; ripgrep is installed, so honor
   // it (run via asyncShell with bounded output) instead of "Unknown tool rg".
   // rg — accepts BOTH call styles the model uses:
@@ -5095,7 +5076,7 @@ const toolExecutors = {
           const r = await fetch(base + path, { method: 'POST', headers: hdrs, body: JSON.stringify(body), signal: ctrl.signal });
           const txt = await r.text();
           let data; try { data = JSON.parse(txt); } catch (_) { data = { raw: txt }; }
-          if ([401, 402, 403, 429].includes(r.status) || r.status >= 500) { _fcIdx++; continue; }  // rotate to next key (402 = insufficient credits)
+          if ([401, 403, 429].includes(r.status) || r.status >= 500) { _fcIdx++; continue; }  // rotate to next key
           return { ok: r.ok, status: r.status, data };
         } catch (e) { _fcIdx++; continue; }
         finally { clearTimeout(t); }
@@ -5623,51 +5604,25 @@ process.stdout.write(`\r\x1b[K${C.primary} ◆ ${taskName}: ${task.goal.substrin
   }
  },
 
- async ollama({ prompt, model = 'hp-1000:latest', system, timeout = 0 }) {
-  // Run prompt against Ollama API — supports remote (Kaggle GPU tunnel via OLLAMA_HOST env)
-  const ollamaBase = process.env.OLLAMA_HOST || OLLAMA_HOST || 'http://localhost:11434';
-  const isRemote = !ollamaBase.includes('localhost') && !ollamaBase.includes('127.0.0.1');
-  // Remote (Kaggle) needs longer timeout — first token can take 10-15s over tunnel
-  const effectiveTimeout = timeout || (isRemote ? 120 : 60);
+ async ollama({ prompt, model = 'groq', system, timeout = 60 }) {
+  // Run prompt against local Ollama API at localhost:11434
   const body = {
    model,
    prompt,
-   stream: true,  // stream:true — ollama 0.32.x hangs on stream:false for /api/generate
+   stream: false,
    ...(system ? { system } : {}),
   };
-  log(`\n${C.secondary}🦙 Ollama ${isRemote ? '(remote)' : ''} (${model}): ${prompt.substring(0, 80)}${C.reset}`);
+  log(`\n${C.secondary}🦙 Ollama (${model}): ${prompt.substring(0, 80)}${C.reset}`);
   try {
-   const resp = await fetch(`${ollamaBase}/api/generate`, {
+   const resp = await fetch('http://localhost:11434/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(effectiveTimeout * 1000),
+    signal: AbortSignal.timeout(timeout * 1000),
    });
-   if (!resp.ok) {
-    const text = await resp.text();
-    return `Ollama error (${resp.status}): ${text.substring(0, 500)}`;
-   }
-   // Accumulate streaming NDJSON response
-   let result = '';
-   const reader = resp.body.getReader();
-   const decoder = new TextDecoder();
-   let buffer = '';
-   while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-     if (!line.trim()) continue;
-     try {
-      const chunk = JSON.parse(line);
-      if (chunk.response) result += chunk.response;
-      if (chunk.done) break;
-     } catch (_) { /* skip malformed lines */ }
-    }
-   }
-   return result.substring(0, 8000);
+   const data = await resp.json();
+   if (!resp.ok) return `Ollama error (${resp.status}): ${JSON.stringify(data.error || data).substring(0, 500)}`;
+   return (data.response || '').substring(0, 8000);
   } catch (e) {
    return `Ollama error: ${e.message}`;
   }
@@ -6392,6 +6347,21 @@ process.stdout.write(`\r\x1b[K${C.primary} ◆ ${taskName}: ${task.goal.substrin
     }
   },
 
+  async parallel_shell({ commands, timeout = 30 }) {
+    if (!commands || !Array.isArray(commands) || commands.length === 0) {
+      return '❌ commands array is required';
+    }
+    const results = await Promise.all(commands.map(async (cmd, i) => {
+      try {
+        const result = await asyncShell(cmd, { timeout });
+        return `── Command ${i + 1} ──\n${result.output || result.stderr || '(no output)'}`;
+      } catch (err) {
+        return `── Command ${i + 1} ──\n❌ Error: ${err.message}`;
+      }
+    }));
+    return results.join('\n\n');
+  },
+
   async context_compaction({ strategy = 'summarize', maxTokens = 8000, keepLastN = 10 }) {
     try {
       const hist = this._conversationHistory || [];
@@ -6429,13 +6399,6 @@ process.stdout.write(`\r\x1b[K${C.primary} ◆ ${taskName}: ${task.goal.substrin
 // ── MCP Integration — merge MCP tools into TOOLS array ──────────────────────
 // Count of built-in tools for reference
 const _builtinToolCount = TOOLS.length;
-
-// Module-level promise — set by repl() when initMcpTools() fires.
-// agentLoop() awaits this before its first LLM call so the model always
-// sees the full tool list (built-in + MCP).  The TUI still starts instantly
-// because we don't block the readline setup — we only block the first
-// agent message processing.
-let _mcpInitPromise = null;
 
 async function initMcpTools() {
   try {
@@ -6493,10 +6456,11 @@ const RATE_LIMIT_RE = /(?:\b429\b|rate.?limit|too many requests|quota|exceeded|o
 const MODEL_FALLBACK_CHAIN = (() => {
   const env = (process.env.HAKSTER_MODEL_FALLBACK || '').split(',').map(s => s.trim()).filter(Boolean);
   if (env.length) return env;
-  // LOCAL-FIRST fallback chain — try free local models before burning cloud quota.
-  // Local models (your hardware, $0 per request) → Parrot Box (LAN, free) → Cloud (quota-limited).
-  // Cloud models are LAST RESORT only — they burn the weekly quota (1,937 req/wk on glm-5.2 alone).
-  return ['hermes3', 'mistral', 'llama3.2:3b', 'claude-pentest', 'llama3.2:1b', 'hackbot', 'glm-5.2:cloud', 'kimi-k2.7-code:cloud'];
+  // Local Ollama models first (free, always available), then cloud fallbacks.
+  // claude-cli has a real dispatch path (Pro/Max subscription via the `claude` CLI).
+  // The rest are placeholders with no API-key wiring yet; they'd 404 against
+  // Ollama's own endpoint if reached, same failure mode this chain exists to avoid.
+  return ['qwen3.5:0.8b', 'llama3.2:1b', 'qwen2.5:0.5b', 'hackbot', 'claude-cli', 'gpt-4o', 'gemini-2.5-flash', 'claude-haiku-3-5', 'glm-5.2:cloud'];
 })();
 // Cloud models surfaced in the /model menu so the user can pick them directly
 // and sign in (paste an API key) without leaving the REPL. Add entries here to
@@ -6504,14 +6468,13 @@ const MODEL_FALLBACK_CHAIN = (() => {
 const CLOUD_MODELS = [
   { name: 'hackbot',            family: 'hackbot', size: 'cloud' },
   { name: 'glm-5.2:cloud',      family: 'charm',  size: 'cloud' },
-  { name: 'glm-5.1:cloud',      family: 'charm',  size: 'cloud' },
-  { name: 'glm-5.1:cloud-ctx',   family: 'charm',  size: 'cloud' },
-  { name: 'kimi-k2.7-code:cloud', family: 'charm',  size: 'cloud' },
-  { name: 'gpt-oss:120b-cloud',  family: 'charm',  size: 'cloud' },
   { name: 'gpt-4o',             family: 'openai',  size: 'cloud' },
   { name: 'gemini-2.5-flash',    family: 'gemini', size: 'cloud' },
   { name: 'claude-haiku-3-5',    family: 'anthropic', size: 'cloud' },
-  // claude-cli removed — refuses tasks, hits sign-in walls. hackbot + glm-5.2 cover cloud.
+  { name: 'sonnet',              family: 'claude-cli', size: 'cloud' },
+  { name: 'opus',                family: 'claude-cli', size: 'cloud' },
+  { name: 'haiku',               family: 'claude-cli', size: 'cloud' },
+  { name: 'claude-cli',          family: 'claude-cli', size: 'cloud' },
 ];
 const CLOUD_FAMILIES = new Set(CLOUD_MODELS.map(m => m.family));
 function _modelChainFor() {
@@ -6519,62 +6482,104 @@ function _modelChainFor() {
 }
 function _familyFor(model) { return (CLOUD_MODELS.find(m => m.name === model) || {}).family; }
 
+function _isPentestTask(messages) {
+  if (process.env.HAKSTER_PENTEST_ROUTING === '0') return false;
+  // Only scan the LAST user message — scanning full history causes false positives
+  // when a resumed session contains old pentest keywords but the user is asking
+  // a casual question like "yo".
+  const all = messages || [];
+  let lastUser = null;
+  for (let i = all.length - 1; i >= 0; i--) {
+    if (all[i].role === 'user') { lastUser = all[i]; break; }
+  }
+  if (!lastUser) return false;
+  const lower = (typeof lastUser.content === 'string' ? lastUser.content : JSON.stringify(lastUser.content || '')).toLowerCase();
+  const keywords = [
+    'pentest', 'penetration test', 'bug bounty', 'hackerone', 'bugcrowd', 'exploit', 'payload', 'reverse shell',
+    'nmap', 'nikto', 'sqlmap', 'bypass', 'waf bypass', 'cloudflare bypass', 'captcha bypass', 'osint',
+    'recon', 'reconnaissance', 'idor', 'xss', 'sqli', 'ssrf', 'csrf', 'rce', 'lfi', 'rfi',
+    'directory traversal', 'command injection', 'subdomain takeover', ' privilege escalation',
+    'brute force', 'fuzz', 'ffuf', 'gobuster', 'dirsearch', 'nuclei', 'burp', 'cors misconfig',
+    'internal api', 'iapi.', 'staging-api', 'jwt', 'api/cms', 'support/gates'
+  ];
+  return keywords.some(k => lower.includes(k));
+}
+
 async function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
-  // ── SMART LOCAL MODEL ROUTING ──
-  // Auto-pick the best LOCAL model for this specific request based on task type.
-  // Only do this when the user hasn't explicitly switched to a cloud model.
-  let activeModel = MODEL;
-  // hp-1000:latest is the remote GPU powerhouse — never downgrade it via smart-routing.
-  // Tiny models (0.5b, 1b) match common keywords (hi, ok, brief) and win the scoring
-  // contest for casual messages, producing garbage responses. Skip routing entirely
-  // when the user has selected the top-tier model.
-  const SKIP_SMART_ROUTE_MODELS = ['hp-1000:latest'];
-  if (!SKIP_SMART_ROUTE_MODELS.includes(MODEL) && (MODEL === 'qwen3.5' || isLocalModel(MODEL))) {
-    // User is on a local model — use smart routing to pick the BEST local model
-    const picked = pickLocalModel(messages);
-    if (picked.model && picked.model !== MODEL) {
-      console.log(`${C.dim}◈ smart-route: ${MODEL} → ${picked.model} (${picked.reason})${C.reset}`);
-      activeModel = picked.model;
+  // ── Pentest/offensive task routing ──────────────────────────────────────
+  // Detect security work and route directly to the uncensored hackbot backend,
+  // bypassing any provider with guardrails (Claude Code, OpenAI, Gemini, etc.)
+  if (_isPentestTask(messages)) {
+    if (process.env.HAKSTER_DEBUG_AGENT === '1') {
+      console.log(`${C.cyan}[pentest-router] Pentest task detected — routing to hackbot backend${C.reset}`);
+    }
+    try {
+      return await callHackbot(messages, tools, { onToken });
+    } catch (hackbotErr) {
+      console.log(`${C.mustard}⚠ hackbot routing failed (${hackbotErr.message?.slice(0, 80)}) — falling back to hp-1000:latest${C.reset}`);
+      const localModels = [MODEL, 'hp-1000:latest', 'llama3.2:1b'];
+      for (const lm of localModels) {
+        try {
+          const resp = await _callOllamaOnce(lm, messages, tools, { onToken, lowToken });
+          console.log(`${C.success}✓ Local Ollama served pentest request (${lm})${C.reset}`);
+          return resp;
+        } catch (ollamaErr) {
+          console.log(`${C.mustard}⚠ local Ollama ${lm} failed (${ollamaErr.message?.slice(0, 60)})${C.reset}`);
+        }
+      }
+      throw hackbotErr;
     }
   }
 
-  if (_familyFor(activeModel) === 'claude-cli') {
+  if (_familyFor(MODEL) === 'claude-cli') {
     return callClaudeCli(messages, tools, { onToken });
   }
-  // ── Cloud-relay models (glm-*:cloud, kimi-*:cloud, gpt-oss:*cloud) route
-  //    through callHackbot → claude-proxy :8082 → zero-burn :11435 → 42 cracked
-  //    endpoints FIRST. Never hit raw Ollama :11434 for cloud models — that
-  //    burns real cloud API tokens on the upstream relay.
-  if (_familyFor(activeModel) === 'hackbot' || _familyFor(activeModel) === 'charm') {
+  if (_familyFor(MODEL) === 'hackbot') {
     try {
-      return await callHackbot(messages, tools, { onToken, modelOverride: activeModel });
+      return await callHackbot(messages, tools, { onToken });
     } catch (hackbotErr) {
-      // Hackbot/claude-proxy failed — try Phantom's 19+ provider waterfall.
-      console.log(`${C.mustard}⚠ hackbot route failed (${hackbotErr.message?.slice(0, 80)}) — falling back to Phantom API waterfall${C.reset}`);
+      // Hackbot (claude-proxy on 8082) failed — credits, keys, or service down.
+      // Fall back to LOCAL Ollama models first (free, always available),
+      // then Phantom's external API waterfall on port 4000 as last resort.
+      console.log(`${C.mustard}⚠ hackbot failed (${hackbotErr.message?.slice(0, 80)}) — trying local Ollama models first${C.reset}`);
+      const localModels = [MODEL, 'hp-1000:latest', 'llama3.2:1b'];
+      for (const lm of localModels) {
+        try {
+          const resp = await _callOllamaOnce(lm, messages, tools, { onToken, lowToken });
+          console.log(`${C.success}✓ Local Ollama served the request (${lm})${C.reset}`);
+          return resp;
+        } catch (ollamaErr) {
+          console.log(`${C.mustard}⚠ local Ollama ${lm} failed (${ollamaErr.message?.slice(0, 60)})${C.reset}`);
+        }
+      }
+      // All local models failed — last resort: Phantom external API waterfall
+      console.log(`${C.mustard}⚠ all local Ollama models failed — falling back to Phantom API waterfall${C.reset}`);
       try {
         const resp = await callPhantomChat(messages, tools, { onToken });
         console.log(`${C.success}✓ Phantom fallback served the request${C.reset}`);
         return resp;
       } catch (phantomErr) {
-        console.error(`${C.error}× Both hackbot and Phantom failed — hackbot: ${hackbotErr.message?.slice(0, 60)} | phantom: ${phantomErr.message?.slice(0, 60)}${C.reset}`);
-        throw phantomErr;
+        console.error(`${C.error}× Both hackbot, local Ollama, and Phantom failed — hackbot: ${hackbotErr.message?.slice(0, 60)} | phantom: ${phantomErr.message?.slice(0, 60)}${C.reset}`);
+        throw phantomErr; // Phantom's error propagates to retry logic
       }
     }
   }
-  const chain = [activeModel, ...MODEL_FALLBACK_CHAIN.filter(m => m !== activeModel)].filter((m, i, a) => a.indexOf(m) === i);
+  const chain = _modelChainFor();
   let lastErr = null;
   for (let i = 0; i < chain.length; i++) {
     const tryModel = chain[i];
     try {
-      // Fallback candidates from a different family (hackbot, charm, etc.) don't
+      // Fallback candidates from a different family (claude-cli, etc.) don't
       // live on the Ollama endpoint — route them to their real dispatch path
       // instead of POSTing a model name Ollama has never heard of (404).
       const family = _familyFor(tryModel);
-      const resp = (family === 'hackbot' || family === 'charm')
-          ? await callHackbot(messages, tools, { onToken, modelOverride: tryModel })
+      const resp = family === 'claude-cli'
+        ? await callClaudeCli(messages, tools, { onToken, modelOverride: tryModel === 'claude-cli' ? 'sonnet' : tryModel })
+        : family === 'hackbot'
+          ? await callHackbot(messages, tools, { onToken })
           : await _callOllamaOnce(tryModel, messages, tools, { onToken, lowToken });
       if (i > 0) {
-        console.log(`${C.success}✓ Rate-limit bypass: served by ${C.bold}${tryModel}${C.reset} ${C.dim}(after ${activeModel} was throttled)${C.reset}`);
+        console.log(`${C.success}✓ Rate-limit bypass: served by ${C.bold}${tryModel}${C.reset} ${C.dim}(after ${MODEL} was throttled)${C.reset}`);
       }
       return resp;
     } catch (e) {
@@ -6595,16 +6600,13 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
     const numPredict = lowToken
       ? Math.max(1024, parseInt(process.env.HAKSTER_LOW_TOKEN_NUM_PREDICT || '4096', 10) || 4096)
       : Math.max(1024, parseInt(process.env.HAKSTER_NUM_PREDICT || '4096', 10) || 4096);  // was 16384 — cap generation to stop runaway token burn
-    const numCtx = Math.max(4096, parseInt(process.env.HAKSTER_NUM_CTX || '32768', 10) || 32768);  // cap context window — modelfile defaults 200K which burns massive input tokens
     const body = JSON.stringify({
       model: model || MODEL,
       messages,
       tools: tools || undefined,
       stream: true,   // ← STREAMING: tokens arrive in real-time instead of blocking until complete
-      keep_alive: '30m',  // keep model in memory between turns — avoids reload thrash
       options: {
         num_predict: numPredict,
-        num_ctx: numCtx,
         temperature: 0.3,     // lower temp = faster convergence, less creative drift
         top_p: 0.9,
       },
@@ -6647,25 +6649,12 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
       let buffer = '';  // partial line buffer (NDJSON = newline-delimited)
       global._chunkLogCount = 0; // reset chunk debug counter
 
-      // ── Chunk-level idle timeout: if Ollama starts streaming then hangs
-      //    mid-generation (overloaded, model stuck, OOM), the connection
-      //    stays open with no data, no 'end', no 'error' — the await hangs
-      //    forever and HaksterAI freezes. Reset this timer on every chunk.
-      const STREAM_IDLE_TIMEOUT_MS = 90000; // 90s with no chunk = dead stream
-      let streamIdleTimer = setTimeout(() => {
-        if (!settled) { settled = true; }
-        try { res.destroy(); } catch {}
-        try { req.destroy(); } catch {}
-        reject(new Error('Stream idle timeout — Ollama stopped sending data mid-response'));
-      }, STREAM_IDLE_TIMEOUT_MS);
-
       // Throttle token display: update status bar at most every 150ms
       let lastStatusUpdate = 0;
       let pendingContent = '';
       let pendingThinking = '';
 
       res.on('data', (chunk) => {
-        if (streamIdleTimer) streamIdleTimer.refresh();
         buffer += chunk.toString();
         const lines = buffer.split('\n');
         buffer = lines.pop();  // keep incomplete line in buffer
@@ -6740,7 +6729,6 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
       });
 
       res.on('end', () => {
-        clearTimeout(streamIdleTimer);
         // Process any remaining buffer
         if (buffer.trim()) {
           try {
@@ -6782,8 +6770,8 @@ function _callOllamaOnce(model, messages, tools, { onToken, lowToken = false } =
       });
     });
 
-    req.on('error', (err) => { clearTimeout(streamIdleTimer); reject(err); });
-    req.setTimeout(maxTimeout, () => { clearTimeout(streamIdleTimer); req.destroy(new Error('Request timeout')); });
+    req.on('error', reject);
+    req.setTimeout(maxTimeout, () => { req.destroy(new Error('Request timeout')); });
     req.write(body);
     req.end();
   });
@@ -6833,10 +6821,10 @@ function _protectedIndices(msgs) {
 // Full tool-calling support: injects tool schemas as text, parses tool calls
 // from the response, and returns them in the same shape as callOllama/callClaudeCli
 // so the agent loop doesn't care which brain answered.
-async function callHackbot(messages, tools, { onToken, modelOverride } = {}) {
+async function callHackbot(messages, tools, { onToken } = {}) {
   const HACKBOT_URL = process.env.HACKBOT_BASE_URL || 'http://localhost:8082';
   const HACKBOT_KEY = process.env.HACKBOT_API_KEY || 'hk-universal-2026';
-  const HACKBOT_MODEL = modelOverride || process.env.HACKBOT_MODEL || 'kimi-uncensored:latest';
+  const HACKBOT_MODEL = process.env.HACKBOT_MODEL || 'groq';
 
   // ── Build tool injection prompt ──
   // The hack bots don't support OpenAI function-calling natively, so we inject
@@ -6952,27 +6940,13 @@ ${toolList}
     }
   }
 
-  // ── Context window trimming — cap input tokens ──
-  // The proxy forwards to cloud models that bill per input token. If the agent
-  // loop accumulates a long conversation, every request resends the entire
-  // history. Cap it to HAKSTER_HACKBOT_MAX_MSGS (default 12) most-recent
-  // messages to keep input token cost bounded.
-  const HACKBOT_MAX_MSGS = Math.max(2, parseInt(process.env.HAKSTER_HACKBOT_MAX_MSGS || '12', 10) || 12);
-  let trimmedMessages = finalMessages;
-  if (finalMessages.length > HACKBOT_MAX_MSGS) {
-    // Always keep the system message (first) + most recent N messages
-    const sys = finalMessages[0]?.role === 'system' ? [finalMessages[0]] : [];
-    const rest = finalMessages[0]?.role === 'system' ? finalMessages.slice(1) : finalMessages;
-    trimmedMessages = [...sys, ...rest.slice(-HACKBOT_MAX_MSGS)];
-  }
-
   // max_tokens: 16384 — agentic tool-calling needs room for reasoning + full
   // <tool> blocks with complete commands. 4096 was cutting commands mid-output
   // (finish_reason: "length"), leaving </tool> unclosed so the parser dropped them.
   const HACKBOT_MAX_TOKENS = parseInt(process.env.HACKBOT_MAX_TOKENS || '16384', 10);
   const body = JSON.stringify({
     model: HACKBOT_MODEL,
-    messages: trimmedMessages,
+    messages: finalMessages,
     stream: true,
     max_tokens: HACKBOT_MAX_TOKENS,
   });
@@ -6987,18 +6961,6 @@ ${toolList}
     let buf = '';
     let settled = false;
 
-    // ── Stream idle timeout — same fix as _callOllamaOnce ──
-    // req.timeout fires on connection-level idle (time to first byte), but if
-    // the proxy starts streaming then hangs mid-generation, no timeout fires.
-    // This timer resets on every chunk and fires if no data arrives for 90s.
-    const HACKBOT_STREAM_IDLE_MS = 90000;
-    let hackbotIdleTimer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { req.destroy(); } catch {}
-      reject(new Error('Stream idle timeout — hackbot proxy stopped sending data mid-response'));
-    }, HACKBOT_STREAM_IDLE_MS);
-
     const req = reqLib.request(url, {
       method: 'POST',
       headers: {
@@ -7008,7 +6970,6 @@ ${toolList}
       timeout: timeoutMs,
     }, (res) => {
       res.on('data', (chunk) => {
-        if (hackbotIdleTimer) hackbotIdleTimer.refresh();
         buf += chunk.toString();
         const lines = buf.split('\n');
         buf = lines.pop();
@@ -7034,7 +6995,6 @@ ${toolList}
         }
       });
       res.on('end', () => {
-        clearTimeout(hackbotIdleTimer);
         if (settled) return;
         settled = true;
         if (timedOut) return; // timeout handler already rejected
@@ -7250,14 +7210,12 @@ ${toolList}
     });
 
     req.on('error', (err) => {
-      clearTimeout(hackbotIdleTimer);
       if (settled) return;
       settled = true;
       reject(err);
     });
 
     req.on('timeout', () => {
-      clearTimeout(hackbotIdleTimer);
       timedOut = true;
       settled = true;
       req.destroy();
@@ -7334,19 +7292,10 @@ RULES:
     finalMessages.unshift({ role: 'system', content: toolRules });
   }
 
-  // ── Context window trimming — same as callHackbot ──
-  const PHANTOM_MAX_MSGS = Math.max(2, parseInt(process.env.HAKSTER_HACKBOT_MAX_MSGS || '12', 10) || 12);
-  let trimmedPhantomMessages = finalMessages;
-  if (finalMessages.length > PHANTOM_MAX_MSGS) {
-    const sys = finalMessages[0]?.role === 'system' ? [finalMessages[0]] : [];
-    const rest = finalMessages[0]?.role === 'system' ? finalMessages.slice(1) : finalMessages;
-    trimmedPhantomMessages = [...sys, ...rest.slice(-PHANTOM_MAX_MSGS)];
-  }
-
   const body = JSON.stringify({
     provider: PHANTOM_PROVIDER,
     model: PHANTOM_MODEL || undefined,
-    messages: trimmedPhantomMessages,
+    messages: finalMessages,
     max_tokens: PHANTOM_MAX_TOKENS,
   });
 
@@ -7950,7 +7899,7 @@ function startSpinner(label) {
 rotateTranscripts();  // prune old session transcripts (keep last 50)
 async function agentLoop(userMessage, history, silent = false, opts = {}) {
   const _lowToken = opts.lowToken || false;
-  let _maxTurns = _lowToken ? LOW_TOKEN_MAX_TURNS : MAX_TURNS;
+  const _maxTurns = _lowToken ? LOW_TOKEN_MAX_TURNS : MAX_TURNS;
   _currentMaxTurns = _maxTurns;
   // Reset tool call counter for each new user request
   _toolCallCount = 0;
@@ -8150,13 +8099,6 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     // Claude Code style: don't show live thinking updates, only final summary
     const tokenCallback = null;
     try {
-      // ── Await MCP init before first LLM call ──
-      // On REPL startup, initMcpTools() fires fire-and-forget so the TUI
-      // starts instantly.  But we can't call the LLM until MCP tools are
-      // merged into TOOLS — otherwise the model never sees MCP tools on
-      // the first turn.  Await the promise (already resolved = no-op on
-      // subsequent turns).
-      if (_mcpInitPromise) await _mcpInitPromise;
       // Only compact when the previous turn did NOT end with tool calls
       // (i.e., we're not in the middle of a tool chain)
       // PERF: throttle compactHistory — only run every 5 turns or when context > 40%,
@@ -8194,16 +8136,6 @@ process.stdout.write(`\r\x1b[K${C.fgMuted}◇ Skipping compact — still in tool
           _historyForCall = [...history, { role: 'system', content: _nudge }];
           if (process.env.HAKSTER_DEBUG_AGENT === '1') console.log(`[DEBUG] round nudge (turn ${turn + 1}/${_maxTurns}): ${_nudge.replace(/\n/g, ' ').slice(0, 140)}`);
         }
-      }
-      // ── Wait for model warmup if still loading ──────────────────────────
-      // The background warmup fires at REPL init. If the user types fast and
-      // hits enter before the model is loaded, we wait here (non-blocking to
-      // the readline — the spinner shows "warming up..." so the user knows).
-      if (_modelWarming) {
-        if (spinner) spinner.stop('');
-        process.stdout.write(`\r${C.dim}⟳ Waiting for ${modelLabel()} to finish loading...${C.reset}   `);
-        while (_modelWarming) { await new Promise(r => setTimeout(r, 500)); }
-        process.stdout.write('\r' + ' '.repeat(60) + '\r');
       }
       // ── Activity: thinking ──
       _agentActivity = 'Thinking'; _activityDetail = `Turn ${turn + 1}/${_maxTurns}`; _activityStart = Date.now();
@@ -8509,24 +8441,42 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
         // 🪝 LEVERS 1+2: detect 'announce-without-act' rut. If the content says
         //    'now writing / let me create / I\'ll add …' but NO tool was called this
         //    turn, that's stalling — DON'T award clean-finish, and nudge to ACT.
-        const _isAnnounce = /\b(now i will|i'?ll now|let me (create|write|add|build|finish|start|make)|i'?m (going to|gonna) (write|create|add|build|make)|now writing|now creating|now adding|time to (write|create|add|build))\b/i.test(cleanContent || '');
-        if (_isAnnounce && !_forcedFinish) {
-          _announceRutCount++;
-          if (_announceRutCount >= 2) {
-            log(`\n${C.mustard}${C.bold}⚡ ANNOUNCE-RUT: ${_announceRutCount} turns of \"now writing / let me …\" with NO tool call. STOP announcing — call write_file/patch_file/shell NOW.${C.reset}`);
-            history.push({ role: 'system', content: `⚡ ANNOUNCE-RUT (${_announceRutCount}x): You keep saying \"now writing / let me create / I\'ll add\" WITHOUT calling a tool. That is stalling, not progress. Your NEXT message MUST contain a tool call (write_file, patch_file, or shell) — do not produce another sentence of narration without a tool call. Execute NOW.` });
+        // ── Broadened announce-rut detection ──────────────────────────────
+        // The model often says "I'll use shell directly" or "I need to check..."
+        // WITHOUT actually calling a tool. The old pattern only caught a narrow
+        // set of verbs (create/write/add/build/finish/start/make). Now we catch
+        // a much wider range of action-oriented language so the model gets nudged
+        // to ACT instead of narrating, then breaking the loop prematurely.
+        // CRITICAL FIX: the old code pushed a nudge but then fell through to
+        // `break;` at line 8530 — the model never saw the nudge. Now we `continue`
+        // to give the model another chance to actually make the tool call.
+        {
+          const _announceVerbs = 'create|write|add|build|finish|start|make|use|check|run|try|look|inspect|read|call|execute|see|find|search|verify|test|fix|update|patch|modify|edit|configure|set|install|restart|examine|review|scan|query|fetch|send|post|get|put|delete|move|copy|rename|chmod|chown|mkdir|kill|stop|deploy|compile|upgrade|rebuild|reload|complete|begin|continue';
+          const _isAnnounce = new RegExp(`\\b(now i (?:will|need to)|i'?ll\\s+(?:${_announceVerbs})|let me (?:${_announceVerbs})|i'?m (?:going to|gonna) (?:${_announceVerbs})|now writing|now creating|now adding|time to (?:${_announceVerbs})|i need to (?:${_announceVerbs})|i should (?:${_announceVerbs})|next,? i'?ll (?:${_announceVerbs}))\\b`, 'i').test(cleanContent || '');
+          if (_isAnnounce && !_forcedFinish) {
+            _announceRutCount++;
+            if (_announceRutCount >= 4) {
+              log(`\n${C.mustard}${C.bold}⚡ ANNOUNCE-RUT: ${_announceRutCount} turns of "I'll …" narration with NO tool call. Giving up — breaking loop.${C.reset}`);
+              _forcedFinish = true;
+              // Fall through to break below — exhausted retries
+            } else {
+              log(`\n${C.mustard}${C.bold}⚡ ANNOUNCE-RUT: ${_announceRutCount} turn(s) of "I'll …" narration WITHOUT calling a tool. Nudging to ACT.${C.reset}`);
+              history.push({ role: 'system', content: `⚡ ANNOUNCE-RUT (${_announceRutCount}x): You said "I'll ..." or "let me ..." but did NOT call a tool. That is stalling, not progress. Your NEXT message MUST contain a tool call (shell, write_file, patch_file, etc.) — do not produce another sentence of narration without a tool call. Execute NOW.` });
+              // Don't break — give the model another chance to actually make the tool call
+              _currentTaskAnchor = history[history.length - 1];
+              continue;
+            }
+            // a mere announcement is not a finish — no clean-finish awarded
+          } else if (!_forcedFinish) {
             _announceRutCount = 0;
+            bumpSmart(8, 'clean-finish');  // real final answer — reward completion
+            if (_hadLoopBreak) bumpSmart(6, 'loop-broken');  // recovered from a loop/stall AND still finished
+          } else {
+            // _forcedFinish: run ended via a loop break with no recovery tool call since —
+            //    not a true finish, so no clean-finish (+8). Keeps the score honest.
+            _announceRutCount = 0;
+            log(`${C.dim}◇ Forced finish (loop break, no recovery tool) — clean-finish not awarded${C.reset}`);
           }
-          // a mere announcement is not a finish — no clean-finish awarded
-        } else if (!_forcedFinish) {
-          _announceRutCount = 0;
-          bumpSmart(8, 'clean-finish');  // real final answer — reward completion
-          if (_hadLoopBreak) bumpSmart(6, 'loop-broken');  // recovered from a loop/stall AND still finished
-        } else {
-          // _forcedFinish: run ended via a loop break with no recovery tool call since —
-          //    not a true finish, so no clean-finish (+8). Keeps the score honest.
-          _announceRutCount = 0;
-          log(`${C.dim}◇ Forced finish (loop break, no recovery tool) — clean-finish not awarded${C.reset}`);
         }
       }
       lastHadToolCalls = false;
@@ -8602,6 +8552,48 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
         history.push({ role: 'system', content: 'LOOP BREAK: You were in a stuck loop. IMMEDIATELY do one of: (1) Take a concrete action using a non-exploration tool (shell, write_file, etc.) with the information you already have. (2) Give the user a direct answer based on what you know. Do NOT ask another question. Do NOT list or search more directories. Do NOT call list_dir, search_files, or read_file. ACT NOW or RESPOND NOW.' });
       } else {
         _lastAssistantResponse = responseText;
+      }
+
+      // ── CRITICAL FIX: Don't break on every no-tool-call response ──
+      // The old code unconditionally broke the loop here, even when the model
+      // was mid-task and just returned text without a tool call (e.g. narrating
+      // "I'll use shell directly" after an unknown-tool error). This caused the
+      // agent to quit after 1-2 steps instead of running to completion.
+      // Now: if not a forced finish (stuck loop), nudge the model to ACT and
+      // continue the loop instead of breaking.
+      if (!_forcedFinish) {
+        // ── QUESTION-TO-USER DETECTION ──
+        // If the agent's response is a question or waiting for user input,
+        // break the loop cleanly — don't nudge it to call tools when there's
+        // no task to act on. This prevents the "yo" → greet → nudge → repeat loop.
+        const _isQuestionToUser = (() => {
+          const t = responseText.trim();
+          if (!t) return false;
+          // Ends with a question mark and is reasonably short (not a code dump)
+          if (/\?\s*$/.test(t) && t.length < 500) return true;
+          // Clarifying question patterns (even 1 hit is enough for short responses)
+          if (t.length < 500 && _isClarifyingQuestion(responseAll)) return true;
+          // Explicit waiting patterns
+          if (/\b(waiting (for|on) (your|user|input|direction|response)|let me know|resume.*or.*start|what.*(would|do) you like|shall i|should i (start|begin|resume|continue))\b/i.test(t)) return true;
+          return false;
+        })();
+
+        if (_isQuestionToUser) {
+          // Clean break — agent asked the user a question, waiting for their response.
+          // Don't nudge, don't continue the loop, don't treat as stuck.
+          if (_stallGuardTimer) { clearInterval(_stallGuardTimer); _stallGuardTimer = null; }
+          if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; }
+          break;
+        }
+
+        // Not a stuck loop — the model returned text without a tool call.
+        // Nudge it to make a tool call on the next turn and continue.
+        if (_noProgressCount < NO_PROGRESS_LIMIT - 2) {
+          history.push({ role: 'system', content: 'NUDGE: You returned text without calling a tool. If the task is not yet complete, your NEXT message MUST contain a tool call. If you are waiting for a tool result, check the history — the result is already there. Do not narrate without acting. Call a tool NOW or give your final answer.' });
+          _currentTaskAnchor = history[history.length - 1];
+          continue;
+        }
+        // Fall through to break -- approaching stuck loop threshold
       }
 
       // ── TUI dashboard: final render at normal exit ──
@@ -9228,7 +9220,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
       });
     }
 
-    // ── Hard stop: soft repeat-breaks fired >= 4 times this run → the model is
+    // ── Hard stop: soft repeat-breaks fired >= 2 times this run → the model is
     // ignoring course corrections and ruts on the same call. End the run now
     // instead of looping up to MAX_TURNS and burning the whole token budget.
     if (_repeatHardBreakCount >= 2) {
@@ -9629,85 +9621,18 @@ async function repl() {
   fs.mkdirSync(path.join(os.homedir(), '.hakster'), { recursive: true });
 
   // Wire MCP log/status to our output functions
-  // Buffer MCP log messages until the TUI readline + _logFn are ready.
-  // If we use console.log directly, background MCP server init messages clobber
-  // the readline prompt as servers come online — the TUI appears to not show.
-  const _mcpLogBuf = [];
-  let _tuiReady = false;
-  setMcpLogFn((text) => {
-    if (_tuiReady && typeof _logFn === 'function') {
-      _logFn(text);
-    } else {
-      _mcpLogBuf.push(text);
-    }
-  });
+  setMcpLogFn((text) => { console.log(text); });
   setMcpStatusFn((text) => { /* status bar not used in REPL */ });
 
-  // Initialize MCP servers — fire-and-forget (non-blocking).
-  // MCP servers are heavy (15 servers, serena spawns Python+LSP ~300MB).
-  // Blocking on `await` here would hang the REPL 30-60s on a 7GB box.
-  // TOOLS is a module-level `let` that gets reassigned when initMcpTools()
-  // finishes, and the agent loop reads TOOLS fresh each call — so tools just
-  // appear as servers come online. The REPL starts instantly.
-  //
-  // Tiered loading (mcp.js):
-  //   tier 1 = loaded immediately (filesystem, memory, sqlite, hermes, kiro, sequential-thinking)
-  //   tier 2 = lazy-loaded on first tool call (playwright, nmap, serena)
-  //   tier 3 = background-loaded after 10s (claude-code, codex, subagents, bounty, writeup, miniforge)
-  console.log(`${C.cyan}🔌 Loading MCP servers (tiered)...${C.reset}`);
-  let _mcpLoadDone = false;
-
-  // When a lazy-loaded server comes online, re-merge MCP tools into TOOLS
-  // so the agent loop sees them on the next turn.
-  setMcpOnToolsChangedFn(() => {
-    try {
-      const mcpToolDefs = getMcpTools();
-      if (mcpToolDefs.length > 0) {
-        const compressed = mcpToolDefs.map(t => {
-          const desc = t.function.description || '';
-          const shortDesc = desc.split('.')[0] + (desc.includes('.') ? '.' : '');
-          let params = { type: 'object', properties: {}, required: t.function.parameters?.required || [] };
-          if (t.function.parameters?.properties) {
-            for (const [key, schema] of Object.entries(t.function.parameters.properties)) {
-              const compressedProp = { type: schema.type || 'string' };
-              if (schema.enum) compressedProp.enum = schema.enum;
-              if (schema.description && schema.description.length < 60) {
-                compressedProp.description = schema.description;
-              }
-              params.properties[key] = compressedProp;
-            }
-          }
-          return {
-            type: 'function',
-            function: { name: t.function.name, description: shortDesc, parameters: params },
-            _mcpServer: t._mcpServer,
-            _mcpToolName: t._mcpToolName,
-          };
-        });
-        TOOLS = [...TOOLS.slice(0, _builtinToolCount), ...compressed];
-        const mcpInfo = mcpStatus();
-        const _emit = (s) => { if (_tuiReady) _logFn(s); else _mcpLogBuf.push(s); };
-        _emit(`\r\x1b[K${C.green}↻ MCP tools refreshed: ${mcpInfo.length} server(s), ${mcpToolDefs.length} tool(s)${C.reset}`);
-      }
-    } catch (_) {}
-  });
-
-  _mcpInitPromise = initMcpTools()
-    .then(() => {
-      _mcpLoadDone = true;
-      const mcpInfo = mcpStatus();
-      const _emit = (s) => { if (_tuiReady) _logFn(s); else _mcpLogBuf.push(s); };
-      if (mcpInfo.length > 0) {
-        _emit(`${C.green}✓ ${mcpInfo.length} MCP server(s) connected, ${getMcpTools().length} tool(s) discovered${C.reset}`);
-      } else {
-        _emit(`${C.dim}  No MCP servers configured${C.reset}`);
-      }
-    })
-    .catch(err => {
-      _mcpLoadDone = true;
-      const _emit = (s) => { if (_tuiReady) _logFn(s); else _mcpLogBuf.push(s); };
-      _emit(`${C.dim}  MCP init warning: ${err.message}${C.reset}`);
-    });
+  // Initialize MCP servers (non-fatal if fails)
+  console.log(`${C.cyan}🔌 Loading MCP servers...${C.reset}`);
+  await initMcpTools();
+  const mcpInfo = mcpStatus();
+  if (mcpInfo.length > 0) {
+    console.log(`${C.green}✓ ${mcpInfo.length} MCP server(s) connected, ${getMcpTools().length} tool(s) discovered${C.reset}`);
+  } else {
+    console.log(`${C.dim}  No MCP servers configured${C.reset}`);
+  }
 
   // ── Check skills ──────────────────────────────────────────────────────
   console.log(`${C.cyan}📋 Loading skills...${C.reset}`);
@@ -9781,8 +9706,7 @@ async function repl() {
   const budgetPct = ((estimatedTokens / budgetMax) * 100).toFixed(1);
   const budgetColor = parseFloat(budgetPct) > 80 ? C.red : parseFloat(budgetPct) > 50 ? C.yellow : C.green;
   console.log(`${budgetColor}📐 Context: ~${estimatedTokens.toLocaleString()} / ${budgetMax.toLocaleString()} tokens (${budgetPct}%)${C.reset} ${C.dim}[sys:${Math.ceil(sysPromptSize/4)} tools:${Math.ceil(toolJsonSize/4)}]${C.reset}`);
-  const mcpLabel = !_mcpLoadDone ? `${C.dim}+ MCP loading...${C.reset}` : (mcpToolCount > 0 ? `${C.dim}+ ${mcpToolCount} MCP${C.reset}` : '');
-  console.log(`${C.bold}🔧 ${totalTools} tools${C.reset} (${builtInToolCount} built-in${mcpLabel ? ' ' + mcpLabel : ''})${C.reset}`);
+  console.log(`${C.bold}🔧 ${totalTools} tools${C.reset} (${builtInToolCount} built-in + ${mcpToolCount} MCP)${C.reset}`);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -9841,55 +9765,6 @@ async function repl() {
     stopSpinner();
     process.stdout.write(text + '\n');
   };
-  _tuiReady = true;
-  // Flush any MCP log messages that were buffered while _logFn wasn't ready
-  if (_mcpLogBuf.length > 0) {
-    for (const msg of _mcpLogBuf) _logFn(msg);
-    _mcpLogBuf.length = 0;
-  }
-
-  // ── Model warmup (background, non-blocking) ──────────────────────────
-  // hp-1000 is 6.6GB — first call to Ollama takes 30-60s to load it from disk
-  // (swap thrash on 7GB box). Warm it up in the background so by the time the
-  // user types something, the model is already in Ollama's memory. The readline
-  // prompt is live the whole time — user can type ahead, the request just
-  // won't fire until the model is ready.
-  let _modelReady = false;
-  const _warmupModel = MODEL;
-  const _isLocalOllama = !_familyFor(_warmupModel) && !isCloudModel(_warmupModel);
-  if (_isLocalOllama && _warmupModel && _warmupModel !== 'claude-cli') {
-    _modelWarming = true;
-    const _warmupBase = process.env.OLLAMA_HOST || OLLAMA_HOST || 'http://localhost:11434';
-    _logFn(`${C.dim}⟳ Warming up ${modelLabel()}...${C.reset}`);
-    fetch(`${_warmupBase}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: _warmupModel,
-        prompt: 'ok',
-        stream: true,  // stream:true — ollama 0.32.x hangs on stream:false
-        keep_alive: '30m',
-        options: { num_predict: 1, temperature: 0.1 },
-      }),
-      signal: AbortSignal.timeout(300000), // 5 min — 6.6GB model on 7GB RAM w/ swap takes >3min
-    }).then(async (resp) => {
-      _modelWarming = false;
-      _modelReady = true;
-      // Drain the streaming response — we only care that the model loaded
-      try {
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        while (true) { const { done } = await reader.read(); if (done) break; }
-      } catch (_) {}
-      _logFn(`${C.green}✓ ${modelLabel()} ready${C.reset}`);
-    }).catch((err) => {
-      _modelWarming = false;
-      _logFn(`${C.mustard}⚠ ${modelLabel()} warmup failed: ${err.message?.slice(0, 80) || err}${C.reset}`);
-    });
-  } else {
-    _modelReady = true; // cloud/claude-cli models don't need warmup
-  }
-
   _statusFn = (text) => {
     statusText = text;
     if (text === 'Ready') {
@@ -10017,11 +9892,10 @@ async function repl() {
     } catch (_) { /* ollama unreachable */ }
     if (!ollamaUp || !hasModel) {
       console.log(`  ${C.error}${C.bold}✗ Ollama ${ollamaUp ? 'model "' + MODEL + '" not found' : 'unreachable (' + OLLAMA_HOST + ')'}${C.reset}`);
-      // Fall back to hackbot (cloud, reliable) — NOT claude-cli (sign-in walls, refusals)
-      const fallback = CLOUD_MODELS.find(m => m.family === 'hackbot');
+      const fallback = CLOUD_MODELS.find(m => m.family === 'claude-cli');
       if (fallback) {
         MODEL = fallback.name;
-        console.log(`  ${C.yellow}↻ Default switched to ${C.bold}hackbot/${MODEL}${C.reset}${C.yellow} — use /model to change.${C.reset}`);
+        console.log(`  ${C.yellow}↻ Default switched to ${C.bold}claude-cli/${MODEL}${C.reset}${C.yellow} (Pro/Max subscription) — use /model to change.${C.reset}`);
       }
     }
   }
@@ -10029,7 +9903,9 @@ async function repl() {
   // ── Show exactly which model is actually loaded, every startup ──────
   {
     const fam = _familyFor(MODEL);
-    const identity = fam
+    const identity = fam === 'claude-cli'
+      ? `Claude (${MODEL}) via claude-cli — Pro/Max subscription`
+      : fam
         ? `${modelLabel()} (${fam} cloud)`
         : `${modelLabel()} (Ollama)`;
     console.log(`  ${C.bold}${C.green}◆ Model loaded:${C.reset} ${C.bold}${identity}${C.reset}`);
@@ -10343,15 +10219,6 @@ async function repl() {
     console.log(C.success + '✓ Model switched to ' + C.bold + MODEL + C.reset);
     return MODEL;
   };
-
-  // ── Wait for MCP servers to finish loading before showing resume prompt ──
-  // MCP init was fired fire-and-forget so the TUI starts fast. But the user
-  // wants all MCP servers loaded BEFORE the resume session prompt appears.
-  // Await the promise here; if already resolved, this is a no-op.
-  if (_mcpInitPromise) {
-    console.log(`${C.dim}  Waiting for MCP servers to finish loading...${C.reset}`);
-    try { await _mcpInitPromise; } catch (_) {}
-  }
 
   const savedSession = loadSession();   // full cleaned history incl. leading system msg
   let history;
