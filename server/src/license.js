@@ -25,6 +25,34 @@ const CACHE_FILE = path.join(os.homedir(), '.hakster', 'license.json');
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 const TRIAL_DURATION = 3 * 24 * 60 * 60 * 1000; // 3-day trial
 
+// ── Owner bypass ──────────────────────────────────────────────────────
+// Hardcoded owner emails skip the license gate entirely. Only triggers when
+// this machine's config.json `email` field matches one of these addresses,
+// so the bypass is scoped to the owner's own machines — not end users.
+// Mirrors BUILTIN_OWNER_EMAILS in server/src/index.js; keep them in sync.
+const BUILTIN_OWNER_EMAILS = [
+  'dekekenneth840@gmail.com',
+  'dekoneed@gmail.com',
+  'dekeneed@yahoo.com',
+  'savannahscott899@gmail.com',
+].map((e) => String(e).toLowerCase().trim());
+
+function isOwnerEmail(email) {
+  return BUILTIN_OWNER_EMAILS.includes(String(email || '').toLowerCase().trim());
+}
+
+// Read the configured account email (set via `hakster init` or manually in
+// ~/.hakster/config.json). Used to detect the owner on this machine without
+// requiring a server round trip or an API key.
+function readCliEmail() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(CLI_CONFIG_FILE, 'utf8'));
+    return cfg.email || null;
+  } catch {
+    return null;
+  }
+}
+
 // Read the CLI's configured API key (set via `hakster init` / Google sign-in)
 function readCliApiKey() {
   try {
@@ -146,6 +174,19 @@ function trialGate(allowTrial, prefix) {
  * @returns {Promise<{valid: boolean, message: string, plan?: string, email?: string, trial?: object}>}
  */
 async function checkLicense(allowTrial = true) {
+  // Owner bypass — hardcoded owner emails skip the gate entirely. Triggered
+  // only when this machine's config.json `email` is one of the owner emails,
+  // so it applies to the owner's own machines and no one else.
+  const localEmail = readCliEmail();
+  if (localEmail && isOwnerEmail(localEmail)) {
+    return {
+      valid: true,
+      message: `✅ Owner account (${localEmail}) — license bypassed.`,
+      plan: 'owner',
+      email: localEmail,
+    };
+  }
+
   const apiKey = readCliApiKey();
 
   // Not signed in at all — local trial only
