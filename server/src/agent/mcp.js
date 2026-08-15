@@ -185,11 +185,14 @@ function connectServer(serverName, config) {
     child.stdout.on('data', (data) => handleServerData(serverName, data));
 
     child.stderr.on('data', (data) => {
-      // Log stderr but filter out npm prefix noise and npx cache spam
+      // Log stderr but filter out npm prefix noise, npx cache spam, and verbose
+      // INFO/DEBUG lines from Python servers (serena) that flood the console
+      // during initial load. Only show warnings/errors.
       const lines = data.toString().trim();
       if (!lines) return;
       const filtered = lines.split('\n')
         .filter(l => !l.includes('config prefix cannot be changed') && !l.includes('npm error config prefix'))
+        .filter(l => !/^(INFO|DEBUG)\s/i.test(l))  // suppress Python INFO/DEBUG noise
         .join('\n');
       if (filtered) _logFn(`  [MCP:${serverName}] stderr: ${filtered.substring(0, 200)}`);
     });
@@ -241,7 +244,7 @@ function connectServer(serverName, config) {
         if (isNpx) {
           const pkgName = config.args && config.args.length > 1 ? config.args[1] : '';
           _logFn(`  [MCP:${serverName}] npx starting${pkgName ? ` ${pkgName}` : ''}...`);
-          await new Promise(r => setTimeout(r, 8000)); // 8s for npx package resolution
+          await new Promise(r => setTimeout(r, 4000)); // 4s for npx package resolution (cached after first run)
         } else if (isBun) {
           _logFn(`  [MCP:${serverName}] bun starting...`);
           await new Promise(r => setTimeout(r, 2000)); // 2s for bun to warm up
@@ -358,7 +361,7 @@ async function loadMcpServers(configDirs) {
   });
   const results = await Promise.allSettled(
     sortedConfigs.map(({ name, config }, i) =>
-      new Promise(r => setTimeout(r, i * 250 + (HEAVY_SERVERS.has(name) ? 2000 : 0))).then(() => connectServer(name, config))
+      new Promise(r => setTimeout(r, i * 100 + (HEAVY_SERVERS.has(name) ? 1500 : 0))).then(() => connectServer(name, config))
     )
   );
 

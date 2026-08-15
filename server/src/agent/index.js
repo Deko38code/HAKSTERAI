@@ -1984,6 +1984,7 @@ const STALL_GUARD_MS  = 20000;  // 20 seconds — kickstart if no activity
 let _lastActivityTime = Date.now();
 let _awaitingConfirm  = false;  // True while waiting on a y/N dangerous-command prompt — suppresses status bar / stall guard so they don't clobber the readline question
 let processing = false;  // (hoisted to module scope so agentLoop's status-bar interval can read it; repl() resets this on each session)
+let _mcpReady = false;   // true once MCP servers finish loading in repl() — prevents idle auto-review from firing mid-load
 let _pendingSudoPassword = null;  // sudo password typed into the approval popout (fed to `sudo -S` via stdin so sudo actually works headlessly)
 
 // ── Readline/panel race tracker ──
@@ -9639,10 +9640,13 @@ async function repl() {
 
   // Initialize MCP servers (non-fatal if fails)
   console.log(`${C.cyan}🔌 Loading MCP servers...${C.reset}`);
+  const _mcpStart = Date.now();
   await initMcpTools();
+  _mcpReady = true;  // MCP loaded — idle auto-review can now fire safely
+  const _mcpElapsed = ((Date.now() - _mcpStart) / 1000).toFixed(1);
   const mcpInfo = mcpStatus();
   if (mcpInfo.length > 0) {
-    console.log(`${C.green}✓ ${mcpInfo.length} MCP server(s) connected, ${getMcpTools().length} tool(s) discovered${C.reset}`);
+    console.log(`${C.green}✓ ${mcpInfo.length} MCP server(s) connected, ${getMcpTools().length} tool(s) discovered${C.reset} ${C.dim}(${_mcpElapsed}s)${C.reset}`);
   } else {
     console.log(`${C.dim}  No MCP servers configured${C.reset}`);
   }
@@ -10311,6 +10315,7 @@ async function repl() {
   // ── Idle auto-review: health + skill hot-reload + self-repair ──
   async function runIdleAutoReview() {
     if (processing) { startIdleTimer(); return; }
+    if (!_mcpReady) { startIdleTimer(); return; }  // don't fire until MCP servers are loaded
     _idleReviewCount++;
     _lastIdleReview = Date.now();
     const reviewNum = _idleReviewCount;
