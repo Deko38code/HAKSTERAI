@@ -9313,7 +9313,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
         // "read mcp-bridge.js 14 times" loop: the model gets the same content
         // back but never actually re-reads the file, and the stub message tells
         // it to STOP and act.
-        const _roTarget = (fnArgs && (fnArgs.path || fnArgs.query || fnArgs.pattern || fnArgs.directory || fnArgs.url)) || '';
+        const _roTarget = (fnArgs && (fnArgs.command || fnArgs.path || fnArgs.query || fnArgs.pattern || fnArgs.directory || fnArgs.url)) || '';
         const _roKey = fnName + '|' + String(_roTarget).slice(0, 120);
         _readOnlyFileHits[_roKey] = (_readOnlyFileHits[_roKey] || 0) + 1;
         if (_readOnlyFileHits[_roKey] >= READ_ONLY_HARD_SKIP) {
@@ -9324,7 +9324,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
           history.push({ role: 'system', content: `⛔ HARD LOOP BREAK: You have called ${fnName}("${_roTarget}") ${_hits} times this task. The file has NOT been re-read. You already have its full contents from the first read. STOP calling ${fnName} on this path. Either (a) run the fix now in one shell call, (b) write/edit a file, or (c) give the user a direct answer. Re-reading the same file is blocked.` });
           // Return a stub tool result — do NOT execute the tool
           history.push({ role: 'tool', name: fnName, content: `[BLOCKED] ${fnName}("${_roTarget}") was called ${_hits}x — this is a read-only loop. The file contents are already in your context from the first read. Do not call this tool on this path again. ACT NOW: run the fix, edit a file, or answer the user.` });
-          tuiAddChain(`#${callNum} ${fnName} → BLOCKED (#${_hits})`, '⛔');
+          tuiAddChain(`#${_toolCallCount} ${fnName} → BLOCKED (#${_hits})`, '⛔');
           continue;
         }
 
@@ -11065,7 +11065,6 @@ async function repl() {
         await agentLoop(input, history, false, { lowToken: process.env.HAKSTER_LOW_TOKEN === '1' || process.env.HAKSTER_LOW_TOKEN === 'true' });
         stopSpinner();
         console.log(`\n${C.success}${C.bold}✓ Done${C.reset} ${C.bgSubtle}${T.hashFill(20, C.success)}${C.reset}`);
-        _printDoneChecklist();
         serverNotify('Agent task completed', { type: 'task', priority: 'normal' });
       } catch (err) {
         stopSpinner();
@@ -11081,6 +11080,9 @@ async function repl() {
       startIdleTimer();
       saveSession(history); // Persist conversation for next session
       reviewTranscript(history, { verbose: true });  // 📝 review transcript + log where/when points came from after every session
+      // Print the "What was done" checklist LAST so it's always visible at the
+      // bottom of the screen without scrolling past transcript/point logs.
+      _printDoneChecklist();
       // Process queued messages — but skip if in stuck-loop cooldown
       if (_stuckCooldown > 0 && _messageQueue.length > 0) {
         // Drain up to _stuckCooldown messages from queue to prevent re-looping
