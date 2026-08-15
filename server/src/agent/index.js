@@ -1837,6 +1837,19 @@ function _printDoneChecklist() {
   // Count total lines in main project file
   let projectLineCount = 0;
   try { projectLineCount = fs.readFileSync(__filename, 'utf-8').split('\n').length; } catch (_) {}
+  // ── Print stats FIRST (so they're above the checklist, not below) ──
+  console.log(`${C.dim}📊 Project: ${C.fgMuted}${path.basename(__filename)}${C.reset} ${C.dim}=${C.reset} ${C.bold}${C.primary}${projectLineCount.toLocaleString()}${C.reset} ${C.dim}lines${C.reset}`);
+  // 📍 Where points came from (the map) + when/where they were earned, with session id
+  if (_sessionPerf.pointMap && Object.keys(_sessionPerf.pointMap).length) {
+    const _pmSum = summarizePointMap(_sessionPerf.pointMap, 4);
+    if (_pmSum) console.log(`${C.bold}${C.fgMuted}📍 Where points came from:${C.reset} ${C.fgBase}${_pmSum}${C.reset} ${C.dim}(session ${(_agentSessionId||'?').slice(0,8)})${C.reset}`);
+    const _log = (_sessionPerf.pointLog || []).slice(-6);
+    if (_log.length) {
+      console.log(`${C.dim}   recent point events (turn · why · pts · when):${C.reset}`);
+      for (const e of _log) console.log(`${C.dim}   t${e.turn} · ${e.why} · ${e.delta>=0?'+':''}${e.delta}p · ${new Date(e.ts).toLocaleTimeString()}${C.reset}`);
+    }
+  }
+  // ── Print "What was done" checklist LAST so it's always at the bottom ──
   console.log(`\n${C.bold}${T.thin.repeat(60)}${C.reset}`);
   console.log(`${C.bold}${C.fgMuted}📋 What was done:${C.reset}`);
   if (_actionsTaken.length === 0) {
@@ -1851,20 +1864,7 @@ function _printDoneChecklist() {
     }).join('\n');
     console.log(lines);
   }
-  console.log(`${C.bold}${T.thin.repeat(60)}${C.reset}`);
-  console.log(`${C.dim}📊 Project: ${C.fgMuted}${path.basename(__filename)}${C.reset} ${C.dim}=${C.reset} ${C.bold}${C.primary}${projectLineCount.toLocaleString()}${C.reset} ${C.dim}lines${C.reset}`);
   console.log(`${C.bold}${T.thin.repeat(60)}${C.reset}\n`);
-  // 📍 Where points came from (the map) + when/where they were earned, with session id
-  if (_sessionPerf.pointMap && Object.keys(_sessionPerf.pointMap).length) {
-    const _pmSum = summarizePointMap(_sessionPerf.pointMap, 4);
-    if (_pmSum) console.log(`${C.bold}${C.fgMuted}📍 Where points came from:${C.reset} ${C.fgBase}${_pmSum}${C.reset} ${C.dim}(session ${(_agentSessionId||'?').slice(0,8)})${C.reset}`);
-    const _log = (_sessionPerf.pointLog || []).slice(-6);
-    if (_log.length) {
-      console.log(`${C.dim}   recent point events (turn · why · pts · when):${C.reset}`);
-      for (const e of _log) console.log(`${C.dim}   t${e.turn} · ${e.why} · ${e.delta>=0?'+':''}${e.delta}p · ${new Date(e.ts).toLocaleTimeString()}${C.reset}`);
-    }
-    console.log(`${C.bold}${T.thin.repeat(60)}${C.reset}\n`);
-  }
   _actionsTaken = [];
 }
 
