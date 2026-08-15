@@ -1446,6 +1446,8 @@ function scoreToolCall(fnName, fnArgs, ok, out) {
 }
 const HAKSTER_GUARDRAILS = process.env.HAKSTER_GUARDRAILS || path.join(__dirname, '..', '..', '..', 'scripts', 'hakster-guardrails.sh');
 const NO_PROGRESS_LIMIT = 15;      // Break loop after sustained no-progress (was 6)
+const WRITE_PATTERN_LIMIT = 5;    // Break loop after N write_file calls with same prefix but different suffix (e.g. fix_v9, fix_v10, fix_v11...)
+const TASK_TIME_LIMIT_MS = 30 * 60 * 1000;  // 30 min hard circuit breaker — break any single task that runs this long
 
 // ── In-process guardrails: replaces spawnSync(hakster-guardrails.sh) ──
 // The shell script spawned a subprocess on EVERY tool call (track) and every
@@ -1745,6 +1747,9 @@ const TOOL_ERROR_LOOP_LIMIT = 3;    // Same tool erroring this many times → br
 const TOOL_REPEAT_LIMIT = 3;       // Same tool called with identical args this many times → break loop (tighten tool loops)
 let _recentToolSigs = [];          // Recent normalized tool-call signatures (for repeat-tool-loop detection)
 let _repeatToolSigCount = 0;        // Consecutive identical tool-call signatures
+let _writeFilePatternCount = 0;     // Consecutive write_file calls with same prefix but different suffix (fix_v9, fix_v10...)
+let _writeFileLastPrefix = '';      // Last write_file path prefix (before version/suffix)
+let _taskStartTime = 0;             // Wall-clock time when current task started (for circuit breaker)
 let _readOnlyFileHits = {};         // { 'read_file|/path/to/file': count } — per-target read-only call counter (HARD skip at 3)
 const READ_ONLY_HARD_SKIP = 3;      // After reading the same file/path 3x, SKIP execution entirely (not just nudge)
 
@@ -7917,6 +7922,9 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
   _diagCount = 0;  // reset diagnosis counter per task
   _diagFires = 0;   // reset escalation counter per task
   _modifyingSigs = {};   // reset redundant-modify counter per task
+  _writeFilePatternCount = 0;  // reset write-pattern loop detector per task
+  _writeFileLastPrefix = '';
+  _taskStartTime = Date.now();  // start circuit breaker timer for this task
   _escalatedThisStreak = false;   // reset auto-escalation guard per task
   _webUrlSeen = new Map(); _webQuerySeen = []; _webToolStreak = 0;   // reset web-tool loop state per task
   _smartDelta = 0;  _smartTrendDrops = 0;   // smartness STICKS (no reset to 62) — only trend resets per task
@@ -9327,6 +9335,53 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
           history.push({ role: 'tool', name: fnName, content: `[BLOCKED] ${fnName}("${_roTarget}") was called ${_hits}x — this is a read-only loop. The file contents are already in your context from the first read. Do not call this tool on this path again. ACT NOW: run the fix, edit a file, or answer the user.` });
           tuiAddChain(`#${_toolCallCount} ${fnName} → BLOCKED (#${_hits})`, '⛔');
           continue;
+        }
+
+        // ── Write-file pattern loop detector ──
+        // Catches agents that write N variations of the "same" file in a row
+        // (fix_v9.cjs, fix_v10.cjs, fix_v11.cjs...) — each call is technically
+        // "different" so the identical-args detector never fires, but the agent
+        // is clearly stuck writing scripts to fix a problem instead of fixing
+        // it directly. After WRITE_PATTERN_LIMIT calls with the same path prefix,
+        // break the loop.
+        if (fnName === 'write_file' && fnArgs && fnArgs.path) {
+          const _wp = String(fnArgs.path);
+          // Strip version suffixes: fix_real_v9.cjs → fix_real_v, fix_v2b.cjs → fix_v
+          const _prefix = _wp.replace(/_v\d+[a-z]*\.(cjs|js|mjs|ts|sh|py)$/i, '_v*')
+                             .replace(/_v\d+[a-z]*$/i, '_v*')
+                             .replace(/\d+$/i, '*');
+          if (_prefix === _writeFileLastPrefix) {
+            _writeFilePatternCount++;
+          } else {
+            _writeFilePatternCount = 1;
+            _writeFileLastPrefix = _prefix;
+          }
+          if (_writeFilePatternCount >= WRITE_PATTERN_LIMIT) {
+            log(`\n${C.red}${C.bold}📝 WRITE-PATTERN LOOP: wrote ${_writeFilePatternCount}x files matching "${_prefix}" — agent is scripting around the problem instead of fixing it. Breaking loop.${C.reset}`);
+            bumpSmart(-15, 'write-pattern-loop');
+            history.push({ role: 'system', content: `HARD BREAK: You wrote ${_writeFilePatternCount} variations of "${_prefix}" (fix_v9, fix_v10, fix_v11...). This is a script-writing loop — you keep generating new fix scripts instead of fixing the actual problem. STOP writing fix scripts. Either (a) fix the file directly with patch_file/edit_file, (b) run a single shell command to fix it, or (c) explain to the user what the actual root cause is and ask for guidance.` });
+            history.push({ role: 'tool', name: fnName, content: `[BLOCKED] Write-pattern loop detected — ${_writeFilePatternCount} variations of ${_prefix}. Stop writing fix scripts. Fix the problem directly or ask the user for help.` });
+            _repeatHardBreakCount++;
+            _writeFilePatternCount = 0;
+            _writeFileLastPrefix = '';
+            break;
+          }
+        } else if (fnName !== 'write_file') {
+          // Non-write tool call resets the pattern counter
+          _writeFilePatternCount = 0;
+          _writeFileLastPrefix = '';
+        }
+
+        // ── Time-based circuit breaker ──
+        // If the agent has been running for > 30 minutes on a single task,
+        // it's stuck. Break the loop regardless of what it's doing.
+        if (_taskStartTime > 0 && (Date.now() - _taskStartTime) > TASK_TIME_LIMIT_MS) {
+          const _elapsedMin = Math.floor((Date.now() - _taskStartTime) / 60000);
+          log(`\n${C.red}${C.bold}⏰ CIRCUIT BREAKER: Task has been running for ${_elapsedMin} minutes — hard time limit reached. Breaking loop to protect token budget.${C.reset}`);
+          bumpSmart(-20, 'time-circuit-breaker');
+          history.push({ role: 'system', content: `TIME LIMIT REACHED: This task has been running for ${_elapsedMin} minutes. The hard limit is ${TASK_TIME_LIMIT_MS / 60000} minutes. Stop now. Summarize what you've done, what's left, and ask the user for guidance. Do not start any new work.` });
+          _forcedFinish = true;
+          break;
         }
 
         // Stable per-call signature for loop detection: fnName + primary
