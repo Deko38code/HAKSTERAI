@@ -650,6 +650,7 @@ program
     // the user can say "check #25" and both of us can find exactly which call that was.
     let sessionToolSeq = 0;
     const sessionToolLog = []; // [{id, name, argStr, status, preview, ms, turn}]
+    let _lastRundownSeq = 0;  // tracks which tools were already in the last rundown
     if (!opts.fresh && history.length > 0) {
       console.log(`${C.gray}  ~ restored ${history.length} message(s) from last session${C.reset}\n`);
     }
@@ -1727,6 +1728,24 @@ program
                 const prov = evt.provider || '';
                 if (toolCount > 0 || turnCount > 0) {
                   process.stdout.write(`${C.green}  ── done${C.reset} ${C.gray}(${toolCount} tools, ${turnCount} turns, ${_fmtMs(elapsed)}${model ? ', ' + model : ''})${C.reset}\n`);
+                }
+                // ── Always print a "What was done" rundown ──
+                const _runActions = sessionToolLog.filter(e => e.id > (_lastRundownSeq || 0));
+                if (_runActions.length > 0) {
+                  process.stdout.write(`\n${C.bold}${C.cyan}  📋 What was done:${C.reset}\n`);
+                  _runActions.forEach((a, i) => {
+                    const status = a.status === 'done' ? `${C.green}✓${C.reset}` : `${C.yellow}·${C.reset}`;
+                    const durStr = a.ms > 0 ? ` ${C.gray}${_fmtMs(a.ms)}${C.reset}` : '';
+                    const num = C.dim + `#${a.id}` + C.reset;
+                    process.stdout.write(`  ${status} ${num} ${C.cyan}${a.name}${C.reset}${a.argStr ? C.gray + a.argStr + C.reset : ''}${durStr}\n`);
+                    if (a.preview) {
+                      const pv = a.preview.length > 120 ? a.preview.slice(0, 120) + '...' : a.preview;
+                      process.stdout.write(`      ${C.gray}⇒ ${pv}${C.reset}\n`);
+                    }
+                  });
+                  _lastRundownSeq = sessionToolLog.length > 0 ? sessionToolLog[sessionToolLog.length - 1].id : 0;
+                } else {
+                  process.stdout.write(`\n${C.bold}${C.cyan}  📋 What was done:${C.reset} ${C.gray}(no tools used — conversational response)${C.reset}\n`);
                 }
               }
               else if (evt.type === 'aborted') {

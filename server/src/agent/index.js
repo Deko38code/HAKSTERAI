@@ -1834,19 +1834,23 @@ function _resultPreview(result, maxLen) {
 }
 
 function _printDoneChecklist() {
-  if (_actionsTaken.length === 0) return;
-  // Two-line entries: call on top, indented "⇒ <real output>" below when present.
-  const lines = _actionsTaken.map(a => {
-    const head = `  ${a.emoji} ${a.text}`;
-    if (!a.result) return head;
-    return `${head}\n     ${C.fgSubtle}⇒ ${a.result}${C.reset}`;
-  }).join('\n');
   // Count total lines in main project file
   let projectLineCount = 0;
   try { projectLineCount = fs.readFileSync(__filename, 'utf-8').split('\n').length; } catch (_) {}
   console.log(`\n${C.bold}${T.thin.repeat(60)}${C.reset}`);
   console.log(`${C.bold}${C.fgMuted}📋 What was done:${C.reset}`);
-  console.log(lines);
+  if (_actionsTaken.length === 0) {
+    // No tools called — conversational or informational response
+    console.log(`  ${C.fgSubtle}💬 Conversational response — no tools used.${C.reset}`);
+  } else {
+    // Two-line entries: call on top, indented "⇒ <real output>" below when present.
+    const lines = _actionsTaken.map(a => {
+      const head = `  ${a.emoji} ${a.text}`;
+      if (!a.result) return head;
+      return `${head}\n     ${C.fgSubtle}⇒ ${a.result}${C.reset}`;
+    }).join('\n');
+    console.log(lines);
+  }
   console.log(`${C.bold}${T.thin.repeat(60)}${C.reset}`);
   console.log(`${C.dim}📊 Project: ${C.fgMuted}${path.basename(__filename)}${C.reset} ${C.dim}=${C.reset} ${C.bold}${C.primary}${projectLineCount.toLocaleString()}${C.reset} ${C.dim}lines${C.reset}`);
   console.log(`${C.bold}${T.thin.repeat(60)}${C.reset}\n`);
@@ -3949,12 +3953,12 @@ let TOOLS = [
        type: 'function',
        function: {
         name: 'ollama',
-        description: 'Run a prompt against a local Ollama model (GLM-5.2, Kimi-K2.7, GPT-OSS:120b, Hermes3, Qwen, Mistral, etc.). Uses the local Ollama API at localhost:11434. Use for fast local inference, coding tasks, second opinions, or when you need an open-source model. Returns the model response text.',
+        description: 'Run a prompt against a local Ollama model (GLM-5.2, Kimi-K2.7, GPT-OSS:120b, Hermes3, Qwen3-Coder, Qwen2.5-Coder, Phi, HP-1000, Mistral, etc.). Uses the local Ollama API at localhost:11434. Use for fast local inference, coding tasks, second opinions, or when you need an open-source model. Returns the model response text.',
         parameters: {
          type: 'object',
          properties: {
           prompt: { type: 'string', description: 'The prompt/message to send to the model' },
-          model: { type: 'string', description: 'Ollama model name (default: groq). Available: groq, sambanova, cerebras, glm-5.2:cloud, glm-5.1:cloud, kimi-k2.7-code:cloud, gpt-oss:120b-cloud, hermes3:latest, qwen3.5:latest, mistral:latest, llama3.2:3b' },
+          model: { type: 'string', description: 'Ollama model name (default: groq). Available: groq, sambanova, cerebras, glm-5.2:cloud, glm-5.1:cloud, kimi-k2.7-code:cloud, gpt-oss:120b-cloud, hermes3:latest, hermes3-65k:latest, qwen3.5:latest, qwen2.5-coder:7b, qwen2.5-coder:3b, qwen2.5:3b, qwen2.5:0.5b, qwen-opt:latest, qwen3-coder:latest, mistral:latest, llama3.2:3b, llama3.2:latest, phi:latest, hp-1000:latest, glm-uncensored:latest, kimi-uncensored:latest, my-security-model:latest' },
           system: { type: 'string', description: 'Optional system prompt for the model' },
           timeout: { type: 'number', description: 'Timeout in seconds (default 60)' },
          },
