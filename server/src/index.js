@@ -2035,13 +2035,64 @@ app.post('/api/memory/search', (req, res) => {
 
 app.post('/api/memory/compact', (req, res) => {
   try {
-    const { maxKeep, maxAgeDays } = req.body || {};
-    const result = compactMemories({ maxKeep: maxKeep || 40, maxAgeDays: maxAgeDays || 14 });
+    const result = compactMemories(req.body || {});
     res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
+
+// === PEER SYNC (Phantom <-> haksterAI) ===
+const PEER_CONFIG = {
+  phantomUrl: process.env.PEER_PHANTOM_URL || 'http://localhost:4000',
+  phantomToken: process.env.PEER_PHANTOM_TOKEN || 'phantom-peer-sync-2026',
+  enabled: process.env.PEER_SYNC_ENABLED !== 'false'
+};
+
+app.get('/api/peer/status', async (_req, res) => {
+  try {
+    const resp = await fetch(PEER_CONFIG.phantomUrl + '/api/status', { signal: AbortSignal.timeout(3000) });
+    const data = await resp.json();
+    res.json({ connected: true, phantom: { status: data.server?.status, uptime: data.server?.uptime_sec, port: data.server?.port } });
+  } catch (e) {
+    res.json({ connected: false, error: e.message, phantomUrl: PEER_CONFIG.phantomUrl });
+  }
+});
+
+app.post('/api/peer/sync', async (req, res) => {
+  try {
+    if (!PEER_CONFIG.enabled) return res.json({ synced: false, reason: 'disabled' });
+    const memories = listMemories({ limit: 50 });
+    const resp = await fetch(PEER_CONFIG.phantomUrl + '/api/peer/receive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Peer-Token': PEER_CONFIG.phantomToken },
+      body: JSON.stringify({ source: 'haksterAI', memories, timestamp: Date.now() }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const result = await resp.json();
+    res.json({ synced: true, sent: memories.length, phantom: result });
+  } catch (e) {
+    res.json({ synced: false, error: e.message });
+  }
+});
+
+app.post('/api/peer/receive', async (req, res) => {
+  try {
+    const { source, memories } = req.body || {};
+    if (!memories || !Array.isArray(memories)) return res.json({ received: 0 });
+    let count = 0;
+    for (const m of memories) {
+      try {
+        saveMemory({ key: 'peer:' + (source || 'unknown') + ':' + (m.key || m.id || 'unknown'), value: m.value || m.observation || '', category: 'context', source: 'peer-sync' });
+        count++;
+      } catch (e) { /* skip */ }
+    }
+    res.json({ received: count, source: source || 'unknown' });
+  } catch (e) {
+    res.json({ received: 0, error: e.message });
+  }
+});
+// === END PEER SYNC ===
 
 // ── Sessions CRUD ─────────────────────────────────────────────────
 app.post('/api/sessions', (req, res) => {
