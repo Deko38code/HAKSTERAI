@@ -182,7 +182,7 @@ function _pmodel(name, fallback) { const e = loadPhantomKeys()[name]; return (e 
 
 // Add the phantom cloud providers into PROVIDERS (merge, don't overwrite existing).
 Object.assign(PROVIDERS, {
-  groq:        { name: 'Groq',        baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq', 'llama-3.3-70b-versatile'), apiKey: _pk('groq')        || process.env.GROQ_API_KEY,        apiKeyEnv: 'GROQ_API_KEY',        type: 'openai-compat' },
+  groq:        { name: 'Groq',        baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq', 'llama-3.1-8b-instant'), apiKey: _pk('groq')        || process.env.GROQ_API_KEY,        apiKeyEnv: 'GROQ_API_KEY',        type: 'openai-compat' },
   groq2:       { name: 'Groq 2',      baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq2','llama-3.1-8b-instant'),   apiKey: _pk('groq2')       || process.env.GROQ_API_KEY2,      apiKeyEnv: 'GROQ_API_KEY2',       type: 'openai-compat' },
   sambanova:   { name: 'SambaNova',   baseURL: 'https://api.sambanova.ai/v1',                    defaultModel: _pmodel('sambanova','Meta-Llama-3.3-70B-Instruct'), apiKey: _pk('sambanova') || process.env.SAMBANOVA_API_KEY,   apiKeyEnv: 'SAMBANOVA_API_KEY',   type: 'openai-compat' },
   cerebras:    { name: 'Cerebras',    baseURL: 'https://api.cerebras.ai/v1',                      defaultModel: _pmodel('cerebras','llama3.1-8b'),          apiKey: _pk('cerebras')    || process.env.CEREBRAS_API_KEY,    apiKeyEnv: 'CEREBRAS_API_KEY',    type: 'openai-compat' },

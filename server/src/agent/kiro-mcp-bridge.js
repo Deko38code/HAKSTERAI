@@ -1,112 +1,72 @@
 #!/usr/bin/env node
 /**
  * MCP<->Kiro bridge.
- *
- * kiro-cli has no MCP serve mode (only `mcp` for consuming other servers, and
- * `acp` which speaks the Agent Client Protocol — a different, incompatible
- * wire protocol from MCP). Rather than implement a full ACP client, this
- * bridges the simple way: expose ONE MCP tool ("kiro") that shells out to
- * `kiro-cli chat --no-interactive <prompt>` and relays the text output back.
- * Same shape as the real `codex` MCP tool (single prompt-in, text-out call).
+ * kiro-cli chat opens a browser GUI which hangs headless environments.
+ * Bridge tries kiro-cli with 5s timeout, falls back to Ollama sub-agent.
  */
 const { spawn } = require('child_process');
 const readline = require('readline');
+const path = require('path');
 
 const KIRO_BIN = 'kiro-cli';
 
-// Strip ANSI escape codes / cursor control sequences — kiro-cli's output is
-// styled for a terminal, not for an LLM tool result.
 function stripAnsi(s) {
-  return s
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-    .replace(/\x1b\][^\x07]*\x07/g, '')
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
-    .trim();
+  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\r/g, '');
 }
 
-function runKiro({ prompt, agent, trustAllTools }) {
+function tryKiroCli(prompt) {
   return new Promise((resolve) => {
-    const args = ['chat', '--no-interactive'];
-    if (agent) args.push('--agent', agent);
-    if (trustAllTools) args.push('--trust-all-tools');
-    args.push(prompt);
-
-    const child = spawn(KIRO_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    let err = '';
-    child.stdout.on('data', (d) => { out += d.toString(); });
-    child.stderr.on('data', (d) => { err += d.toString(); });
-
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      resolve(`[kiro-bridge] timed out after 180s. Partial output:\n${stripAnsi(out || err)}`);
-    }, 180000);
-
-    child.on('close', () => {
-      clearTimeout(timer);
-      const text = stripAnsi(out) || stripAnsi(err) || '(no output)';
-      resolve(text);
+    let output = '';
+    let timedOut = false;
+    const child = spawn(KIRO_BIN, ['chat', '--no-interactive', prompt], {
+      env: { ...process.env, HEADLESS: '1', DISABLE_BROWSER: '1', TERM: 'dumb', BROWSER: 'none' },
+      timeout: 5000,
     });
-    child.on('error', (e) => {
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 5000);
+    child.stdout.on('data', (d) => { output += stripAnsi(d.toString()); });
+    child.stderr.on('data', (d) => { output += stripAnsi(d.toString()); });
+    child.on('close', (code) => {
       clearTimeout(timer);
-      resolve(`[kiro-bridge] failed to spawn kiro-cli: ${e.message}`);
+      if (timedOut || code !== 0 || !output.trim()) resolve(null);
+      else resolve(output.trim());
     });
+    child.on('error', () => { clearTimeout(timer); resolve(null); });
   });
 }
 
-// ── Minimal MCP server over stdio ───────────────────────────────────────
-const TOOLS = [{
-  name: 'kiro',
-  description: 'Run a one-shot, non-interactive Kiro CLI session. Give it a self-contained prompt (it has no memory of this conversation). Real tool access (fs/shell) on the local machine if trustAllTools is set.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      prompt: { type: 'string', description: 'The task/question to give Kiro.' },
-      agent: { type: 'string', description: 'Optional Kiro agent/context profile name.' },
-      trustAllTools: { type: 'boolean', description: 'Auto-approve all tool permission requests (equivalent to kiro-cli --trust-all-tools). Off by default.' },
-    },
-    required: ['prompt'],
-    additionalProperties: false,
-  },
-}];
-
-const rl = readline.createInterface({ input: process.stdin, terminal: false });
-
-function send(msg) {
-  process.stdout.write(JSON.stringify(msg) + '\n');
+async function tryOllamaFallback(prompt) {
+  try {
+    const { spawnSubAgent } = require(path.join(__dirname, '..', 'subagent.js'));
+    const result = await spawnSubAgent(prompt, process.cwd(), 'ollama');
+    return result && !result.startsWith('Error:') ? result : null;
+  } catch { return null; }
 }
 
-rl.on('line', async (line) => {
-  line = line.trim();
-  if (!line) return;
-  let msg;
-  try { msg = JSON.parse(line); } catch (_) { return; }
-  if (msg.method === 'notifications/initialized') return; // no response expected
-
-  const { id, method, params } = msg;
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+let inputBuffer = '';
+rl.on('line', (line) => { inputBuffer += line + '\n'; });
+rl.on('close', async () => {
   try {
-    if (method === 'initialize') {
-      send({ jsonrpc: '2.0', id, result: {
-        protocolVersion: '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'kiro-mcp-bridge', version: '1.0.0' },
-      }});
-    } else if (method === 'tools/list') {
-      send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
-    } else if (method === 'tools/call') {
-      const { name, arguments: args } = params || {};
-      if (name !== 'kiro') {
-        send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
-        return;
-      }
-      const text = await runKiro(args || {});
-      send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } });
-    } else {
-      send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown method: ${method}` } });
+    const msg = JSON.parse(inputBuffer);
+    if (msg.method === 'initialize') {
+      console.log(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'kiro-bridge', version: '1.0.0' } } }));
+      return;
     }
+    if (msg.method === 'tools/list') {
+      console.log(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'kiro', description: 'Run a one-shot Kiro CLI session. Falls back to Ollama if Kiro browser-launch is unavailable.', inputSchema: { type: 'object', properties: { prompt: { type: 'string', description: 'The task/prompt for Kiro' }, agent: { type: 'string' }, trustAllTools: { type: 'boolean' } }, required: ['prompt'] } }] } }));
+      return;
+    }
+    if (msg.method === 'tools/call') {
+      const args = msg.params?.arguments || {};
+      // Try kiro-cli with short timeout (5s), fall back to ollama
+      let result = await tryKiroCli(args.prompt || '');
+      if (!result) result = await tryOllamaFallback(args.prompt || '');
+      if (!result) result = 'Error: Both Kiro CLI and Ollama fallback failed.';
+      console.log(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: result }] } }));
+      return;
+    }
+    console.log(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }));
   } catch (e) {
-    send({ jsonrpc: '2.0', id, error: { code: -32000, message: e.message } });
+    console.log(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } }));
   }
 });
-
-process.stdin.resume();
