@@ -61,28 +61,8 @@ function getFastChatTools() {
   return ALL_TOOLS.filter((tool) => FAST_CHAT_TOOL_NAMES.has(tool.function?.name) || tool._mcpServer);
 }
 
-// Some providers have a max tool count (Groq=128) AND tight TPD quotas.
-// For those, send only the fast-mode core tools to keep token usage low.
-// Groq's 100K TPD limit means 128 full-schema tools (63K tokens) blows the quota
-// on a single request. Send only core built-in tools to Groq.
-const PROVIDER_TOOL_LIMITS = { groq: 128, groq2: 128, sambanova: 128, cerebras: 128 };
-const PROVIDER_FAST_ONLY = new Set(['groq', 'groq2']); // only send fast core tools, no MCP
-function getToolsForProvider(providerName, useFastMode) {
-  // For providers with tight TPD quotas, force fast-mode (core built-in tools only, no MCP)
-  if (PROVIDER_FAST_ONLY.has(providerName)) {
-    return ALL_TOOLS.filter(t => !t._mcpServer).slice(0, PROVIDER_TOOL_LIMITS[providerName] || 128);
-  }
-  let tools = useFastMode ? getFastChatTools() : ALL_TOOLS;
-  const limit = PROVIDER_TOOL_LIMITS[providerName];
-  if (limit && tools.length > limit) {
-    const builtin = tools.filter(t => !t._mcpServer);
-    const mcp = tools.filter(t => t._mcpServer);
-    tools = [...builtin, ...mcp].slice(0, limit);
-  }
-  return tools;
-}
-
 async function initWebMcp() {
+  if (_mcpLoaded) return;
   _mcpLoaded = true;
   mcpSetLogFn((msg) => console.log(msg));
   try {
@@ -846,7 +826,7 @@ function isCerebrasModel(model) {
 function getHaksterModelConfig() {
   // Priority: env vars > hakster-config.json > hardcoded defaults
   const envProvider = process.env.DEFAULT_PROVIDER;
-  const envModel = process.env.HAKSTER_MODEL || process.env.HP1000_MODEL || process.env.OLLAMA_MODEL || process.env.DEFAULT_MODEL;
+  const envModel = process.env.DEFAULT_MODEL;
   if (envProvider && PROVIDERS[envProvider]) {
     return { provider: envProvider, model: envModel || PROVIDERS[envProvider].defaultModel };
   }
@@ -937,7 +917,7 @@ function recordUserTokenUsage(user, usage) {
   }
 }
 
-async function openAICompatStreamFetch(baseURL, payload, signal, apiKey) {
+async function openAICompatStreamFetch(baseURL, payload, signal) {
   const apiBase = String(baseURL || '').replace(/\/$/, '').replace(/\/v1$/, '');
   // Use undici dispatcher with long headersTimeout to avoid HeadersTimeoutError on slow cloud models.
   // GLM-5.2:cloud can take 60-120s to send first byte on cold starts.
@@ -951,7 +931,7 @@ async function openAICompatStreamFetch(baseURL, payload, signal, apiKey) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey || 'ollama'}`,
+      'Authorization': 'Bearer ollama',
     },
     body: JSON.stringify(payload),
     signal,
@@ -1175,28 +1155,6 @@ app.get('/api/agent/mcp-status', (_req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// ── MCP Reload: pick up mcp.json changes without restarting the server ──
-app.post('/api/agent/mcp-reload', async (_req, res) => {
-  try {
-    console.log('[MCP] Reload requested — shutting down existing servers...');
-    await shutdownMcp();
-    console.log('[MCP] Old servers shut down. Reloading...');
-    await initWebMcp();
-    const status = mcpStatus();
-    res.json({
-      ok: true,
-      message: `Reloaded ${status.length} MCP servers (${status.reduce((s, x) => s + x.toolCount, 0)} tools)`,
-      servers: status,
-      totalMcpTools: status.reduce((sum, s) => sum + s.toolCount, 0),
-      totalTools: ALL_TOOLS.length,
-      builtinTools: AGENT_TOOLS.length,
-    });
-  } catch (err) {
-    console.error('[MCP] Reload failed:', err);
-    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -3501,29 +3459,22 @@ ${dirListing}
       let stream;
       try {
         const isO1 = /^o1/i.test(agentModel);
-        // Only send thinking param for providers/models that support it (GLM cloud via ollama/hackbot).
-        // Groq, SambaNova, Cerebras, OpenRouter, etc. reject unknown params with 400.
-        const _supportsThinking = thinking && (
-          provider === 'ollama' || provider === 'hackbot' || provider === 'gpt-oss' ||
-          /glm|kimi|gpt-oss/.test(agentModel)
-        );
         const streamPayload = {
           model: agentModel,
           messages: sanitizeMessagesForProvider(agentMessages, provider),
-          tools: getToolsForProvider(provider, fastMode),
+          tools: fastMode ? getFastChatTools() : ALL_TOOLS,
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
-          ...(_supportsThinking ? { thinking: true } : {}),
-          ...(_supportsThinking && isO1 ? { reasoning_effort: 'high' } : {}),
+          ...(thinking ? { thinking: true } : {}),
+          ...(thinking && isO1 ? { reasoning_effort: 'high' } : {}),
         };
         stream = isAnthropicAgentProvider
           ? await anthropicAgentStream(streamPayload, streamAbort.signal)
           : cfg.type === 'openai-compat'
-          ? await openAICompatStreamFetch(cfg.baseURL, streamPayload, streamAbort.signal, cfg.apiKey)
+          ? await openAICompatStreamFetch(cfg.baseURL, streamPayload, streamAbort.signal)
           : await client.chat.completions.create(streamPayload, { signal: streamAbort.signal });
       } catch (streamErr) {
         clearTimeout(streamTimeout);
-        console.error(`[agent] stream error from provider=${provider} model=${agentModel} type=${cfg && cfg.type} baseURL=${cfg && cfg.baseURL}:`, streamErr && streamErr.message ? streamErr.message.slice(0, 500) : streamErr);
         if (streamErr.name === 'AbortError') {
           res.write(`data: ${JSON.stringify({ type: 'error', message: 'Model response timed out (300s). Try again.' })}\n\n`);
           break;
@@ -3531,19 +3482,7 @@ ${dirListing}
         // ── FAST BYPASS: on 429 / rate-limit / quota / 5xx, rotate to the next
         //    waterfall provider and RETRY THIS TURN immediately (don't fail the run).
         const _em = String(streamErr && (streamErr.message || streamErr.status || streamErr) || '').toLowerCase();
-        // For local providers (ollama, hackbot, gpt-oss on localhost), only bypass on
-        // hard cloud-style errors (quota/auth/balance). Connection errors (econnreset,
-        // socket hang up, ECONNREFUSED) on local providers mean Ollama is busy or
-        // loading a model — do NOT fall through to cloud and burn tokens.
-        const _isLocalProvider = cfg && (cfg.baseURL || '').match(/localhost|127\.0\.0\.1|::1/);
-        const _cloudRateLimitErrors = /429|rate.?limit|too many requests|quota|insufficient|balance|credit|exceeded/.test(_em);
-        const _cloudServerErrors = /50[0-9]|service unavailable|internal server error|bad gateway|gateway timeout|upstream/.test(_em);
-        const _connectionErrors = /econnreset|socket hang up|econnrefused|etimedout|connect timeout/.test(_em);
-        // Local: only bypass on cloud-style quota/auth errors (not connection issues)
-        // Cloud: bypass on rate-limits and server errors, but not connection drops (retry same provider)
-        const _bypassable = _isLocalProvider
-          ? _cloudRateLimitErrors  // ollama/hackbot: only quota/rate-limit triggers rotation
-          : (_cloudRateLimitErrors || _cloudServerErrors) && !_connectionErrors;
+        const _bypassable = /429|rate.?limit|too many requests|quota|insufficient|balance|credit|exceeded|50[0-9]|service unavailable|internal server error|bad gateway|gateway timeout|upstream|econnreset|socket hang up/.test(_em);
         if (_bypassable) {
           markProviderRateLimited(provider, 120000);
           // find the next waterfall provider we haven't tried yet this run
@@ -3557,7 +3496,6 @@ ${dirListing}
             _waterfallTried.add(_next);
             res.write(`data: ${JSON.stringify({ type: 'provider_rotate', from: provider, to: _next, reason: 'rate-limit/5xx fast bypass' })}\n\n`);
             provider = _next;
-            model = null; // reset model so buildAgentClient uses the new provider's default model
             if (!buildAgentClient()) { res.write(`data: ${JSON.stringify({ type: 'error', message: `Provider ${provider} unavailable — cannot build client.` })}\n\n`); break; }
             turn--;            // retry the SAME turn on the new provider
             continue;          // fast-bypass: immediately retry
@@ -4754,7 +4692,7 @@ app.post('/api/generate', async (req, res) => {
         stream = await client.chat.completions.create({
           model: agentModel,
           messages: sanitizeMessagesForProvider(messages, provider),
-          tools: getToolsForProvider(provider, false),
+          tools: ALL_TOOLS,
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
         }, { signal: streamAbort.signal });
@@ -7366,28 +7304,10 @@ seedGoogleIdentityMemoriesFromDb();
 promoteOwnerAccountsFromDb();
 initWebMcp();
 
-// Graceful port handling — kill stale process on port before listening (prevents PM2 crash loops)
-function killStaleProcessOnPort(port) {
-  try {
-    const { execSync } = require('child_process');
-    const pid = execSync(`lsof -ti:${port} 2>/dev/null`, { encoding: 'utf-8' }).trim();
-    if (pid && pid !== String(process.pid)) {
-      console.log(`  ⚠ Killing stale process ${pid} on port ${port}`);
-      execSync(`kill -9 ${pid} 2>/dev/null`, { stdio: 'ignore' });
-      // Give the OS a moment to release the port
-      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-      return sleep(1000);
-    }
-  } catch (_) {
-    // lsof returns error if nothing on the port — that's fine
-  }
-  return Promise.resolve();
-}
-
+// Graceful port handling infinite retry with capped backoff (prevents PM2 crash loops)
 function startServer(delay = 2000) {
  const MAX_DELAY = 30000; // cap at 30s between retries
 
-  killStaleProcessOnPort(PORT).then(() => {
   server.listen(PORT, () => {
     console.log(`\n  ╔══════════════════════════════════════════╗`);
     console.log(`  ║  haksterAi server v1.0                   ║`);
@@ -7413,7 +7333,6 @@ function startServer(delay = 2000) {
       process.exit(1);
     }
   });
-  });  // close .then() from killStaleProcessOnPort
 }
 
 // Note: no license gate here. This process IS haksterai.com — the account/plan

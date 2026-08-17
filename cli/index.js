@@ -650,7 +650,6 @@ program
     // the user can say "check #25" and both of us can find exactly which call that was.
     let sessionToolSeq = 0;
     const sessionToolLog = []; // [{id, name, argStr, status, preview, ms, turn}]
-    let _lastRundownSeq = 0;  // tracks which tools were already in the last rundown
     if (!opts.fresh && history.length > 0) {
       console.log(`${C.gray}  ~ restored ${history.length} message(s) from last session${C.reset}\n`);
     }
@@ -747,22 +746,16 @@ program
         } else if (server) {
           try {
             const data = await fetchJson(`${server}/api/agent/mcp-status`, { headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {} });
-            const rawServers = data.servers || data || {};
-            // Normalize: server returns array [{name, tools, ...}]; legacy/object format is {name: {tools, ...}}
-            const serverEntries = Array.isArray(rawServers)
-              ? rawServers.map(s => [s.name || 'unknown', s])
-              : Object.entries(rawServers);
+            const servers = data.servers || data || {};
             let total = 0;
-            for (const [name, info] of serverEntries) {
+            for (const [name, info] of Object.entries(servers)) {
               const toolList = info.tools || info || [];
               const count = Array.isArray(toolList) ? toolList.length : 0;
               total += count;
-              const initTag = info.initialized === false ? ` ${C.red}!${C.reset}` : '';
-              console.log(`  ${C.green}${name}${C.reset} ${C.gray}(${count})${C.reset}${initTag}`);
+              console.log(`  ${C.green}${name}${C.reset} ${C.gray}(${count})${C.reset}`);
               if (Array.isArray(toolList)) for (const t of toolList.slice(0, 5)) console.log(`    ${C.gray}•${C.reset} ${typeof t === 'string' ? t : t.name}`);
             }
-            const srvTotal = data.totalMcpTools != null ? data.totalMcpTools : total;
-            console.log(`  ${C.cyan}Total: ${srvTotal} tools${C.reset}`);
+            console.log(`  ${C.cyan}Total: ${total} tools${C.reset}`);
           } catch (e) { console.log(`${C.red}${e.message}${C.reset}`); }
         }
         rl.prompt();
@@ -1269,7 +1262,29 @@ program
         }
       }
 
-      history.push({ role: 'user', content: text });
+      // 🧠 SONNET BRAIN: Auto-inject relevant past knowledge before sending to LLM
+      try {
+      const { execFileSync } = require('child_process');
+      const injectScript = '/home/ghost/claude-code-proxy/brain_inject.js';
+      const fs = require('fs');
+      if (fs.existsSync(injectScript) && text && text.length > 3) {
+      const result = execFileSync('node', [injectScript, '--prompt', text, '--agent', 'haksterai', '--json'], {
+      timeout: 5000,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
+      });
+      const parsed = JSON.parse(result);
+      if (parsed.injected && parsed.recall_results && parsed.recall_results.length > 0) {
+      text = parsed.augmented_prompt;
+      process.stdout.write(`\x1b[38;5;141m 🧠 Brain: injected ${parsed.recall_results.length} memories\x1b[0m\n`);
+      }
+      }
+      } catch (e) {
+      // Non-blocking: if brain fails, use original prompt unchanged
+      if (process.env.BRAIN_DEBUG) process.stdout.write(`\x1b[38;5;196m 🧠 Brain error: ${e.message}\x1b[0m\n`);
+      }
+
+    history.push({ role: 'user', content: text });
 
       // ══════════════════════════════════════════════════════════════════
       // ── OFFLINE MODE — direct provider call + local tool execution ──
@@ -1729,24 +1744,6 @@ program
                 if (toolCount > 0 || turnCount > 0) {
                   process.stdout.write(`${C.green}  ── done${C.reset} ${C.gray}(${toolCount} tools, ${turnCount} turns, ${_fmtMs(elapsed)}${model ? ', ' + model : ''})${C.reset}\n`);
                 }
-                // ── Always print a "What was done" rundown ──
-                const _runActions = sessionToolLog.filter(e => e.id > (_lastRundownSeq || 0));
-                if (_runActions.length > 0) {
-                  process.stdout.write(`\n${C.bold}${C.cyan}  📋 What was done:${C.reset}\n`);
-                  _runActions.forEach((a, i) => {
-                    const status = a.status === 'done' ? `${C.green}✓${C.reset}` : `${C.yellow}·${C.reset}`;
-                    const durStr = a.ms > 0 ? ` ${C.gray}${_fmtMs(a.ms)}${C.reset}` : '';
-                    const num = C.dim + `#${a.id}` + C.reset;
-                    process.stdout.write(`  ${status} ${num} ${C.cyan}${a.name}${C.reset}${a.argStr ? C.gray + a.argStr + C.reset : ''}${durStr}\n`);
-                    if (a.preview) {
-                      const pv = a.preview.length > 120 ? a.preview.slice(0, 120) + '...' : a.preview;
-                      process.stdout.write(`      ${C.gray}⇒ ${pv}${C.reset}\n`);
-                    }
-                  });
-                  _lastRundownSeq = sessionToolLog.length > 0 ? sessionToolLog[sessionToolLog.length - 1].id : 0;
-                } else {
-                  process.stdout.write(`\n${C.bold}${C.cyan}  📋 What was done:${C.reset} ${C.gray}(no tools used — conversational response)${C.reset}\n`);
-                }
               }
               else if (evt.type === 'aborted') {
                 stopSpinner();
@@ -1989,20 +1986,15 @@ program
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
     try {
       const data = await fetchJson(`${server}/api/agent/mcp-status`, { headers });
-      const rawServers = data.servers || data || {};
-      // Normalize: server returns array [{name, tools, ...}]; legacy/object format is {name: {tools, ...}}
-      const serverEntries = Array.isArray(rawServers)
-        ? rawServers.map(s => [s.name || 'unknown', s])
-        : Object.entries(rawServers);
-      if (serverEntries.length > 0) {
+      const servers = data.servers || data || {};
+      if (typeof servers === 'object') {
         console.log(`${C.cyan}MCP Servers & Tools:${C.reset}`);
         let total = 0;
-        for (const [name, info] of serverEntries) {
+        for (const [name, info] of Object.entries(servers)) {
           const toolList = info.tools || info || [];
           const count = Array.isArray(toolList) ? toolList.length : 0;
           total += count;
-          const initTag = info.initialized === false ? ` ${C.red}(not initialized)${C.reset}` : '';
-          console.log(`\n  ${C.green}${name}${C.reset} ${C.gray}(${count} tools)${C.reset}${initTag}`);
+          console.log(`\n  ${C.green}${name}${C.reset} ${C.gray}(${count} tools)${C.reset}`);
           if (Array.isArray(toolList)) {
             for (const t of toolList.slice(0, 8)) {
               const tName = typeof t === 'string' ? t : (t.name || '?');
@@ -2012,13 +2004,9 @@ program
             if (toolList.length > 8) console.log(`    ${C.gray}... and ${toolList.length - 8} more${C.reset}`);
           }
         }
-        const srvTotal = data.totalMcpTools != null ? data.totalMcpTools : total;
-        console.log(`\n${C.cyan}Total: ${srvTotal} MCP tools across ${serverEntries.length} servers${C.reset}`);
-        if (data.totalTools) {
-          console.log(`${C.gray}(${data.totalTools} total tools incl. ${data.builtinTools || 0} builtin)${C.reset}`);
-        }
+        console.log(`\n${C.cyan}Total: ${total} tools${C.reset}`);
       } else {
-        console.log(`${C.yellow}No MCP servers connected${C.reset}`);
+        console.log(JSON.stringify(data, null, 2));
       }
     } catch (err) {
       console.error(`${C.red}Error: ${err.message}${C.reset}`);

@@ -1,1 +1,4 @@
-{"provider":"ollama","model":"hp-1000:latest"}
+{
+  "provider": "claude-cli",
+  "model": "sonnet"
+}

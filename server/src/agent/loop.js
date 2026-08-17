@@ -658,7 +658,7 @@ function kiroPreTaskGate(task) {
  * @returns {{ exhausted: boolean, phase: string, nudge?: string }}
  */
 function kiroRoundBudget(ctx) {
-  const { round = 0, maxRounds = 120 } = ctx || {};
+  const { round = 0, maxRounds = 200 } = ctx || {};
   const pct = round / maxRounds;
   if (round >= maxRounds) {
     return { exhausted: true, phase: 'exhausted', nudge: 'Round budget exhausted. Ship current best result.' };

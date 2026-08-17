@@ -31,9 +31,18 @@
     },
     "playwright": {
       "command": "playwright-mcp",
-      "args": [],
-      "env": {},
-      "tier": 2
+      "args": [
+        "--browser",
+        "chromium",
+        "--executable-path",
+        "/home/ghost/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome",
+        "--no-sandbox"
+      ],
+      "env": {
+        "PLAYWRIGHT_BROWSERS_PATH": "/home/ghost/.cache/ms-playwright"
+      },
+      "tier": 2,
+      "initTimeoutMs": 60000
     },
     "nmap": {
       "command": "node",
@@ -142,17 +151,24 @@
       ],
       "env": {
         "MINIFORGE_URL": "http://localhost:5555",
-        "HACKSQUAD_WORK": "/tmp/hackbot-squad"
+        "HACKSQUAD_WORK": "/tmp/hackbot-squad",
+        "BROWSER_TIMEOUT": "120000"
       },
-      "tier": 3
+      "tier": 3,
+      "initTimeoutMs": 120000
     },
     "stealth-bot": {
       "command": "node",
       "args": [
         "/home/ghost/haksterAi/pentest-agents/stealth-bot-mcp.cjs"
       ],
-      "env": {},
-      "tier": 2
+      "env": {
+        "STEALTH_HEADFUL": "0",
+        "STEALTH_TIMEOUT": "30000",
+        "STEALTH_NAV_TIMEOUT": "30000"
+      },
+      "tier": 2,
+      "initTimeoutMs": 120000
     }
   }
 }

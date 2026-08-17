@@ -1386,6 +1386,19 @@ function smartCompact() {
 // bar under Smartness. Unlike smartness (capped 0-100, re-baselines per task),
 // points are the same unbounded reward-system total from recordPerf(), so this
 // can read well past 100% -- that tracks total learning reward earned this
+let _autolearnCache = { errors: 0, lessons: 0, outcomes: 0, success_rate: 0, _ts: 0 };
+function getAutolearnStats() {
+ const now = Date.now();
+ if (now - _autolearnCache._ts < 10000) return _autolearnCache;
+ try {
+  const { execSync } = require('child_process');
+  const cmd = "python3 -c \"import sys; sys.path.insert(0,'/home/ghost/claude-code-proxy'); import brain_autolearn,json; c=brain_autolearn.init_db(); e=c.execute('SELECT COUNT(*) FROM errors').fetchone()[0]; l=c.execute('SELECT COUNT(*) FROM errors WHERE lesson_generated=1').fetchone()[0]; o=c.execute('SELECT COUNT(*) FROM outcomes').fetchone()[0]; s=c.execute('SELECT AVG(success) FROM outcomes').fetchone()[0] or 0; print(json.dumps({'errors':e,'lessons':l,'outcomes':o,'success_rate':round(s,2)})); c.close()\"";
+  const out = execSync(cmd, { timeout: 3000 }).toString().trim();
+  _autolearnCache = JSON.parse(out);
+  _autolearnCache._ts = now;
+ } catch {}
+ return _autolearnCache;
+}
 // session, not a capped percentage.
 function autolearnBar() {
   const pts = _sessionPerf.points;
@@ -1394,8 +1407,10 @@ function autolearnBar() {
   const filled = Math.round(clamped / 100 * barLen);
   const col = pts >= 150 ? C.accent : pts >= 66 ? C.success : pts >= 33 ? C.mustard : C.error;
   const arrow = _smartDelta > 0 ? C.success + '\u25b2' : _smartDelta < 0 ? C.error + '\u25bc' : C.fgSubtle + '\u25c6';
+ const al = getAutolearnStats();
+ const dbTag = al.lessons > 0 ? ' ' + C.accent + 'u2726' + al.lessons + 'L' + C.reset : '';
   const overflow = pts > 100 ? ' ' + C.accent + '\u2726' : '';
-  return col + '\u2588'.repeat(filled) + C.fgSubtle + '\u2591'.repeat(barLen - filled) + C.reset + ' ' + C.bold + C.fgBase + pts + '%' + C.reset + ' ' + arrow + C.reset + overflow;
+  return col + '\u2588'.repeat(filled) + C.fgSubtle + '\u2591'.repeat(barLen - filled) + C.reset + ' ' + C.bold + C.fgBase + pts + '%' + C.reset + ' ' + arrow + C.reset + overflow + dbTag;
 }
 
 // Important files whose presence tracks project integrity. Missing one (esp. a
@@ -2972,7 +2987,9 @@ function renderReasoningPanel() {
   const barColor = progress > 80 ? C.error : progress > 50 ? C.mustard : C.primary;
   const bar = `${barColor}${'█'.repeat(filled)}${C.fgSubtle}${'░'.repeat(barLen - filled)}${C.reset} ${C.bold}${C.fgBase}${progress}%${C.reset} ${C.fgMuted}Step ${_tuiStep}/${_tuiMaxSteps}${C.reset}`;
   lines.push(`           ${C.fgMuted}└─${C.reset} ${C.fgSubtle}Progress${C.reset} ${bar}`);
-  lines.push(`           ${C.fgMuted}└─${C.reset} ${C.fgSubtle}🧠 Smart ${C.reset}  ${smartBar()}`);
+lines.push(` ${C.fgMuted} ${C.reset} ${C.fgSubtle}🧠 Smart ${C.reset} ${smartBar()}`);
+ const _al = getAutolearnStats();
+ lines.push(` ${C.fgMuted} ${C.reset} ${C.fgSubtle}📚 AL ${C.reset}${C.accent}${_al.lessons||0}L${C.reset}/${C.fgSubtle}${_al.errors||0}E${C.reset}/${C.fgSubtle}${_al.outcomes||0}O${C.reset}`);
   lines.push(`           ${C.fgMuted}└─${C.reset} ${C.fgSubtle}📚 Auto  ${C.reset}  ${autolearnBar()}`);
   // ── Token usage + tool stats ──
   const totalTokens = _tuiTokensIn + _tuiTokensOut;
@@ -9108,7 +9125,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
           _lastConsolidationTurn = _toolCallCount;
           try {
             await autolearn.consolidateMemories(path.join(process.env.HOME || '/home/ghost', '.hakster'));
-          } catch (e) { /* non-blocking */ }
+          } catch (e) { console.error("[memory] consolidate failed:", e.message); }
 
           // ── Memory Engine v2: consolidate + extract entities ──
           // Deferred: consolidate is a synchronous disk-heavy op; run it off the
@@ -9117,7 +9134,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
             try {
               const hDir = path.join(process.env.HOME || '/home/ghost', '.hakster');
               memoryEngine.consolidate(hDir);
-            } catch (e) { /* non-blocking */ }
+            } catch (e) { console.error("[memory] consolidate failed:", e.message); }
           });
         }
 
@@ -9141,7 +9158,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
               tags: [toolName, 'tool-result'],
               timestamp: new Date().toISOString()
             }, process.cwd());
-          } catch (e) { /* non-blocking */ }
+ } catch (e) { console.error("[memory] addMemory failed:", e.message); }
         });
 
         // ── Auto-learn: REFLECT phase ──

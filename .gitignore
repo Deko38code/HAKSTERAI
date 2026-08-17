@@ -55,5 +55,3 @@ test-results/
 logs/
 cli/.phantom-ai-config.json
 .serena/
-__pycache__/
-server/.playwright-mcp/

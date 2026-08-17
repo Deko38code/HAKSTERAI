@@ -74,7 +74,7 @@ const PROVIDERS = {
   ollama: {
     name: 'Ollama',
     baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    defaultModel: process.env.HAKSTER_MODEL || process.env.HP1000_MODEL || process.env.OLLAMA_MODEL || process.env.DEFAULT_MODEL || 'hp-1000:latest',
+    defaultModel: process.env.DEFAULT_MODEL || 'glm-uncensored:latest',
     type: 'openai-compat',
   },
   // Second ollama instance for gpt-oss:120b-cloud — same backend, different model,
@@ -182,8 +182,8 @@ function _pmodel(name, fallback) { const e = loadPhantomKeys()[name]; return (e 
 
 // Add the phantom cloud providers into PROVIDERS (merge, don't overwrite existing).
 Object.assign(PROVIDERS, {
-  groq:        { name: 'Groq',        baseURL: 'https://api.groq.com/openai',                 defaultModel: _pmodel('groq', 'llama-3.3-70b-versatile'), apiKey: _pk('groq')        || process.env.GROQ_API_KEY,        apiKeyEnv: 'GROQ_API_KEY',        type: 'openai-compat' },
-  groq2:       { name: 'Groq 2',      baseURL: 'https://api.groq.com/openai',                 defaultModel: _pmodel('groq2','llama-3.1-8b-instant'),   apiKey: _pk('groq2')       || process.env.GROQ_API_KEY2,      apiKeyEnv: 'GROQ_API_KEY2',       type: 'openai-compat' },
+  groq:        { name: 'Groq',        baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq', 'llama-3.3-70b-versatile'), apiKey: _pk('groq')        || process.env.GROQ_API_KEY,        apiKeyEnv: 'GROQ_API_KEY',        type: 'openai-compat' },
+  groq2:       { name: 'Groq 2',      baseURL: 'https://api.groq.com/openai/v1',                 defaultModel: _pmodel('groq2','llama-3.1-8b-instant'),   apiKey: _pk('groq2')       || process.env.GROQ_API_KEY2,      apiKeyEnv: 'GROQ_API_KEY2',       type: 'openai-compat' },
   sambanova:   { name: 'SambaNova',   baseURL: 'https://api.sambanova.ai/v1',                    defaultModel: _pmodel('sambanova','Meta-Llama-3.3-70B-Instruct'), apiKey: _pk('sambanova') || process.env.SAMBANOVA_API_KEY,   apiKeyEnv: 'SAMBANOVA_API_KEY',   type: 'openai-compat' },
   cerebras:    { name: 'Cerebras',    baseURL: 'https://api.cerebras.ai/v1',                      defaultModel: _pmodel('cerebras','llama3.1-8b'),          apiKey: _pk('cerebras')    || process.env.CEREBRAS_API_KEY,    apiKeyEnv: 'CEREBRAS_API_KEY',    type: 'openai-compat' },
   gemini:      { name: 'Google Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: _pmodel('gemini','gemini-2.5-flash'), apiKey: _pk('gemini') || process.env.GEMINI_API_KEY,  apiKeyEnv: 'GEMINI_API_KEY',  type: 'gemini' },
@@ -193,28 +193,15 @@ Object.assign(PROVIDERS, {
   'puter-4o':  { name: 'Puter GPT-4o', baseURL: 'https://api.puter.com',                            defaultModel: 'gpt-4o',                                   apiKey: 'free',                                              apiKeyEnv: '',                     type: 'openai-compat' },
 });
 
-// Waterfall order: ollama 1st (local, always free), then high-quota free-tier cloud
-// (claude-cli rides Pro sub, sambanova/groq reset every minute/day), THEN cloud-Ollama
-// models (hackbot=glm-5.2:cloud, gpt-oss=gpt-oss:120b-cloud) which have tight hourly/weekly
-// caps — keep them as last resort so they aren't burned on every Ollama hiccup.
-const WATERFALL_ORDER = ['ollama','claude-cli','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o','hackbot','gpt-oss'];
-
-// Cloud-Ollama providers that have tight hourly/weekly rate limits.
-// When they 429, cool them down for 2 hours instead of 2 minutes.
-const CLOUD_OLLAMA_PROVIDERS = new Set(['hackbot', 'gpt-oss']);
-
+// Waterfall order: hackbot 1st (uncensored bot network, primary brain),
+// gpt-oss 2nd (120b cloud), ollama 3rd (hp-1000, local backup),
+// then sambanova + groq (cloud-free) and on down — rotates to the next on rate-limit.
+const WATERFALL_ORDER = ['hackbot','gpt-oss','ollama','claude-cli','sambanova','groq','cerebras','gemini','gemini-flash','openrouter','pollinations','puter-sonnet','puter-4o'];
 const _rateLimited = new Map(); // provider -> until ms
-function markProviderRateLimited(name, ms = 60000) {
-  if (!name) return;
-  // Cloud Ollama models have hourly/weekly caps — use a much longer cooldown
-  // so the waterfall doesn't hammer them and burn the weekly allowance in minutes.
-  const cooldown = CLOUD_OLLAMA_PROVIDERS.has(name) ? Math.max(ms, 7200000) : ms; // 2h min for cloud Ollama
-  _rateLimited.set(name, Date.now() + cooldown);
-}
+function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
 function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }
 function providerHasKey(name) {
   const cfg = PROVIDERS[name]; if (!cfg) return false;
-  if (name === 'ollama' || cfg.baseURL?.match(/localhost|127\.0\.0\.1|::1/)) return true;
   if (cfg.type === 'gemini') return !!(cfg.apiKey);
   return !!cfg.apiKey || cfg.apiKey === 'free';
 }
@@ -450,7 +437,7 @@ function getClient(provider) {
 
     case 'openai-compat':
       return new OpenAI({
-        apiKey: cfg.apiKey || 'ollama',
+        apiKey: 'ollama',
         baseURL: `${cfg.baseURL}/v1`,
         timeout: 120000, // 2 minute timeout for model calls
       });
@@ -2204,6 +2191,17 @@ const DANGEROUS_SHELL_PATTERNS = [
   /\bsgdisk\b/i,
   /\bpm2\s+(restart|stop|reload|delete)\s+(hakster-?ai|hakster-tui)\b/i,
   /\bsystemctl\s+(restart|stop)\s+pm2(-root)?\b/i,
+  // 🦙 PROTECT OLLAMA — hard-block any command that stops/kills/deletes ollama
+  /\bsystemctl\s+(stop|disable|mask)\s+ollama\b/i,
+  /\bpm2\s+(stop|delete|kill)\s+ollama\b/i,
+  /\bpkill\s+(-\S+\s+)?ollama\b/i,
+  /\bkillall\s+ollama\b/i,
+  /\bkill\s+(-\S+\s+)+.*\bollama\b/i,
+  /\bollama\s+rm\b/i,
+  /\bollama\s+delete\b/i,
+  /\brm\s+(-\S+\s+)*.*\b\.ollama\b/i,
+  /\brm\s+(-\S+\s+)*.*\/usr\/share\/ollama\b/i,
+  /\brm\s+(-\S+\s+)*.*\/var\/lib\/ollama\b/i,
 ];
 
 const READ_ONLY_SHELL_PREFIXES = [

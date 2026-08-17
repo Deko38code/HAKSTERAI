@@ -185,14 +185,11 @@ function connectServer(serverName, config) {
     child.stdout.on('data', (data) => handleServerData(serverName, data));
 
     child.stderr.on('data', (data) => {
-      // Log stderr but filter out npm prefix noise, npx cache spam, and verbose
-      // INFO/DEBUG lines from Python servers (serena) that flood the console
-      // during initial load. Only show warnings/errors.
+      // Log stderr but filter out npm prefix noise and npx cache spam
       const lines = data.toString().trim();
       if (!lines) return;
       const filtered = lines.split('\n')
         .filter(l => !l.includes('config prefix cannot be changed') && !l.includes('npm error config prefix'))
-        .filter(l => !/^(INFO|DEBUG)\s/i.test(l))  // suppress Python INFO/DEBUG noise
         .join('\n');
       if (filtered) _logFn(`  [MCP:${serverName}] stderr: ${filtered.substring(0, 200)}`);
     });
@@ -244,7 +241,7 @@ function connectServer(serverName, config) {
         if (isNpx) {
           const pkgName = config.args && config.args.length > 1 ? config.args[1] : '';
           _logFn(`  [MCP:${serverName}] npx starting${pkgName ? ` ${pkgName}` : ''}...`);
-          await new Promise(r => setTimeout(r, 4000)); // 4s for npx package resolution (cached after first run)
+          await new Promise(r => setTimeout(r, 8000)); // 8s for npx package resolution
         } else if (isBun) {
           _logFn(`  [MCP:${serverName}] bun starting...`);
           await new Promise(r => setTimeout(r, 2000)); // 2s for bun to warm up
@@ -299,6 +296,98 @@ function connectServer(serverName, config) {
   });
 }
 
+/**
+ * One-shot probe of an MCP server to discover its tools without keeping the
+ * process alive. Spawns -> initialize -> tools/list -> kills. Used at startup
+ * for tier 2/3 (lazy) servers so the LLM sees all tool definitions without
+ * all 19 servers consuming RAM simultaneously on a 7GB box.
+ * @param {string} name - server name (for logging)
+ * @param {object} config - { command, args, env } from mcp.json
+ * @returns {Promise<{ok: boolean, tools?: Array, error?: string}>}
+ */
+function probeServerTools(name, config) {
+  return new Promise((resolve) => {
+    const env = { ...process.env, ...(config.env || {}) };
+    env.HOME = GHOST_HOME;
+    if (!env.PATH?.includes('/root/.bun/bin')) {
+      env.PATH = `/root/.bun/bin:${env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}`;
+    }
+    const localBin = path.join(GHOST_HOME, '.local', 'bin');
+    if (!env.PATH?.includes(localBin)) {
+      env.PATH = `${localBin}:${env.PATH}`;
+    }
+
+    let child;
+    try {
+      child = spawn(config.command, config.args || [], { env, stdio: ['pipe', 'pipe', 'pipe'], cwd: '/tmp' });
+    } catch (err) {
+      return resolve({ ok: false, error: err.message, tools: [] });
+    }
+
+    let settled = false;
+    let stdoutBuf = '';
+    let timer = null;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { child.kill('SIGTERM'); } catch (_) {}
+      setTimeout(() => { try { if (!child.killed) child.kill('SIGKILL'); } catch (_) {} }, 2000);
+      resolve(result);
+    };
+
+    child.stdin.on('error', () => {});
+    child.stdout.on('error', () => {});
+    child.stderr.on('error', () => {});
+    child.on('error', (err) => finish({ ok: false, error: err.message, tools: [] }));
+    child.on('close', (code) => {
+      if (!settled) finish({ ok: false, error: `process exited with code ${code}`, tools: [] });
+    });
+
+    const isNpx = config.command === 'npx' || config.command === 'npx.cmd';
+    const isBun = config.command.endsWith('bun') || config.command.endsWith('/bun');
+    const startupDelay = isNpx ? 8000 : isBun ? 2000 : 0;
+    const effTimeout = config.initTimeoutMs || 120000;
+    timer = setTimeout(() => finish({ ok: false, error: `probe timed out after ${effTimeout}ms`, tools: [] }), effTimeout + startupDelay);
+
+    child.stdout.on('data', (data) => {
+      stdoutBuf += data.toString();
+      let idx;
+      while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
+        const line = stdoutBuf.slice(0, idx).trim();
+        stdoutBuf = stdoutBuf.slice(idx + 1);
+        if (!line) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch (_) { continue; }
+        if (msg.id === 1 && msg.result) {
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', params: {}, id: 2 }) + '\n');
+        } else if (msg.id === 2 && msg.result) {
+          const tools = (msg.result.tools || []).map(t => ({
+            name: t.name,
+            description: t.description || '',
+            inputSchema: t.inputSchema || { type: 'object', properties: {} },
+          }));
+          _logFn(`  [MCP:${name}] probe discovered ${tools.length} tool(s)`);
+          finish({ ok: true, tools });
+        } else if (msg.error) {
+          finish({ ok: false, error: msg.error.message || JSON.stringify(msg.error), tools: [] });
+        }
+      }
+    });
+
+    (async () => {
+      if (startupDelay) await new Promise(r => setTimeout(r, startupDelay));
+      try {
+        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'haksterAI-probe', version: '1.0' } }, id: 1 }) + '\n');
+      } catch (err) {
+        finish({ ok: false, error: err.message, tools: [] });
+      }
+    })();
+  });
+}
+
 // ── Public API ───────────────────────────────────────────────────────────
 
 /**
@@ -344,33 +433,105 @@ async function loadMcpServers(configDirs) {
     return { tools: [], servers: [] };
   }
 
-  // Connect to all servers in parallel (with individual error handling).
-  // Staggered by 250ms per server — spawning 10 interpreters (node/python/uv)
-  // at the exact same instant creates a CPU/IO spike that's cheap to avoid and
-  // gets worse when a heavy local Ollama model is also running on the same box.
+  // Tier-based lazy loading for 7GB RAM boxes.
+  //
+  // Tier 1 (light, always-on): spawned and kept alive at startup — same as before.
+  // Tier 2/3 (medium/heavy): probed at startup (spawn → tools/list → kill) so the
+  //   LLM sees all tool definitions, but the process is NOT kept alive. When a
+  //   tier 2/3 tool is actually called, the server is lazy-spawned on-demand by
+  //   callMcpTool(). This cuts ~800MB+ of RAM from servers that are rarely used.
+  //
+  // Config doesn't need explicit tier fields — default to tier 1 (always-on) for
+  // any server without a tier field, preserving backward compatibility.
   //
   // Heavy servers (serena) get extra delay — they spawn Python + a TypeScript
   // language server + web dashboard (~300MB) and are prone to OOM kills when
   // all 15 servers fire at once on a 7GB box. Spawning serena last gives the
   // lighter servers time to settle first.
   const HEAVY_SERVERS = new Set(['serena']);
-  const sortedConfigs = [...configs].sort((a, b) => {
+
+  const tier1Configs = [];
+  const lazyConfigs = [];
+  for (const { name, config } of configs) {
+    const tier = config.tier || 1;
+    if (tier <= 1) {
+      tier1Configs.push({ name, config });
+    } else {
+      lazyConfigs.push({ name, config });
+    }
+  }
+
+  _logFn(`  [MCP] ${tier1Configs.length} tier-1 (always-on), ${lazyConfigs.length} tier-2/3 (lazy)`);
+
+  // Sort tier 1: heavy servers last
+  const sortedTier1 = [...tier1Configs].sort((a, b) => {
     const aH = HEAVY_SERVERS.has(a.name) ? 1 : 0;
     const bH = HEAVY_SERVERS.has(b.name) ? 1 : 0;
-    return aH - bH; // heavy servers go last
+    return aH - bH;
   });
-  const results = await Promise.allSettled(
-    sortedConfigs.map(({ name, config }, i) =>
-      new Promise(r => setTimeout(r, i * 100 + (HEAVY_SERVERS.has(name) ? 1500 : 0))).then(() => connectServer(name, config))
+
+  // Spawn tier 1 servers (staggered, same as before)
+  const tier1Results = await Promise.allSettled(
+    sortedTier1.map(({ name, config }, i) =>
+      new Promise(r => setTimeout(r, i * 250 + (HEAVY_SERVERS.has(name) ? 2000 : 0))).then(() => connectServer(name, config))
     )
   );
 
   const connected = [];
-  for (let i = 0; i < results.length; i++) {
-    if (results[i].status === 'fulfilled') {
-      connected.push(sortedConfigs[i].name);
+  for (let i = 0; i < tier1Results.length; i++) {
+    if (tier1Results[i].status === 'fulfilled') {
+      connected.push(sortedTier1[i].name);
     } else {
-      _logFn(`  [MCP] Failed to connect "${sortedConfigs[i].name}": ${results[i].reason?.message || results[i].reason}`);
+      _logFn(`  [MCP] Failed to connect "${sortedTier1[i].name}": ${tier1Results[i].reason?.message || tier1Results[i].reason}`);
+    }
+  }
+
+  // Probe tier 2/3 servers one at a time (not parallel — avoid RAM spike).
+  // Each probe: spawn → initialize → tools/list → kill. The tool definitions
+  // are cached in a separate Map so the LLM sees them, but the process is dead.
+  for (const { name, config } of lazyConfigs) {
+    _logFn(`  [MCP:${name}] probing (lazy, tier ${config.tier})...`);
+    try {
+      const probe = await probeServerTools(name, config);
+      if (probe.ok && probe.tools.length > 0) {
+        // Register as lazy: store config + tools but no child process
+        mcpServers.set(name, {
+          name,
+          config,
+          child: null,
+          tools: probe.tools,
+          buffer: '',
+          pending: new Map(),
+          initialized: false,
+          lazy: true,
+        });
+        _logFn(`  [MCP:${name}] lazy-registered with ${probe.tools.length} tool(s)`);
+      } else {
+        _logFn(`  [MCP:${name}] probe failed: ${probe.error || 'no tools'} — will spawn on-demand`);
+        // Still register as lazy with empty tools — callMcpTool will spawn on demand
+        mcpServers.set(name, {
+          name,
+          config,
+          child: null,
+          tools: [],
+          buffer: '',
+          pending: new Map(),
+          initialized: false,
+          lazy: true,
+        });
+      }
+    } catch (err) {
+      _logFn(`  [MCP:${name}] probe error: ${err.message} — will spawn on-demand`);
+      mcpServers.set(name, {
+        name,
+        config,
+        child: null,
+        tools: [],
+        buffer: '',
+        pending: new Map(),
+        initialized: false,
+        lazy: true,
+      });
     }
   }
 
@@ -423,7 +584,26 @@ async function callMcpTool(fullFnName, args) {
   }
 
   const [, serverName, toolName] = match;
-  const server = mcpServers.get(serverName);
+  let server = mcpServers.get(serverName);
+
+  if (!server) {
+    throw new Error(`MCP server "${serverName}" not connected`);
+  }
+
+  // Lazy-spawn tier 2/3 servers on first tool call
+  if (server.lazy && (!server.child || !server.initialized)) {
+    _logFn(`  [MCP:${serverName}] lazy-spawning (tier ${server.config.tier}) for tool: ${toolName}...`);
+    try {
+      await connectServer(serverName, server.config);
+      server = mcpServers.get(serverName); // re-fetch after connectServer replaced it
+      if (!server || !server.initialized) {
+        throw new Error(`lazy-spawn succeeded but server not initialized`);
+      }
+      _logFn(`  [MCP:${serverName}] lazy-spawned, ${server.tools.length} tool(s) available`);
+    } catch (err) {
+      throw new Error(`MCP server "${serverName}" lazy-spawn failed: ${err.message}`);
+    }
+  }
 
   if (!server || !server.initialized) {
     throw new Error(`MCP server "${serverName}" not connected`);
@@ -435,7 +615,7 @@ async function callMcpTool(fullFnName, args) {
     const result = await sendRequest(serverName, 'tools/call', {
       name: toolName,
       arguments: args || {},
-    }, 30000);
+    }, 120000);
 
     // MCP tools/call returns { content: [{type, text}], isError }
     if (result?.content && Array.isArray(result.content)) {
@@ -471,6 +651,7 @@ function mcpStatus() {
     servers.push({
       name,
       initialized: server.initialized,
+      lazy: server.lazy || false,
       toolCount: server.tools.length,
       tools: server.tools.map(t => t.name),
       pid: server.child?.pid || null,
