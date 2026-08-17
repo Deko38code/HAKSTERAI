@@ -710,10 +710,16 @@ function init(cwd) {
 // ---------------------------------------------------------------------------
 function migrateOldArchives(cwd) {
   const dir = archiveDir(cwd);
-  if (!fs.existsSync(dir)) return;
-  
-  const files = fs.readdirSync(dir).filter(f => f.startsWith('raw_memories_archive_') && f.endsWith('.json'));
-  if (files.length === 0) return;
+ if (!fs.existsSync(dir)) return;
+ 
+ // Guard: only migrate once — marker file prevents re-processing 182+ archives every init()
+ const marker = path.join(dir, '.migrated');
+ if (fs.existsSync(marker)) return;
+ // Write marker BEFORE migration so a hang/crash doesn't re-trigger it
+ writeText(marker, new Date().toISOString());
+ 
+ const files = fs.readdirSync(dir).filter(f => f.startsWith('raw_memories_archive_') && f.endsWith('.json'));
+ if (files.length === 0) return;
 
   const store = loadStore(cwd);
   let migrated = 0;
@@ -746,12 +752,11 @@ function migrateOldArchives(cwd) {
     try {
       fs.renameSync(path.join(dir, file), path.join(dir, file + '.migrated'));
     } catch {}
-  }
-
-  if (migrated > 0) {
-    saveStore(cwd, store);
-    console.log(`[memory-engine] Migrated ${migrated} old memories into new store`);
-  }
+ if (migrated > 0) {
+ saveStore(cwd, store);
+ console.log(`[memory-engine] Migrated ${migrated} old memories into new store`);
+ }
+}
 }
 
 // ---------------------------------------------------------------------------
