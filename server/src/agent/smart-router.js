@@ -140,17 +140,30 @@ const TIERS = {
 const TASK_KEYWORDS = {
   code: ['function', 'class', 'bug', 'fix', 'refactor', 'endpoint', 'route', 'api', 'server', 'client',
          'javascript', 'python', 'node', 'react', 'express', 'script', 'compile', 'build', 'deploy',
-         'file', 'edit', 'write', 'code', 'implement', 'feature', 'merge', 'commit', 'git'],
+         'file', 'edit', 'write', 'code', 'implement', 'feature', 'merge', 'commit', 'git',
+         'npm', 'pip', 'install', 'package', 'module', 'import', 'require', 'config', 'json',
+         'directory', 'folder', 'list', 'mkdir', 'cp', 'mv', 'rename', 'chmod'],
   security: ['pentest', 'exploit', 'reverse shell', 'nmap', 'scan', 'vuln', 'bypass', 'payload',
              'xss', 'sqli', 'ssrf', 'rce', 'lfi', 'osint', 'recon', 'brute', 'fuzz', 'waf',
-             'cloudflare', 'captcha', 'injection', 'escalation', 'forensic', 'malware'],
+             'cloudflare', 'captcha', 'injection', 'escalation', 'forensic', 'malware',
+             'phishing', 'botnet', 'ddos', 'trojan', 'backdoor', 'rootkit', 'keylogger',
+             'mitm', 'arp', 'spoofing', 'sniff', 'wireshark', 'metasploit', 'burpsuite',
+             'hashcat', 'john', 'hydra', 'nikto', 'dirb', 'gobuster', 'sqlmap', 'ffuf',
+             'shellshock', 'log4j', 'cve', '0day', 'zeroday', 'privilege', 'sudoers',
+             'crack', 'decrypt', 'encode', 'decode', 'base64', 'hex', 'openssl',
+             'ssh', 'rdp', 'ftp', 'smb', 'telnet', 'snmp', 'ldap', 'kerberos'],
   research: ['research', 'analyze', 'compare', 'investigate', 'find', 'search', 'document',
-             'explain', 'summarize', 'report', 'study', 'review'],
+             'explain', 'summarize', 'report', 'study', 'review',
+             'lookup', 'query', 'inspect', 'examine', 'assess', 'evaluate'],
   chat: ['hello', 'hey', 'yo', 'what', 'how', 'why', 'when', 'where', 'who', 'tell me',
-         'chat', 'talk', 'discuss', 'opinion', 'think'],
+         'chat', 'talk', 'discuss', 'opinion', 'think', 'thanks', 'hi', 'sup'],
   image: ['image', 'picture', 'photo', 'draw', 'generate image', 'render', 'flux', 'sdxl'],
   power: ['architecture', 'design system', 'refactor large', 'migrate', 'rewrite', 'scale',
-          'optimize', 'performance', 'complex', 'multi-step', 'plan'],
+          'optimize', 'performance', 'complex', 'multi-step', 'plan',
+          'run command', 'execute', 'shell', 'bash', 'terminal', 'cmd', 'command',
+          'generate script', 'write script', 'create script', 'automate',
+          'system', 'infrastructure', 'deploy', 'orchestrate', 'pipeline',
+          'database', 'migration', 'schema', 'backup', 'restore'],
 };
 
 function detectTaskType(message) {
@@ -201,175 +214,151 @@ function checkHealth() {
 // ── Router ─────────────────────────────────────────────────────────────────
 
 /**
- * Route a task to the cheapest available backend.
- * Strategy: GLM cloud is ALWAYS the default backbone. Free tiers (T1 cloud, T2 hackbots)
- * are chained first to intercept most traffic and save GLM tokens. GLM is always
- * available as the premium fallback — used less but always there.
+ * Route a task to the best backend based on task type.
  *
- * Chain order:
- *   1. T1 FREE CLOUD (Groq/Cerebras/SambaNova) — fast, free, saves GLM tokens
- *   2. T2 HACKBOTS/Miniforge — free, uncensored, credit maker rotator (sustainable)
- *   3. T3 GLM CLOUD — always default backbone, premium, used less
- *   4. T4-T7 — extra free fallbacks (Phantom, Parrot, Kaggle, local Ollama)
+ * GLM cloud is ALWAYS the default backbone — it still performs real tasks,
+ * not just fallback. The router splits work by task type:
  *
- * Returns the first healthy tier in the chain. Callers can also use routeChain()
- * to get the full ordered list for waterfall execution.
+ *   chat, code, fast  → T1 free cloud (Groq/Cerebras) — saves GLM tokens
+ *   security, hack    → T2 hackbots (uncensored, no refusals)
+ *   power, research   → T3 GLM cloud (HP-1000/GLM-5.1) — needs quality, GLM handles these
+ *   image             → T1 pollinations
+ *
+ * If the preferred tier is down, chain falls to next healthy one.
+ * GLM is always in the chain as the guaranteed backbone.
  *
  * @param {Object} task - { type?, message, model? }
  * @returns {Object} { tier, url, model, displayModel, cost }
  */
 function route(task = {}) {
-  const chain = routeChain(task);
-  return chain[0];  // first healthy in chain
-}
-
-/**
- * Build the full routing chain — GLM cloud always included as default backbone.
- * Free tiers (T1, T2) come first to save GLM tokens. GLM is always in the chain.
- * @param {Object} task - { type?, message, model? }
- * @returns {Array} ordered list of backends to try (first = preferred)
- */
-function routeChain(task = {}) {
   const type = task.type || detectTaskType(task.message || '');
   const requestedModel = task.model || '';
-  const chain = [];
 
   // If a specific cloud alias is requested, route directly to GLM cloud (premium)
   if (requestedModel && TIERS.T8_CLOUD_ALIAS.models[requestedModel]) {
     const cloudModel = TIERS.T8_CLOUD_ALIAS.models[requestedModel];
-    return [{
+    return {
       tier: 'T8_CLOUD_ALIAS',
       name: TIERS.T8_CLOUD_ALIAS.name,
       url: TIERS.T8_CLOUD_ALIAS.url,
       model: cloudModel,
       displayModel: requestedModel,
-      cost: 1,  // burns GLM tokens
-      redirected: true,
-    }];
-  }
-
-  // 1. T1: FREE CLOUD — Groq/Cerebras/SambaNova (fast, free, saves GLM tokens)
-  if (_health.T1_FREE_CLOUD !== false) {
-    const providerMap = {
-      code: 'groq',          // 500+ tok/s, great for code
-      chat: 'cerebras',      // 2000 tok/s, instant responses
-      power: 'sambanova',    // Llama 3.3 70B, complex reasoning
-      security: 'groq',      // fast + good for security scripts
-      research: 'sambanova', // 70B for deep research
-      fast: 'cerebras',      // 2000 tok/s
-      image: 'pollinations', // free GPT-4o proxy
-    };
-    const provider = providerMap[type] || 'groq';
-    chain.push({
-      tier: 'T1_FREE_CLOUD',
-      name: TIERS.T1_FREE_CLOUD.name,
-      url: TIERS.T1_FREE_CLOUD.url,
-      model: provider,
-      displayModel: `free-${provider}`,
-      cost: 0,
-    });
-  }
-
-  // 2. T2: HACKBOTS/Miniforge — free, uncensored, no refusals.
-  //    Credit maker rotator = sustainable, always chained.
-  if (_health.T2_MINIFORGE !== false) {
-    const botMap = { code: 'RobloxScriptHelper', security: 'ai-unrestricted', chat: 'chatgpt',
-                     power: 'gemini-experimental-2-5', research: 'gemini-experimental-2-5', image: 'flux-schnell-image-generator' };
-    const bot = botMap[type] || 'ai-unrestricted';
-    chain.push({
-      tier: 'T2_MINIFORGE',
-      name: TIERS.T2_MINIFORGE.name,
-      url: `http://localhost:5555/api/apps/${bot}/chat`,
-      model: bot,
-      displayModel: bot,
-      cost: 0,
-    });
-  }
-
-  // 3. T3: GLM CLOUD — ALWAYS DEFAULT BACKBONE. Premium, used less, but always in chain.
-  //    This is the guaranteed fallback — if free tiers fail, GLM is always here.
-  if (_health.T3_GLM_CLOUD !== false) {
-    const modelMap = {
-      code: 'hp-1000:latest',     // uncensored on GLM cloud
-      power: 'glm-5.1:cloud',     // raw GLM — highest quality
-      chat: 'hp-1000:latest',
-      security: 'hp-1000:latest',
-      research: 'glm-5.1:cloud',
-    };
-    const model = modelMap[type] || 'hp-1000:latest';
-    chain.push({
-      tier: 'T3_GLM_CLOUD',
-      name: TIERS.T3_GLM_CLOUD.name,
-      url: TIERS.T3_GLM_CLOUD.url,
-      model,
-      displayModel: model,
-      cost: 1,  // burns GLM tokens — used less but always available
-      isDefault: true,  // marks this as the default backbone
-    });
-  }
-
-  // 4. T4: PHANTOM GATEWAY — same free providers, different route
-  if (_health.T4_PHANTOM !== false) {
-    chain.push({
-      tier: 'T4_PHANTOM',
-      name: TIERS.T4_PHANTOM.name,
-      url: TIERS.T4_PHANTOM.url,
-      model: 'groq',
-      displayModel: 'phantom-groq',
-      cost: 0,
-    });
-  }
-
-  // 5. T5: Parrot box (remote Ollama, free)
-  if (_health.T5_PARROT !== false) {
-    chain.push({
-      tier: 'T5_PARROT',
-      name: TIERS.T5_PARROT.name,
-      url: TIERS.T5_PARROT.url,
-      model: TIERS.T5_PARROT.models.code,
-      displayModel: TIERS.T5_PARROT.models.code,
-      cost: 0,
-    });
-  }
-
-  // 6. T6: Kaggle GPU (free, if tunnel up)
-  if (_health.T6_KAGGLE) {
-    chain.push({
-      tier: 'T6_KAGGLE',
-      name: TIERS.T6_KAGGLE.name,
-      url: (process.env.KAGGLE_TUNNEL || '').replace(/\/$/, '') + '/api/chat',
-      model: TIERS.T6_KAGGLE.models.heavy,
-      displayModel: TIERS.T6_KAGGLE.models.heavy,
-      cost: 0,
-    });
-  }
-
-  // 7. T7: LOCAL OLLAMA — free but SLOW on 7GB RAM. Last resort.
-  if (_health.T7_LOCAL !== false) {
-    const model = TIERS.T7_LOCAL.models[type] || TIERS.T7_LOCAL.models.chat;
-    chain.push({
-      tier: 'T7_LOCAL',
-      name: TIERS.T7_LOCAL.name,
-      url: TIERS.T7_LOCAL.url,
-      model,
-      displayModel: model,
-      cost: 0,
-    });
-  }
-
-  // If nothing is healthy, GLM cloud is ALWAYS the absolute fallback
-  if (chain.length === 0) {
-    chain.push({
-      tier: 'T8_CLOUD_ALIAS',
-      name: TIERS.T8_CLOUD_ALIAS.name,
-      url: TIERS.T8_CLOUD_ALIAS.url,
-        model: 'hp-1000:latest',
-      displayModel: 'hp-1000:latest',
       cost: 1,
-    });
+      redirected: true,
+    };
   }
 
-  return chain;
+  // ── Task-type routing: each type has a preferred tier + fallback chain ──────
+  // GLM cloud handles power + research (needs quality). Free tiers handle the rest.
+  const ROUTING_MAP = {
+    // Simple/fast tasks → free cloud first, GLM as fallback
+    chat:    ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T4_PHANTOM', 'T7_LOCAL'],
+    code:    ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T4_PHANTOM', 'T5_PARROT', 'T7_LOCAL'],
+    fast:    ['T1_FREE_CLOUD', 'T3_GLM_CLOUD', 'T7_LOCAL'],
+
+    // Security/hack → hackbots first (uncensored), GLM as fallback
+    security: ['T2_MINIFORGE', 'T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T7_LOCAL'],
+
+    // Heavy/complex tasks → GLM cloud FIRST (it's the backbone, handles these best)
+    power:    ['T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T2_MINIFORGE', 'T4_PHANTOM', 'T6_KAGGLE', 'T7_LOCAL'],
+    research: ['T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T2_MINIFORGE', 'T4_PHANTOM', 'T6_KAGGLE', 'T7_LOCAL'],
+
+    // Image → free pollinations, then GLM
+    image:   ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
+  };
+
+  const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
+
+  // Try each tier in order — return first healthy one
+  for (const tierKey of chain) {
+    const backend = _buildBackend(tierKey, type);
+    if (backend) return backend;
+  }
+
+  // Absolute fallback: GLM cloud always there
+  return {
+    tier: 'T8_CLOUD_ALIAS',
+    name: TIERS.T8_CLOUD_ALIAS.name,
+    url: TIERS.T8_CLOUD_ALIAS.url,
+    model: 'hp-1000:latest',
+    displayModel: 'hp-1000:latest',
+    cost: 1,
+  };
+}
+
+/**
+ * Build a backend object for a given tier + task type.
+ * Returns null if tier is not healthy.
+ */
+function _buildBackend(tierKey, type) {
+  if (_health[tierKey] === false) return null;
+
+  switch (tierKey) {
+    case 'T1_FREE_CLOUD': {
+      const providerMap = {
+        code: 'groq', chat: 'cerebras', power: 'sambanova',
+        security: 'groq', research: 'sambanova', fast: 'cerebras', image: 'pollinations',
+      };
+      const provider = providerMap[type] || 'groq';
+      return {
+        tier: 'T1_FREE_CLOUD', name: TIERS.T1_FREE_CLOUD.name,
+        url: TIERS.T1_FREE_CLOUD.url, model: provider,
+        displayModel: `free-${provider}`, cost: 0,
+      };
+    }
+    case 'T2_MINIFORGE': {
+      const botMap = {
+        code: 'RobloxScriptHelper', security: 'ai-unrestricted', chat: 'chatgpt',
+        power: 'gemini-experimental-2-5', research: 'gemini-experimental-2-5', image: 'flux-schnell-image-generator',
+      };
+      const bot = botMap[type] || 'ai-unrestricted';
+      return {
+        tier: 'T2_MINIFORGE', name: TIERS.T2_MINIFORGE.name,
+        url: `http://localhost:5555/api/apps/${bot}/chat`,
+        model: bot, displayModel: bot, cost: 0,
+      };
+    }
+    case 'T3_GLM_CLOUD': {
+      const modelMap = {
+        code: 'hp-1000:latest', power: 'glm-5.1:cloud',
+        chat: 'hp-1000:latest', security: 'hp-1000:latest', research: 'glm-5.1:cloud',
+      };
+      const model = modelMap[type] || 'hp-1000:latest';
+      return {
+        tier: 'T3_GLM_CLOUD', name: TIERS.T3_GLM_CLOUD.name,
+        url: TIERS.T3_GLM_CLOUD.url, model, displayModel: model,
+        cost: 1, isDefault: true,
+      };
+    }
+    case 'T4_PHANTOM':
+      return {
+        tier: 'T4_PHANTOM', name: TIERS.T4_PHANTOM.name,
+        url: TIERS.T4_PHANTOM.url, model: 'groq',
+        displayModel: 'phantom-groq', cost: 0,
+      };
+    case 'T5_PARROT':
+      return {
+        tier: 'T5_PARROT', name: TIERS.T5_PARROT.name,
+        url: TIERS.T5_PARROT.url, model: TIERS.T5_PARROT.models.code,
+        displayModel: TIERS.T5_PARROT.models.code, cost: 0,
+      };
+    case 'T6_KAGGLE':
+      if (!process.env.KAGGLE_TUNNEL) return null;
+      return {
+        tier: 'T6_KAGGLE', name: TIERS.T6_KAGGLE.name,
+        url: process.env.KAGGLE_TUNNEL.replace(/\/$/, '') + '/api/chat',
+        model: TIERS.T6_KAGGLE.models.heavy, displayModel: TIERS.T6_KAGGLE.models.heavy, cost: 0,
+      };
+    case 'T7_LOCAL': {
+      const model = TIERS.T7_LOCAL.models[type] || TIERS.T7_LOCAL.models.chat;
+      return {
+        tier: 'T7_LOCAL', name: TIERS.T7_LOCAL.name,
+        url: TIERS.T7_LOCAL.url, model, displayModel: model, cost: 0,
+      };
+    }
+    default:
+      return null;
+  }
 }
 
 // ── Scheduler — cron-style agent dispatch ────────────────────────────────────
@@ -656,7 +645,6 @@ module.exports = {
   TIERS,
   init,
   route,
-  routeChain,
   detectTaskType,
   schedule,
   scheduleOnce,
