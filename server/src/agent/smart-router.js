@@ -30,10 +30,13 @@ const path = require('path');
 const TIERS = {
   // T1: FREE CLOUD — fast, supports tools, no credit card
   // Groq 500+ tok/s, Cerebras 2000 tok/s, SambaNova 70B — use these for most work
+  // NOTE: Free cloud via Phantom chat endpoint does NOT support tool calling.
+  // Only route here for pure chat/text. Tool tasks go to GLM or hackbots.
   T1_FREE_CLOUD: {
     name: 'free-cloud',
     cost: 0,
     url: 'http://localhost:4000/api/ai/chat',
+    supportsTools: true,   // Groq/Cerebras/SambaNova all support OpenAI tool calling natively
     models: {
       fast: 'groq',          // 500+ tok/s — default for most tasks
       faster: 'cerebras',    // 2000 tok/s — quick responses
@@ -48,6 +51,7 @@ const TIERS = {
     name: 'miniforge',
     cost: 0,
     url: 'http://localhost:5555/api/apps',
+    supportsTools: true,  // hackbots can execute scripts/commands
     models: {
       uncensored: 'ai-unrestricted',
       coding: 'RobloxScriptHelper',
@@ -64,6 +68,7 @@ const TIERS = {
     name: 'glm-cloud',
     cost: 1,  // costs tokens — free tiers intercept first to save these
     url: 'http://localhost:11434/api/chat',
+    supportsTools: true,  // GLM supports tool calling via Ollama
     models: {
       default: 'hp-1000:latest',        // glm-5.1:cloud + uncensored system prompt
       power: 'glm-5.1:cloud',           // raw glm-5.1 — high quality
@@ -75,6 +80,7 @@ const TIERS = {
     name: 'phantom-gateway',
     cost: 0,
     url: 'http://localhost:4000/api/ai/chat',
+    supportsTools: true,  // Phantom now passes tools to free cloud providers
     models: {
       groq: 'groq',
       gemini: 'gemini',
@@ -88,6 +94,7 @@ const TIERS = {
     name: 'parrot-box',
     cost: 0,
     url: 'http://10.0.0.251:11434/api/chat',
+    supportsTools: true,  // remote Ollama supports tool calling
     models: {
       code: 'deepseek-coder-v2:16b',
       fast: 'phi3:mini',
@@ -255,12 +262,16 @@ let _rrCounter = 0;
  * Round-robin: consecutive tasks of the same type rotate through the chain
  * so ALL healthy clusters get utilized, not just the first one.
  *
- * @param {Object} task - { type?, message, model? }
+ * @param {Object} task - { type?, message, model?, needsTools? }
  * @returns {Object} { tier, url, model, displayModel, cost }
  */
 function route(task = {}) {
   const type = task.type || detectTaskType(task.message || '');
   const requestedModel = task.model || '';
+  // Detect if this task needs tool calling (run commands, read/write files, browser)
+  // If the message mentions executing, reading, writing, or running commands → needs tools
+  const lower = (task.message || '').toLowerCase();
+  const needsTools = task.needsTools === true || /read|write|run|execute|file|command|shell|script|edit|fix|install|create|scrape|browse|click|navigate|deploy|build|grep|find|ls|cat|npm|pip|git|node|python|bash/.test(lower);
 
   // If a specific cloud alias is requested, route directly to GLM cloud (premium)
   if (requestedModel && TIERS.T8_CLOUD_ALIAS.models[requestedModel]) {
@@ -302,10 +313,14 @@ function route(task = {}) {
   const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
 
   // Build all healthy backends in the chain
+  // If task needs tools, filter out tiers that don't support tool calling
   const healthy = [];
   for (const tierKey of chain) {
     const backend = _buildBackend(tierKey, type);
-    if (backend) healthy.push(backend);
+    if (!backend) continue;
+    // Skip non-tool tiers when the task needs tool calling
+    if (needsTools && TIERS[tierKey] && TIERS[tierKey].supportsTools === false) continue;
+    healthy.push(backend);
   }
 
   if (healthy.length === 0) {
@@ -355,6 +370,9 @@ let _wrCounter = 0;
 function routeWeighted(task = {}) {
   const type = task.type || detectTaskType(task.message || '');
   const requestedModel = task.model || '';
+  // Detect tool needs (same logic as route)
+  const lower = (task.message || '').toLowerCase();
+  const needsTools = task.needsTools === true || /read|write|run|execute|file|command|shell|script|edit|fix|install|create|scrape|browse|click|navigate|deploy|build|grep|find|ls|cat|npm|pip|git|node|python|bash/.test(lower);
 
   if (requestedModel && TIERS.T8_CLOUD_ALIAS.models[requestedModel]) {
     const cloudModel = TIERS.T8_CLOUD_ALIAS.models[requestedModel];
@@ -384,7 +402,10 @@ function routeWeighted(task = {}) {
   const healthy = [];
   for (const tierKey of chain) {
     const backend = _buildBackend(tierKey, type);
-    if (backend) healthy.push(backend);
+    if (!backend) continue;
+    // Skip non-tool tiers when the task needs tool calling
+    if (needsTools && TIERS[tierKey] && TIERS[tierKey].supportsTools === false) continue;
+    healthy.push(backend);
   }
 
   if (healthy.length === 0) {
