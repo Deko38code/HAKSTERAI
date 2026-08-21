@@ -34,6 +34,7 @@ import subprocess
 import threading
 import re
 import urllib.request
+import urllib.parse
 
 # Ensure phantom package is importable
 sys.path.insert(0, "/home/ghost")
@@ -190,6 +191,27 @@ def get_tool_list() -> list[dict]:
                 "additionalProperties": False,
             },
         },
+        # ── ScraperAPI tool — 2 keys, 9,970 credits, proxy rotation + CF bypass ──
+        {
+            "name": "hakster_scrape",
+            "description": "Scrape a URL using ScraperAPI with proxy rotation, Cloudflare bypass, and optional JS rendering. 2 API keys with 9,970 total credits. Use for web scraping, page extraction, crawling sites with anti-bot protection. Supports render=true (JS rendering) and premium=true (residential proxies).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to scrape."},
+                    "render": {"type": "boolean", "description": "Enable JS rendering (uses more credits, default false).", "default": False},
+                    "premium": {"type": "boolean", "description": "Use premium residential proxies (uses more credits, default false).", "default": False},
+                    "country_code": {"type": "string", "description": "Optional country code for geo-targeting (e.g. 'us', 'gb')."},
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "hakster_scrape_status",
+            "description": "Check ScraperAPI key status — credits used, credits remaining, total across all keys.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
     ]
 
     # Add browser tools
@@ -279,6 +301,82 @@ def handle_tool(name: str, args: dict) -> dict:
         timeout = args.get("timeout", 30)
         output = run_shell(cmd, timeout)
         return {"content": [{"type": "text", "text": output}]}
+
+    # ── ScraperAPI tools — scrape with key rotation + credit tracking ──────────
+    if name == "hakster_scrape":
+        url = args.get("url", "")
+        render = args.get("render", False)
+        premium = args.get("premium", False)
+        country = args.get("country_code", "")
+        if not url:
+            return {"content": [{"type": "text", "text": "Error: url is required"}], "isError": True}
+        try:
+            # Read keys from file, rotate
+            keys_path = "/home/ghost/.scraperapi_keys"
+            try:
+                with open(keys_path) as f:
+                    keys = [l.strip() for l in f if l.strip()]
+            except FileNotFoundError:
+                return {"content": [{"type": "text", "text": "Error: ScraperAPI keys file not found at " + keys_path}], "isError": True}
+            if not keys:
+                return {"content": [{"type": "text", "text": "Error: No ScraperAPI keys configured"}], "isError": True}
+
+            # Build API URL with params
+            params = ["api_key=" + keys[0]]
+            if render:
+                params.append("render=true")
+            if premium:
+                params.append("premium=true")
+            if country:
+                params.append("country_code=" + country)
+            params.append("url=" + urllib.parse.quote(url, safe=''))
+
+            api_url = "https://api.scraperapi.com?" + "&".join(params)
+
+            req = urllib.request.Request(api_url, headers={
+                "User-Agent": "HaksterAI-MCP/1.0"
+            })
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                body = resp.read()
+                # Return text content (HTML or text), truncate if huge
+                try:
+                    text = body.decode("utf-8", errors="replace")
+                except Exception:
+                    text = str(body[:5000])
+                if len(text) > 50000:
+                    text = text[:50000] + f"\n\n... (truncated, {len(text)} total chars)"
+                return {"content": [{"type": "text", "text": text}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"ScraperAPI error: {e}"}], "isError": True}
+
+    if name == "hakster_scrape_status":
+        try:
+            keys_path = "/home/ghost/.scraperapi_keys"
+            with open(keys_path) as f:
+                keys = [l.strip() for l in f if l.strip()]
+            lines = []
+            total_left = 0
+            total_used = 0
+            for i, key in enumerate(keys):
+                try:
+                    req = urllib.request.Request(
+                        f"https://api.scraperapi.com/account?api_key={key}",
+                        headers={"User-Agent": "HaksterAI-MCP/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        data = json.loads(resp.read())
+                        left = data.get("creditsLeft", 0)
+                        used = data.get("requestCount", 0)
+                        lines.append(f"Key {i+1} ({key[:10]}...): Used={used}  Left={left}")
+                        total_left += left
+                        total_used += used
+                except Exception as e:
+                    lines.append(f"Key {i+1} ({key[:10]}...): Error — {e}")
+            lines.append(f"\nTotal: Used={total_used}  Left={total_left}  Keys={len(keys)}")
+            return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "isError": True}
 
     # Browser + captcha tools (all in BROWSER_TOOLS)
     if name.startswith("browser_") or name.startswith("captcha_"):
