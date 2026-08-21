@@ -288,26 +288,19 @@ function route(task = {}) {
   }
 
   // ── Task-type routing: each type has a preferred chain ──────────────────────
-  // GLM cloud handles power + research. Hackbots handle security. Free cloud handles rest.
-  // ALL tiers in each chain are utilized via round-robin rotation.
+  // Free cloud ALWAYS first — saves GLM tokens. GLM is LAST resort.
   const ROUTING_MAP = {
-    // Simple/fast → free cloud variants first (rotate Groq/Cerebras/SambaNova), GLM + hackbots as fallback
-    chat:    ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T4_PHANTOM', 'T5_PARROT', 'T7_LOCAL'],
-    code:    ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T4_PHANTOM', 'T5_PARROT', 'T7_LOCAL'],
-    fast:    ['T1_FREE_CLOUD', 'T3_GLM_CLOUD', 'T7_LOCAL'],
+    chat:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+    code:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+    fast:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
 
-    // Security/hack → hackbots first (uncensored), GLM + free cloud as fallback
-    security: ['T2_MINIFORGE', 'T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL'],
+    security: ['T2_MINIFORGE', 'T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
 
-    // Heavy/complex → GLM cloud FIRST (backbone), then rotate through free tiers + Kaggle
-    power:    ['T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T2_MINIFORGE', 'T4_PHANTOM', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL'],
-    research: ['T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T2_MINIFORGE', 'T4_PHANTOM', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL'],
+    power:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+    research: ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
 
-    // Image → free pollinations, then hackbots, then GLM
     image:   ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
-
-    // Scrape → ScraperAPI first (proxy rotation, CF bypass), then hackbots, then GLM
-    scrape:  ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T7_LOCAL'],
+    scrape:  ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T1_FREE_CLOUD', 'T7_LOCAL', 'T3_GLM_CLOUD'],
   };
 
   const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
@@ -345,14 +338,14 @@ function route(task = {}) {
 // Patch on top of route() so GLM cloud and hackbots get more tasks
 // while free cloud handles the bulk. Slow tiers (T7 local, T5 parrot) get less.
 const TIER_WEIGHTS = {
-  T1_FREE_CLOUD: 3,   // 3 slots — fast + free, handle bulk
-  T2_MINIFORGE:  3,   // 3 slots — hackbots, uncensored, credit rotator
-  T3_GLM_CLOUD:  4,   // 4 slots — GLM backbone, gets the most weight
-  T4_PHANTOM:    2,   // 2 slots — same as T1, secondary
+  T1_FREE_CLOUD: 6,   // 6 slots — free, fast, handles the BULK of traffic (Groq/Cerebras/SambaNova rotate)
+  T2_MINIFORGE:  4,   // 4 slots — hackbots, uncensored, credit rotator
+  T3_GLM_CLOUD:  1,   // 1 slot — GLM is LAST RESORT, save tokens, only gets traffic when free tiers are rate-limited
+  T4_PHANTOM:    3,   // 3 slots — same as T1, secondary free cloud
   T5_PARROT:     1,   // 1 slot — remote, slow
   T6_KAGGLE:     2,   // 2 slots — free GPU
   T7_LOCAL:      1,   // 1 slot — slow on 7GB RAM
-  T8_CLOUD_ALIAS: 2,  // 2 slots
+  T8_CLOUD_ALIAS: 1,  // 1 slot — costs GLM tokens
   T9_SCRAPERAPI: 3,   // 3 slots — 9,970 credits, proxy rotation
 };
 
@@ -388,14 +381,14 @@ function routeWeighted(task = {}) {
   }
 
   const ROUTING_MAP = {
-    chat:    ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T4_PHANTOM', 'T5_PARROT', 'T7_LOCAL'],
-    code:    ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T4_PHANTOM', 'T5_PARROT', 'T7_LOCAL'],
-    fast:    ['T1_FREE_CLOUD', 'T3_GLM_CLOUD', 'T7_LOCAL'],
-    security: ['T2_MINIFORGE', 'T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL'],
-    power:    ['T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T2_MINIFORGE', 'T4_PHANTOM', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL'],
-    research: ['T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T2_MINIFORGE', 'T4_PHANTOM', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL'],
+    chat:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+    code:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+    fast:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+    security: ['T2_MINIFORGE', 'T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+    power:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+    research: ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
     image:   ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
-    scrape:  ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T7_LOCAL'],
+    scrape:  ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T1_FREE_CLOUD', 'T7_LOCAL', 'T3_GLM_CLOUD'],
   };
 
   const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
