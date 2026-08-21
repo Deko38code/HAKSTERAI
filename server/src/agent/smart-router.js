@@ -132,6 +132,20 @@ const TIERS = {
       'gemini-2.5-pro': 'glm-5.1:cloud',
       'gemini-2.5-flash': 'hp-1000:latest',
     }
+  },
+  // T9: SCRAPERAPI — 2 keys, 9,970 credits. Web scraping with proxy rotation.
+  // Bypasses Cloudflare, renders JS, rotates IPs. Free tier (5k credits each).
+  T9_SCRAPERAPI: {
+    name: 'scraperapi',
+    cost: 0,  // free credits
+    url: 'https://api.scraperapi.com',
+    keysFile: '/home/ghost/.scraperapi_keys',
+    models: {
+      scrape: 'default',
+      render: 'render=true',
+      premium: 'premium=true',
+      render_premium: 'render=true&premium=true',
+    }
   }
 };
 
@@ -164,6 +178,11 @@ const TASK_KEYWORDS = {
           'generate script', 'write script', 'create script', 'automate',
           'system', 'infrastructure', 'deploy', 'orchestrate', 'pipeline',
           'database', 'migration', 'schema', 'backup', 'restore'],
+  scrape: ['scrape', 'scraping', 'crawl', 'crawling', 'fetch page', 'fetch url',
+           'extract data', 'extract content', 'parse html', 'parse page',
+           'web scraping', 'web crawl', 'get page content', 'get html',
+           'bypass cloudflare', 'scrape site', 'scrape website',
+           'spider', 'harvest', 'ripper', 'extract from url', 'extract from site'],
 };
 
 function detectTaskType(message) {
@@ -171,6 +190,10 @@ function detectTaskType(message) {
   // Security tasks get priority — never refuse
   for (const kw of TASK_KEYWORDS.security) {
     if (lower.includes(kw)) return 'security';
+  }
+  // Scrape tasks — ScraperAPI with proxy rotation
+  for (const kw of TASK_KEYWORDS.scrape) {
+    if (lower.includes(kw)) return 'scrape';
   }
   for (const kw of TASK_KEYWORDS.image) {
     if (lower.includes(kw)) return 'image';
@@ -209,6 +232,7 @@ function checkHealth() {
   }
   _health.T6_KAGGLE = !!process.env.KAGGLE_TUNNEL;
   _health.T8_CLOUD_ALIAS = true; // always — routes to GLM cloud
+  _health.T9_SCRAPERAPI = true;  // always — external API, checks keys file on use
 }
 
 // ── Router ─────────────────────────────────────────────────────────────────
@@ -270,6 +294,9 @@ function route(task = {}) {
 
     // Image → free pollinations, then hackbots, then GLM
     image:   ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
+
+    // Scrape → ScraperAPI first (proxy rotation, CF bypass), then hackbots, then GLM
+    scrape:  ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T7_LOCAL'],
   };
 
   const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
@@ -311,6 +338,7 @@ const TIER_WEIGHTS = {
   T6_KAGGLE:     2,   // 2 slots — free GPU
   T7_LOCAL:      1,   // 1 slot — slow on 7GB RAM
   T8_CLOUD_ALIAS: 2,  // 2 slots
+  T9_SCRAPERAPI: 3,   // 3 slots — 9,970 credits, proxy rotation
 };
 
 function _buildWeightedList(healthy) {
@@ -349,6 +377,7 @@ function routeWeighted(task = {}) {
     power:    ['T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T2_MINIFORGE', 'T4_PHANTOM', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL'],
     research: ['T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T2_MINIFORGE', 'T4_PHANTOM', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL'],
     image:   ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
+    scrape:  ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T3_GLM_CLOUD', 'T1_FREE_CLOUD', 'T7_LOCAL'],
   };
 
   const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
@@ -456,6 +485,32 @@ function _buildBackend(tierKey, type) {
       return {
         tier: 'T7_LOCAL', name: TIERS.T7_LOCAL.name,
         url: TIERS.T7_LOCAL.url, model, displayModel: model, cost: 0,
+      };
+    }
+    case 'T9_SCRAPERAPI': {
+      // Read keys from file, rotate through them
+      const keysFile = TIERS.T9_SCRAPERAPI.keysFile;
+      let keys = [];
+      try {
+        keys = fs.readFileSync(keysFile, 'utf8').trim().split('\n').filter(Boolean);
+      } catch (e) { /* keys file missing */ }
+      if (keys.length === 0) return null;
+      const key = keys[_rrCounter % keys.length];
+      const modeMap = {
+        scrape: '', render: '&render=true', premium: '&premium=true',
+        render_premium: '&render=true&premium=true',
+        security: '&render=true', power: '&render=true', research: '',
+        code: '', chat: '', image: '', fast: '',
+      };
+      const mode = modeMap[type] || '';
+      return {
+        tier: 'T9_SCRAPERAPI', name: TIERS.T9_SCRAPERAPI.name,
+        url: TIERS.T9_SCRAPERAPI.url,
+        model: 'scraperapi',
+        displayModel: `scraperapi-${key.slice(0, 8)}...`,
+        cost: 0,
+        apiKey: key,
+        params: mode,
       };
     }
     default:
