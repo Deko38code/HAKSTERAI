@@ -110,6 +110,16 @@
       "env": {},
       "tier": 1
     },
+    "hivemind": {
+      "command": "node",
+      "args": [
+        "/home/ghost/haksterAi/server/src/agent/hivemind-mcp-bridge.js"
+      ],
+      "env": {
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      },
+      "tier": 1
+    },
     "subagents": {
       "command": "node",
       "args": [

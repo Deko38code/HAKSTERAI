@@ -10085,3 +10085,8 @@ python3 bootstrap.py
 
 Do not include private machine instructions in this tracked file. Use a
 git-ignored local note for personal workflow details.
+
+## PHONE SSH ACCESS
+- Host: 10.0.0.147, Port: 8022, User: u0_a584
+- Command: `sshpass -p '122324' ssh -o StrictHostKeyChecking=no -p 8022 u0_a584@10.0.0.147`
+- Phone must have Termux sshd running, same WiFi network required

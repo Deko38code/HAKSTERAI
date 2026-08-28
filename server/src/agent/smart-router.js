@@ -246,108 +246,74 @@ function checkHealth() {
 
 // Round-robin counter — rotates through all healthy tiers so nothing sits idle
 let _rrCounter = 0;
+let _wrCounter = 0;
 
-/**
- * Route a task to the best backend based on task type.
- *
- * GLM cloud is ALWAYS the default backbone — it still performs real tasks.
- * All AI clusters are utilized via round-robin rotation within each task type's chain.
- * The router splits work by task type AND rotates across healthy backends:
- *
- *   chat, code, fast  → T1 free cloud (Groq/Cerebras) — saves GLM tokens
- *   security, hack    → T2 hackbots (uncensored, no refusals)
- *   power, research   → T3 GLM cloud (HP-1000/GLM-5.1) — needs quality
- *   image             → T1 pollinations
- *
- * Round-robin: consecutive tasks of the same type rotate through the chain
- * so ALL healthy clusters get utilized, not just the first one.
- *
- * @param {Object} task - { type?, message, model?, needsTools? }
- * @returns {Object} { tier, url, model, displayModel, cost }
- */
-function route(task = {}) {
-  const type = task.type || detectTaskType(task.message || '');
-  const requestedModel = task.model || '';
-  // Detect if this task needs tool calling (run commands, read/write files, browser)
-  // If the message mentions executing, reading, writing, or running commands → needs tools
-  const lower = (task.message || '').toLowerCase();
-  const needsTools = task.needsTools === true || /read|write|run|execute|file|command|shell|script|edit|fix|install|create|scrape|browse|click|navigate|deploy|build|grep|find|ls|cat|npm|pip|git|node|python|bash/.test(lower);
+// ── Shared constants (extracted to kill duplication) ─────────────────────────
 
-  // If a specific cloud alias is requested, route directly to GLM cloud (premium)
-  if (requestedModel && TIERS.T8_CLOUD_ALIAS.models[requestedModel]) {
-    const cloudModel = TIERS.T8_CLOUD_ALIAS.models[requestedModel];
-    return {
-      tier: 'T8_CLOUD_ALIAS',
-      name: TIERS.T8_CLOUD_ALIAS.name,
-      url: TIERS.T8_CLOUD_ALIAS.url,
-      model: cloudModel,
-      displayModel: requestedModel,
-      cost: 1,
-      redirected: true,
-    };
-  }
+const ROUTING_MAP = {
+  chat:     ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+  code:     ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+  fast:     ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+  security: ['T2_MINIFORGE', 'T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+  power:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+  research: ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+  image:    ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
+  scrape:   ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T1_FREE_CLOUD', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+};
 
-  // ── Task-type routing: each type has a preferred chain ──────────────────────
-  // Free cloud ALWAYS first — saves GLM tokens. GLM is LAST resort.
-  const ROUTING_MAP = {
-    chat:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    code:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    fast:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-
-    security: ['T2_MINIFORGE', 'T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-
-    power:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    research: ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-
-    image:   ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
-    scrape:  ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T1_FREE_CLOUD', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-  };
-
-  const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
-
-  // Build all healthy backends in the chain
-  // If task needs tools, filter out tiers that don't support tool calling
-  const healthy = [];
-  for (const tierKey of chain) {
-    const backend = _buildBackend(tierKey, type);
-    if (!backend) continue;
-    // Skip non-tool tiers when the task needs tool calling
-    if (needsTools && TIERS[tierKey] && TIERS[tierKey].supportsTools === false) continue;
-    healthy.push(backend);
-  }
-
-  if (healthy.length === 0) {
-    return {
-      tier: 'T8_CLOUD_ALIAS',
-      name: TIERS.T8_CLOUD_ALIAS.name,
-      url: TIERS.T8_CLOUD_ALIAS.url,
-      model: 'hp-1000:latest',
-      displayModel: 'hp-1000:latest',
-      cost: 1,
-    };
-  }
-
-  // Round-robin: rotate through all healthy backends
-  // This utilizes ALL AI clusters — none sit idle
-  const idx = _rrCounter % healthy.length;
-  _rrCounter++;
-  return healthy[idx];
-}
-
-// ── Weighted round-robin patch — gives GLM + hackbots more weight ─────────────
-// Patch on top of route() so GLM cloud and hackbots get more tasks
-// while free cloud handles the bulk. Slow tiers (T7 local, T5 parrot) get less.
 const TIER_WEIGHTS = {
-  T1_FREE_CLOUD: 6,   // 6 slots — free, fast, handles the BULK of traffic (Groq/Cerebras/SambaNova rotate)
+  T1_FREE_CLOUD: 6,   // 6 slots — free, fast, handles the BULK of traffic
   T2_MINIFORGE:  4,   // 4 slots — hackbots, uncensored, credit rotator
-  T3_GLM_CLOUD:  1,   // 1 slot — GLM is LAST RESORT, save tokens, only gets traffic when free tiers are rate-limited
-  T4_PHANTOM:    3,   // 3 slots — same as T1, secondary free cloud
+  T3_GLM_CLOUD:  1,   // 1 slot — GLM is LAST RESORT, save tokens
+  T4_PHANTOM:    3,   // 3 slots — secondary free cloud
   T5_PARROT:     1,   // 1 slot — remote, slow
   T6_KAGGLE:     2,   // 2 slots — free GPU
   T7_LOCAL:      1,   // 1 slot — slow on 7GB RAM
   T8_CLOUD_ALIAS: 1,  // 1 slot — costs GLM tokens
   T9_SCRAPERAPI: 3,   // 3 slots — 9,970 credits, proxy rotation
 };
+
+const TOOL_NEEDS_RE = /read|write|run|execute|file|command|shell|script|edit|fix|install|create|scrape|browse|click|navigate|deploy|build|grep|find|ls|cat|npm|pip|git|node|python|bash/;
+
+function _detectNeedsTools(task) {
+  if (task.needsTools === true) return true;
+  return TOOL_NEEDS_RE.test((task.message || '').toLowerCase());
+}
+
+function _cloudAliasRoute(requestedModel) {
+  const cloudModel = TIERS.T8_CLOUD_ALIAS.models[requestedModel];
+  return {
+    tier: 'T8_CLOUD_ALIAS',
+    name: TIERS.T8_CLOUD_ALIAS.name,
+    url: TIERS.T8_CLOUD_ALIAS.url,
+    model: cloudModel,
+    displayModel: requestedModel,
+    cost: 1,
+    redirected: true,
+  };
+}
+
+function _fallbackRoute() {
+  return {
+    tier: 'T8_CLOUD_ALIAS',
+    name: TIERS.T8_CLOUD_ALIAS.name,
+    url: TIERS.T8_CLOUD_ALIAS.url,
+    model: 'hp-1000:latest',
+    displayModel: 'hp-1000:latest',
+    cost: 1,
+  };
+}
+
+function _buildHealthyChain(type, needsTools) {
+  const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
+  const healthy = [];
+  for (const tierKey of chain) {
+    if (needsTools && TIERS[tierKey] && TIERS[tierKey].supportsTools === false) continue;
+    const backend = _buildBackend(tierKey, type);
+    if (backend) healthy.push(backend);
+  }
+  return healthy;
+}
 
 function _buildWeightedList(healthy) {
   const weighted = [];
@@ -358,59 +324,31 @@ function _buildWeightedList(healthy) {
   return weighted;
 }
 
-let _wrCounter = 0;
-
-function routeWeighted(task = {}) {
+/**
+ * Route a task to the best backend using weighted round-robin.
+ *
+ * GLM cloud is the default backbone; free tiers intercept first to save tokens.
+ * All AI clusters are utilized via weighted round-robin within each task type's chain:
+ *
+ *   chat, code, fast  → T1 free cloud (Groq/Cerebras) — saves GLM tokens
+ *   security, hack    → T2 hackbots (uncensored, no refusals)
+ *   power, research   → T3 GLM cloud (HP-1000/GLM-5.1) — needs quality
+ *   image             → T1 pollinations
+ *
+ * @param {Object} task - { type?, message, model?, needsTools? }
+ * @returns {Object} { tier, url, model, displayModel, cost }
+ */
+function route(task = {}) {
   const type = task.type || detectTaskType(task.message || '');
   const requestedModel = task.model || '';
-  // Detect tool needs (same logic as route)
-  const lower = (task.message || '').toLowerCase();
-  const needsTools = task.needsTools === true || /read|write|run|execute|file|command|shell|script|edit|fix|install|create|scrape|browse|click|navigate|deploy|build|grep|find|ls|cat|npm|pip|git|node|python|bash/.test(lower);
+  const needsTools = _detectNeedsTools(task);
 
   if (requestedModel && TIERS.T8_CLOUD_ALIAS.models[requestedModel]) {
-    const cloudModel = TIERS.T8_CLOUD_ALIAS.models[requestedModel];
-    return {
-      tier: 'T8_CLOUD_ALIAS',
-      name: TIERS.T8_CLOUD_ALIAS.name,
-      url: TIERS.T8_CLOUD_ALIAS.url,
-      model: cloudModel,
-      displayModel: requestedModel,
-      cost: 1,
-      redirected: true,
-    };
+    return _cloudAliasRoute(requestedModel);
   }
 
-  const ROUTING_MAP = {
-    chat:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    code:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    fast:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    security: ['T2_MINIFORGE', 'T1_FREE_CLOUD', 'T4_PHANTOM', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    power:    ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    research: ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-    image:   ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
-    scrape:  ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T1_FREE_CLOUD', 'T7_LOCAL', 'T3_GLM_CLOUD'],
-  };
-
-  const chain = ROUTING_MAP[type] || ROUTING_MAP.chat;
-  const healthy = [];
-  for (const tierKey of chain) {
-    const backend = _buildBackend(tierKey, type);
-    if (!backend) continue;
-    // Skip non-tool tiers when the task needs tool calling
-    if (needsTools && TIERS[tierKey] && TIERS[tierKey].supportsTools === false) continue;
-    healthy.push(backend);
-  }
-
-  if (healthy.length === 0) {
-    return {
-      tier: 'T8_CLOUD_ALIAS',
-      name: TIERS.T8_CLOUD_ALIAS.name,
-      url: TIERS.T8_CLOUD_ALIAS.url,
-      model: 'hp-1000:latest',
-      displayModel: 'hp-1000:latest',
-      cost: 1,
-    };
-  }
+  const healthy = _buildHealthyChain(type, needsTools);
+  if (healthy.length === 0) return _fallbackRoute();
 
   const weighted = _buildWeightedList(healthy);
   const idx = _wrCounter % weighted.length;
@@ -418,11 +356,26 @@ function routeWeighted(task = {}) {
   return weighted[idx];
 }
 
-// Patch: override route() to use weighted distribution
-const _originalRoute = route;
-route = function(task) {
-  return routeWeighted(task);
-};
+/**
+ * Unweighted round-robin route — rotates evenly through healthy backends
+ * without tier weighting. Exposed for callers that want pure rotation.
+ */
+function routeWeighted(task = {}) {
+  const type = task.type || detectTaskType(task.message || '');
+  const requestedModel = task.model || '';
+  const needsTools = _detectNeedsTools(task);
+
+  if (requestedModel && TIERS.T8_CLOUD_ALIAS.models[requestedModel]) {
+    return _cloudAliasRoute(requestedModel);
+  }
+
+  const healthy = _buildHealthyChain(type, needsTools);
+  if (healthy.length === 0) return _fallbackRoute();
+
+  const idx = _rrCounter % healthy.length;
+  _rrCounter++;
+  return healthy[idx];
+}
 
 /**
  * Build a backend object for a given tier + task type.

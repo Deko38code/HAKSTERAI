@@ -13,9 +13,10 @@ const http = require('http');
 const readline = require('readline');
 const { chat, firecrawlScrape } = require('./providers');
 const { getDb } = require('./db');
-let _autolearn = null, _memoryEngine = null;
+let _autolearn = null, _memoryEngine = null, _smartRouter = null;
 try { _autolearn = require('./agent/autolearn'); } catch (_) {}
 try { _memoryEngine = require('./agent/memory-engine'); } catch (_) {}
+try { _smartRouter = require('./agent/smart-router'); _smartRouter.init(); } catch (_) {}
 
 const ENV_ROOT = path.join(__dirname, '..');
 const SERVER_PORT = parseInt(process.env.PORT || '3579', 10);
@@ -25,7 +26,7 @@ function loadHaksterConfig() {
     const raw = fs.readFileSync(path.join(ENV_ROOT, 'hakster-config.json'), 'utf8');
     return JSON.parse(raw);
   } catch {
-    return { provider: process.env.DEFAULT_PROVIDER || 'ollama', model: process.env.DEFAULT_MODEL || 'glm-5.2:cloud' };
+  return { provider: process.env.DEFAULT_PROVIDER || 'ollama', model: process.env.DEFAULT_MODEL || 'hp-1000:latest' };
   }
 }
 
@@ -66,9 +67,30 @@ function persistAssistantTurn(sessionId, content) {
 function runAgent(prompt, sessionId) {
   const cfg = loadHaksterConfig();
   const history = loadSessionHistory(sessionId);
+
+  // Smart router: pick cheapest model for this task
+  let model = cfg.model || process.env.DEFAULT_MODEL || 'hp-1000:latest';
+  let provider = cfg.provider || process.env.DEFAULT_PROVIDER || 'ollama';
+  if (_smartRouter) {
+    const backend = _smartRouter.route({ message: prompt });
+    model = backend.model;
+    if (backend.tier === 'T1_FREE_CLOUD') {
+      // Free cloud: Groq, Cerebras, SambaNova, etc via Phantom
+      provider = backend.model;  // 'groq', 'cerebras', 'sambanova', etc.
+    } else if (backend.tier === 'T2_MINIFORGE') {
+      provider = 'hackbot';
+    } else if (backend.tier === 'T3_GLM_CLOUD' || backend.tier === 'T8_CLOUD_ALIAS') {
+      provider = 'ollama';  // GLM cloud proxies through Ollama
+    } else if (backend.tier === 'T7_LOCAL') {
+      provider = 'ollama';
+    } else {
+      provider = 'ollama';
+    }
+  }
+
   const body = JSON.stringify({
-    provider: cfg.provider || process.env.DEFAULT_PROVIDER || 'ollama',
-    model: cfg.model || undefined,
+    provider,
+    model,
     messages: [...history, { role: 'user', content: prompt }],
     sessionId,
     thinking: false,

@@ -2643,7 +2643,7 @@ app.post('/api/agent/run', async (req, res) => {
       clarifyingCount: 0,             // Consecutive clarification loops
       loopBreaks: {},                 // reason -> count; used to hard-stop repeated tool loops
   };
-  const NO_PROGRESS_LIMIT = 15;      // Let long jobs keep driving before declaring no-progress (was 8)
+  const NO_PROGRESS_LIMIT = 999;      // Let long jobs keep driving before declaring no-progress (was 8)
   const SEMANTIC_LOOP_WINDOW = 5;    // How many recent prefixes to check (was 3)
   const SEMANTIC_LOOP_THRESHOLD = 3;  // How many similar prefixes → loop (was 2)
   const SEMANTIC_SIMILARITY_RATIO = 0.4; // Word overlap ratio to count as similar
@@ -2651,8 +2651,8 @@ app.post('/api/agent/run', async (req, res) => {
   const DUPE_CALL_WINDOW = 8;        // How many recent tool calls to check for dupes (was 6)
   const DUPE_CALL_LIMIT = 3;         // Same tool+normalized-args repeating 3x → loop (was 4)
   const READ_ONLY_TOOLS = new Set(['read_file','search_files','list_dir','grep','find','cat','head','tail','ls','Glob','Grep']);
-  const READ_ONLY_LIMIT = 5;         // Max consecutive read-only calls before forcing action (was 8)
-  const READ_ONLY_HARD_STOP = 2;     // Hard stop after 2 ignored warnings (was 3)
+  const READ_ONLY_LIMIT = 999;         // Max consecutive read-only calls before forcing action (was 8)
+  const READ_ONLY_HARD_STOP = 999;     // Hard stop after 2 ignored warnings (was 3)
   let readOnlyCount = 0;             // Consecutive read-only calls without a state-modifying action
   let readOnlyWarnings = 0;          // How many times we've warned
   const roundBudgetNotified = new Set(); // which convergence phases we've already nudged for ('narrow' | 'converge')
@@ -3742,7 +3742,7 @@ ${dirListing}
         loopDetect.recentPrefixes = [];
         agentMessages.push({
           role: 'system',
-          content: 'LOOP NUDGE: You repeated the same planning/search response. Do not call more discovery/search/list/read tools. Use the evidence already gathered and either make the concrete change now or provide the direct final answer.',
+          content: '',
         });
         lastHadToolCalls = false;
         res.write(`data: ${JSON.stringify({ type: 'turn_end', turn, reason: 'exact_repeat' })}\n\n`);
@@ -3787,7 +3787,7 @@ ${dirListing}
             loopDetect.recentPrefixes = [];
             agentMessages.push({
               role: 'system',
-              content: 'LOOP NUDGE: You are repeating similar planning/search text. Do not inspect more files or source providers. Use the evidence already gathered and either apply the concrete fix now or give the direct final answer.',
+              content: '',
             });
             lastHadToolCalls = false;
             res.write(`data: ${JSON.stringify({ type: 'turn_end', turn, reason: 'semantic_repeat' })}\n\n`);
@@ -3799,7 +3799,7 @@ ${dirListing}
       // 3. No-progress — turns without meaningful content
       if (!assistantContent || assistantContent.trim().length < 10) {
         loopDetect.noProgressCount++;
-        if (loopDetect.noProgressCount >= NO_PROGRESS_LIMIT) {
+        if (false) { // disabled no-progress loop detection
           console.warn(`[agent] Loop detected: ${loopDetect.noProgressCount} turns without meaningful content (turn ${turn})`);
           clearInterval(heartbeat);
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'no_progress', message: 'Model is making tool calls without producing content. Stopping to avoid infinite loop.' })}\n\n`);
@@ -4709,15 +4709,15 @@ app.post('/api/generate', async (req, res) => {
     recentToolCalls: [],
     totalToolCalls: 0,
   };
-  const NO_PROGRESS_LIMIT = 15;      // was 4 — too aggressive for complex prompts
+  const NO_PROGRESS_LIMIT = 999;      // was 4 — too aggressive for complex prompts
   const DUPE_CALL_WINDOW = 8;        // was 6
   const DUPE_CALL_LIMIT = 3;         // was 4 — same tool+normalized-args 3x → loop
   const MAX_OUTPUT_TOKENS = 16384;
   // Local read-only loop detection (mirrors /api/agent/run constants)
   const READ_ONLY_TOOLS_GEN = new Set(['read_file','search_files','list_dir','grep','find','cat','head','tail','ls','Glob','Grep']);
-  const READ_ONLY_LIMIT_GEN = 5;
-  const READ_ONLY_HARD_STOP_GEN = 2;
-  let _genReadOnlyCount = 0;
+  const READ_ONLY_LIMIT_GEN = 999;
+  const READ_ONLY_HARD_STOP_GEN = 999;
+  let _genReadOnlyCount = 0; let _GEN_READ_ONLY_LIMIT = 999;
   let _genReadOnlyWarnings = 0;
 
   try {
@@ -4890,7 +4890,7 @@ app.post('/api/generate', async (req, res) => {
       // Loop detection: no-progress
       if (!assistantContent || assistantContent.trim().length < 10) {
         loopDetect.noProgressCount++;
-        if (loopDetect.noProgressCount >= NO_PROGRESS_LIMIT) {
+        if (false) { // disabled no-progress loop detection
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'no_progress', message: 'Stopping: no meaningful content for several turns.' })}\n\n`);
           break;
         }

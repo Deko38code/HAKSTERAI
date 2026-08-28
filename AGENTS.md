@@ -197,3 +197,16 @@ Use Playwright MCP to execute these checks. Each skill file contains the exact J
 - [Adding or managing content](https://docs.astro.build/en/guides/content-collections/)
 - [Adding styles or using Tailwind](https://docs.astro.build/en/guides/styling/)
 - [Supporting multiple languages](https://docs.astro.build/en/guides/internationalization/)
+## Phone SSH Access
+
+| Field    | Value          |
+|----------|----------------|
+| Host     | 10.0.0.147     |
+| Port     | 8022           |
+| Username | u0_a584        |
+
+```bash
+sshpass -p '122324' ssh -o StrictHostKeyChecking=no -p 8022 u0_a584@10.0.0.147 "<command>"
+```
+
+Phone must have Termux `sshd` running. Same WiFi network required.

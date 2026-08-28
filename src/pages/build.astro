@@ -290,7 +290,7 @@ import Layout from '../layouts/Layout.astro';
         <div class="px-5 py-4 space-y-4">
           <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Prompt</label><textarea id="image-prompt" rows="3" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50 resize-none" placeholder="A haksterAi logo with purple neon..."></textarea></div>
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Model</label><select id="image-model" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50"><option value="zimage">Pollinations Z-Image</option><option value="flux">Pollinations Flux</option><option value="kontext">Pollinations Kontext Edit</option><option value="gptimage">Pollinations GPT Image</option><option value="dall-e-3">DALL-E 3</option><option value="gpt-image-1">GPT Image 1</option></select></div>
+            <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Model</label><select id="image-model" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50"><option value="zimage">Pollinations Z-Image</option><option value="flux">Pollinations Flux</option><option value="gptimage">Pollinations GPT Image</option><option value="seedream5">Pollinations SeeDream</option><option value="qwen-image">Pollinations Qwen Image</option><option value="kontext">Pollinations Kontext Edit</option><option value="dall-e-3">DALL-E 3</option><option value="gpt-image-1">GPT Image 1</option></select></div>
             <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Size</label><select id="image-size" class="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]/50"><option value="1024x1024">1024×1024</option><option value="1792x1024">1792×1024</option><option value="1024x1792">1024×1792</option><option value="512x512">512×512</option></select></div>
           </div>
           <div><label class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Quality</label><div class="flex gap-3"><label class="flex items-center gap-1.5 text-sm text-white/70 cursor-pointer"><input type="radio" name="image-quality" value="standard" class="accent-[#7c3aed]" /> Standard</label><label class="flex items-center gap-1.5 text-sm text-white/70 cursor-pointer"><input type="radio" name="image-quality" value="hd" checked class="accent-[#7c3aed]" /> HD</label></div></div>
@@ -3731,7 +3731,7 @@ import Layout from '../layouts/Layout.astro';
     generateImageBtn.addEventListener('click', async () => {
       const prompt = imagePromptInput.value.trim(); if (!prompt) return;
       generateImageBtn.disabled = true; generateImageBtn.textContent = 'Generating...';
-      imageStatus.classList.remove('hidden'); imageStatus.textContent = 'Creating your image with Pollinations...'; imageResult.classList.add('hidden');
+      imageStatus.classList.remove('hidden'); imageStatus.textContent = 'Creating your image...'; imageResult.classList.add('hidden');
       const model = imageModelSelect.value; const size = imageSizeSelect.value;
       const quality = (document.querySelector('input[name="image-quality"]:checked') as HTMLInputElement)?.value || 'hd';
       const provider = ['dall-e-3', 'gpt-image-1'].includes(model) ? 'openai' : 'pollinations';
@@ -3744,12 +3744,13 @@ import Layout from '../layouts/Layout.astro';
         if (data.images && data.images[0]) {
           const img = data.images[0];
           if (img.b64_json) {
-            const dataUrl = `data:image/png;base64,${img.b64_json}`;
+            const mime = img.mime_type || 'image/png';
+            const dataUrl = `data:${mime};base64,${img.b64_json}`;
             imageResultImg.src = dataUrl; imageResultDownload.href = dataUrl;
-            imageResultInfo.textContent = `${model} · ${size} · ${quality} · ${img.revised_prompt ? 'Revised prompt applied' : 'Original prompt'}`;
+            imageResultInfo.textContent = `${data.provider || provider} · ${model} · ${size} · ${quality} · ${img.revised_prompt ? 'Revised prompt' : 'Original prompt'}`;
           } else if (img.url) {
             imageResultImg.src = img.url; imageResultDownload.href = img.url;
-            imageResultInfo.textContent = `${model} · ${size} · ${quality}`;
+            imageResultInfo.textContent = `${data.provider || provider} · ${model} · ${size} · ${quality}`;
           }
           imageResult.classList.remove('hidden'); imageStatus.textContent = `Done in ${data.latency || '?'}ms`;
         } else { throw new Error('No image returned'); }

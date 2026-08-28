@@ -7,7 +7,7 @@
 - OS: Linux
 - Browser: Firefox 149.0
 - Device: desktop
-- IP: 2601:205:4a7e:3da0::db9b
+- IP: 2601:205:4a7e:3da0::4303
 ## Server Machine
 - OS: Linux (Ubuntu, AMD A12-9720P, 4 cores, ~7GB RAM)
 - Working directory: /home/ghost/haksterAi
