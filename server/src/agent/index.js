@@ -303,7 +303,7 @@ async function buildBrowserSnapshotText(page, full = false) {
 }
 
 // ── Config ──────────────────────────────────────────────────────────────
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
+const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
 const HAKSTER_HOST = process.env.HAKSTER_HOST || 'http://localhost:3579';
 let MODEL = process.env.HAKSTER_MODEL || (() => {
   try {
@@ -9985,7 +9985,7 @@ async function repl() {
   if (!_isDirectCloudModel(MODEL)) {
     let ollamaUp = false, hasModel = false;
     try {
-      const j = await (await fetch(OLLAMA_HOST + '/api/tags', { signal: AbortSignal.timeout(1200) })).json();
+      const j = await (await fetch(OLLAMA_HOST + '/api/tags', { signal: AbortSignal.timeout(5000) })).json();
       ollamaUp = true;
       hasModel = (j.models || []).some(m => m.name === MODEL || m.name === MODEL.split(':')[0]);
     } catch (_) { /* ollama unreachable */ }
