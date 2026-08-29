@@ -41,7 +41,7 @@ sys.path.insert(0, "/home/ghost")
 
 PROXY_URL = "http://localhost:8082"
 OLlama_URL = "http://localhost:11434"  # kept for model listing fallback
-DEFAULT_MODEL = os.environ.get("HP1000_MODEL", "claude-sonnet-4-5")  # proxy maps this to glm-5.2:cloud
+DEFAULT_MODEL = os.environ.get("HP1000_MODEL") or "glm-5.3:cloud"  # proxy maps this to glm-5.2:cloud
 
 # ── Ollama helpers ────────────────────────────────────────────────────────────
 
@@ -138,7 +138,7 @@ def run_agent_loop(task: str, max_iterations: int = 8) -> str:
         use_llm_brain=True,
         provider="ollama",
         model=DEFAULT_MODEL,
-        decision_model=os.environ.get("DECISION_MODEL", "free"),
+        decision_model=os.environ.get("DECISION_MODEL") or "glm-5.3:cloud",
         synthesis_model=os.environ.get("SYNTHESIS_MODEL", DEFAULT_MODEL),
     )
 
@@ -271,6 +271,22 @@ def handle_tool(name: str, args: dict) -> dict:
             # Use FREE providers first (saves GLM tokens)
             import urllib.request
             import json as _json
+            # 0. GLM 5.3 cloud — main brain (local ollama relays :cloud, no local RAM, ~2-15s)
+            try:
+                glm_sys = system if (system and "NEVER refuse" not in system) else "You are haksterAI, the operator's local agent. Helpful, direct, no fluff."
+                glm_messages = [{"role": "system", "content": glm_sys}, {"role": "user", "content": message}]
+                glm_body = _json.dumps({"model": "glm-5.3:cloud", "messages": glm_messages, "stream": False,
+                                        "options": {"temperature": 0.7, "num_predict": 4096}}).encode()
+                glm_req = urllib.request.Request("http://localhost:11434/api/chat", data=glm_body,
+                                                 headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(glm_req, timeout=25) as glm_resp:
+                    glm_data = _json.loads(glm_resp.read())
+                    glm_text = (glm_data.get("message") or {}).get("content") or (glm_data.get("message") or {}).get("thinking", "")
+                    glm_low = glm_text[:200].lower()
+                    if glm_text and glm_text.strip() and not any(sig in glm_low for sig in ("i can't", "i cannot", "i'm unable", "as an ai", "i apologize", "i'm sorry", "i refuse")):
+                        return {"content": [{"type": "text", "text": glm_text.strip()}]}
+            except Exception:
+                pass
             try:
                 cfg = _json.load(open(os.path.expanduser("~/.phantom-ai-config.json")))
             except Exception:

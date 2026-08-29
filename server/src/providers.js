@@ -201,12 +201,12 @@ Object.assign(PROVIDERS, {
   groq5: { name: 'Groq 5 (gpt-oss-120b)', baseURL: 'https://api.groq.com/openai/v1', defaultModel: 'openai/gpt-oss-120b', apiKey: process.env.GROQ5_API_KEY || _pk('groq5'), apiKeyEnv: 'GROQ5_API_KEY', type: 'openai-compat' },
   groq6: { name: 'Groq 6 (gpt-oss-120b)', baseURL: 'https://api.groq.com/openai/v1', defaultModel: 'openai/gpt-oss-120b', apiKey: process.env.GROQ6_API_KEY || _pk('groq6'), apiKeyEnv: 'GROQ6_API_KEY', type: 'openai-compat' },
   groq7: { name: 'Groq 7 (gpt-oss-120b)', baseURL: 'https://api.groq.com/openai/v1', defaultModel: 'openai/gpt-oss-120b', apiKey: process.env.GROQ7_API_KEY || _pk('groq7'), apiKeyEnv: 'GROQ7_API_KEY', type: 'openai-compat' },
-  // 5 LLM7 keys running DeepSeek-V4-Flash-0731
-  llm7:     { name: 'LLM7 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'DeepSeek-V4-Flash-0731', apiKey: _pk('llm7') || process.env.LLM7_API_KEY, apiKeyEnv: 'LLM7_API_KEY', type: 'openai-compat' },
-  'llm7-2': { name: 'LLM7-2 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'DeepSeek-V4-Flash-0731', apiKey: _pk('llm7-2') || process.env.LLM7_2_API_KEY, type: 'openai-compat' },
-  'llm7-3': { name: 'LLM7-3 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'DeepSeek-V4-Flash-0731', apiKey: _pk('llm7-3') || process.env.LLM7_3_API_KEY, type: 'openai-compat' },
-  'llm7-4': { name: 'LLM7-4 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'DeepSeek-V4-Flash-0731', apiKey: _pk('llm7-4') || process.env.LLM7_4_API_KEY, type: 'openai-compat' },
-  'llm7-5': { name: 'LLM7-5 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'DeepSeek-V4-Flash-0731', apiKey: _pk('llm7-5') || process.env.LLM7_5_API_KEY, type: 'openai-compat' },
+  // 5 LLM7 keys running deepseek-v4-flash
+  llm7:     { name: 'LLM7 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'deepseek-v4-flash', apiKey: _pk('llm7') || process.env.LLM7_API_KEY, apiKeyEnv: 'LLM7_API_KEY', type: 'openai-compat' },
+  'llm7-2': { name: 'LLM7-2 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'deepseek-v4-flash', apiKey: _pk('llm7-2') || process.env.LLM7_2_API_KEY, type: 'openai-compat' },
+  'llm7-3': { name: 'LLM7-3 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'deepseek-v4-flash', apiKey: _pk('llm7-3') || process.env.LLM7_3_API_KEY, type: 'openai-compat' },
+  'llm7-4': { name: 'LLM7-4 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'deepseek-v4-flash', apiKey: _pk('llm7-4') || process.env.LLM7_4_API_KEY, type: 'openai-compat' },
+  'llm7-5': { name: 'LLM7-5 (DeepSeek-V4-Flash)', baseURL: 'https://api.llm7.io/v1', defaultModel: 'deepseek-v4-flash', apiKey: _pk('llm7-5') || process.env.LLM7_5_API_KEY, type: 'openai-compat' },
   // 2 Mistral keys
   mistral:  { name: 'Mistral Large', baseURL: 'https://api.mistral.ai/v1', defaultModel: 'mistral-large-latest', apiKey: _pk('mistral') || process.env.MISTRAL_API_KEY, type: 'openai-compat' },
   mistral2: { name: 'Mistral Large 2', baseURL: 'https://api.mistral.ai/v1', defaultModel: 'mistral-large-latest', apiKey: _pk('mistral2') || process.env.MISTRAL2_API_KEY, type: 'openai-compat' },

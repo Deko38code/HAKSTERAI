@@ -21,10 +21,10 @@ const path = require('path');
 // Constants
 // ---------------------------------------------------------------------------
 const MEMORY_VERSION = 2;
-const MAX_MEMORIES = 500;
-const DECAY_HALF_LIFE_DAYS = 14;     // Memories lose half importance every 14 days unless reinforced
-const RECALL_LIMIT = 15;             // Max memories to recall per query
-const MIN_RECALL_SCORE = 0.15;       // Minimum similarity score to include in recall
+const MAX_MEMORIES = 4000;          // 500 flooded with per-tool-call observations inside hours; 4k keeps durable learnings resident
+const DECAY_HALF_LIFE_DAYS = 14;    // Memories lose half importance every 14 days unless reinforced
+const RECALL_LIMIT = 25;            // Max memories to recall per query
+const MIN_RECALL_SCORE = 0.1;       // Minimum similarity score to include in recall
 const REINFORCEMENT_BOOST = 0.15;     // Score boost when a memory is recalled/reinforced
 const MAX_SCORE = 1.0;
 const CONSOLIDATION_THRESHOLD = 10;  // Tool calls before consolidation runs
@@ -819,12 +819,13 @@ function recallForPrompt(query, cwd, opts = {}) {
   if (results.length === 0) return '';
 
   const lines = ['## Relevant Memories', ''];
-  for (const r of results.slice(0, 8)) {
-    const obs = r.observation.length > 150 ? r.observation.substring(0, 147) + '...' : r.observation;
-    lines.push(`- [${r.type}] ${obs} _(relevance: ${r.finalScore.toFixed(2)})_`);
+  for (const r of results.slice(0, 16)) {
+    const obs = r.observation.length > 220 ? r.observation.substring(0, 217) + '...' : r.observation;
+    lines.push(`- [${r.type}] ${obs} (relevance: ${r.finalScore.toFixed(2)}, seen ${r.recallCount || 0}x)`);
   }
-  lines.push('');
-  return lines.join('\n');
+  let out = lines.join('\n');
+  if (out.length > 6000) out = out.substring(0, 6000) + '\n... (truncated)';
+  return out;
 }
 
 // ---------------------------------------------------------------------------

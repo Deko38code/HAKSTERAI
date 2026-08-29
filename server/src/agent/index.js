@@ -1218,7 +1218,7 @@ function buildSystemPrompt(clientContext) {
 
   // ── Inject memory-engine v2 recall (importance-scored) ──
   try {
-    const memFrag = memoryEngine.recallForPrompt(process.cwd(), { maxChars: 2500 });
+    const memFrag = memoryEngine.recallForPrompt(process.cwd(), { maxChars: 5000 });
     if (memFrag) prompt += '\n\n## Relevant Memories (v2)\n' + memFrag;
   } catch (e) { /* non-blocking */ }
 
@@ -9155,13 +9155,19 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
             const toolContent = typeof (result && result.content) === 'string'
               ? result.content.substring(0, 500)
               : JSON.stringify(result).substring(0, 500);
-            memoryEngine.addMemory({
-              type: 'observation',
-              observation: `[${toolName}] ${toolContent}`,
-              context: { source: 'tool', tool: toolName },
-              tags: [toolName, 'tool-result'],
-              timestamp: new Date().toISOString()
-            }, process.cwd());
+            // Skip noise: empty, trivially short, or pure-markup results are not
+            // memories — they were flooding the 500-slot store and evicting
+            // durable learnings into the archive before they could matter.
+            const _obs = `[${toolName}] ${toolContent}`.trim();
+            if (_obs.length >= 40 && /[\w/]/.test(_obs.replace(/[\[\]`<>\s]/g, ''))) {
+              memoryEngine.addMemory({
+                type: 'observation',
+                observation: _obs,
+                context: { source: 'tool', tool: toolName },
+                tags: [toolName, 'tool-result'],
+                timestamp: new Date().toISOString()
+              }, process.cwd());
+            }
  } catch (e) { console.error("[memory] addMemory failed:", e.message); }
         });
 
