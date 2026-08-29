@@ -6505,6 +6505,7 @@ const CLOUD_MODELS = [
   { name: 'opus',                family: 'claude-cli', size: 'cloud' },
   { name: 'haiku',               family: 'claude-cli', size: 'cloud' },
   { name: 'claude-cli',          family: 'claude-cli', size: 'cloud' },
+  { name: 'phantom',             family: 'phantom',  size: 'cloud' },  // Phantom /api/ai/chat waterfall (port 4000) — 15+ provider fallback, no claude-cli auth dependency
 ];
 const CLOUD_FAMILIES = new Set(CLOUD_MODELS.map(m => m.family));
 function _modelChainFor() {
@@ -6593,6 +6594,12 @@ async function callOllama(messages, tools, { onToken, lowToken = false } = {}) {
         throw phantomErr; // Phantom's error propagates to retry logic
       }
     }
+  }
+  // Direct Phantom waterfall dispatch (port 4000) — bypasses broken Ollama
+  // cloud models AND the unauthenticated claude-cli fallback. Phantom's own
+  // internal waterfall (groq → openrouter → gemini → …) handles provider failover.
+  if (_familyFor(MODEL) === 'phantom') {
+    return callPhantomChat(messages, tools, { onToken });
   }
   const chain = _modelChainFor();
   let lastErr = null;
