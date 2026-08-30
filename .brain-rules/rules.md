@@ -23,3 +23,11 @@
 - Don't route to real Claude/Anthropic API — it refuses commands and breaks the agent
 - Don't select models manually when smart-router can route — it always picks cheapest available
 - Don't use local Ollama models when free cloud providers (Groq/Cerebras/SambaNova) are up — locals are 100x slower on this 7GB RAM machine
+## 2026-08-30 — Live ops refresh (verified)
+- **Miniforge restored on :5555** — run under ghost pm2 with `--interpreter /home/ghost/.nvm/versions/node/v24.14.0/bin/node` (system node v22 ABIs break better-sqlite3; v24 ABI 137 is what node_modules was built for). If it crashloops with ERR_DLOPEN_FAILED, it was started with the wrong node.
+- **Credit pool truth** — the OPERATIONAL pool is `/home/ghost/miniforge/data/miniapps_pool.json` (server-managed, self-reaping, self-replacing). accounts.json is the registrar archive; `top-up-pool.sh` now measures the pool file (target 50 live — was wrongly measured on accounts.json=400+).
+- **Account creator verified 2026-08-30** — `fresh-accounts-vpn.js N` creates N×100-credit accounts; `login-accounts.js` merges JWTs into the pool; pool holds 373 live accounts / 37k credits. Tools: phantom `account_pool_status/refresh`, hakster MCP `account_pool_status/refresh`.
+- **Hakster unified MCP tools added** — list_hack_bots, chat_hack_bot, ask_hack_squad, account_pool_status, account_pool_refresh (miniforge http on :5555; /api/apps returns a bare array, not {apps}). Crush mcp.servers now include hakster + miniforge-bridge.
+- **Free-lane status 2026-08-30** — ALIVE: groq/groq3(gpt-oss-120b), nvidia-nim×2, cohere, pollinations, hackbot pool. DEAD (fail fast, don't rescue): llm7 402, sambanova 402, cerebras 402 (models gpt-oss-120b/gemma-4-31b exist but paid-only), ollama-cloud2/3 401.
+- **Cerebras model rename** — llama3.1-8b no longer exists; use gpt-oss-120b or gemma-4-31b. Fixed in providers.js fallback + phantom cfg + crush cfg.
+- **Parrot box (10.0.0.251, ssh ghost694)** — runs its own phantom-server :4000 (uptime long-lived) + ollama :11434 (T5). phantom-knowledge.md + agents-with-skills.json synced 2026-08-30; its RAG venv is missing (spawn ENOENT) — file-based KB still serves (335 sections).

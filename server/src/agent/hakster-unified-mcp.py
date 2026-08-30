@@ -119,6 +119,30 @@ def run_shell(cmd: str, timeout: int = 30) -> str:
     except Exception as e:
         return f"Error: {e}"
 
+MINIFORGE_BASE = "http://localhost:5555"
+NVM_NODE = "/home/ghost/.nvm/versions/node/v24.14.0/bin/node"
+REG_LOG = "/home/ghost/miniforge/data/top-up.log"
+
+def miniforge_http(path: str, method: str = "GET", body: dict | None = None, timeout: int = 30):
+    """Call the local Miniforge (hackbot) API and return (status, data)."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        MINIFORGE_BASE + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        try:
+            return resp.status, json.loads(raw)
+        except Exception:
+            return resp.status, raw
+    except Exception as e:
+        return 0, {"error": str(e)}
+
+
 # ── Browser tool imports from phantom.browser_tools ───────────────────────────
 
 from phantom.browser_tools import BROWSER_TOOLS, BROWSER_TOOL_DESCRIPTIONS
@@ -221,6 +245,52 @@ def get_tool_list() -> list[dict]:
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     ]
+    # ── Miniforge hackbot tools (free uncensored bots + account pool) ──
+    tools.extend([
+        {
+            "name": "list_hack_bots",
+            "description": "List uncensored hack/exploit/coding bots on local Miniforge (:5555). Returns slug, title, short description. Use chat_hack_bot with a slug to talk to one.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+        {
+            "name": "chat_hack_bot",
+            "description": "Chat with an uncensored hack/exploit bot via Miniforge (free miniapps.ai credit pool). Pass slug (from list_hack_bots) and message. Raw output, no refusals.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Bot slug from list_hack_bots (e.g. ai-unrestricted)."},
+                    "message": {"type": "string", "description": "Message to send the bot."},
+                },
+                "required": ["slug", "message"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "ask_hack_squad",
+            "description": "Blast a message to the proven no-limits hackbot squad and return the first good response. Use when one bot is down or you want consensus from the uncensored pool.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"message": {"type": "string"}},
+                "required": ["message"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "account_pool_status",
+            "description": "Check the Miniforge free-credit account pool: live accounts, dead accounts, total credits, JWT health. Hackbot chats consume these credits.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+        {
+            "name": "account_pool_refresh",
+            "description": "Force-create fresh free miniapps.ai accounts now (registers N accounts via the account creator, then logs them into the pool). Use when credits are low. Registration runs in background (~1-2 min).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "count": {"type": "integer", "description": "How many accounts to register (1-50, default 10)."},
+                },
+            },
+        },
+    ])
 
     # Add browser tools
     for name, desc in sorted(BROWSER_TOOL_DESCRIPTIONS.items()):
@@ -269,7 +339,6 @@ def handle_tool(name: str, args: dict) -> dict:
         ]
         try:
             # Use FREE providers first (saves GLM tokens)
-            import urllib.request
             import json as _json
             # 0. GLM 5.3 cloud — main brain (local ollama relays :cloud, no local RAM, ~2-15s)
             try:
@@ -401,6 +470,77 @@ def handle_tool(name: str, args: dict) -> dict:
             return {"content": [{"type": "text", "text": "\n".join(lines)}]}
         except Exception as e:
             return {"content": [{"type": "text", "text": f"Error: {e}"}], "isError": True}
+
+    # ── Miniforge hackbot + free-credit account tools ─────────────────────
+    if name == "list_hack_bots":
+        status, data = miniforge_http("/api/apps?limit=200&category=hack")
+        if status != 200:
+            return {"content": [{"type": "text", "text": f"Miniforge error ({status}): {data}"}], "isError": True}
+        raw_bots = data if isinstance(data, list) else ((data.get("apps") or []) if isinstance(data, dict) else [])
+        bots = [b for b in raw_bots if "hack" in (b.get("category") or "").lower()]
+        lines = [f"{b.get('slug')} — {(b.get('title') or b.get('name') or '')}: {(b.get('description') or '')[:90]}" for b in bots] or ["No hack-category bots found."]
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+    if name == "chat_hack_bot":
+        slug = (args.get("slug") or "").strip()
+        message = args.get("message") or ""
+        if not slug or not message:
+            return {"content": [{"type": "text", "text": "Error: slug and message required (use list_hack_bots first)"}], "isError": True}
+        status, data = miniforge_http(f"/api/apps/{urllib.parse.quote(slug)}/chat", "POST", {"message": message}, 120)
+        if status != 200:
+            return {"content": [{"type": "text", "text": f"Bot {slug} error ({status}): {data}"}], "isError": True}
+        text = (data.get("reply") or data.get("response") or data.get("message") or str(data)[:4000]).strip() if isinstance(data, dict) else str(data)
+        return {"content": [{"type": "text", "text": text}]}
+
+    if name == "ask_hack_squad":
+        message = args.get("message") or ""
+        if not message:
+            return {"content": [{"type": "text", "text": "Error: message required"}], "isError": True}
+        squad = ["ai-unrestricted", "no-censor-ai", "uncensored-gpt", "darkgpt", "evil-ai", "chatgpt"]
+        low = message.lower()
+        for slug in squad:
+            status, data = miniforge_http(f"/api/apps/{slug}/chat", "POST", {"message": message}, 90)
+            if status == 200 and isinstance(data, dict):
+                text = (data.get("reply") or data.get("response") or data.get("message") or "").strip()
+                if text and not any(s in text[:120].lower() for s in ("i can't", "i cannot", "i won't", "as an ai")):
+                    return {"content": [{"type": "text", "text": f"[{slug}]\n{text}"}]}
+        return {"content": [{"type": "text", "text": "All squad bots failed to respond."}], "isError": True}
+
+    if name == "account_pool_status":
+        status, data = miniforge_http("/api/pool/stats", timeout=10)
+        try:
+            pool = json.load(open("/home/ghost/miniforge/data/miniapps_pool.json"))
+            accounts = pool.get("accounts", [])
+            live = [a for a in accounts if not a.get("dead")]
+            dead = len(accounts) - len(live)
+            creds = sum(a.get("credits") or 0 for a in live)
+            withjwt = sum(1 for a in live if a.get("jwt"))
+            local = f"Local pool file: {len(live)} live / {dead} dead, {creds} credits, {withjwt} with JWT"
+        except Exception as e:
+            local = f"Local pool file unreadable: {e}"
+        server = json.dumps(data, indent=2)[:1200] if status == 200 else f"Miniforge /api/pool/stats unavailable ({status})"
+        return {"content": [{"type": "text", "text": local + "\n\nMiniforge stats:\n" + str(server)}]}
+
+    if name == "account_pool_refresh":
+        count = args.get("count") or 10
+        try:
+            count = max(1, min(50, int(count)))
+        except Exception:
+            count = 10
+        import subprocess
+        try:
+            subprocess.Popen(
+                ["bash", "-c", f"cd /home/ghost/miniforge && {NVM_NODE} fresh-accounts-vpn.js {count} >> {REG_LOG} 2>&1 && {NVM_NODE} login-accounts.js >> {REG_LOG} 2>&1"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            status, data = miniforge_http("/api/pool/stats", timeout=8)
+            out = f"Account creator started in background: registering {count} fresh accounts, then logins.\nLog: {REG_LOG}\nRe-run account_pool_status in ~2 min for new totals."
+            if status == 200:
+                out += "\nCurrent Miniforge stats:\n" + json.dumps(data, indent=2)[:800]
+            return {"content": [{"type": "text", "text": out}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"Failed to start registrar: {e}"}], "isError": True}
+
 
     # Browser + captcha tools (all in BROWSER_TOOLS)
     if name.startswith("browser_") or name.startswith("captcha_"):
