@@ -187,6 +187,7 @@ const session = require('./session');
 const git = require('./git');
 const sandbox = require('./sandbox');
 const subagent = require('./subagent');
+const taskState = require('./task-state');
 
 // ── Smart Agent Router (cheapest-tier routing, cron scheduling, token burn audit) ──
 const smartRouter = require('./smart-router');
@@ -3525,6 +3526,31 @@ function banner() {
 
 // ── Tool Definitions ────────────────────────────────────────────────────
 let TOOLS = [
+  // G3.1 fill: model-writable todo list — plan externalization for weak models.
+  {
+    type: 'function',
+    function: {
+      name: 'update_todo',
+      description: 'Write/update your task checklist. Call BEFORE starting work and after each step. The list is re-injected into your context every turn so you never lose the plan.',
+      parameters: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                text: { type: 'string', description: 'One-line todo item' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'blocked'], description: 'Item state' },
+              },
+              required: ['text', 'status'],
+            },
+          },
+        },
+        required: ['todos'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -4542,8 +4568,46 @@ function shellQuote(value) {
 }
 
 // ── Tool Executors ──────────────────────────────────────────────────────
+// ── G5.1 fill: schema-driven runtime validation of model-emitted tool args ──
+function validateToolArgs(fnName, args) {
+  try {
+    const def = (TOOLS || []).find(t => t.function && t.function.name === fnName);
+    if (!def) return null; // unknown names fall through to the MCP path
+    if (args === undefined || args === null) args = {};
+    if (typeof args !== 'object' || Array.isArray(args)) return 'arguments must be a single JSON object';
+    const params = def.function.parameters || {};
+    for (const r of (params.required || [])) {
+      if (args[r] === undefined) return `missing required argument '${r}'`;
+    }
+    const props = params.properties || {};
+    if (!Object.keys(props).length) return null; // schema-free tool (exec_shell etc.)
+    for (const k of Object.keys(args)) {
+      if (!(k in props)) return `unknown argument '${k}' — allowed: ${Object.keys(props).join(', ')}`;
+      const sch = props[k] || {};
+      if (sch.enum && !sch.enum.includes(args[k])) return `'${k}' must be one of: ${sch.enum.join(' | ')}`;
+      const want = sch.type;
+      if (want && want !== 'any') {
+        const got = Array.isArray(args[k]) ? 'array' : typeof args[k];
+        if (got !== want) return `'${k}' must be ${want}, got ${got}`;
+      }
+    }
+    return null;
+  } catch (_) { return null; } // never let validation itself break the loop
+}
+
 const toolExecutors = {
-  async shell({ command, timeout = 30, sudoPassword = null }) {
+  // ── G3.1 fill: model-writable todo list (plan externalization) ─────────
+  async update_todo({ todos }) {
+    try {
+      taskState.setTodos(todos);
+      const n = (taskState.getTodos() || []).length;
+      return `TODO list saved (${n} items). It is re-injected into your context every turn — keep it current as you work.`;
+    } catch (err) {
+      return `Error updating todo list: ${err.message}`;
+    }
+  },
+
+   async shell({ command, timeout = 30, sudoPassword = null }) {
     // ── Auto-wrap unbounded grep/rg/find commands with output limits ──
     let finalCmd = command;
     const cmdLower = command.trim().toLowerCase();
@@ -5592,7 +5656,13 @@ process.stdout.write(`\r\x1b[K${C.info}◇ Spawning ${tasksToRun.length} sub-age
 
     const promises = tasksToRun.map(async (task, i) => {
       const taskName = task.name || `task-${i + 1}`;
-      const taskHist = [{ role: 'system', content: buildSystemPrompt() }];
+      // G8.1 fill: fork parent context into the subagent so it does not
+      // re-discover what the parent already mapped.
+      const subHist = [{ role: 'system', content: buildSystemPrompt() }];
+      const _parentPlan = (taskState.summary && taskState.summary()) || '';
+      const _parentTask = (_currentTaskAnchor && _currentTaskAnchor.content) ? String(_currentTaskAnchor.content).slice(0, 800) : '';
+      subHist.push({ role: 'user', content: `PARENT CONTEXT (do not re-diagnose; build on this):\n${_parentPlan || '(no parent plan recorded)'}${_parentTask ? `\nActive parent task: ${_parentTask}` : ''}\n\nYOUR SUBTASK — fully self-contained assignment: ${task.goal}` });
+      const taskHist = subHist;
 process.stdout.write(`\r\x1b[K${C.primary} ◆ ${taskName}: ${task.goal.substring(0, 80)}${C.reset}`);
       try {
         await Promise.race([
@@ -7799,7 +7869,7 @@ process.stdout.write(`\r\x1b[K${C.fgMuted}◇ Sanitized history: ${parts.join(",
   }
 }
 
-function compactHistory(history, lowToken = false) {
+async function compactHistory(history, lowToken = false) {
   if (history.length <= 1) return; // system prompt only
 
   const ctxMax = lowToken ? LOW_TOKEN_MAX_CONTEXT_CHARS : MAX_CONTEXT_CHARS;
@@ -7822,6 +7892,33 @@ process.stdout.write(`\r\x1b[K${C.fgMuted}◇ Skipping compact — tool calls in
     const _g = claudePreCompactGuard({ tokenCount: _tc, maxTokens: CONTEXT_WINDOW, activeTasks: (_pendingTools?.length||0), pendingApprovals: (_awaitingConfirm?1:0) });
 if (_g && !_g.compact) process.stdout.write(`\r\x1b[K${C.fgMuted}🔒 PreCompact guard: ${_g.reason}${C.reset}`);
   } catch (_) {}
+
+  // ── G7.1 fill: model-summarized compaction (Claude Code style) ──
+  // Before truncating, call the model on the OLDER span and replace it with a
+  // structured summary. Preserves the reasoning chain truncation destroys.
+  // Falls through to the truncation path below on any failure. Best-effort.
+  try {
+    const keepTail = 8;
+    if (history.length > keepTail + 18 && !hasPendingToolCalls(history)) {
+      const spanStart = 1;
+      const spanEnd = history.length - keepTail;
+      const span = history.slice(spanStart, spanEnd);
+      if (estimateChars(span) > ctxMax * 0.4) {
+        const sum = await callOllama([
+          { role: 'system', content: 'Compress this coding/ops session transcript. Output ONLY terse bullet lines (max 40) with: (1) Task goal. (2) Key files/paths touched + why. (3) Errors hit and their fixes. (4) Current blocker if any. (5) Exact next planned step.' },
+          { role: 'user', content: span.map(m => `[${m.role}] ${String(m.content || '').replace(/\s+/g, ' ').slice(0, 400)}`).join('\n').slice(0, 24000) },
+        ], [], { lowToken });
+        const sText = sum && ((sum.message && sum.message.content) || '');
+        if (sText && String(sText).trim().length > 40) {
+          history.splice(spanStart, span.length, { role: 'system', content: `📦 SESSION SUMMARY (older turns compacted — trust this summary, it preserves the reasoning chain):\n${String(sText).trim()}` });
+          process.stdout.write(`\r\x1b[K${C.mustard}◇ Model-compacted: ${span.length} turns → 1 session summary${C.reset}`);
+          logContextUsage(history, 'after summarize', lowToken);
+        }
+      }
+    }
+  } catch (_) {
+    /* summary compaction is best-effort — truncation below still bounds context */
+  }
 
   // ALWAYS enforce message count limit, regardless of char size.
   if (history.length > maxMsgs + 1) { // +1 for system prompt
@@ -8090,7 +8187,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     //    hard-stops at 50; it condenses and keeps going with a fresh context.
     if (turn > 0 && turn % 50 === 0) {
       log('\n' + C.cyan + '📦 Auto-consolidation @ round ' + turn + ' — compacting context for another 50 rounds' + C.reset + '\n');
-      try { compactHistory(history, _lowToken); } catch (_) {}
+      try { await compactHistory(history, _lowToken); } catch (_) {}
       try { autolearn.consolidateMemories(path.join(process.env.HOME || '/home/ghost', '.hakster')); } catch (_) {}
       history.push({ role: 'system', content: '📦 Context auto-consolidated at round ' + turn + '. You have a fresh context window — continue working with the key facts you still have. Do not re-diagnose from scratch; use what you already know.' });
     }
@@ -8147,7 +8244,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       if (!lastHadToolCalls) {
         const _ctxPct = parseFloat(contextPercent(history, _lowToken));
         if (turn % 5 === 0 || _ctxPct > 40) {
-          compactHistory(history, _lowToken);
+          await compactHistory(history, _lowToken);
         }
       } else {
 process.stdout.write(`\r\x1b[K${C.fgMuted}◇ Skipping compact — still in tool chain (turn ${turn})${C.reset}`);
@@ -8408,7 +8505,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
       _emptyRetries++;
       bumpSmart(-5, 'empty-retry');
       log(`${C.mustard}⚠  Model returned tool_calls with no content/thinking (stuck-loop pattern, retry ${_emptyRetries}/${EMPTY_RETRY_LIMIT}). Compacting and retrying...${C.reset}`);
-      compactHistory(history, _lowToken);
+      await compactHistory(history, _lowToken);
       // Don't save this empty tool-call turn — just retry with a nudge
       history.push({ role: 'system', content: 'CRITICAL: You MUST include text content (explanation or reasoning) with every response. Do NOT call tools without explaining what you are doing. Respond with substantive text content, then call tools if needed. Never return empty content.' });
       history.push({ role: 'user', content: userMessage });
@@ -8420,7 +8517,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
         _emptyRetries++;
         log(`${C.mustard}⚠  Model returned empty response (retry ${_emptyRetries}/${EMPTY_RETRY_LIMIT}). Compacting history and retrying...${C.reset}`);
         // Compact history aggressively before retry
-        compactHistory(history, _lowToken);
+        await compactHistory(history, _lowToken);
         // Remove the empty assistant entry we just pushed
         if (history.length > 0 && history[history.length - 1].role === 'assistant' && !(history[history.length - 1].content || '').trim()) {
           history.pop();
@@ -9080,8 +9177,15 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
             result = `❌ Error: Unknown tool "${fnName}"`;
           }
         } else {
-          result = await (typeof executor === 'function' ? executor(fnArgs) : executor(fnArgs));
-          if (result === undefined) result = '(no output)';
+          // G5.1 fill: runtime arg validation — small models emit malformed
+          // args constantly; a structured error lets them self-correct next turn.
+          const _verr = validateToolArgs(fnName, fnArgs);
+          if (_verr) {
+            result = `ERROR: invalid arguments for tool '${fnName}': ${_verr}. Re-read the tool schema above and retry with corrected arguments.`;
+          } else {
+            result = await (typeof executor === 'function' ? executor(fnArgs) : executor(fnArgs));
+            if (result === undefined) result = '(no output)';
+          }
         }
       } catch (err) {
         result = `Error: ${err.message}`;

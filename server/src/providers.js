@@ -219,7 +219,7 @@ Object.assign(PROVIDERS, {
   'ollama-cloud2': { name: 'Ollama Cloud 2', baseURL: 'https://ollama.com/v1', defaultModel: 'glm-5.2', apiKey: _pk('ollama-cloud2') || process.env.OLLAMA_CLOUD2_API_KEY, type: 'openai-compat' },
   'ollama-cloud3': { name: 'Ollama Cloud 3', baseURL: 'https://ollama.com/v1', defaultModel: 'glm-5.2', apiKey: _pk('ollama-cloud3') || process.env.OLLAMA_CLOUD3_API_KEY, type: 'openai-compat' },
   // Kiro gateway (local, free Claude via Kiro/AWS)
-  'kiro-gateway': { name: 'Kiro Gateway (Claude)', baseURL: 'http://127.0.0.1:8000/v1', defaultModel: 'claude-sonnet-4', apiKey: 'my-super-secret-password-123', type: 'openai-compat' },
+  'kiro-gateway': { name: 'Kiro Gateway (Claude)', baseURL: 'http://127.0.0.1:8000/v1', defaultModel: 'auto-kiro', apiKey: 'my-super-secret-password-123', type: 'openai-compat' },
 });
 
 // Waterfall order: hackbot 1st (uncensored bot network, primary brain),
@@ -1404,12 +1404,42 @@ async function listModels(provider) {
       ];
     }
 
-    // Ollama / Hermes — strip /v1 suffix (used for OpenAI-compat chat) to hit native /api/tags
-    const tagsBase = cfg.baseURL.replace(/\/v1\/?$/, '');
-    const res = await fetch(`${tagsBase}/api/tags`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.models || []).map(m => ({ id: m.name, name: m.name }));
+    if (cfg.type === 'gemini') {
+      // Gemini native listing — models gated by generateContent support
+      const key = cfg.apiKey || '';
+      if (!key) return [];
+      const gres = await fetch(`${cfg.baseURL}/models?key=${encodeURIComponent(key)}&pageSize=200`, { signal: AbortSignal.timeout(6000) });
+      if (!gres.ok) return [];
+      const gdata = await gres.json();
+      return (gdata.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map(m => ({ id: m.name.replace(/^models\//, ''), name: m.displayName || m.name.replace(/^models\//, ''), thinking: /thinking/i.test(m.name) }));
+    }
+
+    if (!cfg.baseURL) return []; // claude-cli et al — shells out, no HTTP listing
+
+    let host = '';
+    try { host = new URL(cfg.baseURL).hostname; } catch { return []; }
+    const isLocalOllama = (host === 'localhost' || host === '127.0.0.1') && /:11434/.test(cfg.baseURL);
+    if (isLocalOllama) {
+      // Ollama daemon — native /api/tags
+      const tagsBase = cfg.baseURL.replace(/\/v1\/?$/, '');
+      const res = await fetch(`${tagsBase}/api/tags`, { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.models || []).map(m => ({ id: m.name, name: m.name }));
+    }
+
+    // OpenAI-compatible cloud — standard /models (Bearer when a real key is set)
+    const base = cfg.baseURL.replace(/\/$/, '');
+    const headers = cfg.apiKey && cfg.apiKey !== 'free' ? { Authorization: `Bearer ${cfg.apiKey}` } : {};
+    let res2 = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(6000) });
+    if (res2.status === 404 && !/\/v1$/.test(base)) res2 = await fetch(`${base}/v1/models`, { headers, signal: AbortSignal.timeout(6000) });
+    if (!res2.ok) return [];
+    const data2 = await res2.json();
+    return (Array.isArray(data2.data) ? data2.data : Array.isArray(data2.models) ? data2.models : [])
+      .map(m => ({ id: typeof m === 'string' ? m : (m.id || m.name || '') }))
+      .filter(m => m.id);
   } catch {
     return [];
   }
@@ -1890,6 +1920,30 @@ const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'update_todo',
+      description: 'Write/update your task checklist. Call BEFORE starting work and after each step. The list is re-injected into your context every turn so you never lose the plan.',
+      parameters: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                text: { type: 'string' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'blocked'] },
+              },
+              required: ['text', 'status'],
+            },
+          },
+        },
+        required: ['todos'],
+      },
+    },
+  },
 ];
 
 let agentBrowser = null;
@@ -2049,6 +2103,12 @@ You operate in a 6-phase loop: THINK → PLAN → ACT → OBSERVE → REFLECT �
 - CONSOLIDATE: Periodically, lessons learned are consolidated into memory for future sessions.
 The server tracks these phases and will inject [REFLECT] and [CONSOLIDATE] system messages when needed.
 ═══ END PHASES ═══`;
+
+  // Per-tool behavioral contracts (G1.1 fill) — injected only for tools present
+  try {
+    const { injectToolPrompts } = require('./agent/tool-prompts');
+    prompt = injectToolPrompts(AGENT_TOOLS, prompt);
+  } catch (e) { /* tool contracts are best-effort */ }
 
   _sysPromptCache.set(cacheKey, { prompt, ts: Date.now() });
   return prompt;

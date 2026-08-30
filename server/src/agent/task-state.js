@@ -118,7 +118,31 @@ function summary() {
   const stepsStr = steps.length
     ? steps.map((s, i) => `  ${i + 1}. ${s.text}`).join('\n')
     : '  (none yet — you are just starting)';
-  return `\n\n## 🎯 Current Task — DO NOT FORGET THIS\nGoal: ${t.title}\nStarted: ${_rel(t.startedAt)} · Last active: ${_rel(t.lastActive)}\nSteps so far:\n${stepsStr}\nRULE: You are in the middle of the task above. RESUME where you left off — do NOT restart from scratch, do NOT ask the user what to do, do NOT ask for clarification unless you hit a real blocker. Keep going until the goal is fully achieved, then confirm completion.`;
+  const TODO_ICONS = { pending: '○', in_progress: '◐', done: '✔', blocked: '⛔' };
+  const todos = (t.todos || []);
+  const planStr = todos.length
+    ? todos.map(x => `  [${TODO_ICONS[x.status] || '○'}] ${x.text}`).join('\n')
+    : '  (no plan on file — write one with the update_todo tool BEFORE working)';
+  return `\n\n## 🎯 Current Task — DO NOT FORGET THIS\nGoal: ${t.title}\nStarted: ${_rel(t.startedAt)} · Last active: ${_rel(t.lastActive)}\nPlan (from your update_todo list):\n${planStr}\nSteps so far:\n${stepsStr}\nRULE: You are in the middle of the task above. RESUME where you left off — do NOT restart from scratch, do NOT ask the user what to do, do NOT ask for clarification unless you hit a real blocker. Keep going until the goal is fully achieved, then confirm completion.`;
+}
+
+// Model-writable todo list (plan externalization — keeps a weak model on-task
+// across a long round budget: it writes the plan here, the plan is re-read
+// into context every turn by summary()).
+function setTodos(todos) {
+  const state = _load();
+  if (!state.active) return;
+  if (!Array.isArray(todos)) return;
+  state.active.todos = todos.slice(0, 30).map(x => ({
+    text: String(x.text || '').replace(/\s+/g, ' ').trim().slice(0, 140),
+    status: ['pending', 'in_progress', 'done', 'blocked'].includes(x.status) ? x.status : 'pending',
+  })).filter(x => x.text);
+  state.active.lastActive = _now();
+  _save(state);
+}
+function getTodos() {
+  const state = _load();
+  return (state.active && state.active.todos) || [];
 }
 
 function complete() {
@@ -134,4 +158,4 @@ function clear() {
 }
 function get() { return _load(); }
 
-module.exports = { init, addStep, summary, complete, clear, get };
+module.exports = { init, addStep, summary, setTodos, getTodos, complete, clear, get };
