@@ -191,6 +191,76 @@ function formatResult(r) {
   }
   return String(r);
 }
+// ── FABRICATION GUARD: validate tool args before execution ──
+const fs = require('fs');
+const path = require('path');
+
+const KNOWN_TOOLS = new Set([
+  'phantom_read_file', 'phantom_write_file', 'phantom_edit_file',
+  'phantom_run_command', 'phantom_search_web', 'phantom_ai_chat',
+  'phantom_grep', 'phantom_list_files', 'phantom_status',
+]);
+
+// Reject placeholder/fabricated paths
+function isValidFilePath(p) {
+  if (!p || typeof p !== 'string') return false;
+  if (p.length < 3) return false;
+  if (/^(path|file|dir|cmd|command|url|query|pattern|search|target|undefined|null)$/i.test(p)) return false;
+  if (/^[a-z]$/i.test(p)) return false; // single letter
+  return true;
+}
+
+// Reject placeholder/fabricated commands
+function isValidCommand(cmd) {
+  if (!cmd || typeof cmd !== 'string') return false;
+  if (cmd.length < 2) return false;
+  if (/^(cmd|command|run|shell|exec|script|undefined|null)$/i.test(cmd.trim())) return false;
+  // Reject prose sentences — LLM sometimes writes natural language
+  const words = cmd.trim().split(/\s+/);
+  if (words.length > 8 && /\b(allow|me|execute|provide|output|this|that|will|can|the|a|an|to|for|with|using)\b/i.test(cmd)) return false;
+  return true;
+}
+
+// Check if a file path exists on disk (for read operations)
+function fileExists(p) {
+  try { return fs.existsSync(path.resolve(p)); } catch { return false; }
+}
+
+// Validate tool call args — returns error string or null if valid
+function validateToolCall(name, args) {
+  if (!KNOWN_TOOLS.has(name)) return `Unknown tool: ${name}. Valid tools: ${[...KNOWN_TOOLS].join(', ')}`;
+  if (!args || typeof args !== 'object') return 'Missing or invalid arguments';
+
+  switch (name) {
+    case 'phantom_read_file':
+      if (!isValidFilePath(args.file)) return 'Invalid file path — must be a real path, not a placeholder';
+      if (!fileExists(args.file)) return `File not found: ${args.file} — cannot read a file that doesn't exist. Do not fabricate its contents.`;
+      break;
+    case 'phantom_write_file':
+      if (!isValidFilePath(args.file)) return 'Invalid file path';
+      if (!args.content || typeof args.content !== 'string') return 'Missing file content';
+      break;
+    case 'phantom_edit_file':
+      if (!isValidFilePath(args.file)) return 'Invalid file path';
+      if (!fileExists(args.file)) return `File not found: ${args.file} — cannot edit a file that doesn't exist`;
+      if (!args.old_str || typeof args.old_str !== 'string') return 'Missing old_str';
+      if (!args.new_str || typeof args.new_str !== 'string') return 'Missing new_str';
+      break;
+    case 'phantom_run_command':
+      if (!isValidCommand(args.cmd)) return 'Invalid command — must be a real shell command, not a placeholder or prose';
+      break;
+    case 'phantom_grep':
+      if (!args.pattern || args.pattern.length < 2) return 'Pattern too short';
+      break;
+    case 'phantom_search_web':
+      if (!args.query || args.query.length < 2) return 'Query too short';
+      break;
+    case 'phantom_ai_chat':
+      if (!args.message || typeof args.message !== 'string') return 'Missing message';
+      break;
+  }
+  return null; // valid
+}
 
 const rl = require('readline').createInterface({ input: process.stdin, terminal: false });
 
@@ -211,7 +281,7 @@ rl.on('line', async (line) => {
       send({ jsonrpc: '2.0', id, result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'phantom-mcp-bridge', version: '2.0.0' },
+        serverInfo: { name: 'phantom-mcp-bridge', version: '2.1.0' },
       }});
       return;
     }
@@ -223,6 +293,14 @@ rl.on('line', async (line) => {
 
     if (method === 'tools/call') {
       const { name, arguments: args } = params || {};
+
+      // ── FABRICATION GUARD: validate before execution ──
+      const validationError = validateToolCall(name, args);
+      if (validationError) {
+        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `🚫 FABRICATION BLOCKED: ${validationError}` }] } });
+        return;
+      }
+
       let text;
 
       switch (name) {
