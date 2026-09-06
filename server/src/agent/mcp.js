@@ -348,7 +348,10 @@ function probeServerTools(name, config) {
     const isNpx = config.command === 'npx' || config.command === 'npx.cmd';
     const isBun = config.command.endsWith('bun') || config.command.endsWith('/bun');
     const startupDelay = isNpx ? 8000 : isBun ? 2000 : 0;
-    const effTimeout = config.initTimeoutMs || 120000;
+    // Probe timeout: startup probes must NOT inherit the 120s real-usage timeout.
+    // A server that can't answer initialize within 8s isn't startup-viable — it
+    // still lazy-spawns on demand with the full config.initTimeoutMs budget.
+    const effTimeout = Math.min(config.initTimeoutMs || 8000, 8000);
     timer = setTimeout(() => finish({ ok: false, error: `probe timed out after ${effTimeout}ms`, tools: [] }), effTimeout + startupDelay);
 
     child.stdout.on('data', (data) => {
@@ -409,7 +412,7 @@ async function loadMcpServers(configDirs) {
 
   // Collect unique mcp.json paths
   const seenConfigs = new Set();
-  const configs = [];
+  let configs = [];
 
   for (const dir of configDirs) {
     const configPath = path.join(dir, 'mcp.json');
@@ -432,6 +435,16 @@ async function loadMcpServers(configDirs) {
     _logFn('  [MCP] No MCP servers configured');
     return { tools: [], servers: [] };
   }
+
+  // Dedupe by server name across config dirs — first definition wins.
+  // hivemind is defined in BOTH ~/.hakster/mcp.json and the project .hakster/mcp.json;
+  // connecting it twice doubles the handshake cost and RAM for zero gain.
+  const _seenMcpNames = new Set();
+  configs = configs.filter(({ name }) => {
+    if (_seenMcpNames.has(name)) return false;
+    _seenMcpNames.add(name);
+    return true;
+  });
 
   // Tier-based lazy loading for 7GB RAM boxes.
   //
@@ -470,10 +483,11 @@ async function loadMcpServers(configDirs) {
     return aH - bH;
   });
 
-  // Spawn tier 1 servers (staggered, same as before)
+  // Spawn tier 1 servers (staggered — light anti-OOM pacing, trimmed from 250ms:
+  // 4.7GB+ free RAM makes 120ms plenty; saves ~1.4s of pure sleep at startup)
   const tier1Results = await Promise.allSettled(
     sortedTier1.map(({ name, config }, i) =>
-      new Promise(r => setTimeout(r, i * 250 + (HEAVY_SERVERS.has(name) ? 2000 : 0))).then(() => connectServer(name, config))
+      new Promise(r => setTimeout(r, i * 120 + (HEAVY_SERVERS.has(name) ? 1200 : 0))).then(() => connectServer(name, config))
     )
   );
 
@@ -486,10 +500,12 @@ async function loadMcpServers(configDirs) {
     }
   }
 
-  // Probe tier 2/3 servers one at a time (not parallel — avoid RAM spike).
-  // Each probe: spawn → initialize → tools/list → kill. The tool definitions
-  // are cached in a separate Map so the LLM sees them, but the process is dead.
-  for (const { name, config } of lazyConfigs) {
+  // Probe tier 2/3 servers with bounded concurrency — same behavior as before
+  // (spawn → initialize → tools/list → kill, tool defs cached for the LLM), but
+  // ~4× faster than one-at-a-time on boxes with 11 lazy servers. Cap of 3 keeps
+  // the transient RAM spike ≈ three short-lived probe processes. Heavy servers
+  // (serena: Python + language server + dashboard) still go last, alone.
+  async function probeAndRegisterLazy(name, config) {
     _logFn(`  [MCP:${name}] probing (lazy, tier ${config.tier})...`);
     try {
       const probe = await probeServerTools(name, config);
@@ -535,6 +551,20 @@ async function loadMcpServers(configDirs) {
     }
   }
 
+  const lightLazy = lazyConfigs.filter(({ name }) => !HEAVY_SERVERS.has(name));
+  const heavyLazy = lazyConfigs.filter(({ name }) => HEAVY_SERVERS.has(name));
+  const probeQueue = [...lightLazy];
+  await Promise.all(
+    Array.from({ length: Math.min(3, probeQueue.length) }, async () => {
+      while (probeQueue.length) {
+        const { name, config } = probeQueue.shift();
+        await probeAndRegisterLazy(name, config);
+      }
+    })
+  );
+  for (const { name, config } of heavyLazy) {
+    await probeAndRegisterLazy(name, config);
+  }
   return { tools: getMcpTools(), servers: connected };
 }
 
