@@ -8734,13 +8734,13 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
 
         // Not a stuck loop — the model returned text without a tool call.
         // Nudge it to make a tool call on the next turn and continue.
-        // NUDGE disabled — text-only responses are valid final answers
-        // if (_noProgressCount < NO_PROGRESS_LIMIT - 2) {
-        // history.push({ role: 'system', content: 'NUDGE: You returned text without calling a tool...' });
-        // _currentTaskAnchor = history[history.length - 1];
-        // continue;
-        // }
-        // Fall through to break -- approaching stuck loop threshold
+        // NUDGE re-enabled — model returned text without tools mid-task, nudge it to act
+        if (_noProgressCount < NO_PROGRESS_LIMIT - 2) {
+          history.push({ role: 'system', content: 'NUDGE: You returned text without calling a tool. If the task is not complete, call a tool NOW. If it IS complete, say "Done" explicitly.' });
+          _currentTaskAnchor = history[history.length - 1];
+          continue;
+        }
+        // Only fall through to break if approaching stuck-loop threshold
       }
 
       // ── TUI dashboard: final render at normal exit ──
