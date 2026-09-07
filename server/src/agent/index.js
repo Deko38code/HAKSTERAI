@@ -109,7 +109,8 @@ function recordCrash(err) {
     }
   } catch (_) {}
 }
-process.on('uncaughtException', (err) => { console.error('[hakster] CRASH:', err.message); console.error(err.stack); recordCrash(err); process.exit(1); });
+process.on('uncaughtException', (err) => { if (err.code === 'EPIPE' || (err.message && err.message.includes('EPIPE'))) { /* pipe closed — not a real crash, just a stale stdout */ return; } console.error('[hakster] CRASH:', err.message); console.error(err.stack); recordCrash(err); process.exit(1); });
+process.stdout?.on?.('error', (err) => { if (err.code === 'EPIPE') process.stdout.destroy(); });
 process.on('unhandledRejection', (err) => { console.error('[hakster] \ud83d\udca5 REJECTION:', String(err)); recordCrash(err); });
 
 
