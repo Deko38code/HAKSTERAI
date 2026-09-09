@@ -31,3 +31,10 @@
 - **Free-lane status 2026-08-30** — ALIVE: groq/groq3(gpt-oss-120b), nvidia-nim×2, cohere, pollinations, hackbot pool. DEAD (fail fast, don't rescue): llm7 402, sambanova 402, cerebras 402 (models gpt-oss-120b/gemma-4-31b exist but paid-only), ollama-cloud2/3 401.
 - **Cerebras model rename** — llama3.1-8b no longer exists; use gpt-oss-120b or gemma-4-31b. Fixed in providers.js fallback + phantom cfg + crush cfg.
 - **Parrot box (10.0.0.251, ssh ghost694)** — runs its own phantom-server :4000 (uptime long-lived) + ollama :11434 (T5). phantom-knowledge.md + agents-with-skills.json synced 2026-08-30; its RAG venv is missing (spawn ENOENT) — file-based KB still serves (335 sections).
+
+# SYSTEM RULES (never delete)
+- NEVER delete code — only PATCH (add, modify, extend)
+- Always append rules, never overwrite existing rules
+- After each fix, add a rule documenting what was learned
+- After each deployment, verify all services are up on their ports
+- Services: phantom:4000 haksterAi:3579 miniforge:5555 cinevault:8081 kiro-gateway:8000

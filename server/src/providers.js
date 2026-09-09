@@ -225,7 +225,7 @@ Object.assign(PROVIDERS, {
 // Waterfall order: hackbot 1st (uncensored bot network, primary brain),
 // gpt-oss 2nd (120b cloud), ollama 3rd (hp-1000, local backup),
 // then sambanova + groq (cloud-free) and on down — rotates to the next on rate-limit.
-const WATERFALL_ORDER = ['hackbot','gpt-oss','ollama','claude-cli','ollama-cloud2','ollama-cloud3','sambanova','groq','groq3','groq4','groq5','groq6','groq7','cerebras','gemini','gemini-flash','mistral','mistral2','nvidia-nim','nvidia-nim2','cohere','llm7','llm7-2','llm7-3','llm7-4','llm7-5','openrouter','pollinations','puter-sonnet','puter-4o','kiro-gateway'];
+const WATERFALL_ORDER = ['hackbot','gpt-oss','ollama','sambanova','groq','groq3','groq4','groq5','groq6','groq7','cerebras','gemini','gemini-flash','mistral','mistral2','nvidia-nim','nvidia-nim2','cohere','llm7','llm7-2','llm7-3','llm7-4','llm7-5','pollinations','puter-sonnet','puter-4o','claude-cli','ollama-cloud2','ollama-cloud3','openrouter','kiro-gateway'];
 const _rateLimited = new Map(); // provider -> until ms
 function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
 function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }
