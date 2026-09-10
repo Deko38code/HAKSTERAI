@@ -462,7 +462,7 @@ function getClient(provider) {
 
     case 'openrouter':
       return new OpenAI({
-        apiKey: process.env.OPENROUTER_API_KEY,
+        apiKey: nextOpenRouterKey() || process.env.OPENROUTER_API_KEY,
         baseURL: cfg.baseURL,
         timeout: 120000,
         defaultHeaders: {
@@ -555,6 +555,27 @@ function nextFirecrawlKey() {
   if (keys.length === 0) return null;
   const key = keys[_fcKeyIndex % keys.length];
   _fcKeyIndex++;
+  return key;
+}
+
+// ── OpenRouter key rotator (round-robin across OPENROUTER_API_KEY_* env vars) ──
+// Picks the next key on each call, cycling through all available keys.
+function getOpenRouterKeys() {
+  const keys = [];
+  if (process.env.OPENROUTER_API_KEY) keys.push(process.env.OPENROUTER_API_KEY);
+  for (let i = 2; i <= 20; i++) {
+    const k = process.env[`OPENROUTER_API_KEY_${i}`] || process.env[`OPENROUTER_API_KEY${i}`];
+    if (k) keys.push(k);
+  }
+  return [...new Set(keys)].filter(k => k && k.trim().length > 10);
+}
+
+let _orKeyIndex = 0;
+function nextOpenRouterKey() {
+  const keys = getOpenRouterKeys();
+  if (keys.length === 0) return process.env.OPENROUTER_API_KEY || null;
+  const key = keys[_orKeyIndex % keys.length];
+  _orKeyIndex++;
   return key;
 }
 
@@ -1195,7 +1216,7 @@ async function generateImage({ provider = 'openai', model = 'dall-e-3', prompt, 
 
   if (provider === 'openrouter') {
     // OpenRouter doesn't have native image gen — route through OpenAI
-    const client = new OpenAI({ apiKey: process.env.OPENROUTER_API_KEY, baseURL: 'https://openrouter.ai/api/v1' });
+    const client = new OpenAI({ apiKey: nextOpenRouterKey() || process.env.OPENROUTER_API_KEY, baseURL: 'https://openrouter.ai/api/v1' });
     const start = Date.now();
     const response = await client.images.generate({
       model,
@@ -3601,4 +3622,4 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
   }
 }
 
-module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv, isRefusal, GODMODE_PROMPT, UNRESTRICTED_SYSTEM_PROMPT };
+module.exports = { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv, isRefusal, GODMODE_PROMPT, UNRESTRICTED_SYSTEM_PROMPT, getOpenRouterKeys, nextOpenRouterKey };
