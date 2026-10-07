@@ -50,6 +50,9 @@ const PROVIDER_ORDER = [
   'ollama', 'sambanova', 'groq', 'cerebras', 'gemini-flash', 'gemini',
   'openrouter', 'pollinations', 'minimax', 'together', 'hyperbolic',
   'novita', 'deepinfra', 'glhf', 'featherless', 'aimlapi',
+  'cloudflare', 'modelscope', 'github-models', 'kilo-code', 'ovhcloud',
+  'opencode-zen', 'aion-labs', 'z-ai', 'agnes-ai', 'alibaba',
+  'siliconflow', 'chutes', 'ai21', 'nscale', 'nebius', 'xai',
   'anthropic', 'openai', 'lmstudio', 'jan', 'copilot', 'deepseek',
   'mistral', 'fireworks', 'huggingface',
 ];
@@ -59,6 +62,9 @@ const LOCAL_PROVIDERS_ORDER = [
   'ollama', 'lmstudio', 'jan', 'sambanova', 'groq', 'cerebras',
   'gemini-flash', 'openrouter', 'pollinations', 'minimax', 'together',
   'hyperbolic', 'novita', 'deepinfra', 'glhf', 'featherless', 'aimlapi',
+  'cloudflare', 'modelscope', 'github-models', 'kilo-code', 'ovhcloud',
+  'opencode-zen', 'aion-labs', 'z-ai', 'agnes-ai', 'alibaba',
+  'siliconflow', 'chutes', 'ai21', 'nscale', 'nebius', 'xai',
   'gemini', 'anthropic', 'openai', 'copilot', 'deepseek', 'mistral',
   'fireworks', 'huggingface',
 ];
@@ -67,8 +73,12 @@ const LOCAL_PROVIDERS_ORDER = [
 const CLOUD_PROVIDERS = [
   'sambanova', 'groq', 'cerebras', 'gemini-flash', 'gemini', 'openrouter',
   'pollinations', 'minimax', 'together', 'hyperbolic', 'novita', 'deepinfra',
-  'glhf', 'featherless', 'aimlapi', 'anthropic', 'openai', 'copilot',
-  'deepseek', 'mistral', 'fireworks', 'huggingface',
+  'glhf', 'featherless', 'aimlapi',
+  'cloudflare', 'modelscope', 'github-models', 'kilo-code', 'ovhcloud',
+  'opencode-zen', 'aion-labs', 'z-ai', 'agnes-ai', 'alibaba',
+  'siliconflow', 'chutes', 'ai21', 'nscale', 'nebius', 'xai',
+  'anthropic', 'openai', 'copilot', 'deepseek', 'mistral',
+  'fireworks', 'huggingface',
 ];
 
 // ── Provider endpoint URL map ──────────────────────────────────────────────
@@ -104,6 +114,21 @@ const PROVIDER_ENDPOINTS = {
   glhf:          'https://glhf.chat/api/openai/v1/chat/completions',
   featherless:   'https://api.featherless.ai/v1/chat/completions',
   aimlapi:       'https://api.aimlapi.com/v1/chat/completions',
+  cloudflare:    'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions',
+  modelscope:    'https://api-inference.modelscope.cn/v1/chat/completions',
+  'github-models':'https://models.github.ai/inference/chat/completions',
+  'kilo-code':   'https://api.kilo.ai/api/gateway/chat/completions',
+  ovhcloud:      'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions',
+  'opencode-zen':'https://opencode.ai/zen/v1/chat/completions',
+  'aion-labs':   'https://api.aionlabs.ai/v1/chat/completions',
+  'z-ai':        'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+  'agnes-ai':    'https://apihub.agnes-ai.com/v1/chat/completions',
+  alibaba:       'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
+  chutes:        'https://api.chutes.ai/v1/chat/completions',
+  ai21:          'https://api.ai21.com/studio/v1/chat/completions',
+  nscale:        'https://inference.api.nscale.com/v1/chat/completions',
+  nebius:        'https://api.studio.nebius.com/v1/chat/completions',
+  xai:           'https://api.x.ai/v1/chat/completions',
 };
 
 // Providers that need no API key (local servers or keyless free tier)
@@ -145,9 +170,21 @@ const PROVIDER_TYPE = {
   glhf:          'openai-compat',
   featherless:   'openai-compat',
   aimlapi:       'openai-compat',
-  anthropic:     'anthropic',
-  gemini:        'gemini',
-  'gemini-flash':'gemini',
+  cloudflare:    'openai-compat',
+  modelscope:    'openai-compat',
+  'github-models':'openai-compat',
+  'kilo-code':   'openai-compat',
+  ovhcloud:      'openai-compat',
+  'opencode-zen':'openai-compat',
+  'aion-labs':   'openai-compat',
+  'z-ai':        'openai-compat',
+  'agnes-ai':    'openai-compat',
+  alibaba:       'openai-compat',
+  chutes:        'openai-compat',
+  ai21:          'openai-compat',
+  nscale:        'openai-compat',
+  nebius:        'openai-compat',
+  xai:           'openai-compat',
   cohere:        'cohere',
 };
 

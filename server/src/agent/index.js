@@ -1766,6 +1766,7 @@ let _consecutiveToolErrors = [];     // [{name, count}]  recent tool error count
 const TOOL_ERROR_LOOP_LIMIT = 3;    // Same tool erroring this many times → break loop
 const TOOL_REPEAT_LIMIT = 3;       // Same tool called with identical args this many times → break loop (tighten tool loops)
 let _recentToolSigs = [];          // Recent normalized tool-call signatures (for repeat-tool-loop detection)
+let _toolResultCache = null;        // Session tool-result cache — read-only calls only (saves tokens on identical reruns)
 let _repeatToolSigCount = 0;        // Consecutive identical tool-call signatures
 let _writeFilePatternCount = 0;     // Consecutive write_file calls with same prefix but different suffix (fix_v9, fix_v10...)
 let _writeFileLastPrefix = '';      // Last write_file path prefix (before version/suffix)
@@ -9140,8 +9141,21 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
       // Execute tool (with nudge timer for shell commands)
       let result;
       let nudgeInterval = null;
+      // ── Token cache: identical READ-ONLY tool-call reruns skip execution ──
+      // The model often re-issues the same read (read_file/list_dir/safe shell)
+      // with identical args. Re-executing burns tokens and time for a result it
+      // already has — serve the cached copy instead and tell it not to re-call.
+      const _baseFn = String(fnName).split(' → ')[0];
+      if (!_toolResultCache) _toolResultCache = new Map();
+      const _cacheKey = _baseFn + '::' + JSON.stringify(parsedArgs || {});
+      let _cacheHit = false;
+      if (isReadOnlyTool(_baseFn, fnArgs) && _toolResultCache.has(_cacheKey)) {
+        result = `[CACHED — identical rerun of ${_baseFn}; result unchanged from the earlier call. Execution skipped to save tokens. Do NOT call this again with the same args — use the result below.]\n` + _toolResultCache.get(_cacheKey);
+        _cacheHit = true;
+        log(`${C.dim}♻️  Token-cache hit: ${_baseFn} — rerun skipped, served from cache${C.reset}`);
+      }
       const isSlowTool = ['shell', 'parallel_shell', 'sub_agent', 'crush'].includes(fnName);
-      if (isSlowTool && _statusFn) {
+      if (!_cacheHit && isSlowTool && _statusFn) {
         // Live elapsed-time nudge while shell commands run
         const startTime = Date.now();
         const nudgeEmoji = fnName === 'shell' ? '🖥️' : fnName === 'parallel_shell' ? '⚡' : '🤖';
@@ -9155,6 +9169,7 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
           if (!silent) _writeLiveToolPanel();
         }, Math.round(500 / SCROLL_SPEED));
       }
+      if (!_cacheHit) {
       try {
         // ── PreToolUse hook (codexSandboxPolicy) — GATE: block WRITES to system
         //    paths only (/etc,/usr,/boot,/sys,/proc,/dev). Project files are never
@@ -9192,6 +9207,14 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
         result = `Error: ${err.message}`;
       } finally {
         if (nudgeInterval) { clearInterval(nudgeInterval); nudgeInterval = null; }
+      }
+      }
+      // ── Store successful read-only results for future rerun cache hits ──
+      if (!_cacheHit && result !== undefined && result !== null && isReadOnlyTool(_baseFn, fnArgs)) {
+        const _rs = String(result);
+        if (_rs && !/^(Error:|⛔|❌|ERROR)/.test(_rs)) {
+          _toolResultCache.set(_cacheKey, _rs.substring(0, 4000));
+        }
       }
 
       // ── Update live output stream for TUI grid ──

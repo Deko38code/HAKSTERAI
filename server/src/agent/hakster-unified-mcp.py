@@ -119,7 +119,7 @@ def run_shell(cmd: str, timeout: int = 30) -> str:
     except Exception as e:
         return f"Error: {e}"
 
-MINIFORGE_BASE = "http://localhost:5555"
+MINIFORGE_BASE = "http://10.0.0.131:5555"
 NVM_NODE = "/home/ghost/.nvm/versions/node/v24.14.0/bin/node"
 REG_LOG = "/home/ghost/miniforge/data/top-up.log"
 
@@ -223,6 +223,23 @@ def get_tool_list() -> list[dict]:
                 "additionalProperties": False,
             },
         },
+        {
+            "name": "agent_system",
+            "description": f"Run the local Claude Agent System ({AGENT_SYSTEM_SCRIPT}): six Ollama-backed role agents — CODER, DEBUGGER, SECURITY, EXPLOIT, AI, AUTOMATOR — each with a fixed persona. Send one prompt to one agent, or to several in parallel via agents (accepts \"all\"). Optional file attach and Ollama model override. SECURITY is defensive-audit only; EXPLOIT is authorized-testing/CTF only.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Question or task for the agent(s)."},
+                    "agent": {"type": "string", "description": "Single agent: CODER|DEBUGGER|SECURITY|EXPLOIT|AI|AUTOMATOR."},
+                    "agents": {"type": "array", "items": {"type": "string"},
+                               "description": "Multiple agent names to run in parallel ('all' = the six defaults). Overrides 'agent'."},
+                    "model": {"type": "string", "description": "Optional Ollama model override (default glm-5.3-flash:cloud — fast relay; local models are slow on this CPU)."},
+                    "timeout": {"type": "integer", "description": "Per-agent call timeout in seconds (default 300).", "default": 300},
+                },
+                "required": ["prompt"],
+                "additionalProperties": False,
+            },
+        },
         # ── ScraperAPI tool — 2 keys, 9,970 credits, proxy rotation + CF bypass ──
         {
             "name": "hakster_scrape",
@@ -319,6 +336,60 @@ def get_tool_list() -> list[dict]:
 
     return tools
 
+AGENT_SYSTEM_SCRIPT = os.path.expanduser("~/claude_agents/claude_agent_system.sh")
+AGENT_SYSTEM_AGENTS = ["CODER", "DEBUGGER", "SECURITY", "EXPLOIT", "AI", "AUTOMATOR"]
+
+def run_agent_system(args: dict) -> str:
+    """Run the local Claude Agent System roster: one Ollama-backed role agent, \
+or several in parallel, via the deployed script's CLI mode."""
+    prompt = (args.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("prompt is required")
+    raw = args.get("agents") or args.get("agent") or ""
+    if isinstance(raw, list):
+        names = [str(a).strip().upper() for a in raw if str(a).strip()]
+    else:
+        names = [p.strip().upper() for p in str(raw).replace(",", " ").split() if p.strip()]
+    if names == ["ALL"]:
+        names = list(AGENT_SYSTEM_AGENTS)
+    bad = [n for n in names if n not in AGENT_SYSTEM_AGENTS]
+    if bad:
+        raise ValueError(f"unknown agent(s): {', '.join(bad)}; valid: "
+                         f"{', '.join(AGENT_SYSTEM_AGENTS)}, or 'all'")
+    if not names:
+        names = ["AI"]
+    file_arg = args.get("file") or ""
+    fpath = os.path.expanduser(str(file_arg)) if str(file_arg).strip() else ""
+    if fpath and not os.path.isfile(fpath):
+        raise FileNotFoundError(f"file not found: {fpath}")
+    timeout = int(args.get("timeout") or 300)
+    if not os.path.isfile(AGENT_SYSTEM_SCRIPT) or not os.access(AGENT_SYSTEM_SCRIPT, os.X_OK):
+        raise FileNotFoundError(f"{AGENT_SYSTEM_SCRIPT} missing or not executable")
+    env = dict(os.environ)
+    env["AGENT_MODEL"] = (args.get("model") or "").strip() or "glm-5.3-flash:cloud"
+
+    env.setdefault("AGENT_NUM_PREDICT", "16384")
+
+    def call(agent: str) -> str:
+        cmd = [AGENT_SYSTEM_SCRIPT, "cli", agent, prompt]
+        if fpath:
+            cmd.append(fpath)
+        try:
+            r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return f"--- {agent} ---\n(timed out after {timeout}s)"
+        out = r.stdout.strip() or (r.stderr.strip() or "(no output)")
+        if r.returncode != 0:
+            out += f"\n(exit={r.returncode})"
+        return f"--- {agent} ---\n{out}"
+
+    if len(names) == 1:
+        return call(names[0])
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(6, len(names))) as ex:
+        results = list(ex.map(call, names))
+    return "\n\n".join(results)
+
 # ── Tool dispatch ─────────────────────────────────────────────────────────────
 
 def handle_tool(name: str, args: dict) -> dict:
@@ -394,6 +465,13 @@ def handle_tool(name: str, args: dict) -> dict:
         timeout = args.get("timeout", 30)
         output = run_shell(cmd, timeout)
         return {"content": [{"type": "text", "text": output}]}
+
+    if name == "agent_system":
+        try:
+            output = run_agent_system(args)
+            return {"content": [{"type": "text", "text": output}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"Error (agent_system): {e}"}], "isError": True}
 
     # ── ScraperAPI tools — scrape with key rotation + credit tracking ──────────
     if name == "hakster_scrape":

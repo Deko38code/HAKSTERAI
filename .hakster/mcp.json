@@ -8,6 +8,14 @@
       "env": {},
       "tier": 1
     },
+    "hakster": {
+      "command": "python3",
+      "args": [
+        "/home/ghost/haksterAi/server/src/agent/hakster-unified-mcp.py"
+      ],
+      "env": {},
+      "tier": 1
+    },
     "filesystem": {
       "command": "mcp-server-filesystem",
       "args": [

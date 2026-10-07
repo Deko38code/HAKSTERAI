@@ -1263,15 +1263,18 @@ program
       }
 
       // 🧠 SONNET BRAIN: Auto-inject relevant past knowledge before sending to LLM
+      // ASYNC: was execFileSync which blocked the TUI event loop for up to 5s on
+      // every user input, making the CLI appear frozen on xterminal.
       try {
-      const { execFileSync } = require('child_process');
+      const { execFile } = require('child_process');
       const injectScript = '/home/ghost/claude-code-proxy/brain_inject.js';
-      const fs = require('fs');
       if (fs.existsSync(injectScript) && text && text.length > 3) {
-      const result = execFileSync('node', [injectScript, '--prompt', text, '--agent', 'haksterai', '--json'], {
-      timeout: 5000,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      const result = await new Promise((resolve, reject) => {
+        execFile('node', [injectScript, '--prompt', text, '--agent', 'haksterai', '--json'], {
+          timeout: 5000,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe']
+        }, (err, stdout) => { if (err) reject(err); else resolve(stdout); });
       });
       const parsed = JSON.parse(result);
       if (parsed.injected && parsed.recall_results && parsed.recall_results.length > 0) {

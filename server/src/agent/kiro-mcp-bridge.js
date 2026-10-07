@@ -100,11 +100,10 @@ function callKiro(prompt) {
     }
 
     // Spawn kiro-cli chat with the prompt
-    const args = ['chat', '-p', prompt];
+    const args = ['chat', prompt];
     const child = spawn(KIRO_BIN, args, {
       env: HEADLESS_ENV,
-      timeout: 120000,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     let stdout = '';

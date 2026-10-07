@@ -741,8 +741,11 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
             const priceId = sub.items.data[0]?.price?.id;
             const planId = planFromPriceId(priceId) || 'pro';
             db.prepare("UPDATE subscriptions SET status = 'expired' WHERE user_id = ? AND status = 'active'").run(userId);
+            // 7 placeholders, so 7 values: provider_sub_id was missing and every
+            // checkout.session.completed threw "Too few parameter values", leaving
+            // paying customers on their old plan.
             db.prepare(`INSERT INTO subscriptions (id, user_id, plan, billing_cycle, status, current_period_start, current_period_end, provider_sub_id, metadata) VALUES (?, ?, ?, 'monthly', 'active', ?, ?, ?, ?)`)
-              .run(subId, userId, planId, sub.current_period_start, sub.current_period_end, JSON.stringify({ stripe_customer_id: customerId, price_id: priceId }));
+              .run(subId, userId, planId, sub.current_period_start, sub.current_period_end, subId, JSON.stringify({ stripe_customer_id: customerId, price_id: priceId }));
             db.prepare('UPDATE users SET plan = ?, updated_at = unixepoch() WHERE id = ?').run(planId, userId);
             // Record payment
             const receiptId = 'rcpt_' + crypto.randomBytes(16).toString('hex');
@@ -760,8 +763,16 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
             const user = db.prepare('SELECT id FROM users WHERE stripe_customer_id = ?').get(sub.customer);
             if (user) {
               db.prepare('UPDATE users SET plan = ?, updated_at = unixepoch() WHERE id = ?').run(planId, user.id);
+              // Stripe's vocabulary does not match the schema's CHECK constraint
+              // ('canceled' one L, plus unpaid/incomplete/paused which aren't
+              // allowed). Passing them raw made this UPDATE throw and the
+              // subscription silently stop tracking.
+              const STATUS_MAP = { active: 'active', trialing: 'trialing',
+                past_due: 'past_due', canceled: 'cancelled', unpaid: 'past_due',
+                incomplete: 'past_due', incomplete_expired: 'expired', paused: 'past_due' };
+              const mappedStatus = STATUS_MAP[sub.status] || 'past_due';
               db.prepare("UPDATE subscriptions SET status = ?, current_period_start = ?, current_period_end = ? WHERE provider_sub_id = ?")
-                .run(sub.status === 'active' ? 'active' : sub.status, sub.current_period_start, sub.current_period_end, sub.id);
+                .run(mappedStatus, sub.current_period_start, sub.current_period_end, sub.id);
             }
           }
           break;
@@ -997,6 +1008,58 @@ app.get('/api/points', (_req, res) => {
       lastSession,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Command Center ─────────────────────────────────────────────────────────
+const CMD_CENTER_DIR = path.join(__dirname, '../../command-center');
+const userCmdFile = path.join(CMD_CENTER_DIR, 'user-commands.json');
+
+function readJsonSafe(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+}
+
+function writeUserCommands(list) {
+  fs.writeFileSync(userCmdFile, JSON.stringify({ updated: new Date().toISOString(), commands: list }, null, 1));
+}
+
+app.get('/commands', (_req, res) => {
+  res.sendFile(path.join(CMD_CENTER_DIR, 'index.html'));
+});
+
+app.get('/api/commands', (_req, res) => {
+  const data = readJsonSafe(path.join(CMD_CENTER_DIR, 'commands.json'), { generated: null, commands: [] });
+  const stack = readJsonSafe(path.join(CMD_CENTER_DIR, 'stack.json'), { groups: [] });
+  const memories = readJsonSafe(path.join(CMD_CENTER_DIR, 'memories.json'), { memories: [] });
+  const user = readJsonSafe(userCmdFile, { commands: [] });
+  res.json({
+    generated: data.generated || new Date().toISOString(),
+    stack: stack.groups || [],
+    commands: data.commands || [],
+    memories: memories.memories || [],
+    user: user.commands || [],
+  });
+});
+
+app.post('/api/commands', express.json({ limit: '1mb' }), (req, res) => {
+  const { title, section, cmd, box } = req.body || {};
+  if (!cmd || typeof cmd !== 'string' || cmd.length > 4000 || cmd.length < 2) {
+    return res.status(400).json({ error: 'cmd required (2-4000 chars)' });
+  }
+  const user = readJsonSafe(userCmdFile, { commands: [] });
+  user.commands = user.commands || [];
+  if (user.commands.some(c => c.cmd === cmd)) {
+    return res.status(409).json({ error: 'command already added' });
+  }
+  user.commands.push({
+    id: Date.now(),
+    title: String(title || '').slice(0, 200) || 'session command',
+    section: String(section || 'session-added').slice(0, 120),
+    box: String(box || 'session').slice(0, 20),
+    cmd,
+    added: new Date().toISOString(),
+  });
+  writeUserCommands(user.commands);
+  res.json({ ok: true, count: user.commands.length });
 });
 
 app.get('/api/health', (_req, res) => {
@@ -2160,7 +2223,7 @@ app.delete('/api/sessions/:id', (req, res) => {
 // ── Chat (non-streaming) ──────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
   const defaultCfg = getHaksterModelConfig();
-  const { provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId } = req.body;
+  const { provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId, unrestricted = false } = req.body;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -2182,7 +2245,7 @@ app.post('/api/chat', async (req, res) => {
   const effectiveSystem = (system ? system + '\n\n' : '') + clientCtxStr + deviceAwareness;
 
   try {
-    const result = await chat({ provider, model, messages, system: effectiveSystem || undefined });
+    const result = await chat({ provider, model, messages, system: effectiveSystem || undefined, unrestricted });
     const db = getDb();
 
     // Log the request
@@ -2214,7 +2277,7 @@ app.post('/api/chat', async (req, res) => {
 // ── Chat (SSE streaming) ─────────────────────────────────────────
 app.post('/api/chat/stream', async (req, res) => {
   const defaultCfg = getHaksterModelConfig();
-  const { provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId, thinking = false } = req.body;
+  const { provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId, thinking = false, unrestricted = false } = req.body;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -2253,7 +2316,7 @@ app.post('/api/chat/stream', async (req, res) => {
     let fullThinking = '';
     let finalMeta = null;
 
-    for await (const event of chatStream({ provider, model, messages, system: effectiveSystem || undefined, thinking })) {
+    for await (const event of chatStream({ provider, model, messages, system: effectiveSystem || undefined, thinking, unrestricted })) {
       if (event.type === 'delta') {
         fullContent += event.content;
         res.write(`data: ${JSON.stringify({ type: 'delta', content: event.content })}\n\n`);
@@ -6370,6 +6433,17 @@ app.get('/api/auth/google/callback', async (req, res) => {
       return res.redirect(`/build?google_error=token_exchange_failed`);
     }
     const tokens = await tokenRes.json();
+    // Non-breaking side effect: save tokens for clipper YouTube uploads
+    if (tokens.access_token) {
+      try {
+        require('fs').writeFileSync('/home/ghost/clipper/.state/yt_token.json', JSON.stringify({
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token || null,
+          expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600)
+        }, null, 2));
+        console.log('[clipper] YouTube token saved via Google OAuth callback');
+      } catch (e) { /* best-effort, never breaks haksterAi auth */ }
+    }
     const idToken = tokens.id_token;
     if (!idToken) return res.redirect('/build?google_error=no_id_token');
 
@@ -6448,9 +6522,12 @@ app.get('/api/auth/google/callback', async (req, res) => {
       user: { id: user.id, username: user.username, displayName, name: displayName, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
       apiKey: user.api_key,
     }));
-    // Redirect to pricing section so users can select a plan after login
- // Query params must come BEFORE the hash fragment so the browser can parse them
- res.redirect(`/?google_auth=${userData}#pricing`);
+    // Owner/admin accounts bypass pricing — go straight to the terminal
+    if (isOwner || user.role === 'admin' || user.plan === 'enterprise') {
+      res.redirect(`/terminal?google_auth=${userData}`);
+    } else {
+      res.redirect(`/?google_auth=${userData}#pricing`);
+    }
   } catch (err) {
     console.error('Google OAuth callback error:', err);
     res.redirect(`/build?google_error=${encodeURIComponent(err.message || 'unknown')}`);
@@ -6885,8 +6962,12 @@ app.get('/outputs/images/:file', (req, res, next) => {
 });
 app.use('/outputs', express.static(outputsPath));
 
+// /chat is the chat entry point. This route is registered before the static
+// handler, so it wins over the built dist/chat/index.html - it used to send
+// everyone to /terminal (the owner/admin shell), which is why following a Chat
+// link never reached the chat UI. The chat UI lives at /build.
 app.get(['/chat', '/chat/'], (req, res) => {
-  res.redirect(301, '/terminal');
+  res.redirect(301, '/build');
 });
 
 // ── Serve Astro static build ──────────────────────────────────────
@@ -7216,6 +7297,19 @@ ptyWss.on('connection', (ws, req) => {
   try {
     const spawnBin = ptyMode === 'shell' ? shellBin : crushBin;
     const spawnArgs = ptyMode === 'shell' ? ['-l'] : ['--cwd', workDir];
+    const ghostHome = '/home/ghost';
+    const fullUserPath = [
+      `${ghostHome}/.local/bin`,
+      `${ghostHome}/go/bin`,
+      `${ghostHome}/.cargo/bin`,
+      `${ghostHome}/.foundry/bin`,
+      `${ghostHome}/.nvm/versions/node/v24.14.0/bin`,
+      `${ghostHome}/.lmstudio/bin`,
+      `${ghostHome}/bin`,
+      '/usr/local/sbin', '/usr/local/bin',
+      '/usr/sbin', '/usr/bin', '/sbin', '/bin',
+      '/usr/games', '/usr/local/games', '/snap/bin',
+    ].join(':');
     const ptyEnv = {
       ...process.env,
       TERM: 'xterm-256color',
@@ -7223,7 +7317,8 @@ ptyWss.on('connection', (ws, req) => {
       FORCE_COLOR: '1',
       CLICOLOR: '1',
       CLICOLOR_FORCE: '1',
-      HOME: '/home/ghost', // crush always runs as ghost — never inherit PM2's /root
+      HOME: ghostHome,
+      PATH: fullUserPath,
     };
     delete ptyEnv.NO_COLOR;
 

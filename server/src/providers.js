@@ -219,7 +219,7 @@ Object.assign(PROVIDERS, {
   'ollama-cloud2': { name: 'Ollama Cloud 2', baseURL: 'https://ollama.com/v1', defaultModel: 'glm-5.2', apiKey: _pk('ollama-cloud2') || process.env.OLLAMA_CLOUD2_API_KEY, type: 'openai-compat' },
   'ollama-cloud3': { name: 'Ollama Cloud 3', baseURL: 'https://ollama.com/v1', defaultModel: 'glm-5.2', apiKey: _pk('ollama-cloud3') || process.env.OLLAMA_CLOUD3_API_KEY, type: 'openai-compat' },
   // Kiro gateway (local, free Claude via Kiro/AWS)
-  'kiro-gateway': { name: 'Kiro Gateway (Claude)', baseURL: 'http://127.0.0.1:8000/v1', defaultModel: 'auto-kiro', apiKey: 'my-super-secret-password-123', type: 'openai-compat' },
+  'kiro-gateway': { name: 'Kiro Gateway (Claude)', baseURL: 'http://127.0.0.1:8000/v1', defaultModel: 'claude-haiku-4.5', apiKey: 'my-super-secret-password-123', type: 'openai-compat' },
 });
 
 // Waterfall order: hackbot 1st (uncensored bot network, primary brain),
@@ -785,18 +785,18 @@ function routeModel(complexity, providerType) {
   return tier[providerType] || tier.anthropic;
 }
 
-async function chat({ provider, model, messages, system, maxTokens = 4096 }) {
+async function chat({ provider, model, messages, system, maxTokens = 4096, unrestricted = false }) {
   const cfg = PROVIDERS[provider];
   if (!cfg) throw new Error(`Unknown provider: ${provider}`);
   model = model || cfg.defaultModel;
 
   const start = Date.now();
 
-  // ── Inject GODMODE into system prompt if not already present ──
+  // ── GODMODE is opt-in: explicit flag or caller-passed 'UNRESTRICTED MODE' marker ──
   const effectiveSystem = (system || SYSTEM_PROMPT);
-  const godmodeSystem = effectiveSystem.includes('UNRESTRICTED MODE')
-    ? effectiveSystem
-    : effectiveSystem + GODMODE_PROMPT;
+  const godmodeSystem = (unrestricted === true || effectiveSystem.includes('UNRESTRICTED MODE'))
+    ? (effectiveSystem.includes('UNRESTRICTED MODE') ? effectiveSystem : effectiveSystem + GODMODE_PROMPT)
+    : effectiveSystem;
 
   if (cfg.type === 'anthropic' || cfg.type === 'claude-proxy') {
     const client = getClient(provider);
@@ -912,10 +912,13 @@ function _nextWaterfallProvider(currentProvider) {
 }
 
 // ── Streaming chat (with thinking support for ALL providers) ────────
-async function* chatStream({ provider, model, messages, system, thinking = false, maxTokens = 6144 }) {
+async function* chatStream({ provider, model, messages, system, thinking = false, maxTokens = 6144, unrestricted = false }) {
   const cfg = PROVIDERS[provider];
   if (!cfg) throw new Error(`Unknown provider: ${provider}`);
   model = model || cfg.defaultModel;
+
+  // GODMODE opt-in: explicit flag or caller-passed marker in system
+  const wantGodmode = unrestricted === true || (system || '').includes('UNRESTRICTED MODE');
 
   const start = Date.now();
   let inputTokens = 0;
@@ -924,9 +927,9 @@ async function* chatStream({ provider, model, messages, system, thinking = false
   // ── Anthropic with extended thinking ──────────────────────────────
   if ((cfg.type === 'anthropic' || cfg.type === 'claude-proxy') && thinking) {
     const client = getClient(provider);
-    // ── Inject GODMODE into streaming system prompt ──
+    // GODMODE opt-in — clean system prompt by default
     const rawSys = system || SYSTEM_PROMPT;
-    const sysPrompt = rawSys.includes('UNRESTRICTED MODE') ? rawSys : rawSys + GODMODE_PROMPT;
+    const sysPrompt = (wantGodmode && !rawSys.includes('UNRESTRICTED MODE')) ? rawSys + GODMODE_PROMPT : rawSys;
 
     const stream = await client.messages.stream({
       model,
@@ -982,9 +985,8 @@ async function* chatStream({ provider, model, messages, system, thinking = false
   // ── Anthropic without thinking ────────────────────────────────────
   if (cfg.type === 'anthropic' || cfg.type === 'claude-proxy') {
     const client = getClient(provider);
-    // ── Inject GODMODE into streaming system prompt (no-thinking path) ──
     const _streamSys = (system || SYSTEM_PROMPT);
-    const _streamSysGM = _streamSys.includes('UNRESTRICTED MODE') ? _streamSys : _streamSys + GODMODE_PROMPT;
+    const _streamSysGM = (wantGodmode && !_streamSys.includes('UNRESTRICTED MODE')) ? _streamSys + GODMODE_PROMPT : _streamSys;
     const stream = await client.messages.stream({
       model,
       max_tokens: maxTokens,
@@ -1018,9 +1020,8 @@ async function* chatStream({ provider, model, messages, system, thinking = false
   }
 
   if (cfg.type === 'claude-cli') {
-    // ── Inject GODMODE into claude-cli streaming ──
     const _cliSys = (system || SYSTEM_PROMPT);
-    const _cliSysGM = _cliSys.includes('UNRESTRICTED MODE') ? _cliSys : _cliSys + GODMODE_PROMPT;
+    const _cliSysGM = (wantGodmode && !_cliSys.includes('UNRESTRICTED MODE')) ? _cliSys + GODMODE_PROMPT : _cliSys;
     const content = await claudeCliComplete({ model, messages, system: _cliSysGM });
     outputTokens = Math.ceil(content.length / 4);
     yield { type: 'delta', content };
@@ -1038,14 +1039,13 @@ async function* chatStream({ provider, model, messages, system, thinking = false
 
   // ── OpenAI / Ollama / Hermes / OpenRouter ──────────────────────────
   const client = getClient(provider);
-  // ── Inject GODMODE into streaming system prompt ──
   const _oaiSys = (system || SYSTEM_PROMPT);
-  const _oaiSysGM = _oaiSys.includes('UNRESTRICTED MODE') ? _oaiSys : _oaiSys + GODMODE_PROMPT;
+  const _oaiSysGM = (wantGodmode && !_oaiSys.includes('UNRESTRICTED MODE')) ? _oaiSys + GODMODE_PROMPT : _oaiSys;
   const finalMessages = [{ role: 'system', content: _oaiSysGM }, ...messages];
 
   // If thinking is requested for non-Anthropic providers, inject a thinking prompt
   const thinkingPrefix = thinking
-    ? [{ role: 'system', content: UNRESTRICTED_SYSTEM_PROMPT + '\n\nBefore answering, think through the problem step-by-step inside <thinking>...</thinking> tags. Then provide your answer after the closing </thinking> tag.' }]
+    ? [{ role: 'system', content: (wantGodmode ? UNRESTRICTED_SYSTEM_PROMPT : SYSTEM_PROMPT) + '\n\nBefore answering, think through the problem step-by-step inside <thinking>...</thinking> tags. Then provide your answer after the closing </thinking> tag.' }]
     : [];
 
   const streamMessages = thinking

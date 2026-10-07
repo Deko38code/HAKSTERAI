@@ -294,7 +294,13 @@ async function sendToRole(roleKey, text, options = {}) {
   if (!role || !role.bot) return false;
   const ids = Array.from(role.chatIds);
   if (!ids.length) {
-    console.warn(`[telegram:${role.name}] no known chats`);
+    // Rate-limit: only log once per 10 min per bot to avoid flooding error log
+    // (periodic reporters fire every 15-30m, but PM2 restarts multiply this).
+    const now = Date.now();
+    if (!role._noChatsLoggedAt || now - role._noChatsLoggedAt > 600000) {
+      role._noChatsLoggedAt = now;
+      console.warn(`[telegram:${role.name}] no known chats (bot has no /start registrations)`);
+    }
     return false;
   }
   const chunks = splitMessage(String(text || 'Empty message'));
@@ -379,35 +385,46 @@ function initBots() {
     }).catch(e => console.error(`[telegram] ${ROLES[key].name} getMe failed:`, e.message));
 
     // Handle polling errors gracefully instead of crashing
-    // 409 fix: the old 2s restart was SHORTER than the long-poll timeout (10s),
-    // so the stale getUpdates connection was still alive when we restarted ->
-    // instant 409 -> infinite loop (see log spam). Now back off 15s (> timeout),
-    // dedupe concurrent restarts, clear any webhook first, and cap retries at 3
-    // before giving up to avoid CPU-thrashing the box.
+    // 409 fix: exponential backoff (15s→30s→60s→120s) with dedupe + permanent
+    // stop after 4 failures. The old fixed-15s retry loop kept colliding with
+    // stale getUpdates connections on every PM2 restart (34 restarts = 34 loops),
+    // pegging the server event loop and making the TUI CLI unresponsive.
     let _poll409Busy = false;
     let _poll409Count = 0;
     let _poll409Dead = false;
+    let _pollNetErrCount = 0;
     bot.on('polling_error', (error) => {
       const msg = error?.message || String(error);
       if (msg.includes('409') || msg.includes('terminated by other')) {
         if (_poll409Busy || _poll409Dead) return;  // already mid-backoff or dead — don't pile on
         _poll409Count++;
-        if (_poll409Count > 3) {
+        if (_poll409Count > 4) {
           console.error(`[telegram] ${ROLES[key].name}: 409 conflict persisted ${_poll409Count}x — stopping polling to save CPU`);
           _poll409Dead = true;
           bot.stopPolling().catch(() => {});
           return;
         }
         _poll409Busy = true;
-        console.warn(`[telegram] ${ROLES[key].name}: 409 conflict (attempt ${_poll409Count}/3) — backing off 15s`);
+        const backoffMs = 15000 * Math.pow(2, _poll409Count - 1); // 15s, 30s, 60s, 120s
+        console.warn(`[telegram] ${ROLES[key].name}: 409 conflict (attempt ${_poll409Count}/4) — backing off ${backoffMs / 1000}s`);
         bot.stopPolling().catch(() => {});
         setTimeout(async () => {
           try { await bot.deleteWebHook(); } catch {}
           try { await bot.startPolling(); } catch {}
           _poll409Busy = false;
-        }, 15000);
+        }, backoffMs);
       } else if (msg.includes('EFATAL') || msg.includes('fetch failed')) {
-        console.warn(`[telegram] ${ROLES[key].name}: network error — will auto-retry`);
+        // Network errors: the library auto-retries with no backoff, which can
+        // busy-loop. Rate-limit our own log and stop after sustained failures.
+        _pollNetErrCount++;
+        if (_pollNetErrCount % 10 === 0) {
+          console.warn(`[telegram] ${ROLES[key].name}: network error (${_pollNetErrCount}x) — library auto-retrying`);
+        }
+        if (_pollNetErrCount > 50) {
+          console.error(`[telegram] ${ROLES[key].name}: sustained network errors (${_pollNetErrCount}x) — stopping polling`);
+          _poll409Dead = true;
+          bot.stopPolling().catch(() => {});
+        }
       } else if (msg.includes('401') || msg.includes('Unauthorized')) {
         // Invalid/revoked token — the library retries with no backoff on 401,
         // which busy-loops getUpdates and pegs the event loop. Retrying is
@@ -453,7 +470,10 @@ function initBots() {
   };
   setTimeout(() => {
     for (const [key, msg] of Object.entries(JOBS)) {
-      sendToRole(key, msg).catch(() => {});
+      // Skip bots with no registered chats — sending would just log "no known chats" spam
+      if (ROLES[key] && ROLES[key].chatIds.size > 0) {
+        sendToRole(key, msg).catch(() => {});
+      }
     }
   }, 5000);
 }

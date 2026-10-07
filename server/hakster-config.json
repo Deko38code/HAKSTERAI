@@ -1,4 +1,4 @@
 {
-  "provider": "hackbot",
-  "model": "hackbot"
+  "provider": "ollama",
+  "model": "glm-5.2:cloud"
 }

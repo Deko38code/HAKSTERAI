@@ -123,6 +123,7 @@ const TIERS = {
       fast: 'kimi-uncensored:latest',
       security: 'hp-1000:latest',
       research: 'glm-uncensored:latest',
+      deep: 'glm-uncensored:latest',
     }
   },
   // T8: CLOUD aliases — compatibility labels, route to GLM cloud
@@ -190,6 +191,10 @@ const TASK_KEYWORDS = {
            'web scraping', 'web crawl', 'get page content', 'get html',
            'bypass cloudflare', 'scrape site', 'scrape website',
            'spider', 'harvest', 'ripper', 'extract from url', 'extract from site'],
+  deep: ['reason step', 'think through', 'think deeply', 'root cause', 'debug complex', 'hard bug',
+         'architect', 'design decision', 'trade-off', 'tradeoff', 'pros and cons', 'strategy',
+         'figure out', 'prove', 'derive', 'math', 'logic puzzle', 'algorithm design',
+         'review my code', 'code review', 'audit code', 'complex reasoning', 'multi-step plan'],
 };
 
 function detectTaskType(message) {
@@ -204,6 +209,10 @@ function detectTaskType(message) {
   }
   for (const kw of TASK_KEYWORDS.image) {
     if (lower.includes(kw)) return 'image';
+  }
+  // Deep tasks — hard reasoning: strongest model first, no fast-tier interception
+  for (const kw of TASK_KEYWORDS.deep) {
+    if (lower.includes(kw)) return 'deep';
   }
   for (const kw of TASK_KEYWORDS.power) {
     if (lower.includes(kw)) return 'power';
@@ -259,6 +268,7 @@ const ROUTING_MAP = {
   research: ['T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T6_KAGGLE', 'T5_PARROT', 'T7_LOCAL', 'T3_GLM_CLOUD'],
   image:    ['T1_FREE_CLOUD', 'T2_MINIFORGE', 'T3_GLM_CLOUD'],
   scrape:   ['T9_SCRAPERAPI', 'T2_MINIFORGE', 'T1_FREE_CLOUD', 'T7_LOCAL', 'T3_GLM_CLOUD'],
+  deep:     ['T3_GLM_CLOUD', 'T6_KAGGLE', 'T1_FREE_CLOUD', 'T4_PHANTOM', 'T2_MINIFORGE', 'T5_PARROT', 'T7_LOCAL'],
 };
 
 const TIER_WEIGHTS = {
@@ -335,6 +345,7 @@ function _buildWeightedList(healthy) {
  *   power, research   → T3 GLM cloud (HP-1000/GLM-5.1) — needs quality
  *   image             → T1 pollinations
  *
+ *   deep              → T3 GLM-5.1 first, deterministic priority (no round-robin)
  * @param {Object} task - { type?, message, model?, needsTools? }
  * @returns {Object} { tier, url, model, displayModel, cost }
  */
@@ -349,6 +360,9 @@ function route(task = {}) {
 
   const healthy = _buildHealthyChain(type, needsTools);
   if (healthy.length === 0) return _fallbackRoute();
+
+  // Deep tasks: deterministic priority — always the best healthy backend, no rotation.
+  if (type === 'deep') return healthy[0];
 
   const weighted = _buildWeightedList(healthy);
   const idx = _wrCounter % weighted.length;
@@ -377,6 +391,50 @@ function routeWeighted(task = {}) {
   return healthy[idx];
 }
 
+// ── Miniforge bot pool (10k+ bots, cached, refreshed every 10 min) ────────────
+
+let _miniforgeBots = [];
+const _MINIFORGE_BOT_RE = {
+  code: /code|dev|script|python|node|coder/i,
+  security: /hack|exploit|pentest|security|vuln|red|offsec/i,
+  chat: /chat|gpt|assistant|ai/i,
+  power: /reason|think|smart|gemini|deep/i,
+  research: /research|search|know|wiki|scholar/i,
+  deep: /reason|think|smart|gemini|deep|logic|r1|ultra/i,
+  image: /image|img|draw|flux|paint|art|picture|photo/i,
+  fast: /fast|flash|quick|mini/i,
+  scrape: /scrape|crawl|fetch|spider/i,
+};
+
+function _miniforgeBotMatches(type) {
+  const re = _MINIFORGE_BOT_RE[type];
+  if (!re || _miniforgeBots.length === 0) return [];
+  return _miniforgeBots.filter((b) => re.test(b));
+}
+
+async function refreshMiniforgeBots() {
+  try {
+    const body = await new Promise((resolve, reject) => {
+      const req = http.get('http://127.0.0.1:5555/api/apps?limit=2000', { timeout: 20000 }, (r) => {
+        let buf = '';
+        r.on('data', (c) => { buf += c; });
+        r.on('end', () => resolve(buf));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+    const data = JSON.parse(body);
+    const raw = Array.isArray(data) ? data : (data.apps || data.data || data.bots || []);
+    const slugs = raw.map((b) => (typeof b === 'string' ? b : (b.slug || b.name || b.id || ''))).filter(Boolean);
+    if (slugs.length > 0) {
+      _miniforgeBots = slugs;
+      console.log(`[smart-router] miniforge bot pool: ${slugs.length} bots cached`);
+    }
+  } catch (e) {
+    console.log(`[smart-router] miniforge pool refresh failed: ${e && e.message ? e.message : e}`);
+  }
+}
+
 /**
  * Build a backend object for a given tier + task type.
  * Returns null if tier is not healthy.
@@ -394,6 +452,7 @@ function _buildBackend(tierKey, type) {
         security: ['groq', 'sambanova', 'cerebras'],
         research: ['sambanova', 'cerebras', 'groq'],
         fast: ['cerebras', 'groq'],
+        deep: ['sambanova', 'cerebras', 'groq'],
         image: ['pollinations'],
       };
       const providers = providersByType[type] || providersByType.code;
@@ -405,11 +464,14 @@ function _buildBackend(tierKey, type) {
       };
     }
     case 'T2_MINIFORGE': {
+      // Curated bots first, then rotate the full bot pool (10k+ bots) for sustainability
       const botMap = {
         code: 'RobloxScriptHelper', security: 'ai-unrestricted', chat: 'chatgpt',
-        power: 'gemini-experimental-2-5', research: 'gemini-experimental-2-5', image: 'flux-schnell-image-generator',
+        power: 'gemini-experimental-2-5', research: 'gemini-experimental-2-5',
+        image: 'flux-schnell-image-generator', deep: 'gemini-experimental-2-5',
       };
-      const bot = botMap[type] || 'ai-unrestricted';
+      const candidates = [botMap[type]].filter(Boolean).concat(_miniforgeBotMatches(type));
+      const bot = candidates.length > 0 ? candidates[_rrCounter % candidates.length] : 'ai-unrestricted';
       return {
         tier: 'T2_MINIFORGE', name: TIERS.T2_MINIFORGE.name,
         url: `http://localhost:5555/api/apps/${bot}/chat`,
@@ -420,6 +482,7 @@ function _buildBackend(tierKey, type) {
       const modelMap = {
         code: 'hp-1000:latest', power: 'glm-5.1:cloud',
         chat: 'hp-1000:latest', security: 'hp-1000:latest', research: 'glm-5.1:cloud',
+        deep: 'glm-5.1:cloud',
       };
       const model = modelMap[type] || 'hp-1000:latest';
       return {
@@ -445,7 +508,8 @@ function _buildBackend(tierKey, type) {
       return {
         tier: 'T6_KAGGLE', name: TIERS.T6_KAGGLE.name,
         url: process.env.KAGGLE_TUNNEL.replace(/\/$/, '') + '/api/chat',
-        model: TIERS.T6_KAGGLE.models.heavy, displayModel: TIERS.T6_KAGGLE.models.heavy, cost: 0,
+        model: type === 'deep' ? TIERS.T6_KAGGLE.models.reasoning : TIERS.T6_KAGGLE.models.heavy,
+        displayModel: TIERS.T6_KAGGLE.models[type === 'deep' ? 'reasoning' : 'heavy'], cost: 0,
       };
     case 'T7_LOCAL': {
       const model = TIERS.T7_LOCAL.models[type] || TIERS.T7_LOCAL.models.chat;
@@ -719,6 +783,9 @@ function init() {
   // Health checks every 30s
   checkHealth();
   setInterval(checkHealth, 30000);
+  // Miniforge bot pool — first refresh after boot settles (MCP probes congest early loop), then every 10 min
+  setTimeout(refreshMiniforgeBots, 60 * 1000);
+  setInterval(refreshMiniforgeBots, 10 * 60 * 1000);
 
   // Load durable jobs
   const stored = loadSchedule();
