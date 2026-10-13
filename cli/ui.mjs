@@ -12,6 +12,7 @@ import { Box as Box16, Text as Text17, useInput as useInput5, useApp, useStdout 
 import { EventEmitter } from "events";
 var SERVER_URL = process.env.HAKSTER_URL || "ws://localhost:3579/ws";
 var API_URL = process.env.HAKSTER_API_URL || "http://localhost:3579";
+var API_AUTH_HEADERS = process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {};
 var MODEL_CONTEXT = {
   "glm-5.2:cloud": 128e3,
   "thudm/glm-5.2:cloud": 128e3,
@@ -303,7 +304,7 @@ var HaksterAgent = class extends EventEmitter {
     try {
       const res = await fetch(`${API_URL}/api/agent/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...API_AUTH_HEADERS },
         body: JSON.stringify({
           messages: this._messages.slice(-20),
           model: this.model,
@@ -387,7 +388,7 @@ var HaksterAgent = class extends EventEmitter {
   }
   async listSessions() {
     try {
-      const res = await fetch(`${API_URL}/api/sessions`);
+      const res = await fetch(`${API_URL}/api/sessions`, { headers: { ...API_AUTH_HEADERS } });
       if (res.ok) {
         const data = await res.json();
         if (this._sessionsCb) this._sessionsCb(data.sessions || data || []);
@@ -402,7 +403,7 @@ var HaksterAgent = class extends EventEmitter {
     try {
       await fetch(`${API_URL}/api/agent/confirm`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...API_AUTH_HEADERS },
         body: JSON.stringify({
           sessionId: this.sessionId || "",
           toolCallId,

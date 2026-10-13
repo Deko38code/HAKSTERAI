@@ -800,7 +800,7 @@ async function cliExecuteTool(name, args, trustCfg) {
           ? { action: 'search', query: args.query || args.q || '' }
           : { action: 'scrape', url: args.url || '' });
         const raw = await new Promise(resolve => {
-          const req = http.request({ hostname: '127.0.0.1', port: 3579, path: '/api/agent/firecrawl', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, res => {
+          const req = http.request({ hostname: '127.0.0.1', port: 3579, path: '/api/agent/firecrawl', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) } }, res => {
             let d = ''; res.on('data', c => d += c); res.on('end', () => resolve({ status: res.statusCode, body: d }));
           });
           req.on('error', e => resolve({ status: 0, body: JSON.stringify({ ok: false, error: e.message }) }));
@@ -820,7 +820,7 @@ async function cliExecuteTool(name, args, trustCfg) {
         const http = require('http');
         const data = JSON.stringify({ category: args.category || 'general', key: args.key, value: args.value });
         const result = await new Promise(resolve => {
-          const req = http.request({ hostname: '127.0.0.1', port: 3579, path: '/api/agent/memory', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }, res => {
+          const req = http.request({ hostname: '127.0.0.1', port: 3579, path: '/api/agent/memory', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) } }, res => {
             let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
           });
           req.on('error', () => resolve('{"ok":false}')); req.write(data); req.end();
@@ -832,7 +832,7 @@ async function cliExecuteTool(name, args, trustCfg) {
         const http = require('http');
         const q = encodeURIComponent(args.query || '');
         const raw = await new Promise(resolve => {
-          const req = http.request({ hostname: '127.0.0.1', port: 3579, path: `/api/agent/memory?q=${q}`, method: 'GET' }, res => {
+          const req = http.request({ hostname: '127.0.0.1', port: 3579, path: `/api/agent/memory?q=${q}`, method: 'GET', headers: { ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) } }, res => {
             let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
           });
           req.on('error', () => resolve('[]')); req.end();
@@ -1050,7 +1050,7 @@ async function cliExecuteTool(name, args, trustCfg) {
         const url = args.name ? `/api/agent-skills?name=${encodeURIComponent(args.name)}` : '/api/agent-skills';
         const serverUrl = new URL(process.env.HAKSTER_SERVER || process.env.HAKSTER_API || 'http://127.0.0.1:3579');
         const raw = await new Promise(resolve => {
-          const req = http.request({ hostname: serverUrl.hostname, port: serverUrl.port || 80, path: url, method: 'GET' }, res => {
+          const req = http.request({ hostname: serverUrl.hostname, port: serverUrl.port || 80, path: url, method: 'GET', headers: { ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) } }, res => {
             let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
           });
           req.on('error', () => resolve('{}')); req.end();

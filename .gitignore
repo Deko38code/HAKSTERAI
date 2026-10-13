@@ -23,6 +23,9 @@ server/data/
 # Hakster runtime
 .hakster/
 
+# Trigger.dev
+.trigger/
+
 # OS files
 .DS_Store
 Thumbs.db

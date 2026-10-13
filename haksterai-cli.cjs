@@ -26,6 +26,10 @@ const _cfgDefaults = (() => {
   try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; }
 })();
 const API_BASE = (process.env.HAKSTER_HOST || _cfgDefaults.server || 'http://localhost:3579').replace(/\/$/, '');
+// Service key for the platform-wide /api auth sweep (2026-10-08). Sent only
+// when set, so behaviour is unchanged when the key is absent.
+const API_KEY = process.env.HAKSTER_API_KEY || '';
+const authHeaders = () => (API_KEY ? { 'x-api-key': API_KEY } : {});
 const DEFAULT_PROVIDER = process.env.HAKSTER_PROVIDER || process.env.DEFAULT_PROVIDER || _cfgDefaults.provider || 'nous';
 const DEFAULT_MODEL = process.env.HAKSTER_MODEL || _cfgDefaults.model || '';
 const MAX_LOG_LINES = parseInt(process.env.MAX_LOG_LINES || '500', 10); // Grid tuning max log lines
@@ -55,7 +59,7 @@ let pendingConfirm = null; // { toolCallId, command, reason, isSudo, passwordMod
 function httpGet(url) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
-    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'GET', timeout: 5000 };
+    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'GET', headers: { ...authHeaders() }, timeout: 5000 };
     const req = http.request(opts, res => {
       let body = '';
       res.on('data', d => body += d);
@@ -71,7 +75,7 @@ function httpPost(url, body) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const data = JSON.stringify(body || {});
-    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }, timeout: 8000 };
+    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...authHeaders() }, timeout: 8000 };
     const req = http.request(opts, res => {
       let b = '';
       res.on('data', d => b += d);
@@ -287,7 +291,7 @@ function streamAgent(prompt) {
   return new Promise((resolve, reject) => {
     const u = new URL(`${API_BASE}/api/agent/run`);
     const body = JSON.stringify({ provider, model, sessionId, messages: [...messages, { role: 'user', content: prompt }] });
-    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 300000 };
+    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...authHeaders() }, timeout: 300000 };
     let buffer = '';
     let fullContent = '';
     let meta = {};

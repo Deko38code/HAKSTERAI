@@ -16,6 +16,7 @@ const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { diffLines } = require('diff');
 const { getDb } = require('./db');
+const { mountAds } = require('./ads');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -637,6 +638,27 @@ app.use((req, res, next) => {
   if (req.path === '/api/stripe/webhook') return next();
   return express.json()(req, res, next);
 });
+// ── Platform-wide API auth sweep (2026-10-08 security hardening) ──
+// All /api/* routes require an API key (x-api-key header or Authorization
+// Bearer via getUserByApiKey) unless explicitly public below.
+// Override the public lists via env without code changes:
+//   PUBLIC_API_PREFIXES=/api/auth/,/api/rmt/,/api/stripe/webhook
+//   PUBLIC_API_EXACT=/api/health
+const SWEEP_PUBLIC_PREFIXES = (process.env.PUBLIC_API_PREFIXES || '/api/auth/,/api/rmt/,/api/stripe/webhook')
+  .split(',').map(s => s.trim()).filter(Boolean);
+const SWEEP_PUBLIC_EXACT = (process.env.PUBLIC_API_EXACT || '/api/health')
+  .split(',').map(s => s.trim()).filter(Boolean);
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (req.method === 'OPTIONS') return next();
+  if (SWEEP_PUBLIC_EXACT.includes(req.path)) return next();
+  if (SWEEP_PUBLIC_PREFIXES.some(pre => req.path.startsWith(pre))) return next();
+  const _sweepUser = getUserByApiKey(req);
+  if (!_sweepUser) return res.status(401).json({ error: 'API key required (x-api-key header or Authorization Bearer)' });
+  req.apiUser = _sweepUser;
+  next();
+});
+
 const tuiState = {
   messages: [],
   thinking: '',
@@ -706,6 +728,73 @@ function planFromPriceId(priceId) {
   return null;
 }
 
+// ── RMT payments — Rent My Trailer membership billed through this platform's
+//    live Stripe account ("payments work through haksterai id"). ──
+app.post('/api/rmt/checkout', express.json(), async (req, res) => {
+  const secret = process.env.RMT_PAY_SECRET || '';
+  if (!secret || req.headers['x-rmt-secret'] !== secret) return res.status(403).json({ error: 'forbidden' });
+  const { email, rmt_user_id, success_url, cancel_url } = req.body || {};
+  if (!rmt_user_id || !email) return res.status(400).json({ error: 'email and rmt_user_id required' });
+  const stripe = getStripe();
+  if (!stripe) return res.status(503).json({ error: 'stripe not configured on haksterai' });
+  try {
+    const base = process.env.PUBLIC_URL || 'https://haksterai.com';
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      customer_email: email,
+      client_reference_id: 'rmt_user_' + rmt_user_id,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'usd', unit_amount: 3900,
+          product_data: { name: 'Rent My Trailer — Premium' },
+          recurring: { interval: 'month' },
+        },
+      }],
+      subscription_data: { metadata: { rmt_user_id: String(rmt_user_id), rmt_email: email, product: 'rmt-membership' } },
+      metadata: { rmt_user_id: String(rmt_user_id), rmt_email: email, product: 'rmt-membership' },
+      success_url: success_url || base + '/rmt-ok',
+      cancel_url: cancel_url || base + '/rmt-cancel',
+    });
+    res.json({ url: session.url, session_id: session.id });
+  } catch (err) {
+    console.error('[rmt-pay] checkout failed:', err.message);
+    res.status(500).json({ error: 'checkout failed', detail: err.message });
+  }
+});
+
+app.post('/api/rmt/booking-checkout', express.json(), async (req, res) => {
+  const secret = process.env.RMT_PAY_SECRET || '';
+  if (!secret || req.headers['x-rmt-secret'] !== secret) return res.status(403).json({ error: 'forbidden' });
+  const { email, rmt_user_id, booking_code, amount_cents, success_url, cancel_url } = req.body || {};
+  if (!rmt_user_id || !email || !booking_code || !amount_cents) return res.status(400).json({ error: 'email, rmt_user_id, booking_code, amount_cents required' });
+  const stripe = getStripe();
+  if (!stripe) return res.status(503).json({ error: 'stripe not configured on haksterai' });
+  try {
+    const base = process.env.PUBLIC_URL || 'https://haksterai.com';
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer_email: email,
+      client_reference_id: 'rmt_booking_' + booking_code,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'usd',
+          unit_amount: Math.round(Number(amount_cents)),
+          product_data: { name: `RMT Booking ${booking_code}` },
+        },
+      }],
+      metadata: { rmt_user_id: String(rmt_user_id), rmt_email: email, product: 'rmt-booking', booking_code },
+      success_url: success_url || base + '/rmt-ok',
+      cancel_url: cancel_url || base + '/rmt-cancel',
+    });
+    res.json({ url: session.url, session_id: session.id });
+  } catch (err) {
+    console.error('[rmt-pay] booking checkout failed:', err.message);
+    res.status(500).json({ error: 'checkout failed', detail: err.message });
+  }
+});
+
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
@@ -723,6 +812,13 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
     // Dev mode — no signature verification
     try { event = JSON.parse(req.body.toString()); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
   }
+  // Forward raw Stripe event to Klaviyo (fire-and-forget)
+  const klaviyoUrl = process.env.KLAVIYO_STRIPE_WEBHOOK_URL;
+  if (klaviyoUrl) {
+    fetch(klaviyoUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: req.body, signal: AbortSignal.timeout(5000) })
+      .then(() => console.log('[stripe-webhook] forwarded to Klaviyo:', event.type))
+      .catch((e) => console.error('[stripe-webhook] Klaviyo forward failed:', e.message));
+  }
 
   const db = getDb();
   (async () => {
@@ -731,6 +827,45 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
         case 'checkout.session.completed': {
           const session = event.data.object;
           const customerId = session.customer;
+          // Relay RMT booking payments back to Rent My Trailer
+          if (session.metadata?.product === 'rmt-booking' && session.metadata?.booking_code) {
+            try {
+              const bookingRelayUrl = (process.env.RMT_PAY_RELAY_URL || 'http://127.0.0.1:8112/api/stripe/relay').replace('/api/stripe/relay', '/api/bookings/pay/relay');
+              const relay = await fetch(bookingRelayUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-rmt-secret': process.env.RMT_PAY_SECRET || '' },
+                body: JSON.stringify({
+                  booking_code: session.metadata.booking_code,
+                  rmt_user_id: session.metadata.rmt_user_id,
+                  payment_intent: session.payment_intent || '',
+                  session_id: session.id,
+                }),
+              });
+              if (relay.ok) console.log('[stripe-webhook] RMT booking payment relayed for', session.metadata.booking_code);
+              else console.error('[stripe-webhook] RMT booking relay rejected:', relay.status);
+            } catch (e) { console.error('[stripe-webhook] RMT booking relay failed:', e.message); }
+          }
+          // Relay RMT membership payments back to Rent My Trailer (payments via haksterai id)
+          if (session.metadata?.rmt_user_id && session.metadata?.product !== 'rmt-booking') {
+            try {
+              const rmtUrl = process.env.RMT_PAY_RELAY_URL || 'http://127.0.0.1:8112/api/stripe/relay';
+              const relay = await fetch(rmtUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-rmt-secret': process.env.RMT_PAY_SECRET || '' },
+                body: JSON.stringify({
+                  rmt_user_id: session.metadata.rmt_user_id,
+                  rmt_email: session.metadata.rmt_email,
+                  stripe_customer: customerId,
+                  subscription_id: session.subscription || '',
+                  session_id: session.id,
+                }),
+              });
+              if (relay.ok) console.log('[stripe-webhook] RMT membership relayed for user', session.metadata.rmt_user_id);
+              else console.error('[stripe-webhook] RMT relay rejected:', relay.status, (await relay.text()).slice(0, 120));
+            } catch (relayErr) {
+              console.error('[stripe-webhook] RMT relay failed:', relayErr.message);
+            }
+          }
           const subId = session.subscription;
           const userId = session.metadata?.userId;
           if (userId) {
@@ -816,6 +951,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
 
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '50mb' }));
+// Local ad service for the TUI (house inventory; see src/ads.js).
+// Mounted AFTER the body parsers above so req.body is populated on the
+// auction route — a route registered before express.json() never sees a body.
+mountAds(app);
 app.use((err, req, res, next) => {
   if (err?.type === 'entity.too.large' || err?.status === 413) {
     return res.status(413).json({
@@ -958,17 +1097,40 @@ async function openAICompatStreamFetch(baseURL, payload, signal) {
     const decoder = new TextDecoder();
     let buffer = '';
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const data = trimmed.slice(5).trim();
-        if (!data || data === '[DONE]') continue;
-        try { yield JSON.parse(data); } catch {}
+      // Upstream relays (ollama cloud etc.) fail two ways: the reader dies mid-stream,
+      // or they send an SSE error frame like {"error":"upstream returned no context"}
+      // with no choices. Handle both here and yield a fail-marker so callers can rotate
+      // providers / show a clean error instead of silently dropping the failure (which
+      // produced empty replies) or leaking raw relay noise to the UI.
+      try {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed && typeof parsed === 'object' && parsed.error && !parsed.choices) {
+              const _msg = typeof parsed.error === 'string'
+                ? parsed.error
+                : (parsed.error.message || JSON.stringify(parsed.error).slice(0, 300));
+              yield { __hakster_stream_fail: _msg };
+            } else {
+              yield parsed;
+            }
+          } catch {}
+        }
+      } catch (readErr) {
+        // User cancel / timeout abort → preserve existing AbortError handling upstream
+        if (signal && signal.aborted) throw readErr;
+        if (readErr && (readErr.name === 'AbortError' || /abort/i.test(String(readErr.message || '')))) throw readErr;
+        yield { __hakster_stream_fail: String((readErr && readErr.message) || readErr || 'stream read failed') };
+        return;
       }
     }
   }
@@ -2595,6 +2757,8 @@ app.delete('/api/agent/allowlist/:id', (req, res) => {
 });
 
 app.post('/api/agent/run', async (req, res) => {
+  const _agentUser = getUserByApiKey(req);
+  if (!_agentUser) return res.status(401).json({ error: 'API key required (x-api-key header or Authorization Bearer)' });
   const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false, maxTurns: requestedMaxTurns } = req.body;
   const savedAgent = getHaksterModelConfig();
   const requestedProvider = req.body.provider || savedAgent.provider || null;
@@ -2614,7 +2778,7 @@ app.post('/api/agent/run', async (req, res) => {
   if (fastMode && (!req.body.model || req.body.model === 'gpt-oss:120b-cloud') && savedAgent.model) {
     model = savedAgent.model;
   }
-  const thinking = fastMode ? thinkingParam === true : thinkingParam !== false;
+  const thinking = thinkingParam === true;
   const effectiveApprovalMode = approvalMode || (fastMode ? 'full-auto' : undefined);
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
@@ -2654,12 +2818,12 @@ app.post('/api/agent/run', async (req, res) => {
   if (usingIsolatedWorkDir) {
     fs.mkdirSync(workDir, { recursive: true });
   }
-  const configuredMaxTurns = parseInt(requestedMaxTurns || process.env.HAKSTER_AGENT_MAX_TURNS || (lowToken ? '12' : fastMode ? '18' : '80'), 10) || (lowToken ? 12 : fastMode ? 18 : 80);
+  const configuredMaxTurns = parseInt(requestedMaxTurns || process.env.HAKSTER_AGENT_MAX_TURNS || (lowToken ? '12' : fastMode ? '18' : '24'), 10) || (lowToken ? 12 : fastMode ? 18 : 24);
   const maxTurns = lowToken
     ? Math.min(Math.max(6, configuredMaxTurns), 16)
     : fastMode
     ? Math.min(Math.max(8, configuredMaxTurns), 24)
-    : Math.max(25, configuredMaxTurns);
+    : Math.max(8, Math.min(configuredMaxTurns, 32));
   let agentModel = model || cfg.defaultModel;
   let client = null;
   let isAnthropicAgentProvider = false;
@@ -3624,8 +3788,13 @@ ${dirListing}
       const toolCalls = []; // { id, name, arguments (accumulated) }
       let currentToolCall = null;
       let thinkingActive = false;
+      let _streamFailMsg = '';  // surfaced by openAICompatStreamFetch on upstream relay failure
 
       for await (const chunk of stream) {
+        if (chunk && chunk.__hakster_stream_fail) {
+          _streamFailMsg = String(chunk.__hakster_stream_fail);
+          break;
+        }
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
 
@@ -3678,6 +3847,36 @@ ${dirListing}
         }
       }
 
+      // ── Mid-stream upstream relay failure ("upstream returned no context", dropped
+      //    connections, SSE error frames, …): rotate to the next waterfall provider for
+      //    a clean retry instead of surfacing relay noise or ending with an empty reply. ──
+      if (_streamFailMsg) {
+        const _em2 = _streamFailMsg.toLowerCase();
+        const _bypassable2 = /429|rate.?limit|too many requests|quota|insufficient|balance|credit|exceeded|50[0-9]|service unavailable|internal server error|bad gateway|gateway timeout|upstream|econnreset|socket hang up|no context|context unavailable|empty response|terminated|fetch failed|network/.test(_em2);
+        const _hadOutput = assistantContent.trim().length > 0 || toolCalls.length > 0;
+        if (_bypassable2 && !_hadOutput) {
+          let _next = null;
+          for (const _n of [provider, ...WATERFALL_ORDER]) {
+            if (_waterfallTried.has(_n) || isProviderRateLimited(_n)) continue;
+            if (!PROVIDERS[_n]) continue;
+            _next = _n; break;
+          }
+          if (_next) {
+            _waterfallTried.add(_next);
+            markProviderRateLimited(provider, 120000);
+            res.write(`data: ${JSON.stringify({ type: 'provider_rotate', from: provider, to: _next, reason: 'mid-stream upstream failure' })}\n\n`);
+            provider = _next;
+            if (buildAgentClient()) { turn--; continue; }
+          }
+        }
+        // Not retryable or nothing left to try — clean error instead of raw relay text
+        res.write(`data: ${JSON.stringify({ type: 'error', error: `Upstream provider stream failed (${_streamFailMsg.slice(0, 120)})` })}\n\n`);
+        clearInterval(heartbeat);
+        recordThisAgentUsage();
+        res.end();
+        return;
+      }
+
       // Stream finished successfully
       clearTimeout(streamTimeout);
 
@@ -3721,14 +3920,26 @@ ${dirListing}
         }
 
         // ── Full-auto nudge: if model replies with text only, push it to act ──
-        // Extended: nudge on ANY turn where the model talks but doesn't act (not just first 3).
-        // This fixes "let me finish sorry" loops where hp-1000 apologizes instead of using tools.
-        if (effectiveApprovalMode === 'full-auto' && toolCalls.length === 0 && assistantContent.trim().length > 0 && turn < maxTurns - 2) {
+        // Only nudge when the answer looks like an UNACTIONED PROMISE ("let me…",
+        // "I'll run…", "sorry, need to…") — i.e. talk with no action and no tools
+        // yet. A genuine final answer (greeting, summary after tools, plain chat
+        // reply in the website panel) must stream through as `done` untouched:
+        // nudging every text-only turn made the chat panel burn turns on pointless
+        // tool calls (list_dir etc.) after the user's question was already answered.
+        const PROMISE_RE = /\b(let me|i'?m going to|i will(?!\s+(not|never|refuse|decline))|i'?ll(?!\s+(not|never|consider|skip|pass|refuse|decline|think))|about to|working on|hold on|one moment|give me a (sec|second|minute)|need to (run|check|create|write|read|look|scan|test|install|fix|start))\b/i;
+        if (
+          effectiveApprovalMode === 'full-auto' &&
+          toolCalls.length === 0 &&
+          assistantContent.trim().length > 0 &&
+          turn < maxTurns - 2 &&
+          loopDetect.totalToolCalls === 0 &&   // tools already ran → text is the final summary, accept it
+          PROMISE_RE.test(assistantContent)
+        ) {
           // Count how many times we've nudged already to avoid infinite apologizing
           const nudgeCount = agentMessages.filter(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('You responded with text only')).length;
-          if (nudgeCount < 5) {
+          if (nudgeCount < 2) {
             agentMessages.push({ role: 'user', content: 'You responded with text only and did not use any tools. Stop apologizing and DO the work now. Call list_dir, read_file, exec_shell, write_file, or whatever tool is appropriate. Do not explain — execute. The task is NOT done until you have used tools to complete it.' });
-            res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\\n\\n`);
+            res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\n\n`);
             continue;
           }
         }
@@ -4824,6 +5035,12 @@ app.post('/api/generate', async (req, res) => {
       let thinkingActive = false;
 
       for await (const chunk of stream) {
+        if (chunk && chunk.__hakster_stream_fail) {
+          clearTimeout(streamTimeout);
+          res.write(`data: ${JSON.stringify({ type: 'error', error: `Upstream provider stream failed (${String(chunk.__hakster_stream_fail).slice(0, 120)})` })}\n\n`);
+          res.end();
+          return;
+        }
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
 
@@ -5624,6 +5841,7 @@ function ensureCrushModelRegistered(cfg, provider, model) {
     if (!prov.type) prov.type = 'openai';
     if (!prov.api_key && process.env.NOUS_API_KEY) prov.api_key = process.env.NOUS_API_KEY;
   }
+  if (provider === 'ollama' && !prov.base_url) prov.base_url = process.env.CRUSH_OLLAMA_BASE_URL || 'http://10.0.0.251:11434';
   prov.models = Array.isArray(prov.models) ? prov.models : [];
   if (prov.models.some(m => m && m.id === model)) return cfg;
   // Copy a sibling entry's shape so cost/window fields are sane;
@@ -7232,6 +7450,15 @@ ptyWss.on('connection', (ws, req) => {
     } catch (e) { console.log('[pty] MCP top config sync error:', e.message); }
     fs.writeFileSync(crushTopConfigPath, JSON.stringify(crushTop, null, 2));
 
+    // Force the active model to the user's selected provider/model — overrides any
+    // stale selection stuck in recent_models (e.g. gpt-5.6-sol/openai that pops the
+    // charm-cloud auth wall instead of using the dell/parrot ollama brain).
+    const activeModel = { model: hakCfg.model || 'glm-5.2:cloud', provider: hakCfg.provider || 'ollama' };
+    const recentModel = [activeModel];
+    crushCfg.recent_models = { large: recentModel, small: recentModel };
+    crushConf.recent_models = { large: recentModel, small: recentModel };
+    crushTop.recent_models = { large: recentModel, small: recentModel };
+
     // Write CRUSH.md context file so crush knows who the user is and what machine they're on
     try {
       const crushMdPath = path.join(workDir, 'CRUSH.md');
@@ -7454,7 +7681,7 @@ initWebMcp();
 function startServer(delay = 2000) {
  const MAX_DELAY = 30000; // cap at 30s between retries
 
-  server.listen(PORT, () => {
+  server.listen(PORT, process.env.BIND_HOST || '127.0.0.1', () => {
     console.log(`\n  ╔══════════════════════════════════════════╗`);
     console.log(`  ║  haksterAi server v1.0                   ║`);
     console.log(`  ║  http://localhost:${String(PORT).padEnd(5)}                ║`);

@@ -287,7 +287,7 @@ function httpPost(url, body) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const data = JSON.stringify(body || {});
-    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }, timeout: 3000 };
+    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) }, timeout: 3000 };
     const req = http.request(opts, res => {
       let b = ''; res.on('data', d => b += d); res.on('end', () => { try { resolve(JSON.parse(b)); } catch { resolve({}); } });
     });
@@ -301,7 +301,7 @@ function httpPost(url, body) {
 function httpGet(url) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
-    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'GET', timeout: 5000 };
+    const opts = { hostname: u.hostname, port: u.port, path: u.pathname, method: 'GET', headers: { ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) }, timeout: 5000 };
     const req = http.request(opts, res => {
       let body = '';
       res.on('data', d => body += d);

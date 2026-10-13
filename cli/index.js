@@ -162,10 +162,30 @@ const DEFAULT_AI_PROVIDER = process.env.HAKSTER_PROVIDER || process.env.DEFAULT_
 const DEFAULT_MODEL = process.env.HAKSTER_MODEL || _cfgDefaults.model || 'gpt-oss:120b-cloud';
 
 // ── HTTP helper (preserved with timeoutMs support) ───────────────────────
+// The server's 2026-10-08 platform-wide auth sweep 401s every /api/* request
+// that carries no API key, so attach the service key (HAKSTER_API_KEY) to
+// haksterAi's own /api/* calls. Other local services — Ollama :11434,
+// Phantom :4000, claude-proxy :8082, miniforge :5555 — must never receive it.
+const _NON_HAKSTER_PORTS = new Set(['11434', '4000', '8082', '5555']);
+function _isHaksterApi(url) {
+  if (!process.env.HAKSTER_API_KEY) return false;
+  try {
+    const u = new URL(url);
+    if (!u.pathname.startsWith('/api/')) return false;
+    if (_NON_HAKSTER_PORTS.has(u.port)) return false;
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.port === '3579';
+  } catch {
+    return false;
+  }
+}
+
 function fetchUrl(url, { method = 'GET', headers = {}, body = null, timeoutMs = 0 } = {}) {
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('https') ? https : http;
-    const req = lib.request(url, { method, headers }, (res) => {
+    const reqHeaders = _isHaksterApi(url) && !headers['x-api-key']
+      ? { ...headers, 'x-api-key': process.env.HAKSTER_API_KEY }
+      : headers;
+    const req = lib.request(url, { method, headers: reqHeaders }, (res) => {
       if (res.statusCode >= 400) {
         let errBody = '';
         res.on('data', (d) => (errBody += d));
@@ -2371,6 +2391,55 @@ program
       try { mod.start(); }
       catch (err) { restoreTerminal(); console.error(err); process.exit(1); }
     }).catch(err => { restoreTerminal(); console.error(err); process.exit(1); });
+  });
+
+// ── tui mode — the OpenTUI dashboard TUI (ui-fb.mjs) ─────────────────────
+// The TUI uses @opentui/core, which loads a native Zig binary via Bun's FFI.
+// When the CLI is running under Node, we re-exec the TUI under Bun so the
+// native engine can load. When already under Bun, the bundle is imported
+// directly. The CliRenderer owns all terminal setup (raw mode, alternate
+// screen, cursor, restore), so the manual terminal handling from the old
+// Ink-based `ui` command is not replicated here.
+program
+  .command('tui')
+  .description('Launch the dashboard TUI: live grid panels, ad rail, model picker')
+  .action(() => {
+    if (!process.stdin.isTTY) {
+      console.log(`${C.red}✗ TUI requires a real terminal (TTY).${C.reset}`);
+      console.log(`${C.dim}Run it directly in your terminal, not through a pipe.${C.reset}`);
+      process.exit(1);
+    }
+
+    const version = require('./package.json').version;
+
+    if (process.versions.bun) {
+      // Already under Bun — import the bundle directly.
+      import('./ui-fb.mjs').then(mod => {
+        try { mod.start({ version }); }
+        catch (err) { console.error(err); process.exit(1); }
+      }).catch(err => {
+        console.error(`${C.red}✗ Could not load ui-fb.mjs.${C.reset} Build it first: ${C.green}npm run build:ui${C.reset}`);
+        console.error(err && err.message ? err.message : err);
+        process.exit(1);
+      });
+      return;
+    }
+
+    // Running under Node — re-exec the TUI under Bun.
+    const { spawn } = require('child_process');
+    const path = require('path');
+    const entry = path.join(__dirname, 'tui-entry.mjs');
+    const child = spawn('bun', [entry], {
+      stdio: 'inherit',
+      env: { ...process.env, HAKSTER_TUI_VERSION: version },
+    });
+    child.on('exit', (code) => process.exit(code || 0));
+    child.on('error', (err) => {
+      console.error(`${C.red}✗ Bun is required for the TUI but could not be launched.${C.reset}`);
+      console.error(`${C.dim}Install Bun: ${C.green}curl -fsSL https://bun.sh/install | bash${C.reset}`);
+      console.error(err.message);
+      process.exit(1);
+    });
   });
 
 // ── sessions — grid box view of server sessions ──────────────────────────

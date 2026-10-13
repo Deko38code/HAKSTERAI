@@ -483,6 +483,25 @@ async function handleMessage(roleKey, msg) {
   const chatId = msg.chat.id;
   const bot = ROLES[roleKey].bot;
 
+  // ── rmt (rent-my-trailer) account verification — any bot carries the code ──
+  // Deep link https://t.me/…?start=rmt_<code> arrives as "/start rmt_<code>";
+  // rmt returns 200 for it and marks the account telegram-verified.
+  if (/^\/?start\s+|^rmt_/i.test(text) && /rmt_[a-f0-9]{8}/i.test(text)) {
+    const code = (text.match(/rmt_[a-f0-9]{8}/i) || [])[0];
+    try {
+      const r = await fetch(`http://127.0.0.1:${process.env.RMT_PORT || 8112}/api/tg/verify/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-rmt-secret": process.env.RMT_PAY_SECRET || "" },
+        body: JSON.stringify({ code, telegram_id: String(chatId), display_name: msg.from?.username ? "@" + msg.from.username : (msg.from?.first_name || "") }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok) return bot.sendMessage(chatId, "✅ Rent My Trailer: Telegram verified! Your account is linked to this Telegram.");
+      return bot.sendMessage(chatId, `❌ RMT verification failed: ${j.error || "HTTP " + r.status} — regenerate the link in Settings and try again.`);
+    } catch (e) {
+      return bot.sendMessage(chatId, `❌ RMT verification unreachable (rmt server down?): ${e.message}`);
+    }
+  }
+
   // ── Role 1: haksterAi command bot ──
   if (roleKey === 'TELEGRAM_BOT_TOKEN_1') {
     if (/^\/(?:subscribe|pay|plans)\b/i.test(text)) {
