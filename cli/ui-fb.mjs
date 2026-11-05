@@ -585,12 +585,12 @@ var require_catalog = __commonJS({
 });
 
 // src/index.jsx
-import React11 from "react";
+import React12 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React10, { useCallback as useCallback2, useEffect as useEffect4, useRef as useRef2, useState as useState4 } from "react";
+import React11, { useCallback as useCallback2, useEffect as useEffect5, useRef as useRef2, useState as useState5 } from "react";
 import { useKeyboard as useKeyboard3, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes8 } from "@opentui/core";
 
@@ -842,8 +842,9 @@ function Composer({
           focused && !disabled ? /* @__PURE__ */ jsx3(
             "input",
             {
+              style: { width: Math.max(1, inner - 2), flexGrow: 1, flexShrink: 1 },
               value,
-              placeholder: disabled ? "working\u2026" : placeholder,
+              placeholder,
               onInput: onChange,
               onSubmit: (text) => {
                 if (typeof onSubmit === "function") onSubmit(text);
@@ -922,14 +923,14 @@ function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, mar
   const { columns, columnWidth, columnGroups } = useGridLayout(items, availableWidth);
   if (items.length === 0) return null;
   const isMultiColumn = columns > 1;
-  return /* @__PURE__ */ jsxs4("box", { style: { flexDirection: "column", gap: isMultiColumn ? 1 : 0, width: "100%", marginTop }, children: [
+  return /* @__PURE__ */ jsxs4("box", { style: { flexDirection: "column", gap: isMultiColumn ? 1 : 0, width: availableWidth, marginTop }, children: [
     /* @__PURE__ */ jsx4(
       "box",
       {
         style: {
           flexDirection: "row",
           gap: isMultiColumn ? 1 : 0,
-          width: "100%",
+          width: availableWidth,
           alignItems: "flex-start"
         },
         children: columnGroups.map((columnItems, colIdx) => {
@@ -945,7 +946,7 @@ function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, mar
                 flexBasis: 0,
                 minWidth: MIN_COLUMN_WIDTH
               },
-              children: columnItems.map((item, idx) => /* @__PURE__ */ jsx4("box", { style: { width: "100%" }, children: renderItem(item, idx, columnWidth) }, getItemKey(item)))
+              children: columnItems.map((item, idx) => /* @__PURE__ */ jsx4("box", { style: { width: columnWidth }, children: renderItem(item, idx, columnWidth) }, getItemKey(item)))
             },
             columnKey
           );
@@ -962,13 +963,17 @@ import React5 from "react";
 import { TextAttributes as TextAttributes4 } from "@opentui/core";
 import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
 function GridPanel({ title, cols = 4, width, children, borderColor = "gray", hint }) {
-  const inner = Math.max(0, (width || 80) - 2);
+  const inner = Math.max(1, (width || 80) - 4);
+  const titleText = String(title || "");
+  const hintText = String(hint || "");
+  const hintWidth = Math.max(0, inner - titleText.length - 1);
+  const clippedHint = hintText.length <= hintWidth ? hintText : hintWidth > 1 ? `${hintText.slice(0, hintWidth - 1)}\u2026` : "";
   return /* @__PURE__ */ jsxs5("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor, paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsxs5("box", { style: { justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx5("text", { fg: "cyan", attributes: TextAttributes4.BOLD, children: title }),
-      hint ? /* @__PURE__ */ jsx5("text", { fg: "gray", children: hint }) : null
+    /* @__PURE__ */ jsxs5("box", { style: { width: inner, justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx5("text", { fg: "cyan", attributes: TextAttributes4.BOLD, children: titleText.slice(0, inner) }),
+      clippedHint ? /* @__PURE__ */ jsx5("text", { fg: "gray", children: clippedHint }) : null
     ] }),
-    /* @__PURE__ */ jsx5("box", { style: { flexWrap: "wrap" }, children })
+    /* @__PURE__ */ jsx5("box", { style: { width: inner, flexWrap: "wrap" }, children })
   ] });
 }
 function Cell({ label, value, w = 18, color = "white" }) {
@@ -976,7 +981,7 @@ function Cell({ label, value, w = 18, color = "white" }) {
     const t = String(s == null ? "\u2014" : s);
     return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
   };
-  return /* @__PURE__ */ jsxs5("box", { style: { width: w, flexDirection: "column", marginRight: 1 }, children: [
+  return /* @__PURE__ */ jsxs5("box", { style: { width: Math.max(1, w), flexDirection: "column", flexShrink: 0, marginRight: 1 }, children: [
     /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip2(label, w) }),
     /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: clip2(value, w) })
   ] });
@@ -1062,10 +1067,59 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint }
   ] });
 }
 
-// src/components/TodoPanel.jsx
-import React7 from "react";
-import { TextAttributes as TextAttributes6 } from "@opentui/core";
+// src/components/CrushStatus.jsx
+import React7, { useEffect as useEffect3, useState as useState3 } from "react";
 import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
+var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
+var GRADIENT = [51, 87, 117, 153, 117, 87];
+var PHASES = {
+  THINK: { color: "#58a6ff", emoji: "\u{1F9E0}", phrases: ["Thinking through the problem\u2026", "Reasoning carefully\u2026", "Analyzing the request\u2026", "Connecting concepts\u2026"] },
+  PLAN: { color: "#c084fc", emoji: "\u{1F4CB}", phrases: ["Formulating a plan\u2026", "Mapping out steps\u2026", "Structuring the approach\u2026"] },
+  ACT: { color: "#3fb950", emoji: "\u26A1", phrases: ["Executing command\u2026", "Running tool\u2026", "Taking action\u2026"] },
+  OBSERVE: { color: "#39c5cf", emoji: "\u{1F441}", phrases: ["Observing output\u2026", "Reading results\u2026", "Checking response\u2026"] },
+  REFLECT: { color: "#d29922", emoji: "\u{1FA9E}", phrases: ["Assessing the outcome\u2026", "Learning from this step\u2026"] },
+  CONSOLIDATE: { color: "#ffd700", emoji: "\u{1F4E6}", phrases: ["Consolidating findings\u2026", "Compiling the answer\u2026", "Putting it all together\u2026"] },
+  DEFAULT: { color: "#58a6ff", emoji: "\u25C7", phrases: ["Working on it\u2026", "Processing\u2026", "Hold tight\u2026"] }
+};
+function formatElapsed2(ms) {
+  const seconds = Math.max(0, Math.floor(Number(ms || 0) / 1e3));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
+}
+function CrushStatus({ width, phase, activity, elapsedMs }) {
+  const [frame, setFrame] = useState3(0);
+  useEffect3(() => {
+    const timer = setInterval(() => setFrame((value) => value + 1), 80);
+    return () => clearInterval(timer);
+  }, []);
+  const normalizedPhase = String(phase || "DEFAULT").toUpperCase();
+  const info = PHASES[normalizedPhase] || PHASES.DEFAULT;
+  const color = Number(elapsedMs || 0) < 5e3 ? "#3fb950" : Number(elapsedMs || 0) < 15e3 ? "#d29922" : "#f85149";
+  const grad = GRADIENT[frame % GRADIENT.length];
+  const gradColor = `rgb(${grad},${Math.floor(grad * 0.7)},${Math.floor(grad * 1.2)})`;
+  const phrase = activity || info.phrases[Math.floor(frame / 20) % info.phrases.length];
+  const shimmer = [0, 1, 2].map((offset) => SHIMMER[(frame + offset) % SHIMMER.length]).join("");
+  return /* @__PURE__ */ jsx7("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs7("text", { children: [
+    /* @__PURE__ */ jsx7("span", { fg: gradColor, children: "\u27E6" }),
+    /* @__PURE__ */ jsx7("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
+    /* @__PURE__ */ jsx7("span", { fg: gradColor, children: "\u27E7" }),
+    " ",
+    /* @__PURE__ */ jsx7("span", { children: info.emoji }),
+    " ",
+    /* @__PURE__ */ jsx7("span", { fg: info.color, children: normalizedPhase }),
+    " ",
+    /* @__PURE__ */ jsx7("span", { fg: "#a5b4c3", children: phrase }),
+    " ",
+    /* @__PURE__ */ jsx7("span", { fg: gradColor, children: shimmer }),
+    " ",
+    /* @__PURE__ */ jsx7("span", { fg: "gray", children: formatElapsed2(elapsedMs) })
+  ] }) });
+}
+
+// src/components/TodoPanel.jsx
+import React8 from "react";
+import { TextAttributes as TextAttributes6 } from "@opentui/core";
+import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 var GLYPH_DONE = "\u2713";
 var GLYPH_TODO = "\u25CB";
 var EMPTY_TEXT = "No todos yet \u2014 the agent's checklist appears here once it creates one.";
@@ -1083,39 +1137,39 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   const rows = [];
   if (list.length === 0) {
     rows.push(
-      /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip(EMPTY_TEXT, inner) }, "empty")
+      /* @__PURE__ */ jsx8("text", { fg: "gray", children: clip(EMPTY_TEXT, inner) }, "empty")
     );
   } else {
     visible.forEach((todo, i) => {
       const done = !!(todo && todo.done);
       const text = clip(todo && todo.text || "", Math.max(0, inner - 2));
       rows.push(
-        /* @__PURE__ */ jsxs7("box", { style: { width: "100%", flexDirection: "row" }, children: [
-          /* @__PURE__ */ jsx7("text", { fg: done ? "green" : "gray", attributes: done ? 0 : TextAttributes6.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
-          /* @__PURE__ */ jsx7("text", { fg: done ? "white" : "gray", children: ` ${text}` })
+        /* @__PURE__ */ jsxs8("box", { style: { width: "100%", flexDirection: "row" }, children: [
+          /* @__PURE__ */ jsx8("text", { fg: done ? "green" : "gray", attributes: done ? 0 : TextAttributes6.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
+          /* @__PURE__ */ jsx8("text", { fg: done ? "white" : "gray", children: ` ${text}` })
         ] }, `row-${i}`)
       );
     });
     if (overflow > 0) {
       rows.push(
-        /* @__PURE__ */ jsx7("text", { fg: "gray", children: `+${overflow} more` }, "more")
+        /* @__PURE__ */ jsx8("text", { fg: "gray", children: `+${overflow} more` }, "more")
       );
     }
   }
-  return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsx7("text", { fg: "cyan", attributes: TextAttributes6.BOLD, children: `Todos \u2014 ${completed}/${list.length} completed` }),
+  return /* @__PURE__ */ jsxs8("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsx8("text", { fg: "cyan", attributes: TextAttributes6.BOLD, children: `Todos \u2014 ${completed}/${list.length} completed` }),
     rows,
-    hint ? /* @__PURE__ */ jsx7("text", { fg: "gray", children: hint }) : null
+    hint ? /* @__PURE__ */ jsx8("text", { fg: "gray", children: hint }) : null
   ] });
 }
 
 // src/components/Transcript.jsx
-import React9 from "react";
+import React10 from "react";
 
 // src/components/MessageBlock.jsx
-import React8 from "react";
+import React9 from "react";
 import { TextAttributes as TextAttributes7 } from "@opentui/core";
-import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
   assistant: { border: "gray", label: "hakster" },
@@ -1127,16 +1181,16 @@ function ToolRow({ tool, width }) {
   const glyph = pending ? "\u2026" : "\u2713";
   const colour = pending ? "yellow" : "green";
   const args = tool.args && Object.keys(tool.args).length ? ` ${JSON.stringify(tool.args).slice(0, 60)}` : "";
-  return /* @__PURE__ */ jsxs8("box", { style: { flexDirection: "column", width }, children: [
-    /* @__PURE__ */ jsxs8("text", { children: [
-      /* @__PURE__ */ jsxs8("span", { fg: colour, children: [
+  return /* @__PURE__ */ jsxs9("box", { style: { flexDirection: "column", width }, children: [
+    /* @__PURE__ */ jsxs9("text", { children: [
+      /* @__PURE__ */ jsxs9("span", { fg: colour, children: [
         glyph,
         " "
       ] }),
-      /* @__PURE__ */ jsx8("span", { fg: "white", children: tool.name || "tool" }),
-      args ? /* @__PURE__ */ jsx8("span", { fg: "gray", children: args }) : null
+      /* @__PURE__ */ jsx9("span", { fg: "white", children: tool.name || "tool" }),
+      args ? /* @__PURE__ */ jsx9("span", { fg: "gray", children: args }) : null
     ] }),
-    tool.result != null ? /* @__PURE__ */ jsx8("text", { fg: "gray", children: `  ${String(tool.result).slice(0, 120)}` }) : null
+    tool.result != null ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: `  ${String(tool.result).slice(0, 120)}` }) : null
   ] });
 }
 function MessageBlock({ message, width }) {
@@ -1145,14 +1199,14 @@ function MessageBlock({ message, width }) {
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
   const inner = Math.max(8, (width || 80) - 4);
   if (message.role === "system") {
-    return /* @__PURE__ */ jsx8("box", { style: { width, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx8("text", { fg: border, children: String(message.text || "") }) });
+    return /* @__PURE__ */ jsx9("box", { style: { width, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx9("text", { fg: border, children: String(message.text || "") }) });
   }
   const tools = Array.isArray(message.tools) ? message.tools : [];
-  return /* @__PURE__ */ jsxs8("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsx8("text", { fg: border, attributes: TextAttributes7.BOLD, children: roleStyle.label }),
-    message.thinking ? /* @__PURE__ */ jsx8("text", { fg: "gray", children: String(message.thinking) }) : null,
-    message.text ? /* @__PURE__ */ jsx8("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx8("text", { fg: "gray", children: "thinking\u2026" }) : null,
-    tools.map((tool, i) => /* @__PURE__ */ jsx8(ToolRow, { tool, width: inner }, `tool-${i}`))
+  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsx9("text", { fg: border, attributes: TextAttributes7.BOLD, children: roleStyle.label }),
+    message.thinking ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: String(message.thinking) }) : null,
+    message.text ? /* @__PURE__ */ jsx9("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: "thinking\u2026" }) : null,
+    tools.map((tool, i) => /* @__PURE__ */ jsx9(ToolRow, { tool, width: inner }, `tool-${i}`))
   ] });
 }
 
@@ -1196,23 +1250,23 @@ function fitTranscript(messages, width, budget) {
 }
 
 // src/components/Transcript.jsx
-import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
+import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 function Transcript({ messages = [], width, height, emptyHint }) {
   const list = Array.isArray(messages) ? messages : [];
   if (list.length === 0) {
-    return /* @__PURE__ */ jsx9("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx9("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
+    return /* @__PURE__ */ jsx10("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx10("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
   }
   const budget = Math.max(1, Number(height) || 20);
   const { visible, hidden, used } = fitTranscript(list, width, budget);
   const pad = Math.max(0, budget - used);
-  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "column", height: budget }, children: [
-    hidden > 0 ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"}` }) : null,
-    /* @__PURE__ */ jsx9("box", { style: { flexDirection: "column", marginTop: pad }, children: visible.map((message) => /* @__PURE__ */ jsx9("box", { style: { marginBottom: 1 }, children: /* @__PURE__ */ jsx9(MessageBlock, { message, width }) }, message.id)) })
+  return /* @__PURE__ */ jsxs10("box", { style: { width, flexDirection: "column", height: budget }, children: [
+    hidden > 0 ? /* @__PURE__ */ jsx10("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"}` }) : null,
+    /* @__PURE__ */ jsx10("box", { style: { flexDirection: "column", marginTop: pad }, children: visible.map((message) => /* @__PURE__ */ jsx10("box", { style: { marginBottom: 1 }, children: /* @__PURE__ */ jsx10(MessageBlock, { message, width }) }, message.id)) })
   ] });
 }
 
 // src/hooks/useAgentStream.js
-import { useCallback, useEffect as useEffect3, useRef, useState as useState3 } from "react";
+import { useCallback, useEffect as useEffect4, useRef, useState as useState4 } from "react";
 var DEFAULT_API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
 var seq = 0;
@@ -1233,12 +1287,12 @@ function useAgentStream({
   cwd,
   approvalMode
 } = {}) {
-  const [messages, setMessages] = useState3([]);
-  const [todos, setTodos] = useState3([]);
-  const [status, setStatus] = useState3("idle");
-  const [error, setError] = useState3(null);
-  const [elapsedMs, setElapsedMs] = useState3(0);
-  const [pendingConfirm, setPendingConfirm] = useState3(null);
+  const [messages, setMessages] = useState4([]);
+  const [todos, setTodos] = useState4([]);
+  const [status, setStatus] = useState4("idle");
+  const [error, setError] = useState4(null);
+  const [elapsedMs, setElapsedMs] = useState4(0);
+  const [pendingConfirm, setPendingConfirm] = useState4(null);
   const pendingConfirmRef = useRef(null);
   const setPending = useCallback((value) => {
     pendingConfirmRef.current = value;
@@ -1251,7 +1305,7 @@ function useAgentStream({
     statusRef.current = next;
     setStatus(next);
   }, []);
-  useEffect3(() => {
+  useEffect4(() => {
     const ticking = status === "thinking" || status === "streaming" || status === "approval";
     if (!ticking) return void 0;
     const id = setInterval(() => {
@@ -1393,10 +1447,29 @@ function useAgentStream({
                   id: evt.tool_call_id || nextId("tool"),
                   name,
                   args: evt.tool_args || {},
-                  result: null
+                  result: null,
+                  mcp: name.startsWith("mcp__")
                 }
               ]
             }));
+            break;
+          }
+          case "mcp_result": {
+            const result = String(evt.data == null ? "" : evt.data);
+            patch(assistantId, (m) => {
+              const tools = m.tools.slice();
+              let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
+              if (idx === -1) {
+                for (let i = tools.length - 1; i >= 0; i--) {
+                  if (tools[i].mcp && tools[i].result === null) {
+                    idx = i;
+                    break;
+                  }
+                }
+              }
+              if (idx !== -1) tools[idx] = { ...tools[idx], result, mcp: true };
+              return { ...m, tools };
+            });
             break;
           }
           case "tool_call_result":
@@ -1567,22 +1640,25 @@ var useAgentStream_default = useAgentStream;
 // src/App.jsx
 var import_catalog = __toESM(require_catalog());
 var import_ad_client2 = __toESM(require_ad_client());
-import { Fragment as Fragment2, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
+var MCP_OUTPUT_LINES = 4;
+var MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
 var SYSTEM = process.env.HAKSTER_TUI_SYSTEM || "You are haksterAi running inside a terminal dashboard. Answer briefly and use tools when they are needed.";
 function App({ version = "0.1.0" }) {
   const renderer2 = useRenderer();
   const { width: cols, height: rows } = useTerminalDimensions();
-  const [view, setView] = useState4("chat");
-  const [focus, setFocus] = useState4("composer");
-  const [adsOn, setAdsOn] = useState4(true);
-  const [dockExpanded, setDockExpanded] = useState4(false);
-  const [draft, setDraft] = useState4("");
-  const [model, setModel] = useState4(process.env.HAKSTER_MODEL || "glm-5.2:cloud");
-  const [modelIdx, setModelIdx] = useState4(0);
-  const [status, setStatus] = useState4(null);
-  const [statusErr, setStatusErr] = useState4(null);
-  const [history, setHistory] = useState4([]);
+  const [view, setView] = useState5("chat");
+  const [focus, setFocus] = useState5("composer");
+  const [adsOn, setAdsOn] = useState5(true);
+  const [dockExpanded, setDockExpanded] = useState5(false);
+  const [draft, setDraft] = useState5("");
+  const [model, setModel] = useState5(process.env.HAKSTER_MODEL || "glm-5.2:cloud");
+  const [modelIdx, setModelIdx] = useState5(0);
+  const [status, setStatus] = useState5(null);
+  const [statusErr, setStatusErr] = useState5(null);
+  const [history, setHistory] = useState5([]);
+  const [mcpOutputOffset, setMcpOutputOffset] = useState5(0);
   const agent = useAgentStream_default({
     api: API,
     model,
@@ -1602,7 +1678,7 @@ function App({ version = "0.1.0" }) {
       setStatusErr(e.message);
     }
   }, []);
-  useEffect4(() => {
+  useEffect5(() => {
     load();
     const t = setInterval(load, 3e3);
     return () => clearInterval(t);
@@ -1620,6 +1696,24 @@ function App({ version = "0.1.0" }) {
     [agent]
   );
   const approving = !!agent.pendingConfirm;
+  const showCrushStatus = view === "chat" && agent.busy;
+  const activeAssistant = [...agent.messages].reverse().find((message) => message.role === "assistant");
+  const activeTool = activeAssistant?.tools?.slice().reverse().find((tool) => tool.result === null);
+  const latestMcpTool = agent.messages.filter((message) => message.role === "assistant").flatMap((message) => message.tools || []).filter((tool) => tool.mcp || String(tool.name || "").startsWith("mcp__")).slice(-1)[0] || null;
+  const mcpOutputText = latestMcpTool?.result == null ? "Waiting for MCP server output\u2026" : String(latestMcpTool.result).replace(/\r/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  const mcpPanelWidth = Math.max(1, Math.max(40, Math.min((cols || 100) - 2, 140)) - 10);
+  const mcpOutputLines = mcpOutputText.split("\n").flatMap((line) => {
+    if (!line) return [" "];
+    const rows2 = [];
+    for (let i = 0; i < line.length; i += mcpPanelWidth) rows2.push(line.slice(i, i + mcpPanelWidth));
+    return rows2;
+  });
+  const mcpMaxOffset = Math.max(0, mcpOutputLines.length - MCP_OUTPUT_LINES);
+  const visibleMcpOutput = mcpOutputLines.slice(mcpOutputOffset, mcpOutputOffset + MCP_OUTPUT_LINES);
+  useEffect5(() => {
+    setMcpOutputOffset(0);
+  }, [latestMcpTool?.id, latestMcpTool?.result]);
+  const crushPhase = activeAssistant?.phase || (agent.status === "thinking" ? "THINK" : agent.status === "connecting" ? "PLAN" : "ACT");
   const answerApproval = useCallback2(
     (approved, opts) => {
       agent.answerConfirm(approved, opts);
@@ -1665,6 +1759,10 @@ function App({ version = "0.1.0" }) {
       setDockExpanded((v) => !v);
       return;
     }
+    if (key.ctrl && latestMcpTool && (key.name === "up" || key.name === "down")) {
+      setMcpOutputOffset((offset) => Math.max(0, Math.min(mcpMaxOffset, offset + (key.name === "up" ? -1 : 1))));
+      return;
+    }
     switch (key.name) {
       case "a":
         setAdsOn((v) => !v);
@@ -1691,14 +1789,14 @@ function App({ version = "0.1.0" }) {
     }
   });
   const panelW = Math.max(40, Math.min((cols || 100) - 2, 140));
-  const CHROME_ROWS = 1 + 1;
+  const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
   const composerRows = 5;
   const railRows = dockExpanded ? 7 : 1;
   const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 4 : 0;
   const approvalRows = approving ? 6 : 0;
   const transcriptRows = Math.max(
     4,
-    (rows || 30) - CHROME_ROWS - composerRows - railRows - todoRows - approvalRows
+    (rows || 30) - CHROME_ROWS - composerRows - railRows - todoRows - approvalRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0)
   );
   const dashboardItems = [
     {
@@ -1735,40 +1833,40 @@ function App({ version = "0.1.0" }) {
       ]
     }
   ];
-  return /* @__PURE__ */ jsxs10("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
-    /* @__PURE__ */ jsxs10("box", { style: { width: panelW, justifyContent: "space-between", flexShrink: 0 }, children: [
-      /* @__PURE__ */ jsx10("text", { fg: "cyan", attributes: TextAttributes8.BOLD, children: "haksterAi" }),
-      /* @__PURE__ */ jsx10("text", { fg: "gray", children: `tui ${version} \xB7 ${view} \xB7 ${model} \xB7 ctx ${Math.round(ctxMax / 1e3)}K` })
+  return /* @__PURE__ */ jsxs11("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
+    /* @__PURE__ */ jsxs11("box", { style: { width: panelW, justifyContent: "space-between", flexShrink: 0 }, children: [
+      /* @__PURE__ */ jsx11("text", { fg: "cyan", attributes: TextAttributes8.BOLD, children: "haksterAi" }),
+      /* @__PURE__ */ jsx11("text", { fg: "gray", children: `tui ${version} \xB7 ${view} \xB7 ${model} \xB7 ctx ${Math.round(ctxMax / 1e3)}K` })
     ] }),
-    statusErr ? /* @__PURE__ */ jsx10("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs10("text", { fg: "red", children: [
+    statusErr ? /* @__PURE__ */ jsx11("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs11("text", { fg: "red", children: [
       "server unreachable \u2014 ",
       statusErr
     ] }) }) : null,
-    view === "models" ? /* @__PURE__ */ jsx10(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: models.map((m, i) => /* @__PURE__ */ jsx10(
+    view === "models" ? /* @__PURE__ */ jsx11(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: models.map((m, i) => /* @__PURE__ */ jsx11(
       Cell,
       {
         label: m.vendor,
         value: `${i === modelIdx ? "\u25B8 " : ""}${m.id}`,
-        w: Math.max(20, Math.floor((panelW - 4) / 2)),
+        w: Math.max(1, Math.floor((panelW - 6) / 2)),
         color: i === modelIdx ? "yellow" : "white"
       },
       m.id
-    )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs10(Fragment2, { children: [
-      /* @__PURE__ */ jsx10(
+    )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs11(Fragment2, { children: [
+      /* @__PURE__ */ jsx11(
         GridLayout_default,
         {
           items: dashboardItems,
           availableWidth: panelW,
           getItemKey: (item) => item.key,
-          renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx10(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, children: item.cells.map((c) => /* @__PURE__ */ jsx10(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(14, Math.floor((columnWidth - 4) / 2)) }, c.label)) })
+          renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx11(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, children: item.cells.map((c) => /* @__PURE__ */ jsx11(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)) }, c.label)) })
         }
       ),
-      /* @__PURE__ */ jsxs10(GridPanel_default, { title: "Context", width: panelW, hint: import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: model, vendor: "local", context: null }), children: [
-        /* @__PURE__ */ jsx10("box", { children: /* @__PURE__ */ jsx10(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, panelW - 30), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }) }),
-        /* @__PURE__ */ jsx10("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx10(Spark, { data: history, w: Math.min(30, Math.max(10, panelW - 10)) }) })
+      /* @__PURE__ */ jsxs11(GridPanel_default, { title: "Context", width: panelW, hint: import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: model, vendor: "local", context: null }), children: [
+        /* @__PURE__ */ jsx11("box", { children: /* @__PURE__ */ jsx11(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, panelW - 30), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }) }),
+        /* @__PURE__ */ jsx11("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx11(Spark, { data: history, w: Math.min(30, Math.max(10, panelW - 10)) }) })
       ] })
-    ] }) : /* @__PURE__ */ jsxs10(Fragment2, { children: [
-      agent.todos.length ? /* @__PURE__ */ jsx10("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx10(
+    ] }) : /* @__PURE__ */ jsxs11(Fragment2, { children: [
+      agent.todos.length ? /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
         TodoPanel,
         {
           todos: agent.todos,
@@ -1777,7 +1875,7 @@ function App({ version = "0.1.0" }) {
           maxVisibleRows: Math.min(agent.todos.length, 6)
         }
       ) }) : null,
-      /* @__PURE__ */ jsx10("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx10(
+      /* @__PURE__ */ jsx11("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx11(
         Transcript,
         {
           messages: agent.messages,
@@ -1786,7 +1884,28 @@ function App({ version = "0.1.0" }) {
           emptyHint: "Type a task and the agent runs it with tools. Tab moves focus to the ad slot; esc stops a run."
         }
       ) }),
-      /* @__PURE__ */ jsx10("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx10(
+      latestMcpTool ? /* @__PURE__ */ jsx11(
+        GridPanel_default,
+        {
+          title: `MCP Output \xB7 ${String(latestMcpTool.name || "").split("__")[1] || "server"}`,
+          width: panelW,
+          borderColor: "magenta",
+          hint: `${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} \xB7 Ctrl+\u2191/\u2193`,
+          children: /* @__PURE__ */ jsx11("box", { style: { flexDirection: "column", width: Math.max(1, panelW - 4) }, children: visibleMcpOutput.map((line, index) => {
+            return /* @__PURE__ */ jsx11("text", { fg: "white", children: String(line || " ") }, `mcp-output-${index}`);
+          }) })
+        }
+      ) : null,
+      showCrushStatus ? /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
+        CrushStatus,
+        {
+          width: panelW,
+          phase: crushPhase,
+          activity: activeTool?.name || "",
+          elapsedMs: agent.elapsedMs
+        }
+      ) }) : null,
+      /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
         DockAd,
         {
           width: panelW,
@@ -1796,7 +1915,7 @@ function App({ version = "0.1.0" }) {
           expanded: dockExpanded
         }
       ) }),
-      approving ? /* @__PURE__ */ jsx10("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx10(
+      approving ? /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
         ApprovalPrompt,
         {
           width: panelW,
@@ -1804,7 +1923,7 @@ function App({ version = "0.1.0" }) {
           onAnswer: answerApproval
         }
       ) }) : null,
-      /* @__PURE__ */ jsx10("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx10(
+      /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
         Composer,
         {
           width: panelW,
@@ -1814,7 +1933,7 @@ function App({ version = "0.1.0" }) {
           focused: focus === "composer" && !approving,
           disabled: agent.busy,
           hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? "esc stop \xB7 the run is streaming" : "enter send \xB7 tab focus \xB7 a ads \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit",
-          adSlot: /* @__PURE__ */ jsx10(
+          adSlot: /* @__PURE__ */ jsx11(
             DockAd,
             {
               width: Math.max(8, panelW - 4),
@@ -1827,7 +1946,7 @@ function App({ version = "0.1.0" }) {
         }
       ) })
     ] }),
-    /* @__PURE__ */ jsx10("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx10(
+    /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
       StatusBar,
       {
         width: panelW,
@@ -1854,7 +1973,7 @@ async function start({ version = "0.1.0" } = {}) {
     hideCursor: true
   });
   root = createRoot(renderer);
-  root.render(React11.createElement(App, { version }));
+  root.render(React12.createElement(App, { version }));
   return {
     unmount() {
       if (root) {

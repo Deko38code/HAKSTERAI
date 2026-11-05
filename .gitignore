@@ -60,3 +60,16 @@ cli/.phantom-ai-config.json
 .serena/
 __pycache__/
 *.pyc
+
+# Local backups, snapshots, and generated operator state
+/backups/
+**/backups/
+/server/src/agent/*.before-*
+/docs/agent/hakterm-admin-notes.md
+
+# Command Center source only; personal notes and runtime/user data stay local
+/command-center/commands.json
+/command-center/memories.json
+/command-center/user-commands.json
+/command-center/stack.json
+/command-center/parrot/

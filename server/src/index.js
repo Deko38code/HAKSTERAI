@@ -16,11 +16,11 @@ const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { diffLines } = require('diff');
 const { getDb } = require('./db');
-const { mountAds } = require('./ads');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const { Readable } = require('node:stream');
 const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
@@ -53,6 +53,7 @@ const FAST_CHAT_TOOL_NAMES = new Set([
   'browser_screenshot',
   'web_search',
   'firecrawl_scrape',
+  'hakster_scrape',
   'generate_image',
   'recall_memory',
   'save_memory',
@@ -249,10 +250,9 @@ const BUILTIN_OWNER_EMAILS = [
   'dekeneed@yahoo.com',
   'savannahscott899@gmail.com',
 ];
-const OWNER_EMAILS = Array.from(new Set([
-  ...BUILTIN_OWNER_EMAILS,
-  ...(process.env.OWNER_EMAILS || '').split(','),
-].map((email) => String(email || '').toLowerCase().trim()).filter(Boolean)));
+// Admin and owner-only surfaces are restricted to the primary owner account.
+// Paid status, database role, and OWNER_EMAILS environment entries do not grant access.
+const OWNER_EMAILS = [BUILTIN_OWNER_EMAILS[0]];
 const OWNER_IDS = {
   'dekekenneth840@gmail.com': '1234',
   'dekoneed@gmail.com': '1235',
@@ -445,10 +445,17 @@ function parseOAuthState(state) {
   }
 }
 
-function makeOAuthState(referralCode) {
+const MINIFORGE_SSO_RETURN_PATHS = new Set(['/miniforge/', '/miniforge/app/']);
+function safeMiniforgeReturnTo(value) {
+  const target = String(value || '');
+  return MINIFORGE_SSO_RETURN_PATHS.has(target) ? target : '';
+}
+
+function makeOAuthState(referralCode, returnTo = '') {
   return Buffer.from(JSON.stringify({
     nonce: crypto.randomBytes(16).toString('hex'),
     ref: normalizeReferralCode(referralCode),
+    returnTo: safeMiniforgeReturnTo(returnTo),
   })).toString('base64url');
 }
 
@@ -638,27 +645,6 @@ app.use((req, res, next) => {
   if (req.path === '/api/stripe/webhook') return next();
   return express.json()(req, res, next);
 });
-// ── Platform-wide API auth sweep (2026-10-08 security hardening) ──
-// All /api/* routes require an API key (x-api-key header or Authorization
-// Bearer via getUserByApiKey) unless explicitly public below.
-// Override the public lists via env without code changes:
-//   PUBLIC_API_PREFIXES=/api/auth/,/api/rmt/,/api/stripe/webhook
-//   PUBLIC_API_EXACT=/api/health
-const SWEEP_PUBLIC_PREFIXES = (process.env.PUBLIC_API_PREFIXES || '/api/auth/,/api/rmt/,/api/stripe/webhook')
-  .split(',').map(s => s.trim()).filter(Boolean);
-const SWEEP_PUBLIC_EXACT = (process.env.PUBLIC_API_EXACT || '/api/health')
-  .split(',').map(s => s.trim()).filter(Boolean);
-app.use((req, res, next) => {
-  if (!req.path.startsWith('/api/')) return next();
-  if (req.method === 'OPTIONS') return next();
-  if (SWEEP_PUBLIC_EXACT.includes(req.path)) return next();
-  if (SWEEP_PUBLIC_PREFIXES.some(pre => req.path.startsWith(pre))) return next();
-  const _sweepUser = getUserByApiKey(req);
-  if (!_sweepUser) return res.status(401).json({ error: 'API key required (x-api-key header or Authorization Bearer)' });
-  req.apiUser = _sweepUser;
-  next();
-});
-
 const tuiState = {
   messages: [],
   thinking: '',
@@ -728,73 +714,6 @@ function planFromPriceId(priceId) {
   return null;
 }
 
-// ── RMT payments — Rent My Trailer membership billed through this platform's
-//    live Stripe account ("payments work through haksterai id"). ──
-app.post('/api/rmt/checkout', express.json(), async (req, res) => {
-  const secret = process.env.RMT_PAY_SECRET || '';
-  if (!secret || req.headers['x-rmt-secret'] !== secret) return res.status(403).json({ error: 'forbidden' });
-  const { email, rmt_user_id, success_url, cancel_url } = req.body || {};
-  if (!rmt_user_id || !email) return res.status(400).json({ error: 'email and rmt_user_id required' });
-  const stripe = getStripe();
-  if (!stripe) return res.status(503).json({ error: 'stripe not configured on haksterai' });
-  try {
-    const base = process.env.PUBLIC_URL || 'https://haksterai.com';
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer_email: email,
-      client_reference_id: 'rmt_user_' + rmt_user_id,
-      line_items: [{
-        quantity: 1,
-        price_data: {
-          currency: 'usd', unit_amount: 3900,
-          product_data: { name: 'Rent My Trailer — Premium' },
-          recurring: { interval: 'month' },
-        },
-      }],
-      subscription_data: { metadata: { rmt_user_id: String(rmt_user_id), rmt_email: email, product: 'rmt-membership' } },
-      metadata: { rmt_user_id: String(rmt_user_id), rmt_email: email, product: 'rmt-membership' },
-      success_url: success_url || base + '/rmt-ok',
-      cancel_url: cancel_url || base + '/rmt-cancel',
-    });
-    res.json({ url: session.url, session_id: session.id });
-  } catch (err) {
-    console.error('[rmt-pay] checkout failed:', err.message);
-    res.status(500).json({ error: 'checkout failed', detail: err.message });
-  }
-});
-
-app.post('/api/rmt/booking-checkout', express.json(), async (req, res) => {
-  const secret = process.env.RMT_PAY_SECRET || '';
-  if (!secret || req.headers['x-rmt-secret'] !== secret) return res.status(403).json({ error: 'forbidden' });
-  const { email, rmt_user_id, booking_code, amount_cents, success_url, cancel_url } = req.body || {};
-  if (!rmt_user_id || !email || !booking_code || !amount_cents) return res.status(400).json({ error: 'email, rmt_user_id, booking_code, amount_cents required' });
-  const stripe = getStripe();
-  if (!stripe) return res.status(503).json({ error: 'stripe not configured on haksterai' });
-  try {
-    const base = process.env.PUBLIC_URL || 'https://haksterai.com';
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      customer_email: email,
-      client_reference_id: 'rmt_booking_' + booking_code,
-      line_items: [{
-        quantity: 1,
-        price_data: {
-          currency: 'usd',
-          unit_amount: Math.round(Number(amount_cents)),
-          product_data: { name: `RMT Booking ${booking_code}` },
-        },
-      }],
-      metadata: { rmt_user_id: String(rmt_user_id), rmt_email: email, product: 'rmt-booking', booking_code },
-      success_url: success_url || base + '/rmt-ok',
-      cancel_url: cancel_url || base + '/rmt-cancel',
-    });
-    res.json({ url: session.url, session_id: session.id });
-  } catch (err) {
-    console.error('[rmt-pay] booking checkout failed:', err.message);
-    res.status(500).json({ error: 'checkout failed', detail: err.message });
-  }
-});
-
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
@@ -812,13 +731,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
     // Dev mode — no signature verification
     try { event = JSON.parse(req.body.toString()); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
   }
-  // Forward raw Stripe event to Klaviyo (fire-and-forget)
-  const klaviyoUrl = process.env.KLAVIYO_STRIPE_WEBHOOK_URL;
-  if (klaviyoUrl) {
-    fetch(klaviyoUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: req.body, signal: AbortSignal.timeout(5000) })
-      .then(() => console.log('[stripe-webhook] forwarded to Klaviyo:', event.type))
-      .catch((e) => console.error('[stripe-webhook] Klaviyo forward failed:', e.message));
-  }
 
   const db = getDb();
   (async () => {
@@ -827,45 +739,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
         case 'checkout.session.completed': {
           const session = event.data.object;
           const customerId = session.customer;
-          // Relay RMT booking payments back to Rent My Trailer
-          if (session.metadata?.product === 'rmt-booking' && session.metadata?.booking_code) {
-            try {
-              const bookingRelayUrl = (process.env.RMT_PAY_RELAY_URL || 'http://127.0.0.1:8112/api/stripe/relay').replace('/api/stripe/relay', '/api/bookings/pay/relay');
-              const relay = await fetch(bookingRelayUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-rmt-secret': process.env.RMT_PAY_SECRET || '' },
-                body: JSON.stringify({
-                  booking_code: session.metadata.booking_code,
-                  rmt_user_id: session.metadata.rmt_user_id,
-                  payment_intent: session.payment_intent || '',
-                  session_id: session.id,
-                }),
-              });
-              if (relay.ok) console.log('[stripe-webhook] RMT booking payment relayed for', session.metadata.booking_code);
-              else console.error('[stripe-webhook] RMT booking relay rejected:', relay.status);
-            } catch (e) { console.error('[stripe-webhook] RMT booking relay failed:', e.message); }
-          }
-          // Relay RMT membership payments back to Rent My Trailer (payments via haksterai id)
-          if (session.metadata?.rmt_user_id && session.metadata?.product !== 'rmt-booking') {
-            try {
-              const rmtUrl = process.env.RMT_PAY_RELAY_URL || 'http://127.0.0.1:8112/api/stripe/relay';
-              const relay = await fetch(rmtUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-rmt-secret': process.env.RMT_PAY_SECRET || '' },
-                body: JSON.stringify({
-                  rmt_user_id: session.metadata.rmt_user_id,
-                  rmt_email: session.metadata.rmt_email,
-                  stripe_customer: customerId,
-                  subscription_id: session.subscription || '',
-                  session_id: session.id,
-                }),
-              });
-              if (relay.ok) console.log('[stripe-webhook] RMT membership relayed for user', session.metadata.rmt_user_id);
-              else console.error('[stripe-webhook] RMT relay rejected:', relay.status, (await relay.text()).slice(0, 120));
-            } catch (relayErr) {
-              console.error('[stripe-webhook] RMT relay failed:', relayErr.message);
-            }
-          }
           const subId = session.subscription;
           const userId = session.metadata?.userId;
           if (userId) {
@@ -951,10 +824,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
 
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '50mb' }));
-// Local ad service for the TUI (house inventory; see src/ads.js).
-// Mounted AFTER the body parsers above so req.body is populated on the
-// auction route — a route registered before express.json() never sees a body.
-mountAds(app);
 app.use((err, req, res, next) => {
   if (err?.type === 'entity.too.large' || err?.status === 413) {
     return res.status(413).json({
@@ -992,18 +861,171 @@ function getHaksterModelConfig() {
 }
 
 function requireAdmin(req, res, next) {
+  // Keep older route declarations owner-only too; an `admin` role alone is
+  // never enough to expose owner data or controls.
+  return requireOwner(req, res, next);
+}
+
+// ── Owner gate — Terminal / Hack Lab / Command Center are owner-email-only ──
+function isOwnerUser(user) {
+  return Boolean(user && isOwnerEmail(user.email));
+}
+
+const OWNER_REQUIRED = { error: 'Owner access required. Terminal, Hack Lab, and Command Center are restricted to configured owner emails.', redirect: '/' };
+function requireOwner(req, res, next) {
   const user = getUserByApiKey(req);
-  if (!user) return res.status(401).json({ error: 'Authentication required' });
-  if (user.role !== 'admin' && !isOwnerEmail(user.email)) return res.status(403).json({ error: 'Admin access required' });
-  if (user.role !== 'admin' && isOwnerEmail(user.email)) {
-    try {
-      getDb().prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE id = ?').run('admin', 'enterprise', user.id);
-      user.role = 'admin';
-      user.plan = 'enterprise';
-    } catch {}
+  if (!user) return res.status(401).json({ ...OWNER_REQUIRED, error: 'Sign in required', redirect: '/' });
+  if (!isOwnerUser(user)) return res.status(403).json(OWNER_REQUIRED);
+  if (user.role !== 'admin') {
+    try { getDb().prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE id = ?').run('admin', 'enterprise', user.id); } catch {}
+    user.role = 'admin'; user.plan = 'enterprise';
   }
   req.user = user;
   return next();
+}
+
+// ── Signed-in gate for the public chat surface ──
+// Traffic reaching this server through the Cloudflare/ngrok tunnels carries
+// an X-Forwarded-For header with the real client IP; direct localhost callers
+// (TUI, CLI, telegram bridges, other local services) do not. So an anonymous
+// request WITHOUT that header is internal infrastructure and stays permitted —
+// one from the public internet must carry a valid user API key.
+function isInternalCaller(req) {
+  const xff = req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'];
+  if (xff) return false;
+  const addr = (req.socket && req.socket.remoteAddress) || '';
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+function requireSignedIn(req, res, next) {
+  if (isInternalCaller(req)) return next();
+  const user = getUserByApiKey(req);
+  if (!user || user.status !== 'active') {
+    return res.status(401).json({ error: 'Sign in required to use chat', redirect: '/?signin=1&redirect=' + encodeURIComponent(req.query.redirect || '/build') });
+  }
+  req.user = user;
+  return next();
+}
+
+// ── User-safe tools — signed-in non-owners cannot run commands or touch the ──
+// filesystem. Free users receive ten total web research calls; Pro and owners
+// have unrestricted access to the configured web research providers.
+const WEB_RESEARCH_TOOL_NAMES = new Set(['web_search', 'firecrawl_scrape', 'hakster_scrape']);
+const USER_SAFE_TOOL_NAMES = new Set([...WEB_RESEARCH_TOOL_NAMES, 'recall_memory', 'generate_image']);
+const FREE_WEB_RESEARCH_LIMIT = 10;
+function isUnlimitedWebResearchUser(user) {
+  return isOwnerUser(user) || ['pro', 'enterprise'].includes(String(user?.plan || '').toLowerCase());
+}
+function getFreeWebResearchUses(user) {
+  if (!user || !user.id) return 0;
+  const db = getDb();
+  db.exec(`CREATE TABLE IF NOT EXISTS free_web_research_usage (
+    user_id TEXT PRIMARY KEY,
+    uses INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`);
+  return db.prepare('SELECT uses FROM free_web_research_usage WHERE user_id = ?').get(user.id)?.uses || 0;
+}
+function claimFreeWebResearchUse(user) {
+  if (isUnlimitedWebResearchUser(user)) return { allowed: true, unlimited: true };
+  if (!user || !user.id) return { allowed: false, remaining: 0 };
+  const db = getDb();
+  db.exec(`CREATE TABLE IF NOT EXISTS free_web_research_usage (
+    user_id TEXT PRIMARY KEY,
+    uses INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`);
+  const insert = db.prepare('INSERT OR IGNORE INTO free_web_research_usage (user_id, uses) VALUES (?, 0)');
+  const claim = db.prepare('UPDATE free_web_research_usage SET uses = uses + 1, updated_at = unixepoch() WHERE user_id = ? AND uses < ?');
+  const take = db.transaction((userId) => {
+    insert.run(userId);
+    return claim.run(userId, FREE_WEB_RESEARCH_LIMIT).changes > 0;
+  });
+  const allowed = take(user.id);
+  return { allowed, remaining: Math.max(0, FREE_WEB_RESEARCH_LIMIT - getFreeWebResearchUses(user)) };
+}
+function toolsForUser(user) {
+  if (isOwnerUser(user)) return ALL_TOOLS;
+  const hasWebResearch = isUnlimitedWebResearchUser(user) || getFreeWebResearchUses(user) < FREE_WEB_RESEARCH_LIMIT;
+  const safe = ALL_TOOLS.filter((t) => USER_SAFE_TOOL_NAMES.has(t.function?.name)
+    && (hasWebResearch || !WEB_RESEARCH_TOOL_NAMES.has(t.function?.name)));
+  return safe.length ? safe : ALL_TOOLS.filter((t) => !t._mcpServer && !/exec_shell|shell_bg|write_file|edit_file|replace_in_file|apply_patch|browser_|read_file|list_dir|search_files|glob_search|codebase_/.test(t.function?.name || ''));
+}
+
+// Owner-only skill editor. All writes stay inside the repo's dedicated
+// .hakster/skills directory; every edit gets a verified timestamped backup.
+const ADMIN_SKILLS_ROOT = path.resolve(__dirname, '../..', '.hakster', 'skills');
+const ADMIN_SKILL_NAME_RE = /^[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*$/i;
+const ADMIN_SKILL_MAX_BYTES = 100 * 1024;
+function normalizeAdminSkillName(value) {
+  let name = String(value || '').trim().replace(/\\/g, '/').replace(/\.md$/i, '');
+  if (!name || !ADMIN_SKILL_NAME_RE.test(name) || name.split('/').some(part => part === '.' || part === '..')) return null;
+  return name;
+}
+function adminSkillPath(name, createDirs = false) {
+  const normalized = normalizeAdminSkillName(name);
+  if (!normalized) return null;
+  const file = path.resolve(ADMIN_SKILLS_ROOT, `${normalized}.md`);
+  if (!file.startsWith(ADMIN_SKILLS_ROOT + path.sep)) return null;
+  const relative = path.relative(ADMIN_SKILLS_ROOT, file).split(path.sep);
+  let current = ADMIN_SKILLS_ROOT;
+  for (const part of relative.slice(0, -1)) {
+    current = path.join(current, part);
+    if (fs.existsSync(current)) {
+      const stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return null;
+    } else if (createDirs) fs.mkdirSync(current, { recursive: false });
+  }
+  if (fs.existsSync(file) && fs.lstatSync(file).isSymbolicLink()) return null;
+  return { name: normalized, file };
+}
+function listAdminSkills() {
+  const skills = [];
+  if (!fs.existsSync(ADMIN_SKILLS_ROOT)) return skills;
+  const rootStat = fs.lstatSync(ADMIN_SKILLS_ROOT);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error('Skill library root is not a regular directory.');
+  const visit = (dir, prefix = '') => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory() && !entry.isSymbolicLink()) visit(full, rel);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+        const name = rel.replace(/\.md$/i, '');
+        skills.push({ name, content: fs.readFileSync(full, 'utf8'), updatedAt: fs.statSync(full).mtimeMs });
+      }
+    }
+  };
+  visit(ADMIN_SKILLS_ROOT);
+  return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+function writeAdminSkill(name, content, { createOnly = false } = {}) {
+  fs.mkdirSync(ADMIN_SKILLS_ROOT, { recursive: true });
+  const rootStat = fs.lstatSync(ADMIN_SKILLS_ROOT);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return { error: 'Skill library root is not a regular directory.' };
+  const resolved = adminSkillPath(name, true);
+  if (!resolved) return { error: 'Use a skill name containing letters, numbers, dashes, underscores, and optional folders.' };
+  if (typeof content !== 'string' || !content.trim()) return { error: 'Skill content is required.' };
+  if (Buffer.byteLength(content, 'utf8') > ADMIN_SKILL_MAX_BYTES) return { error: 'Skill content must be 100 KB or smaller.' };
+  const exists = fs.existsSync(resolved.file);
+  if (createOnly && exists) return { error: 'That skill already exists. Select it to edit.' };
+  if (!createOnly && !exists) return { error: 'Skill not found. Create it first.' };
+  if (exists) {
+    const backupRoot = '/home/ghost/backups/haksterai-admin-skills';
+    fs.mkdirSync(backupRoot, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backup = path.join(backupRoot, `${stamp}-${crypto.randomUUID()}-${resolved.name.replace(/\//g, '__')}.md`);
+    fs.copyFileSync(resolved.file, backup, fs.constants.COPYFILE_EXCL);
+    if (fs.readFileSync(backup).compare(fs.readFileSync(resolved.file)) !== 0) throw new Error('Skill backup verification failed; original was not changed.');
+  }
+  const temp = `${resolved.file}.hakster-save-${crypto.randomUUID()}`;
+  fs.writeFileSync(temp, content, { encoding: 'utf8', flag: 'wx' });
+  fs.renameSync(temp, resolved.file);
+  _skillsCache = null;
+  _skillsCacheTime = 0;
+  try { require('./skills').refreshCache(); } catch {}
+  return { name: resolved.name, created: !exists };
 }
 
 function stableUserLabel(row) {
@@ -1097,40 +1119,17 @@ async function openAICompatStreamFetch(baseURL, payload, signal) {
     const decoder = new TextDecoder();
     let buffer = '';
     while (true) {
-      // Upstream relays (ollama cloud etc.) fail two ways: the reader dies mid-stream,
-      // or they send an SSE error frame like {"error":"upstream returned no context"}
-      // with no choices. Handle both here and yield a fail-marker so callers can rotate
-      // providers / show a clean error instead of silently dropping the failure (which
-      // produced empty replies) or leaking raw relay noise to the UI.
-      try {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          const data = trimmed.slice(5).trim();
-          if (!data || data === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed && typeof parsed === 'object' && parsed.error && !parsed.choices) {
-              const _msg = typeof parsed.error === 'string'
-                ? parsed.error
-                : (parsed.error.message || JSON.stringify(parsed.error).slice(0, 300));
-              yield { __hakster_stream_fail: _msg };
-            } else {
-              yield parsed;
-            }
-          } catch {}
-        }
-      } catch (readErr) {
-        // User cancel / timeout abort → preserve existing AbortError handling upstream
-        if (signal && signal.aborted) throw readErr;
-        if (readErr && (readErr.name === 'AbortError' || /abort/i.test(String(readErr.message || '')))) throw readErr;
-        yield { __hakster_stream_fail: String((readErr && readErr.message) || readErr || 'stream read failed') };
-        return;
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        try { yield JSON.parse(data); } catch {}
       }
     }
   }
@@ -1188,7 +1187,7 @@ app.get('/commands', (_req, res) => {
   res.sendFile(path.join(CMD_CENTER_DIR, 'index.html'));
 });
 
-app.get('/api/commands', (_req, res) => {
+app.get('/api/commands', requireOwner, (_req, res) => {
   const data = readJsonSafe(path.join(CMD_CENTER_DIR, 'commands.json'), { generated: null, commands: [] });
   const stack = readJsonSafe(path.join(CMD_CENTER_DIR, 'stack.json'), { groups: [] });
   const memories = readJsonSafe(path.join(CMD_CENTER_DIR, 'memories.json'), { memories: [] });
@@ -1202,7 +1201,7 @@ app.get('/api/commands', (_req, res) => {
   });
 });
 
-app.post('/api/commands', express.json({ limit: '1mb' }), (req, res) => {
+app.post('/api/commands', express.json({ limit: '1mb' }), requireOwner, (req, res) => {
   const { title, section, cmd, box } = req.body || {};
   if (!cmd || typeof cmd !== 'string' || cmd.length > 4000 || cmd.length < 2) {
     return res.status(400).json({ error: 'cmd required (2-4000 chars)' });
@@ -1521,7 +1520,7 @@ async function getMachineContext(force = false) {
   return ctx;
 }
 
-app.get('/api/machine-context', async (_req, res) => {
+app.get('/api/machine-context', requireOwner, async (_req, res) => {
   const ctx = await getMachineContext();
   if (ctx.error) return res.status(500).json({ error: ctx.error });
   res.json(ctx);
@@ -2383,7 +2382,7 @@ app.delete('/api/sessions/:id', (req, res) => {
 });
 
 // ── Chat (non-streaming) ──────────────────────────────────────────
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', requireSignedIn, async (req, res) => {
   const defaultCfg = getHaksterModelConfig();
   const { provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId, unrestricted = false } = req.body;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
@@ -2437,7 +2436,7 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // ── Chat (SSE streaming) ─────────────────────────────────────────
-app.post('/api/chat/stream', async (req, res) => {
+app.post('/api/chat/stream', requireSignedIn, async (req, res) => {
   const defaultCfg = getHaksterModelConfig();
   const { provider = defaultCfg.provider, model = defaultCfg.model, messages, system, sessionId, thinking = false, unrestricted = false } = req.body;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
@@ -2646,13 +2645,13 @@ function safeJsonParse(text) {
   } catch (_) { /* DB may not exist yet on first boot */ }
 }
 
-app.get('/api/agent/allowlist', (_req, res) => {
+app.get('/api/agent/allowlist', requireOwner, (_req, res) => {
   const db = getDb();
   const rows = db.prepare('SELECT id, command, pattern, source, created_at FROM command_allowlist ORDER BY created_at DESC').all();
   res.json({ allowlist: rows });
 });
 
-app.post('/api/agent/allow', (req, res) => {
+app.post('/api/agent/allow', requireOwner, (req, res) => {
   const { command, permanent, sessionId } = req.body;
   if (!command) return res.status(400).json({ error: 'command is required' });
   const cmd = command.trim();
@@ -2670,7 +2669,7 @@ app.post('/api/agent/allow', (req, res) => {
 
 // ── Interactive confirmation: client POSTs the user's y/N answer here ──
 // ── Allowlist a command permanently or for the session (used by the web danger popup) ──
-app.post('/api/agent/allowlist', (req, res) => {
+app.post('/api/agent/allowlist', requireOwner, (req, res) => {
   try {
     const { command, permanent, sessionId } = req.body || {};
     const cmd = String(command || '').trim();
@@ -2690,7 +2689,7 @@ app.post('/api/agent/allowlist', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/agent/confirm', (req, res) => {
+app.post('/api/agent/confirm', requireOwner, (req, res) => {
   const { sessionId, toolCallId, approved, command, permanent } = req.body || {};
   const sid = sessionId || 'default';
   const key = `${sid}:${toolCallId}`;
@@ -2741,7 +2740,7 @@ async function awaitUserConfirmation(sessionId, toolCallId, needsConfirmation, r
   });
 }
 
-app.delete('/api/agent/allowlist/:id', (req, res) => {
+app.delete('/api/agent/allowlist/:id', requireOwner, (req, res) => {
   const db = getDb();
   const result = db.prepare('DELETE FROM command_allowlist WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
@@ -2756,9 +2755,7 @@ app.delete('/api/agent/allowlist/:id', (req, res) => {
   res.json({ deleted: true });
 });
 
-app.post('/api/agent/run', async (req, res) => {
-  const _agentUser = getUserByApiKey(req);
-  if (!_agentUser) return res.status(401).json({ error: 'API key required (x-api-key header or Authorization Bearer)' });
+app.post('/api/agent/run', requireSignedIn, async (req, res) => {
   const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false, maxTurns: requestedMaxTurns } = req.body;
   const savedAgent = getHaksterModelConfig();
   const requestedProvider = req.body.provider || savedAgent.provider || null;
@@ -2778,7 +2775,7 @@ app.post('/api/agent/run', async (req, res) => {
   if (fastMode && (!req.body.model || req.body.model === 'gpt-oss:120b-cloud') && savedAgent.model) {
     model = savedAgent.model;
   }
-  const thinking = thinkingParam === true;
+  const thinking = fastMode ? thinkingParam === true : thinkingParam !== false;
   const effectiveApprovalMode = approvalMode || (fastMode ? 'full-auto' : undefined);
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
@@ -2818,12 +2815,12 @@ app.post('/api/agent/run', async (req, res) => {
   if (usingIsolatedWorkDir) {
     fs.mkdirSync(workDir, { recursive: true });
   }
-  const configuredMaxTurns = parseInt(requestedMaxTurns || process.env.HAKSTER_AGENT_MAX_TURNS || (lowToken ? '12' : fastMode ? '18' : '24'), 10) || (lowToken ? 12 : fastMode ? 18 : 24);
+  const configuredMaxTurns = parseInt(requestedMaxTurns || process.env.HAKSTER_AGENT_MAX_TURNS || (lowToken ? '12' : fastMode ? '18' : '80'), 10) || (lowToken ? 12 : fastMode ? 18 : 80);
   const maxTurns = lowToken
     ? Math.min(Math.max(6, configuredMaxTurns), 16)
     : fastMode
     ? Math.min(Math.max(8, configuredMaxTurns), 24)
-    : Math.max(8, Math.min(configuredMaxTurns, 32));
+    : Math.max(25, configuredMaxTurns);
   let agentModel = model || cfg.defaultModel;
   let client = null;
   let isAnthropicAgentProvider = false;
@@ -3259,7 +3256,7 @@ app.post('/api/agent/run', async (req, res) => {
       max_tokens: payload.max_tokens,
       system: payload.messages.find(m => m.role === 'system')?.content || systemContent,
       messages: anthropicMessagesFromAgentMessages(payload.messages),
-      tools: anthropicToolsFromAgentTools(ALL_TOOLS),
+      tools: anthropicToolsFromAgentTools(toolsForUser(user)),
       ...(payload.thinking ? { thinking: { type: 'enabled', budget_tokens: budgetTokens } } : {}),
     };
     const stream = await client.messages.stream(streamPayload, { signal });
@@ -3423,8 +3420,9 @@ ${dirListing}
   // (Client Awareness and File Delivery instructions are already in AGENT_SYSTEM_PROMPT)
 
   const factualLookupQuery = getFactualLookupQuery();
-  if (factualLookupQuery) {
+  if (factualLookupQuery && (isUnlimitedWebResearchUser(user) || getFreeWebResearchUses(user) < FREE_WEB_RESEARCH_LIMIT)) {
     try {
+      if (!isUnlimitedWebResearchUser(user) && !claimFreeWebResearchUse(user).allowed) throw new Error('Free web research limit reached (10 uses).');
       res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_name: 'web_search', tool_args: { query: factualLookupQuery, count: 5 } })}\n\n`);
       const lookupResult = await executeAgentTool('web_search', { query: factualLookupQuery, count: 5 }, workDir, provider, agentModel, null, null, effectiveApprovalMode);
       res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_name: 'web_search', tool_result: String(lookupResult).slice(0, 1200) })}\n\n`);
@@ -3740,7 +3738,7 @@ ${dirListing}
         const streamPayload = {
           model: agentModel,
           messages: sanitizeMessagesForProvider(agentMessages, provider),
-          tools: fastMode ? getFastChatTools() : ALL_TOOLS,
+          tools: fastMode ? (isOwnerUser(user) ? getFastChatTools() : toolsForUser(user)) : toolsForUser(user),
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
           ...(thinking ? { thinking: true } : {}),
@@ -3788,13 +3786,8 @@ ${dirListing}
       const toolCalls = []; // { id, name, arguments (accumulated) }
       let currentToolCall = null;
       let thinkingActive = false;
-      let _streamFailMsg = '';  // surfaced by openAICompatStreamFetch on upstream relay failure
 
       for await (const chunk of stream) {
-        if (chunk && chunk.__hakster_stream_fail) {
-          _streamFailMsg = String(chunk.__hakster_stream_fail);
-          break;
-        }
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
 
@@ -3847,36 +3840,6 @@ ${dirListing}
         }
       }
 
-      // ── Mid-stream upstream relay failure ("upstream returned no context", dropped
-      //    connections, SSE error frames, …): rotate to the next waterfall provider for
-      //    a clean retry instead of surfacing relay noise or ending with an empty reply. ──
-      if (_streamFailMsg) {
-        const _em2 = _streamFailMsg.toLowerCase();
-        const _bypassable2 = /429|rate.?limit|too many requests|quota|insufficient|balance|credit|exceeded|50[0-9]|service unavailable|internal server error|bad gateway|gateway timeout|upstream|econnreset|socket hang up|no context|context unavailable|empty response|terminated|fetch failed|network/.test(_em2);
-        const _hadOutput = assistantContent.trim().length > 0 || toolCalls.length > 0;
-        if (_bypassable2 && !_hadOutput) {
-          let _next = null;
-          for (const _n of [provider, ...WATERFALL_ORDER]) {
-            if (_waterfallTried.has(_n) || isProviderRateLimited(_n)) continue;
-            if (!PROVIDERS[_n]) continue;
-            _next = _n; break;
-          }
-          if (_next) {
-            _waterfallTried.add(_next);
-            markProviderRateLimited(provider, 120000);
-            res.write(`data: ${JSON.stringify({ type: 'provider_rotate', from: provider, to: _next, reason: 'mid-stream upstream failure' })}\n\n`);
-            provider = _next;
-            if (buildAgentClient()) { turn--; continue; }
-          }
-        }
-        // Not retryable or nothing left to try — clean error instead of raw relay text
-        res.write(`data: ${JSON.stringify({ type: 'error', error: `Upstream provider stream failed (${_streamFailMsg.slice(0, 120)})` })}\n\n`);
-        clearInterval(heartbeat);
-        recordThisAgentUsage();
-        res.end();
-        return;
-      }
-
       // Stream finished successfully
       clearTimeout(streamTimeout);
 
@@ -3920,26 +3883,14 @@ ${dirListing}
         }
 
         // ── Full-auto nudge: if model replies with text only, push it to act ──
-        // Only nudge when the answer looks like an UNACTIONED PROMISE ("let me…",
-        // "I'll run…", "sorry, need to…") — i.e. talk with no action and no tools
-        // yet. A genuine final answer (greeting, summary after tools, plain chat
-        // reply in the website panel) must stream through as `done` untouched:
-        // nudging every text-only turn made the chat panel burn turns on pointless
-        // tool calls (list_dir etc.) after the user's question was already answered.
-        const PROMISE_RE = /\b(let me|i'?m going to|i will(?!\s+(not|never|refuse|decline))|i'?ll(?!\s+(not|never|consider|skip|pass|refuse|decline|think))|about to|working on|hold on|one moment|give me a (sec|second|minute)|need to (run|check|create|write|read|look|scan|test|install|fix|start))\b/i;
-        if (
-          effectiveApprovalMode === 'full-auto' &&
-          toolCalls.length === 0 &&
-          assistantContent.trim().length > 0 &&
-          turn < maxTurns - 2 &&
-          loopDetect.totalToolCalls === 0 &&   // tools already ran → text is the final summary, accept it
-          PROMISE_RE.test(assistantContent)
-        ) {
+        // Extended: nudge on ANY turn where the model talks but doesn't act (not just first 3).
+        // This fixes "let me finish sorry" loops where hp-1000 apologizes instead of using tools.
+        if (effectiveApprovalMode === 'full-auto' && toolCalls.length === 0 && assistantContent.trim().length > 0 && turn < maxTurns - 2) {
           // Count how many times we've nudged already to avoid infinite apologizing
           const nudgeCount = agentMessages.filter(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('You responded with text only')).length;
-          if (nudgeCount < 2) {
+          if (nudgeCount < 5) {
             agentMessages.push({ role: 'user', content: 'You responded with text only and did not use any tools. Stop apologizing and DO the work now. Call list_dir, read_file, exec_shell, write_file, or whatever tool is appropriate. Do not explain — execute. The task is NOT done until you have used tools to complete it.' });
-            res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\\n\\n`);
             continue;
           }
         }
@@ -4210,9 +4161,19 @@ ${dirListing}
           const sessionSet = sessionAllowedCommands.get(sessionId || 'default');
           const globalSet = sessionAllowedCommands.get('default');
           const allowedCommands = new Set([...(sessionSet || []), ...(globalSet || [])]);
-          const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, undefined, allowedCommands, effectiveApprovalMode);
+          // Last line of defense: non-owner users may only run web/memory/image tools,
+          // no matter how the tool call reached this loop (tools list, text fallback, MCP).
+          if (!isOwnerUser(user) && !USER_SAFE_TOOL_NAMES.has(toolName)) {
+            const result = `⛔ Tool "${toolName}" is not permitted for this account. Web lookup, image generation, and memory recall only.`;
+            return { tc, result, toolName, toolArgs };
+          }
+          if (WEB_RESEARCH_TOOL_NAMES.has(toolName) && !isUnlimitedWebResearchUser(user)) {
+            const webUse = claimFreeWebResearchUse(user);
+            if (!webUse.allowed) return { tc, result: '⛔ Free web research limit reached (10 uses). Upgrade to Pro for unlimited web research.', toolName, toolArgs };
+          }
+          const result2 = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, undefined, allowedCommands, effectiveApprovalMode);
           try { const _db = getDb(); _db.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae) {}
-          return { tc, result, toolName, toolArgs };
+          return { tc, result: result2, toolName, toolArgs };
         });
         const settled = await Promise.all(promises);
 
@@ -4383,6 +4344,7 @@ ${dirListing}
             ...(ev.type === 'shell_data' ? { stream: ev.stream, data: ev.data } : {}),
             ...(ev.type === 'shell_end' ? { exit_code: ev.exit_code } : {}),
             ...(ev.type === 'shell_error' ? { error: ev.error } : {}),
+            ...(ev.type === 'mcp_result' ? { data: ev.data } : {}),
           })}\n\n`);
         };
 
@@ -4391,8 +4353,18 @@ ${dirListing}
         const sessionSet = sessionAllowedCommands.get(sessionId || 'default');
         const globalSet = sessionAllowedCommands.get('default');
         const allowedCommands = new Set([...(sessionSet || []), ...(globalSet || [])]);
-        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, allowedCommands, effectiveApprovalMode);
-        try { const _db2 = getDb(); _db2.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae2) {}
+        // Last line of defense: non-owner users may only run web/memory/image tools.
+        let result;
+        if (!isOwnerUser(user) && !USER_SAFE_TOOL_NAMES.has(toolName)) {
+          result = `⛔ Tool "${toolName}" is not permitted for this account. Web lookup, image generation, and memory recall only.`;
+          try { const _db2 = getDb(); _db2.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call_denied', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae2) {}
+        } else if (WEB_RESEARCH_TOOL_NAMES.has(toolName) && !isUnlimitedWebResearchUser(user) && !(claimFreeWebResearchUse(user).allowed)) {
+          result = '⛔ Free web research limit reached (10 uses). Upgrade to Pro for unlimited web research.';
+          try { const _db2 = getDb(); _db2.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call_denied', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae2) {}
+        } else {
+          result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, allowedCommands, effectiveApprovalMode);
+          try { const _db2 = getDb(); _db2.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae2) {}
+        }
 
         // ── Detect __needs_confirmation and emit special SSE event ──
         let needsConfirmation = null;
@@ -4673,7 +4645,7 @@ function safePath(reqPath) {
 }
 
 // GET /api/fs/list?path=/some/dir — List files/dirs in a path
-app.get('/api/fs/list', (req, res) => {
+app.get('/api/fs/list', requireOwner, (req, res) => {
   try {
     const dirPath = safePath(req.query.path || '/');
     if (!fs.existsSync(dirPath)) return res.status(404).json({ error: 'Not found' });
@@ -4695,7 +4667,7 @@ app.get('/api/fs/list', (req, res) => {
 });
 
 // Read file
-app.get('/api/fs/read', (req, res) => {
+app.get('/api/fs/read', requireOwner, (req, res) => {
   try {
     const filePath = safePath(req.query.path || '/');
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
@@ -4716,7 +4688,7 @@ app.get('/api/fs/read', (req, res) => {
 });
 
 // Write file
-app.post('/api/fs/write', (req, res) => {
+app.post('/api/fs/write', requireOwner, (req, res) => {
   try {
     const { path: fPath, content } = req.body;
     if (!fPath || content === undefined) return res.status(400).json({ error: 'path and content required' });
@@ -4730,7 +4702,7 @@ app.post('/api/fs/write', (req, res) => {
 });
 
 // Diff (apply a patch)
-app.post('/api/fs/diff', (req, res) => {
+app.post('/api/fs/diff', requireOwner, (req, res) => {
   try {
     const { path: fPath, oldContent, newContent } = req.body;
     if (!fPath) return res.status(400).json({ error: 'path required' });
@@ -4763,7 +4735,7 @@ app.post('/api/fs/diff', (req, res) => {
 });
 
 // Delete file/dir
-app.delete('/api/fs/delete', (req, res) => {
+app.delete('/api/fs/delete', requireOwner, (req, res) => {
   try {
     const filePath = safePath(req.query.path || '/');
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
@@ -4780,7 +4752,7 @@ app.delete('/api/fs/delete', (req, res) => {
 });
 
 // GET /api/fs/download?path=/some/file — Download any file from server filesystem
-app.get('/api/fs/download', (req, res) => {
+app.get('/api/fs/download', requireOwner, (req, res) => {
   try {
     const filePath = safePath(req.query.path || '/');
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
@@ -4935,7 +4907,11 @@ app.post('/api/generate', async (req, res) => {
     ? ' Firecrawl is configured with rotating keys; use web_search and firecrawl_scrape to pull live docs/examples when needed.'
     : '';
 
-  const BUILD_SYSTEM = APP_BUILDER_SYSTEM + '\n\n' + AGENT_SYSTEM_PROMPT + machineCtxText + '\n\nYou have tools available: read_file, write_file, edit_file, list_dir, exec_shell, browser_navigate, browser_snapshot, browser_screenshot, generate_image, web_search, firecrawl_scrape.' + firecrawlHint + ' Use them to inspect the workspace, search the web for docs/examples, scrape reference pages, generate images for the app, run shell commands (build/test), and write files directly. After using tools, still output the complete app as structured artifacts in the format above.';
+  const canUseWebResearch = isUnlimitedWebResearchUser(user) || getFreeWebResearchUses(user) < FREE_WEB_RESEARCH_LIMIT;
+  const webResearchHint = canUseWebResearch
+    ? ` web_search, firecrawl_scrape, hakster_scrape.${firecrawlHint} Use web tools for current docs and reference pages.`
+    : ' Web research tools are unavailable on this free account after its 10 included uses.';
+  const BUILD_SYSTEM = APP_BUILDER_SYSTEM + '\n\n' + AGENT_SYSTEM_PROMPT + machineCtxText + '\n\nYou have tools available: read_file, write_file, edit_file, list_dir, exec_shell, browser_navigate, browser_snapshot, browser_screenshot, generate_image,' + webResearchHint + ' Use the available tools to inspect the workspace, generate images, run shell commands (build/test), and write files directly. After using tools, still output the complete app as structured artifacts in the format above.';
 
   const messages = [
     { role: 'system', content: BUILD_SYSTEM },
@@ -5017,7 +4993,7 @@ app.post('/api/generate', async (req, res) => {
         stream = await client.chat.completions.create({
           model: agentModel,
           messages: sanitizeMessagesForProvider(messages, provider),
-          tools: ALL_TOOLS,
+          tools: toolsForUser(user),
           stream: true,
           max_tokens: MAX_OUTPUT_TOKENS,
         }, { signal: streamAbort.signal });
@@ -5035,12 +5011,6 @@ app.post('/api/generate', async (req, res) => {
       let thinkingActive = false;
 
       for await (const chunk of stream) {
-        if (chunk && chunk.__hakster_stream_fail) {
-          clearTimeout(streamTimeout);
-          res.write(`data: ${JSON.stringify({ type: 'error', error: `Upstream provider stream failed (${String(chunk.__hakster_stream_fail).slice(0, 120)})` })}\n\n`);
-          res.end();
-          return;
-        }
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
 
@@ -5248,7 +5218,12 @@ app.post('/api/generate', async (req, res) => {
           })}\n\n`);
         };
 
-        const result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, undefined, approvalMode);
+        let result;
+        if (WEB_RESEARCH_TOOL_NAMES.has(toolName) && !isUnlimitedWebResearchUser(user) && !claimFreeWebResearchUse(user).allowed) {
+          result = '⛔ Free web research limit reached (10 uses). Upgrade to Pro for unlimited web research.';
+        } else {
+          result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, undefined, approvalMode);
+        }
         try { const _db3 = getDb(); _db3.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae3) {}
 
         // Check for image URLs in result
@@ -5511,20 +5486,10 @@ app.post('/api/images/analyze', async (req, res) => {
 
 // ── Stats ──────────────────────────────────────────────────────────
 // ── Dashboard stats ────────────────────────────────────────────────
-app.get('/api/dashboard', (req, res) => {
+app.get('/api/dashboard', requireOwner, (req, res) => {
   try {
     const db = getDb();
-    const dashboardUser = getUserByApiKey(req);
-    const isDashboardAdmin = dashboardUser && (dashboardUser.role === 'admin' || isOwnerEmail(dashboardUser.email));
-    const isPublicDashboard = req.query.public === '1';
-    if (!isPublicDashboard && !isDashboardAdmin) {
-      return res.status(dashboardUser ? 403 : 401).json({ error: dashboardUser ? 'Admin access required' : 'Authentication required', redirect: dashboardUser ? '/portal' : '/' });
-    }
-    if (dashboardUser && dashboardUser.role !== 'admin' && isOwnerEmail(dashboardUser.email)) {
-      try {
-        db.prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE id = ?').run('admin', 'enterprise', dashboardUser.id);
-      } catch {}
-    }
+    const dashboardUser = req.user;
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
@@ -5535,7 +5500,7 @@ app.get('/api/dashboard', (req, res) => {
       _toolsCache = null;
       _toolsCacheTime = 0;
     }
-    const dashCacheKey = `${isPublicDashboard ? 'pub' : 'admin'}:${req.query.compact === '1' ? 'compact' : 'full'}`;
+    const dashCacheKey = `admin:${req.query.compact === '1' ? 'compact' : 'full'}`;
     const dashCached = _dashboardCache.get(dashCacheKey);
     if (!forceLive && dashCached && (Date.now() - dashCached.time) < DASHBOARD_CACHE_TTL) {
       return res.json(dashCached.payload);
@@ -5841,7 +5806,6 @@ function ensureCrushModelRegistered(cfg, provider, model) {
     if (!prov.type) prov.type = 'openai';
     if (!prov.api_key && process.env.NOUS_API_KEY) prov.api_key = process.env.NOUS_API_KEY;
   }
-  if (provider === 'ollama' && !prov.base_url) prov.base_url = process.env.CRUSH_OLLAMA_BASE_URL || 'http://10.0.0.251:11434';
   prov.models = Array.isArray(prov.models) ? prov.models : [];
   if (prov.models.some(m => m && m.id === model)) return cfg;
   // Copy a sibling entry's shape so cost/window fields are sane;
@@ -6034,7 +5998,7 @@ app.get('/api/stats', (_req, res) => {
 });
 
 // ── Users, Logs & Audit API ────────────────────────────────────────
-app.get('/api/users', requireAdmin, (_req, res) => {
+app.get('/api/users', requireOwner, (_req, res) => {
   const db = getDb();
   const users = db.prepare(`SELECT id, username, email, role, plan, status, created_at, updated_at, last_login_at, last_login_ip FROM users ORDER BY created_at DESC`).all();
   const stats = {
@@ -6052,7 +6016,7 @@ app.get('/api/users', requireAdmin, (_req, res) => {
 });
 
 // ── User activity & tracking ──────────────────────────────────────
-app.get('/api/users/activity', requireAdmin, (req, res) => {
+app.get('/api/users/activity', requireOwner, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const action = req.query.action;
@@ -6066,7 +6030,7 @@ app.get('/api/users/activity', requireAdmin, (req, res) => {
   res.json({ activity, count: activity.length });
 });
 
-app.get('/api/users/recent', requireAdmin, (req, res) => {
+app.get('/api/users/recent', requireOwner, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 20, 100);
   const users = db.prepare(
@@ -6101,7 +6065,7 @@ app.post('/api/users/track', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/users/:id', requireAdmin, (req, res) => {
+app.get('/api/users/:id', requireOwner, (req, res) => {
   const db = getDb();
   const user = db.prepare(`SELECT id, username, email, role, plan, status, created_at, updated_at, last_login_at, last_login_ip FROM users WHERE id = ?`).get(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
@@ -6131,7 +6095,7 @@ app.get('/api/fingerprint', (req, res) => {
 
 // ── Pentester Agent API ──
 const { execSync } = require('child_process');
-app.post('/api/pentester/run', (req, res) => {
+app.post('/api/pentester/run', requireOwner, (req, res) => {
   const target = (req.body && req.body.target) || '';
   if (!target) return res.status(400).json({ error: 'target required' });
 
@@ -6156,7 +6120,7 @@ app.post('/api/pentester/run', (req, res) => {
 });
 
 // ── Pentester tools (real implementations) ──
-app.post('/api/pentester/scan', (req, res) => {
+app.post('/api/pentester/scan', requireOwner, (req, res) => {
   const { target, tool } = req.body || {};
   if (!target) return res.status(400).json({ error: 'target required' });
 
@@ -6180,7 +6144,7 @@ app.post('/api/pentester/scan', (req, res) => {
   }
 });
 
-app.get('/api/pentester/fingerprint', (req, res) => {
+app.get('/api/pentester/fingerprint', requireOwner, (req, res) => {
   try {
     const scriptDir = path.join(__dirname, '..', '..', 'scripts');
     const raw = execSync(`cd ${JSON.stringify(scriptDir)} && python3 pentester_fingerprint.py 2>&1`, {
@@ -6302,7 +6266,34 @@ app.get('/api/sessions/:id/messages', (req, res) => {
 
 // ── Admin: Telegram message center — list bot conversations and reply from
 // the dashboard. telegram-<chatId> session ids come from telegramBots.js.
-app.get('/api/admin/telegram/sessions', requireAdmin, (_req, res) => {
+app.get('/api/admin/skills', requireOwner, (_req, res) => {
+  try { res.json({ ok: true, skills: listAdminSkills() }); }
+  catch (err) { res.status(500).json({ ok: false, error: 'Could not load owner skills.' }); }
+});
+
+app.post('/api/admin/skills', requireOwner, (req, res) => {
+  try {
+    const result = writeAdminSkill(req.body?.name, req.body?.content, { createOnly: true });
+    if (result.error) return res.status(400).json({ ok: false, error: result.error });
+    res.status(201).json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[admin-skills] create failed:', err.message);
+    res.status(500).json({ ok: false, error: 'Could not save the new skill.' });
+  }
+});
+
+app.put('/api/admin/skills', requireOwner, (req, res) => {
+  try {
+    const result = writeAdminSkill(req.body?.name, req.body?.content);
+    if (result.error) return res.status(result.error === 'Skill not found. Create it first.' ? 404 : 400).json({ ok: false, error: result.error });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[admin-skills] update failed:', err.message);
+    res.status(500).json({ ok: false, error: 'Could not update the skill.' });
+  }
+});
+
+app.get('/api/admin/telegram/sessions', requireOwner, (_req, res) => {
   const db = getDb();
   const sessions = db.prepare("SELECT * FROM sessions WHERE id LIKE 'telegram-%' ORDER BY updated_at DESC LIMIT 200").all();
   const withPreview = sessions.map(s => {
@@ -6315,7 +6306,7 @@ app.get('/api/admin/telegram/sessions', requireAdmin, (_req, res) => {
 
 // POST /api/admin/telegram/send  { chatId, text }  — admin reply, via the
 // command bot (TELEGRAM_BOT_TOKEN_1), persisted into the same session history.
-app.post('/api/admin/telegram/send', requireAdmin, async (req, res) => {
+app.post('/api/admin/telegram/send', requireOwner, async (req, res) => {
   const { chatId, text } = req.body || {};
   if (!chatId || !text) return res.status(400).json({ ok: false, error: 'chatId and text required' });
   const token = process.env.TELEGRAM_BOT_TOKEN_1;
@@ -6433,7 +6424,7 @@ app.post('/api/stripe/portal', async (req, res) => {
 // normal purchase flow — that's account-based, see server/src/license.js.
 try { initLicenseTables(getDb()); } catch (e) { console.warn('License tables init deferred:', e.message); }
 
-app.get('/api/admin/licenses', (req, res) => {
+app.get('/api/admin/licenses', requireOwner, (req, res) => {
   try {
     const db = getDb();
     const licenses = db.prepare(`
@@ -6452,7 +6443,7 @@ app.get('/api/admin/licenses', (req, res) => {
   }
 });
 
-app.post('/api/admin/licenses/create', (req, res) => {
+app.post('/api/admin/licenses/create', requireOwner, (req, res) => {
   const { email, plan } = req.body;
   if (!email || !plan) return res.status(400).json({ error: 'Missing email or plan' });
   try {
@@ -6464,7 +6455,7 @@ app.post('/api/admin/licenses/create', (req, res) => {
   }
 });
 
-app.post('/api/admin/licenses/deactivate', (req, res) => {
+app.post('/api/admin/licenses/deactivate', requireOwner, (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ error: 'Missing key' });
   try {
@@ -6560,6 +6551,219 @@ app.get('/api/auth/google/client-id', (_req, res) => {
   res.json({ clientId: GOOGLE_CLIENT_ID, configured: !!GOOGLE_CLIENT_ID });
 });
 
+// ── Owner-only Gmail monitor (read-only OAuth; refresh token stays encrypted on this server) ──
+const GMAIL_MONITOR_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_MONITOR_CALLBACK = '/api/admin/gmail/callback';
+const gmailMonitorOAuthStates = new Map();
+const gmailMonitorDir = path.join(os.homedir(), '.hakster', 'gmail-monitor');
+function gmailMonitorConnectionPath(userId) {
+  const ownerKey = crypto.createHash('sha256').update(String(userId || '')).digest('hex');
+  return path.join(gmailMonitorDir, `connection-${ownerKey}.json`);
+}
+
+function gmailMonitorRedirectUri() {
+  const configured = String(process.env.GMAIL_MONITOR_REDIRECT_URI || '').trim();
+  if (!configured) return '';
+  try {
+    const parsed = new URL(configured);
+    const local = ['localhost', '127.0.0.1'].includes(parsed.hostname) && parsed.protocol === 'http:';
+    const production = parsed.hostname === 'haksterai.com' && parsed.protocol === 'https:';
+    if ((local || production) && parsed.pathname === GMAIL_MONITOR_CALLBACK && !parsed.search && !parsed.hash) return parsed.href;
+  } catch {}
+  return '';
+}
+
+function ensureGmailMonitorStorage() {
+  const parent = path.dirname(gmailMonitorDir);
+  if (fs.existsSync(parent)) {
+    const parentStat = fs.lstatSync(parent);
+    if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error('Gmail monitor storage parent is unsafe');
+  } else fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+  if (fs.existsSync(gmailMonitorDir)) {
+    const dirStat = fs.lstatSync(gmailMonitorDir);
+    if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) throw new Error('Gmail monitor storage directory is unsafe');
+    if ((dirStat.mode & 0o077) !== 0) throw new Error('Gmail monitor storage permissions must be owner-only');
+  } else fs.mkdirSync(gmailMonitorDir, { mode: 0o700 });
+}
+
+function gmailMonitorEncryptionKey() {
+  if (!GOOGLE_CLIENT_SECRET) throw new Error('Google OAuth client secret is not configured');
+  return crypto.createHmac('sha256', GOOGLE_CLIENT_SECRET).update('haksterai:gmail-monitor:refresh-token:v1').digest();
+}
+
+function readGmailMonitorConnection(userId) {
+  const file = gmailMonitorConnectionPath(userId);
+  if (!fs.existsSync(file)) return null;
+  const info = fs.lstatSync(file);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error('Gmail monitor connection file is unsafe');
+  const envelope = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (envelope.version !== 1) throw new Error('Unsupported Gmail monitor token format');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', gmailMonitorEncryptionKey(), Buffer.from(envelope.iv, 'base64url'));
+  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));
+  const plain = Buffer.concat([decipher.update(Buffer.from(envelope.data, 'base64url')), decipher.final()]).toString('utf8');
+  return JSON.parse(plain);
+}
+
+function writeGmailMonitorConnection(userId, connection) {
+  ensureGmailMonitorStorage();
+  const file = gmailMonitorConnectionPath(userId);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', gmailMonitorEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(connection), 'utf8'), cipher.final()]);
+  const envelope = JSON.stringify({ version: 1, iv: iv.toString('base64url'), tag: cipher.getAuthTag().toString('base64url'), data: encrypted.toString('base64url') });
+  if (fs.existsSync(file)) {
+    const info = fs.lstatSync(file);
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('Gmail monitor connection file is unsafe');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(3).toString('hex');
+    const backupFile = `${file}.bak-${stamp}`;
+    const originalDigest = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    fs.copyFileSync(file, backupFile, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(backupFile, 0o600);
+    const backupDigest = crypto.createHash('sha256').update(fs.readFileSync(backupFile)).digest('hex');
+    if (backupDigest !== originalDigest) throw new Error('Gmail monitor connection backup verification failed');
+  }
+  const tempFile = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  fs.writeFileSync(tempFile, envelope, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  fs.renameSync(tempFile, file);
+  fs.chmodSync(file, 0o600);
+}
+
+app.get('/api/admin/gmail/status', requireOwner, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const connection = readGmailMonitorConnection(req.user.id);
+    const configured = Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && gmailMonitorRedirectUri());
+    res.json({ configured, connected: Boolean(connection?.refreshToken), email: connection?.email || '', scope: GMAIL_MONITOR_SCOPE, requiredRedirectUri: 'https://haksterai.com/api/admin/gmail/callback' });
+  } catch {
+    res.status(503).json({ configured: false, connected: false, error: 'Gmail connection storage needs attention. Reconnect after server setup.', requiredRedirectUri: 'https://haksterai.com/api/admin/gmail/callback' });
+  }
+});
+
+app.post('/api/admin/gmail/connect', requireOwner, (req, res) => {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.status(503).json({ error: 'Google OAuth is not configured on the server' });
+  const redirectUri = gmailMonitorRedirectUri();
+  if (!redirectUri) return res.status(503).json({ error: 'Set GMAIL_MONITOR_REDIRECT_URI to https://haksterai.com/api/admin/gmail/callback and register that exact URI in Google Cloud' });
+  const now = Date.now();
+  for (const [key, item] of gmailMonitorOAuthStates) if (item.expiresAt < now) gmailMonitorOAuthStates.delete(key);
+  if (gmailMonitorOAuthStates.size >= 128) return res.status(429).json({ error: 'Too many pending Google authorization requests. Try again shortly.' });
+  const state = crypto.randomBytes(32).toString('base64url');
+  gmailMonitorOAuthStates.set(state, { userId: req.user.id, redirectUri, expiresAt: now + 10 * 60 * 1000 });
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: GMAIL_MONITOR_SCOPE,
+    access_type: 'offline',
+    prompt: 'consent select_account',
+    include_granted_scopes: 'true',
+    state,
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ authorizationUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
+});
+
+app.get(GMAIL_MONITOR_CALLBACK, async (req, res) => {
+  const state = String(req.query.state || '');
+  const pending = gmailMonitorOAuthStates.get(state);
+  gmailMonitorOAuthStates.delete(state);
+  const fail = (code) => res.redirect(`/admin/email?gmail_error=${encodeURIComponent(code)}`);
+  if (!pending || pending.expiresAt < Date.now()) return fail('state');
+  const pendingUser = getDb().prepare('SELECT * FROM users WHERE id = ?').get(pending.userId);
+  if (!isOwnerUser(pendingUser)) return fail('owner');
+  if (req.query.error) return fail('denied');
+  const code = String(req.query.code || '');
+  if (!code) return fail('code');
+  try {
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ code, client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, redirect_uri: pending.redirectUri, grant_type: 'authorization_code' }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!tokenResponse.ok) return fail('token');
+    const tokens = await tokenResponse.json();
+    if (!String(tokens.scope || '').split(/\s+/).includes(GMAIL_MONITOR_SCOPE) || !tokens.access_token) return fail('scope');
+    const profileResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${tokens.access_token}` }, signal: AbortSignal.timeout(12000) });
+    if (!profileResponse.ok) return fail('profile');
+    const profile = await profileResponse.json();
+    const email = String(profile.emailAddress || '').slice(0, 254);
+    let refreshToken = String(tokens.refresh_token || '');
+    if (!refreshToken) {
+      try {
+        const existing = readGmailMonitorConnection(pending.userId);
+        if (existing?.email?.toLowerCase() === email.toLowerCase()) refreshToken = String(existing.refreshToken || '');
+      } catch {}
+    }
+    if (!email || !refreshToken) return fail('refresh_token');
+    writeGmailMonitorConnection(pending.userId, { email, refreshToken, connectedAt: new Date().toISOString(), ownerUserId: pending.userId });
+    return res.redirect('/admin/email?gmail=connected');
+  } catch {
+    return fail('connection');
+  }
+});
+
+app.get('/api/admin/gmail/messages', requireOwner, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  let connection;
+  try { connection = readGmailMonitorConnection(req.user.id); }
+  catch { return res.status(503).json({ error: 'Gmail connection storage needs attention' }); }
+  if (!connection?.refreshToken) return res.status(409).json({ error: 'Connect an authorized Gmail inbox first' });
+  try {
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, refresh_token: connection.refreshToken, grant_type: 'refresh_token' }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!tokenResponse.ok) return res.status(401).json({ error: 'Gmail authorization expired. Reconnect the inbox.', reconnectRequired: true });
+    const tokenData = await tokenResponse.json();
+    const headers = { Authorization: `Bearer ${tokenData.access_token}` };
+    const listResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&labelIds=INBOX', { headers, signal: AbortSignal.timeout(12000) });
+    if (!listResponse.ok) return res.status(502).json({ error: 'Gmail could not return inbox messages. Check the Gmail API setup and consent.' });
+    const list = await listResponse.json();
+    const messages = await Promise.all((list.messages || []).slice(0, 20).map(async (item) => {
+      try {
+        const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}`);
+        url.searchParams.set('format', 'metadata');
+        url.searchParams.append('metadataHeaders', 'From');
+        url.searchParams.append('metadataHeaders', 'Subject');
+        url.searchParams.append('metadataHeaders', 'Date');
+        const response = await fetch(url, { headers, signal: AbortSignal.timeout(12000) });
+        if (!response.ok) return null;
+        const message = await response.json();
+        const messageHeaders = message.payload?.headers || [];
+        const header = (name) => String(messageHeaders.find((value) => String(value.name).toLowerCase() === name.toLowerCase())?.value || '').slice(0, 500);
+        const timestamp = Number(message.internalDate) || 0;
+        return { id: String(message.id || '').slice(0, 200), from: header('From'), subject: header('Subject') || '(no subject)', date: timestamp ? new Date(timestamp).toISOString() : header('Date'), snippet: String(message.snippet || '').slice(0, 500), unread: (message.labelIds || []).includes('UNREAD') };
+      } catch { return null; }
+    }));
+    res.json({ email: connection.email, messages: messages.filter(Boolean) });
+  } catch {
+    res.status(502).json({ error: 'Gmail is temporarily unavailable. Try refreshing.' });
+  }
+});
+
+app.post('/api/admin/gmail/disconnect', requireOwner, async (req, res) => {
+  let connection;
+  try { connection = readGmailMonitorConnection(req.user.id); }
+  catch { return res.status(503).json({ error: 'Gmail connection storage needs attention' }); }
+  if (!connection?.refreshToken) return res.json({ ok: true, connected: false });
+  let revokeResponse;
+  try {
+    revokeResponse = await fetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token: connection.refreshToken }), signal: AbortSignal.timeout(12000),
+    });
+  } catch {
+    return res.status(502).json({ error: 'Could not reach Google to revoke access. The connection remains active.' });
+  }
+  if (!revokeResponse.ok) return res.status(502).json({ error: 'Google did not confirm token revocation. The connection remains active.' });
+  try {
+    writeGmailMonitorConnection(req.user.id, { email: connection.email, refreshToken: '', disconnectedAt: new Date().toISOString(), ownerUserId: req.user.id });
+    res.json({ ok: true, connected: false });
+  } catch {
+    res.status(503).json({ error: 'Google revoked Gmail access, but HaksterAI could not update its saved connection status.' });
+  }
+});
+
 app.get('/api/auth/me', (req, res) => {
   const user = getUserByApiKey(req);
   if (!user) return res.status(401).json({ error: 'Invalid or missing API key' });
@@ -6570,7 +6774,8 @@ app.get('/api/auth/me', (req, res) => {
       id: user.id,
       username: user.username,
       email: user.email,
-      role: user.role,
+      role: isOwnerUser(user) ? 'admin' : (user.role || 'user'),
+      is_owner: isOwnerUser(user),
       plan: user.plan,
       status: user.status,
       referralCode,
@@ -6584,7 +6789,7 @@ app.get('/api/auth/authorize-page', (req, res) => {
   if (page === 'dashboard') {
     const user = getUserByApiKey(req);
     if (!user) return res.status(401).json({ ok: false, redirect: '/' });
-    if (user.role !== 'admin' && !isOwnerEmail(user.email)) return res.status(403).json({ ok: false, redirect: '/portal' });
+    if (!isOwnerUser(user)) return res.status(403).json({ ok: false, redirect: '/build' });
     if (user.role !== 'admin' && isOwnerEmail(user.email)) {
       try {
         getDb().prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE id = ?').run('admin', 'enterprise', user.id);
@@ -6595,6 +6800,8 @@ app.get('/api/auth/authorize-page', (req, res) => {
 });
 
 // Redirect to Google OAuth consent screen
+const miniforgeSsoTickets = new Map();
+
 app.get('/api/auth/google/redirect', (req, res) => {
   if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Google OAuth not configured' });
   // Use a canonical redirect URI — strip www, always use same proto/host
@@ -6604,7 +6811,8 @@ app.get('/api/auth/google/redirect', (req, res) => {
   if (host.startsWith('www.')) host = host.slice(4);
   const port = (host === 'localhost' || host === '127.0.0.1') ? `:${req.socket.localPort}` : '';
   const redirectUri = `${proto}://${host}${port}/api/auth/google/callback`;
-  const state = makeOAuthState(req.query.ref || req.query.referral || '');
+  const returnTo = safeMiniforgeReturnTo(req.query.returnTo);
+  const state = makeOAuthState(req.query.ref || req.query.referral || '', returnTo);
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: redirectUri,
@@ -6620,12 +6828,14 @@ app.get('/api/auth/google/redirect', (req, res) => {
 // Google OAuth callback
 app.get('/api/auth/google/callback', async (req, res) => {
   const { code, error } = req.query;
-  if (error) return res.redirect(`/build?google_error=${encodeURIComponent(error)}`);
-  if (!code) return res.redirect('/build?google_error=no_code');
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.redirect('/build?google_error=not_configured');
+  const oauthState = parseOAuthState(req.query.state);
+  const returnTo = safeMiniforgeReturnTo(oauthState.returnTo);
+  const googleErrorRedirect = (reason) => res.redirect(`${returnTo || '/build'}?google_error=${encodeURIComponent(reason)}`);
+  if (error) return googleErrorRedirect(error);
+  if (!code) return googleErrorRedirect('no_code');
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return googleErrorRedirect('not_configured');
 
   try {
-    const oauthState = parseOAuthState(req.query.state);
     const referralCode = normalizeReferralCode(oauthState.ref);
     const proto = req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http');
     let host = req.hostname || 'localhost';
@@ -6648,7 +6858,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
     if (!tokenRes.ok) {
       const errBody = await tokenRes.text();
       console.error('Google token exchange failed:', errBody);
-      return res.redirect(`/build?google_error=token_exchange_failed`);
+      return googleErrorRedirect('token_exchange_failed');
     }
     const tokens = await tokenRes.json();
     // Non-breaking side effect: save tokens for clipper YouTube uploads
@@ -6663,14 +6873,15 @@ app.get('/api/auth/google/callback', async (req, res) => {
       } catch (e) { /* best-effort, never breaks haksterAi auth */ }
     }
     const idToken = tokens.id_token;
-    if (!idToken) return res.redirect('/build?google_error=no_id_token');
+    if (!idToken) return googleErrorRedirect('no_id_token');
 
     // Verify the ID token
     const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
-    if (!verifyRes.ok) return res.redirect('/build?google_error=invalid_token');
+    if (!verifyRes.ok) return googleErrorRedirect('invalid_token');
     const payload = await verifyRes.json();
-    if (payload.aud !== GOOGLE_CLIENT_ID) return res.redirect('/build?google_error=audience_mismatch');
-    if (payload.exp && parseInt(payload.exp) < Math.floor(Date.now() / 1000)) return res.redirect('/build?google_error=expired_token');
+    if (payload.aud !== GOOGLE_CLIENT_ID) return googleErrorRedirect('audience_mismatch');
+    if (payload.email_verified !== true && payload.email_verified !== 'true') return googleErrorRedirect('email_not_verified');
+    if (payload.exp && parseInt(payload.exp) < Math.floor(Date.now() / 1000)) return googleErrorRedirect('expired_token');
 
     const googleId = payload.sub;
     const email = payload.email || '';
@@ -6733,6 +6944,23 @@ app.get('/api/auth/google/callback', async (req, res) => {
       source: 'auth',
     });
 
+    if (returnTo) {
+      const now = Date.now();
+      for (const [ticket, record] of miniforgeSsoTickets) if (record.expiresAt <= now) miniforgeSsoTickets.delete(ticket);
+      const ticket = crypto.randomBytes(32).toString('base64url');
+      miniforgeSsoTickets.set(ticket, {
+        userId: user.id,
+        email: user.email,
+        username: user.username,
+        displayName,
+        apiKey: user.api_key,
+        plan: user.plan || 'free',
+        status: user.status || 'active',
+        expiresAt: now + 90_000,
+      });
+      return res.redirect(`${returnTo}?hakster_sso=${encodeURIComponent(ticket)}`);
+    }
+
     // Encode user data into redirect URL for frontend to pick up
     const userData = encodeURIComponent(JSON.stringify({
       ok: true,
@@ -6748,8 +6976,17 @@ app.get('/api/auth/google/callback', async (req, res) => {
     }
   } catch (err) {
     console.error('Google OAuth callback error:', err);
-    res.redirect(`/build?google_error=${encodeURIComponent(err.message || 'unknown')}`);
+    googleErrorRedirect('callback_failed');
   }
+});
+
+app.post('/api/auth/miniforge/exchange', (req, res) => {
+  const ticket = String(req.body?.ticket || '');
+  const record = miniforgeSsoTickets.get(ticket);
+  miniforgeSsoTickets.delete(ticket);
+  if (!record || record.expiresAt <= Date.now()) return res.status(401).json({ error: 'Google sign-in ticket expired or already used' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ user: { id: record.userId, email: record.email, username: record.username, displayName: record.displayName, plan: record.plan, status: record.status }, apiKey: record.apiKey });
 });
 
 // ── Usage tracking & limits ───────────────────────────────────────
@@ -6813,6 +7050,8 @@ app.get('/api/usage', (req, res) => {
     used: user.usage_count || 0,
     limit: user.plan === 'free' ? FREE_USAGE_LIMIT : -1, // -1 = unlimited
     remaining: user.plan === 'free' ? Math.max(0, FREE_USAGE_LIMIT - (user.usage_count || 0)) : -1,
+    webResearchUsed: isUnlimitedWebResearchUser(user) ? 0 : getFreeWebResearchUses(user),
+    webResearchRemaining: isUnlimitedWebResearchUser(user) ? -1 : Math.max(0, FREE_WEB_RESEARCH_LIMIT - getFreeWebResearchUses(user)),
     tokenBalance: user.token_balance || 0,
     tokenUsage: {
       requests: tokenUsage.requests || 0,
@@ -6936,32 +7175,62 @@ function findOrCreateTelegramUser(tgUser, req) {
   return { user, wasSignup, displayName, picture: tgUser.photo_url || '' };
 }
 
-function telegramAuthResponse(res, tgUser, req) {
+function telegramAuthResponse(res, tgUser, req, rawReferralCode) {
   if (!tgUser || !tgUser.id) return res.status(401).json({ ok: false, error: 'Invalid Telegram auth data' });
   const { user, wasSignup, displayName, picture } = findOrCreateTelegramUser(tgUser, req);
+  if (wasSignup && !isOwnerUser(user)) {
+    let referred = null;
+    try { referred = applyReferralCredit(getDb(), user, rawReferralCode); } catch (e) { console.warn('[referral] telegram credit failed:', e.message); }
+    if (referred) notifPush(`🎁 Referral credit: ${displayName} signed up via referral ${referred.referralCode}`, { type: 'referral', priority: 'normal', source: 'auth' });
+  }
   notifPush(`👤 ${wasSignup ? 'New user' : 'Login'} via Telegram: ${displayName}`, { type: wasSignup ? 'user_signup' : 'user_login', priority: wasSignup ? 'high' : 'normal', source: 'auth' });
+  const db = getDb();
+  try { ensureReferralCode(db, user); } catch (_) {}
   res.json({
     ok: true,
     isNewUser: wasSignup,
-    user: { id: user.id, username: user.username, displayName, name: displayName, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
+    user: { id: user.id, username: user.username, displayName, name: displayName, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code || user.referralCode, tokenBalance: user.token_balance || 0 },
     apiKey: user.api_key,
   });
 }
 
 // POST /api/auth/telegram/webapp  { initData }  — Mini App auto-login
 app.post('/api/auth/telegram/webapp', (req, res) => {
-  const { initData } = req.body || {};
+  const { initData, ref } = req.body || {};
   if (!initData) return res.status(400).json({ ok: false, error: 'initData required' });
   const tgUser = verifyTelegramWebAppData(initData);
   if (!tgUser) return res.status(401).json({ ok: false, error: 'Invalid or expired Telegram WebApp data' });
-  telegramAuthResponse(res, tgUser, req);
+  telegramAuthResponse(res, tgUser, req, ref);
 });
 
 // POST /api/auth/telegram/widget  — Telegram Login Widget callback (landing page button)
 app.post('/api/auth/telegram/widget', (req, res) => {
-  const verified = verifyTelegramLoginWidget(req.body || {});
+  const body = req.body || {};
+  const verified = verifyTelegramLoginWidget(body);
   if (!verified) return res.status(401).json({ ok: false, error: 'Invalid Telegram login data' });
-  telegramAuthResponse(res, verified, req);
+  telegramAuthResponse(res, verified, req, body.ref || body.referral || body.referralCode);
+});
+// ── Owner-insight: referral program overview (admin dashboards) ──
+app.get('/api/admin/referrals', requireOwner, (_req, res) => {
+  const db = getDb();
+  const totals = db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(reward_tokens),0) as tokens_payout FROM referrals WHERE status = 'credited'`).get();
+  const top = db.prepare(`
+    SELECT u.id, u.username, u.email, COUNT(r.id) as referrals,
+           COALESCE(SUM(r.reward_tokens),0) as earned
+      FROM referrals r JOIN users u ON u.id = r.referrer_user_id
+     WHERE r.status = 'credited'
+     GROUP BY r.referrer_user_id
+     ORDER BY referrals DESC LIMIT 10`).all();
+  const recent = db.prepare(`
+    SELECT r.created_at, r.referral_code, r.reward_tokens, r.referred_tokens,
+           ru.username as referred_name, ru.email as referred_email,
+           ou.username as referrer_name, ou.email as referrer_email
+      FROM referrals r
+      LEFT JOIN users ru ON ru.id = r.referred_user_id
+      LEFT JOIN users ou ON ou.id = r.referrer_user_id
+     ORDER BY r.created_at DESC LIMIT 25`).all();
+  const withCode = db.prepare(`SELECT COUNT(*) as c FROM users WHERE referral_code IS NOT NULL AND referral_code != ''`).get().c;
+  res.json({ totals, top, recent, usersWithCode: withCode, rewardTokens: REFERRAL_REWARD_TOKENS, signupTokens: REFERRAL_SIGNUP_TOKENS });
 });
 
 app.post('/api/auth/google', async (req, res) => {
@@ -7081,7 +7350,7 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-app.get('/api/access-logs', requireAdmin, (req, res) => {
+app.get('/api/access-logs', requireOwner, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
   const offset = parseInt(req.query.offset) || 0;
@@ -7100,7 +7369,7 @@ app.get('/api/access-logs', requireAdmin, (req, res) => {
   res.json({ logs, total, limit, offset });
 });
 
-app.get('/api/api-key-audit', requireAdmin, (req, res) => {
+app.get('/api/api-key-audit', requireOwner, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
   const offset = parseInt(req.query.offset) || 0;
@@ -7110,7 +7379,7 @@ app.get('/api/api-key-audit', requireAdmin, (req, res) => {
   res.json({ logs, total, limit, offset });
 });
 
-app.get('/api/requests', (req, res) => {
+app.get('/api/requests', requireOwner, (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
   const offset = parseInt(req.query.offset) || 0;
@@ -7180,6 +7449,73 @@ app.get('/outputs/images/:file', (req, res, next) => {
 });
 app.use('/outputs', express.static(outputsPath));
 
+// Public Miniforge Chat 2 surface. Keep the Miniforge APIs behind a narrow
+// user-facing allowlist; every other API remains owner-only.
+app.use('/miniforge', (req, res, next) => {
+  const upstreamPath = req.originalUrl.replace(/^\/miniforge(?=\/|\?|$)/, '') || '/';
+  const pathname = new URL(upstreamPath, 'http://miniforge.local').pathname;
+  const method = req.method.toUpperCase();
+  const publicStatic = ['GET', 'HEAD'].includes(method)
+    && (/^\/app\/?$/.test(pathname)
+      || /^\/app\/(?:manifest\.webmanifest|miniforge-sw\.js|icons\/haksterai-(?:192|512)\.png)$/.test(pathname)
+      || /^\/img\/[a-zA-Z0-9_./-]+$/.test(pathname));
+  const publicRoutes = [
+    ['GET', /^\/api\/(apps|categories|stats|skills|memory-clusters)$/],
+    ['GET', /^\/api\/skills\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/],
+    ['GET', /^\/api\/apps\/[a-zA-Z0-9_-]+$/],
+    ['GET', /^\/api\/apps\/[a-zA-Z0-9_-]+\/config-status$/],
+    ['GET', /^\/api\/apps\/[a-zA-Z0-9_-]+\/conversations$/],
+    ['GET', /^\/api\/apps\/[a-zA-Z0-9_-]+\/memory$/],
+    ['GET', /^\/api\/user\/apps$/],
+    ['POST', /^\/api\/auth\/(register|login)$/],
+    ['POST', /^\/api\/auth\/hakster-google$/],
+    ['GET', /^\/api\/auth\/me$/],
+    ['POST', /^\/api\/apps\/[a-zA-Z0-9_-]+\/chat(\/stream)?$/],
+    ['POST', /^\/api\/apps\/[a-zA-Z0-9_-]+\/(image|rate)$/],
+    ['POST', /^\/api\/apps\/[a-zA-Z0-9_-]+\/memory(\/auto-learn)?$/],
+    ['DELETE', /^\/api\/apps\/[a-zA-Z0-9_-]+\/memory$/],
+    ['POST', /^\/api\/memory-clusters\/\d+\/apply\/[a-zA-Z0-9_-]+$/],
+  ].some(([allowedMethod, pattern]) => method === allowedMethod && pattern.test(pathname));
+  const publicRoute = publicStatic || publicRoutes;
+
+  const forward = async () => {
+    try {
+      const forwardHeaders = {
+        'content-type': req.get('content-type') || 'application/json',
+        accept: req.get('accept') || '*/*',
+      };
+      for (const name of ['authorization', 'x-api-key', 'cookie', 'last-event-id']) {
+        const value = req.get(name);
+        if (value) forwardHeaders[name] = value;
+      }
+      const upstream = await fetch(`http://127.0.0.1:5555${upstreamPath}`, {
+        method,
+        headers: forwardHeaders,
+        body: ['GET', 'HEAD'].includes(method) ? undefined
+          : (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)
+            ? JSON.stringify(req.body) : req),
+        duplex: ['GET', 'HEAD'].includes(method) || (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) ? undefined : 'half',
+        signal: AbortSignal.timeout(120000),
+      });
+      res.status(upstream.status);
+      upstream.headers.forEach((value, key) => {
+        if (!['transfer-encoding', 'connection', 'content-length', 'content-encoding', 'access-control-allow-origin'].includes(key.toLowerCase())) res.setHeader(key, value);
+      });
+      if (method === 'HEAD') return res.end();
+      return Readable.fromWeb(upstream.body).pipe(res);
+    } catch (error) {
+      console.error('[miniforge-proxy] upstream request failed:', error.message);
+      return res.status(502).json({ error: 'Miniforge is temporarily unavailable' });
+    }
+  };
+
+  if (['GET', 'HEAD'].includes(method) && (pathname === '/' || pathname === '/index.html')) {
+    return res.sendFile(path.join(__dirname, '../../dist/miniforge/index.html'));
+  }
+  if (publicRoute) return forward();
+  return requireOwner(req, res, forward);
+});
+
 // /chat is the chat entry point. This route is registered before the static
 // handler, so it wins over the built dist/chat/index.html - it used to send
 // everyone to /terminal (the owner/admin shell), which is why following a Chat
@@ -7190,6 +7526,34 @@ app.get(['/chat', '/chat/'], (req, res) => {
 
 // ── Serve Astro static build ──────────────────────────────────────
 const distPath = path.join(__dirname, '../../dist');
+// Serve the standalone HakTerm UI under its admin path. Public API requests
+// require an owner API key; the HTML bootstrap obtains it from the signed-in app.
+app.use('/hakterm', (req, res, next) => {
+  const upstreamPath = req.originalUrl.replace(/^\/hakterm/, '') || '/';
+  const publicAsset = ['GET', 'HEAD'].includes(req.method) &&
+    (req.path === '/' || req.path === '/index.html' || req.path === '/assets/hakterm-hacker-bg.png');
+  const forward = async () => {
+    try {
+      const upstream = await fetch(`http://127.0.0.1:8100${upstreamPath}`, {
+        method: req.method,
+        headers: { 'content-type': req.get('content-type') || 'application/json' },
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body ?? {}),
+      });
+      res.status(upstream.status);
+      upstream.headers.forEach((value, key) => {
+        if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) res.setHeader(key, value);
+      });
+      if (req.method === 'HEAD') return res.end();
+      Readable.fromWeb(upstream.body).pipe(res);
+    } catch (error) {
+      console.error('[hakterm-proxy] local HakTerm request failed:', error.message);
+      res.status(502).json({ error: 'HakTerm is temporarily unavailable' });
+    }
+  };
+  if (publicAsset) return forward();
+  return requireOwner(req, res, forward);
+});
+
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   // SPA fallback: try page-specific index.html first, then root index.html
@@ -7327,13 +7691,15 @@ ptyWss.on('connection', (ws, req) => {
   let userName = 'Ghost';
   let userEmail = '';
   let userHandle = '';
+  let ptyUser = null;
   try {
     const url = new URL(req.url || '/pty', 'http://localhost');
     const apiKey = url.searchParams.get('key');
     if (apiKey) {
       const db = getDb();
-      const u = db.prepare('SELECT username, email FROM users WHERE api_key = ?').get(apiKey);
+      const u = db.prepare('SELECT username, email, role FROM users WHERE api_key = ?').get(apiKey);
       if (u) {
+        ptyUser = u;
         userName = u.username || 'Ghost';
         userEmail = u.email || '';
         userHandle = '@' + userName;
@@ -7341,6 +7707,18 @@ ptyWss.on('connection', (ws, req) => {
       }
     }
   } catch (e) { console.log('[pty] user lookup error:', e.message); }
+
+  // ── Owner-only terminal gate ──
+  // Public tunnel traffic carries X-Forwarded-For; direct localhost callers
+  // (local TUI/dashboard) do not. Anonymous or non-owner tunnel connections
+  // are rejected before any shell is spawned.
+  const ptyFromTunnel = Boolean(req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip']);
+  if (!isOwnerUser(ptyUser) && ptyFromTunnel) {
+    console.warn(`[pty] rejected non-owner connection (key=${ptyUser ? 'valid-user' : 'none'})`);
+    try { ws.send(JSON.stringify({ type: 'error', error: 'Owner access required. Terminal is restricted to owner emails.' })); } catch {}
+    try { ws.close(); } catch {}
+    return;
+  }
 
   // Kill any existing crush process before spawning a new one
   // to prevent "read only database" errors from concurrent SQLite access
@@ -7449,15 +7827,6 @@ ptyWss.on('connection', (ws, req) => {
       }
     } catch (e) { console.log('[pty] MCP top config sync error:', e.message); }
     fs.writeFileSync(crushTopConfigPath, JSON.stringify(crushTop, null, 2));
-
-    // Force the active model to the user's selected provider/model — overrides any
-    // stale selection stuck in recent_models (e.g. gpt-5.6-sol/openai that pops the
-    // charm-cloud auth wall instead of using the dell/parrot ollama brain).
-    const activeModel = { model: hakCfg.model || 'glm-5.2:cloud', provider: hakCfg.provider || 'ollama' };
-    const recentModel = [activeModel];
-    crushCfg.recent_models = { large: recentModel, small: recentModel };
-    crushConf.recent_models = { large: recentModel, small: recentModel };
-    crushTop.recent_models = { large: recentModel, small: recentModel };
 
     // Write CRUSH.md context file so crush knows who the user is and what machine they're on
     try {
@@ -7681,7 +8050,7 @@ initWebMcp();
 function startServer(delay = 2000) {
  const MAX_DELAY = 30000; // cap at 30s between retries
 
-  server.listen(PORT, process.env.BIND_HOST || '127.0.0.1', () => {
+  server.listen(PORT, () => {
     console.log(`\n  ╔══════════════════════════════════════════╗`);
     console.log(`  ║  haksterAi server v1.0                   ║`);
     console.log(`  ║  http://localhost:${String(PORT).padEnd(5)}                ║`);

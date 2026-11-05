@@ -17,10 +17,8 @@
       "tier": 1
     },
     "filesystem": {
-      "command": "npx",
+      "command": "mcp-server-filesystem",
       "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
         "/home/ghost",
         "/tmp"
       ],
@@ -28,38 +26,36 @@
       "tier": 1
     },
     "sequential-thinking": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-sequential-thinking"
-      ],
+      "command": "mcp-server-sequential-thinking",
+      "args": [],
       "env": {},
       "tier": 1
     },
     "memory": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-memory"
-      ],
+      "command": "mcp-server-memory",
+      "args": [],
       "env": {},
       "tier": 1
     },
     "playwright": {
-      "command": "npx",
+      "command": "playwright-mcp",
       "args": [
-        "-y",
-        "@playwright/mcp@latest",
         "--browser",
-        "chromium"
+        "chromium",
+        "--executable-path",
+        "/home/ghost/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome",
+        "--no-sandbox"
       ],
-      "env": {},
-      "tier": 1
+      "env": {
+        "PLAYWRIGHT_BROWSERS_PATH": "/home/ghost/.cache/ms-playwright"
+      },
+      "tier": 2,
+      "initTimeoutMs": 60000
     },
     "nmap": {
       "command": "node",
       "args": [
-        "/usr/lib/node_modules/@ebowwa/mcp-nmap/dist/index.js"
+        "/home/ghost/.npm-global/lib/node_modules/@ebowwa/mcp-nmap/dist/index.js"
       ],
       "env": {
         "PATH": "/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -67,10 +63,8 @@
       "tier": 2
     },
     "sqlite": {
-      "command": "npx",
+      "command": "mcp-server-sqlite-npx",
       "args": [
-        "-y",
-        "mcp-server-sqlite-npx",
         "/home/ghost/haksterAi/data/mcp.db"
       ],
       "env": {},
@@ -92,7 +86,9 @@
         "--context",
         "desktop-app",
         "--project",
-        "/home/ghost/haksterAi"
+        "/home/ghost/haksterAi",
+        "--open-web-dashboard",
+        "false"
       ],
       "env": {},
       "tier": 2
@@ -109,10 +105,8 @@
       "tier": 3
     },
     "codex": {
-      "command": "/home/ghost/.npm-global/bin/codex",
-      "args": [
-        "mcp-server"
-      ],
+      "command": "node",
+      "args": ["/home/ghost/haksterAi/server/src/agent/codex-mcp-bridge.js"],
       "env": {},
       "tier": 3
     },
@@ -143,7 +137,7 @@
       "tier": 3
     },
     "bounty-platforms": {
-      "command": "/home/ghost/.hakster/venvs/mcp-pentest/bin/python",
+      "command": "/home/ghost/.hakster/venvs/mcp-pentest-ready/bin/python",
       "args": [
         "/home/ghost/haksterAi/pentest-agents/mcp-bounty-server/server.py"
       ],
@@ -151,7 +145,7 @@
       "tier": 3
     },
     "writeup-search": {
-      "command": "/home/ghost/.hakster/venvs/mcp-pentest/bin/python",
+      "command": "/home/ghost/.hakster/venvs/mcp-pentest-ready/bin/python",
       "args": [
         "/home/ghost/haksterAi/pentest-agents/mcp-writeup-server/server.py"
       ],

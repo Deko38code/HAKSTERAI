@@ -1417,19 +1417,23 @@ function QueueBox({ items = [], cols = 80 }) {
 import React11, { useState as useState5, useEffect as useEffect2 } from "react";
 import { Text as Text11 } from "ink";
 import { jsxs as jsxs11 } from "react/jsx-runtime";
-var FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
-var FRAMES_DOTS = ["\u28FE", "\u28FD", "\u28FB", "\u28BF", "\u287F", "\u28DF", "\u28EF", "\u28F7"];
-function Spinner({ type = "braille", label = "", color = "yellow" }) {
+var FRAMES = ["❄", "✦", "✧", "✶", "✧", "✦"];
+var FRAMES_DOTS = ["❅", "❄", "✧", "❄", "❅"];
+var SPINNER_COLORS = ["#58a6ff", "#80bfff", "#a8d5ff", "#c084fc", "#a8d5ff", "#80bfff"];
+function Spinner({ type = "braille", label = "", color }) {
   const [frame, setFrame] = useState5(0);
   const frames = type === "dots" ? FRAMES_DOTS : FRAMES;
   useEffect2(() => {
-    const id = setInterval(() => setFrame((f) => (f + 1) % frames.length), 80);
+    const id = setInterval(() => setFrame((f) => (f + 1) % frames.length), 140);
     return () => clearInterval(id);
   }, [frames.length]);
-  return /* @__PURE__ */ jsxs11(Text11, { color, children: [
+  const spinnerColor = color || SPINNER_COLORS[frame % SPINNER_COLORS.length];
+  return /* @__PURE__ */ jsxs11(Text11, { color: spinnerColor, bold: true, children: [
+    "⟦",
     frames[frame],
-    " ",
-    label
+    "⟧",
+    " ✧",
+    label ? ` ${label}` : ""
   ] });
 }
 
@@ -1469,55 +1473,69 @@ function SplashScreen({ onDone, version = "0.1.0" }) {
 import React13, { useState as useState7, useEffect as useEffect4, useRef } from "react";
 import { Box as Box12, Text as Text13 } from "ink";
 import { jsx as jsx12, jsxs as jsxs13 } from "react/jsx-runtime";
+function scrambleReveal(text, revealCount, frame) {
+  return String(text || "").split("").map((ch, index) => {
+    if (index < revealCount || !/[A-Za-z0-9]/.test(ch)) return ch;
+    if (/[A-Za-z]/.test(ch)) {
+      const alphabet = ch === ch.toUpperCase() ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" : "abcdefghijklmnopqrstuvwxyz";
+      const seed = (Math.imul(index + frame + 1, 2654435761) + ch.charCodeAt(0) * 101) >>> 0;
+      let replacement = alphabet[seed % alphabet.length];
+      if (replacement === ch) replacement = alphabet[(seed + 13) % alphabet.length];
+      return replacement;
+    }
+    return String.fromCharCode(48 + (Math.imul(index + frame, 40503) >>> 0) % 10);
+  }).join("");
+}
+
 function ThinkingBox({ thinking = "", phase = "", cols = 80, theme }) {
-  const [offset, setOffset] = useState7(0);
-  const [dots, setDots] = useState7(0);
-  const textRef = useRef("");
+  const [frame, setFrame] = useState7(0);
+  const [elapsedMs, setElapsedMs] = useState7(0);
+  const startedAt = useRef(0);
+  const rawPhase = String(phase || "THINK").toUpperCase();
+  const active = Boolean(thinking) || ["THINK", "PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE"].includes(rawPhase);
   useEffect4(() => {
-    textRef.current = thinking ? thinking.trim() : "";
-    setOffset(0);
-  }, [thinking]);
-  useEffect4(() => {
-    if (!textRef.current) return;
+    if (!active) return;
+    startedAt.current = Date.now();
+    setElapsedMs(0);
     const id = setInterval(() => {
-      setOffset((o) => {
-        const textLen = textRef.current.length;
-        const maxOffset = textLen + 20;
-        return o >= maxOffset ? 0 : o + 1;
-      });
+      setFrame((value) => value + 1);
+      setElapsedMs(Date.now() - startedAt.current);
     }, 120);
     return () => clearInterval(id);
-  }, [thinking]);
-  useEffect4(() => {
-    if (!phase) return;
-    const id = setInterval(() => setDots((d) => (d + 1) % 4), 400);
-    return () => clearInterval(id);
-  }, [phase]);
-  if (!thinking && !phase) return null;
-  const fullText = textRef.current;
-  const availWidth = Math.max(0, cols - 22);
-  let viewport = "";
-  if (fullText) {
-    const padded = "   " + fullText + "   ";
-    if (padded.length <= availWidth) {
-      viewport = padded.trim();
-    } else {
-      let window = "";
-      for (let i = 0; i < availWidth; i++) {
-        const idx = (offset + i) % padded.length;
-        window += padded[idx];
-      }
-      viewport = window;
-    }
-  }
-  const phaseLabel = phase ? ` ${phase}${".".repeat(dots)}` : "";
-  const accentColor = theme?.accent || theme?.primary || "cyan";
+  }, [active]);
+  const normalizedPhase = thinking && ["IDLE", "DONE"].includes(rawPhase) ? "THINK" : rawPhase;
+  const phases = {
+    THINK: { color: "#58a6ff", emoji: "🧠", phrases: ["Thinking through the problem…", "Reasoning carefully…", "Analyzing the request…", "Connecting concepts…"] },
+    PLAN: { color: "#c084fc", emoji: "📋", phrases: ["Formulating a plan…", "Mapping out steps…", "Structuring the approach…"] },
+    ACT: { color: "#3fb950", emoji: "⚡", phrases: ["Executing command…", "Running tool…", "Taking action…"] },
+    OBSERVE: { color: "#39c5cf", emoji: "👁", phrases: ["Observing output…", "Reading results…", "Checking response…"] },
+    REFLECT: { color: "#d29922", emoji: "🪞", phrases: ["Assessing the outcome…", "Learning from this step…"] },
+    CONSOLIDATE: { color: "#ffd700", emoji: "📦", phrases: ["Consolidating findings…", "Compiling the answer…", "Putting it all together…"] },
+    DEFAULT: { color: "#58a6ff", emoji: "◇", phrases: ["Working on it…", "Processing…", "Hold tight…"] },
+  };
+  const info = phases[normalizedPhase] || phases.DEFAULT;
+  const palette = ["#33aaff", "#57b7ff", "#75c5ff", "#a1d7ff", "#75c5ff", "#57b7ff"];
+  const color = elapsedMs < 5000 ? "#3fb950" : elapsedMs < 15000 ? "#d29922" : "#f85149";
+  const phrase = thinking.trim() || info.phrases[Math.floor(frame / 30) % info.phrases.length];
+  const width = Math.max(12, cols - 38);
+  const visiblePhrase = phrase.length > width ? `${phrase.slice(0, width - 1)}…` : phrase;
+  // HakTerm's scramble reveal: preserve punctuation/spacing, cycle letters and
+  // digits in the unrevealed tail, then reveal the phrase from left to right.
+  const reveal = Math.floor(visiblePhrase.length * Math.min(1, (frame % 30) / 22));
+  const scrambledPhrase = scrambleReveal(visiblePhrase, reveal, frame);
+  const seconds = Math.floor(elapsedMs / 1000);
+  const time = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
+  const sparkle = ["❅", "❄", "✧", "❄", "❅"];
+  const shimmer = [0, 1, 2].map((offset) => sparkle[(frame + offset) % sparkle.length]).join("");
+  if (!active) return null;
   return /* @__PURE__ */ jsxs13(Box12, { flexDirection: "row", alignItems: "center", children: [
-    /* @__PURE__ */ jsx12(Box12, { marginRight: 1, children: /* @__PURE__ */ jsx12(Spinner, {}) }),
-    /* @__PURE__ */ jsx12(Text13, { color: accentColor, bold: true, children: "\u27E1" }),
-    /* @__PURE__ */ jsx12(Text13, { color: "gray", dim: true, children: " thinking" }),
-    /* @__PURE__ */ jsx12(Text13, { color: accentColor, children: phaseLabel ? ` ${phaseLabel}` : "" }),
-    /* @__PURE__ */ jsx12(Box12, { flexGrow: 1, marginLeft: 1, overflow: "hidden", children: /* @__PURE__ */ jsx12(Text13, { color: "gray", wrap: "truncate", children: viewport }) })
+    /* @__PURE__ */ jsxs13(Text13, { color: color, bold: true, children: ["⟦", FRAMES[frame % FRAMES.length], "⟧"] }),
+    /* @__PURE__ */ jsx12(Text13, { children: " " }),
+    /* @__PURE__ */ jsx12(Text13, { children: info.emoji }),
+    /* @__PURE__ */ jsx12(Text13, { color: info.color, bold: true, children: ` ${normalizedPhase}` }),
+    /* @__PURE__ */ jsx12(Text13, { color: "#a5b4c3", wrap: "truncate", children: ` ${scrambledPhrase}` }),
+    /* @__PURE__ */ jsx12(Text13, { color: palette[frame % palette.length], children: ` ${shimmer}` }),
+    /* @__PURE__ */ jsx12(Text13, { color: "gray", children: ` ${time}` })
   ] });
 }
 
@@ -1865,12 +1883,16 @@ function App() {
     output.length - newerBelow
   );
   const liveTextRef = useRef3("");
+  const liveRevealRef = useRef3(0);
+  const liveScrambleFrameRef = useRef3(0);
   const liveThinkRef = useRef3("");
   const [, forceTick] = useState9(0);
   const flushTokens = useCallback(() => {
     const b = batchRef.current;
     if (!b.text) return;
     liveTextRef.current += b.text;
+    liveRevealRef.current = Math.min(liveTextRef.current.length, liveRevealRef.current + Math.max(1, Math.floor(b.text.length / 3)));
+    liveScrambleFrameRef.current++;
     b.text = "";
     b.timer = null;
     forceTick((n) => n + 1);
@@ -1889,6 +1911,8 @@ function App() {
         setOutput((prev) => [...prev, { type: "assistant", text: parts[i] }].slice(-MAX_OUTPUT));
       }
       liveTextRef.current = parts[parts.length - 1];
+      liveRevealRef.current = 0;
+      liveScrambleFrameRef.current++;
       forceTick((n) => n + 1);
       return;
     }
@@ -2320,7 +2344,7 @@ function App() {
         }
         return /* @__PURE__ */ jsx16(Text17, { color: "white", children: line.text }, i);
       }),
-      _working && liveTextRef.current && /* @__PURE__ */ jsx16(Text17, { color: blink ? theme.accent : theme.primary, bold: true, children: liveTextRef.current }),
+      _working && liveTextRef.current && /* @__PURE__ */ jsx16(Text17, { color: blink ? theme.accent : theme.primary, bold: true, children: scrambleReveal(liveTextRef.current, liveRevealRef.current, liveScrambleFrameRef.current) }),
       thinking && liveThinkRef.current && /* @__PURE__ */ jsxs17(Text17, { color: blink ? theme.secondary : theme.primary, dim: true, children: [
         "  ",
         liveThinkRef.current

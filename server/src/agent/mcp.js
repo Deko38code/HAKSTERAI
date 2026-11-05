@@ -143,20 +143,23 @@ function resolveGhostHome() {
 }
 const GHOST_HOME = resolveGhostHome();
 
+function addUserToolPaths(env) {
+  const fallback = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+  const rootBunPath = '/root/.bun/bin';
+  const entries = (env.PATH || fallback).split(path.delimiter).filter(Boolean)
+    .filter(entry => entry !== rootBunPath || GHOST_HOME === '/root');
+  const homePaths = [path.join(GHOST_HOME, '.bun', 'bin'), path.join(GHOST_HOME, '.local', 'bin'), path.join(GHOST_HOME, '.npm-global', 'bin')];
+  for (const dir of homePaths) {
+    if (fs.existsSync(dir) && !entries.includes(dir)) entries.unshift(dir);
+  }
+  env.PATH = [...new Set(entries)].join(path.delimiter);
+}
+
 function connectServer(serverName, config) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, ...(config.env || {}) };
     env.HOME = GHOST_HOME;
-    // Ensure bun is in PATH for MCP servers that need it
-    if (!env.PATH?.includes('/root/.bun/bin')) {
-      env.PATH = `/root/.bun/bin:${env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}`;
-    }
-    // Ensure ~/.local/bin is in PATH — uv/uvx (serena and friends) install there,
-    // and it's not always on the parent process's PATH depending on how the server was launched.
-    const localBin = path.join(GHOST_HOME, '.local', 'bin');
-    if (!env.PATH?.includes(localBin)) {
-      env.PATH = `${localBin}:${env.PATH}`;
-    }
+    addUserToolPaths(env);
 
     const child = spawn(config.command, config.args || [], {
       env,
@@ -309,13 +312,7 @@ function probeServerTools(name, config) {
   return new Promise((resolve) => {
     const env = { ...process.env, ...(config.env || {}) };
     env.HOME = GHOST_HOME;
-    if (!env.PATH?.includes('/root/.bun/bin')) {
-      env.PATH = `/root/.bun/bin:${env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}`;
-    }
-    const localBin = path.join(GHOST_HOME, '.local', 'bin');
-    if (!env.PATH?.includes(localBin)) {
-      env.PATH = `${localBin}:${env.PATH}`;
-    }
+    addUserToolPaths(env);
 
     let child;
     try {
@@ -707,13 +704,7 @@ function testServerConfig(name, config, timeoutMs) {
     const start = Date.now();
     const env = { ...process.env, ...(config.env || {}) };
     env.HOME = GHOST_HOME;
-    if (!env.PATH?.includes('/root/.bun/bin')) {
-      env.PATH = `/root/.bun/bin:${env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}`;
-    }
-    const localBin = path.join(GHOST_HOME, '.local', 'bin');
-    if (!env.PATH?.includes(localBin)) {
-      env.PATH = `${localBin}:${env.PATH}`;
-    }
+    addUserToolPaths(env);
 
     let child;
     try {

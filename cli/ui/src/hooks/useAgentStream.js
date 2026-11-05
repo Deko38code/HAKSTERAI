@@ -271,9 +271,26 @@ export function useAgentStream({
                   name,
                   args: evt.tool_args || {},
                   result: null,
+                  mcp: name.startsWith('mcp__'),
                 },
               ],
             }));
+            break;
+          }
+
+          case 'mcp_result': {
+            const result = String(evt.data == null ? '' : evt.data);
+            patch(assistantId, (m) => {
+              const tools = m.tools.slice();
+              let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
+              if (idx === -1) {
+                for (let i = tools.length - 1; i >= 0; i--) {
+                  if (tools[i].mcp && tools[i].result === null) { idx = i; break; }
+                }
+              }
+              if (idx !== -1) tools[idx] = { ...tools[idx], result, mcp: true };
+              return { ...m, tools };
+            });
             break;
           }
 

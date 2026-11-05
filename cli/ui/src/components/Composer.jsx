@@ -48,8 +48,9 @@ export default function Composer({
         </text>
         {focused && !disabled ? (
           <input
+            style={{ width: Math.max(1, inner - 2), flexGrow: 1, flexShrink: 1 }}
             value={value}
-            placeholder={disabled ? 'working…' : placeholder}
+            placeholder={placeholder}
             onInput={onChange}
             onSubmit={(text) => {
               if (typeof onSubmit === 'function') onSubmit(text);

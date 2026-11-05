@@ -21,20 +21,20 @@ const https = require('https');
 // License check — must pass before anything else runs
 const { checkLicense } = require('../server/src/license');
 async function _haksterLicenseGate() {
-  const lic = await checkLicense(true); // allowTrial = true
+  const lic = await checkLicense(false); // paid plans only; owner agent entrypoint is separate
   if (!lic.valid) {
     console.error('\n' + lic.message + '\n');
     process.exit(1);
   }
   if (lic.message) console.log(lic.message + '\n');
 }
-// Run gate before CLI starts (non-blocking for --help/--version)
+// Setup/help commands stay available so a paid customer can add their API key.
+// Every agent, chat, and model operation still requires an active paid plan.
 const _rawArgs = process.argv.slice(2);
-if (_rawArgs.includes('--help') || _rawArgs.includes('-h') || _rawArgs.includes('--version') || _rawArgs.includes('-V')) {
-  // Allow help/version without license
-} else {
-  _haksterLicenseGate().catch((e) => { console.error('License check failed:', e.message); process.exit(1); });
-}
+const _firstCommand = _rawArgs.find((arg) => !arg.startsWith('-')) || '';
+const _setupOnlyCommand = _firstCommand === 'init' || _firstCommand === 'config' || _firstCommand === 'help';
+const _helpOrVersion = _rawArgs.includes('--help') || _rawArgs.includes('-h') || _rawArgs.includes('--version') || _rawArgs.includes('-V');
+const _skipLicenseGate = _helpOrVersion || _setupOnlyCommand;
 
 const pkg = require('./package.json');
 const { showIntro, C: logoC } = require('./logo');
@@ -71,8 +71,9 @@ try {
   autolearn = { autoInit() { return ''; } };
 }
 
-// Show intro on every launch (skip for TUI mode — Ink manages the screen)
-if (!process.argv.includes('ui')) {
+// Show intro on normal CLI launches; UI/TUI render their own full-screen startup.
+const _isTerminalUi = process.argv.some((arg) => arg === 'ui' || arg === 'tui');
+if (!_isTerminalUi && process.env.HAKSTER_SUPPRESS_INTRO !== '1') {
   showIntro(pkg.version);
 }
 
@@ -96,8 +97,10 @@ function loadConfig() {
 }
 
 function saveConfig(cfg) {
-  if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
+  if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(CONFIG_DIR, 0o700); } catch {}
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(CONFIG_FILE, 0o600); } catch {}
   console.log(`Config saved to ${CONFIG_FILE}`);
 }
 
@@ -1478,9 +1481,14 @@ program
         };
         const startSpinner = (phase, activity) => {
           if (!useSpinner) return;
-          stopSpinner();
-          spinner = ui.thinkingAnimation(opts.model || '', phase || 'THINK');
-          setSpinnerActivity(activity || `agent ${String(phase || 'THINK').toLowerCase()}`);
+          const nextPhase = phase || 'THINK';
+          if (!spinner) {
+            spinner = ui.thinkingAnimation(opts.model || '', nextPhase, todoState.startTime);
+          } else if (typeof spinner.updatePhase === 'function') {
+            spinner.updatePhase(nextPhase);
+            if (typeof spinner.rebase === 'function') spinner.rebase(todoState.startTime);
+          }
+          setSpinnerActivity(activity || `agent ${String(nextPhase).toLowerCase()}`);
         };
 
         res.on('data', (chunk) => {
@@ -1496,6 +1504,7 @@ program
 
               if (evt.type === 'delta') {
                 stopSpinner();
+                if (process.stdout.isTTY) process.stdout.write('\n');
                 process.stdout.write(evt.content);
                 fullResponse += evt.content;
               }
@@ -1518,11 +1527,9 @@ program
               }
               else if (evt.type === 'thinking_end') {
                 // Don't print anything — spinner already showed latest phrase in 1 line
-                stopSpinner();
                 isThinking = false;
               }
               else if (evt.type === 'tool_call_start') {
-                stopSpinner();
                 toolCount++;
                 const tname = evt.tool_name || 'unknown';
                 const args = evt.tool_args || {};
@@ -1534,8 +1541,8 @@ program
                 const _tocId = sessionToolSeq;
                 sessionToolLog.push({ id: _tocId, callId: evt.tool_call_id || null, name: tname, argStr: argStr.trim(), status: 'running', preview: '', ms: 0, startedAt: Date.now() });
                 showTodo({ totalTools: toolCount, activeTool: tname, status: 'active' });
-                startSpinner('ACT', `running ${tname}`);
-                process.stdout.write(`\n${C.gray}  ↳ ${C.bold}#${_tocId}${C.reset} ${C.cyan}${tname}${C.reset}${C.gray}${argStr}${C.reset}`);
+                startSpinner('ACT', `${tname}${args.command ? ` · ${String(args.command).slice(0, 52)}` : ''}`);
+                process.stdout.write(`\n${C.gray}  ↳ ${C.bold}#${_tocId}${C.reset} ${C.cyan}${tname}${C.reset}${C.gray}${argStr}${C.reset}\n`);
                 // ── Plan grid: parse steps when plan(action=write) fires ──────
                 if (tname === 'plan' && args.action === 'write' && args.content) {
                   const rawSteps = String(args.content).split('\n')
@@ -1551,13 +1558,15 @@ program
               else if (evt.type === 'tool_call_result') {
                 const tname = evt.tool_name || '';
                 const result = (evt.tool_result || '').toString();
-                const preview = result.slice(0, 500).replace(/\n/g, ' ');
+                const preview = result.slice(0, 500).replace(/\s+/g, ' ').trim();
                 const dur = todoState._toolStart ? Date.now() - todoState._toolStart : 0;
                 if (dur > 0) gridToolTimes.push(dur);
                 if (gridToolTimes.length > 20) gridToolTimes.shift();
                 todoState._toolStart = null;
                 showTodo({ completedTools: Math.max(todoState.completedTools, toolCount), activeTool: tname || todoState.activeTool, avgToolTime: _avg(gridToolTimes) });
-                startSpinner('OBSERVE', `checking ${tname || 'tool'} result`);
+                stopSpinner();
+                startSpinner('OBSERVE', `received ${tname || 'tool'} output`);
+                stopSpinner();
                 // ── Table of contents: close out the matching entry (by tool_call_id, else newest running w/ same name) ──
                 let _tocEntry = evt.tool_call_id ? sessionToolLog.find(e => e.callId === evt.tool_call_id) : null;
                 if (!_tocEntry) {
@@ -1571,6 +1580,7 @@ program
                   _tocEntry.preview = preview;
                   _tocEntry.ms = dur;
                 }
+                if (spinner) spinner.stop();
                 process.stdout.write(`\n${C.gray}  ↳ ${C.green}✓${C.reset}${_tocId ? ` ${C.bold}#${_tocId}${C.reset}` : ''} ${C.gray}${preview}${result.length > 500 ? '...' : ''}${C.reset}\n`);
                 // ── Plan grid: show plan as read back from server ──────────────
                 if (tname === 'plan' && planState.steps.length === 0 && result.includes('\n')) {
@@ -1584,18 +1594,19 @@ program
                 }
               }
               else if (evt.type === 'tool_use' || evt.type === 'tool_call') {
-                stopSpinner();
                 toolCount++;
                 const tname = evt.tool || evt.tool_name || evt.name || 'unknown';
                 showTodo({ totalTools: toolCount, activeTool: tname, status: 'active' });
-                startSpinner('ACT', `calling ${tname}`);
+                startSpinner('ACT', `running ${tname}`);
                 process.stdout.write(`\n${C.gray}  ↳ [tool ${toolCount}] ${C.cyan}${tname}${C.reset}\n`);
               }
               else if (evt.type === 'tool_result') {
                 const result = (evt.result || evt.tool_result || '').toString();
-                const preview = result.slice(0, 500).replace(/\n/g, ' ');
+                const preview = result.slice(0, 500).replace(/\s+/g, ' ').trim();
                 showTodo({ completedTools: Math.max(todoState.completedTools, toolCount) });
-                startSpinner('OBSERVE', 'reading tool output');
+                stopSpinner();
+                startSpinner('OBSERVE', 'received tool output');
+                stopSpinner();
                 process.stdout.write(`${C.gray}  ↳ ${C.green}✓${C.reset} ${C.gray}${preview}${result.length > 500 ? '...' : ''}${C.reset}\n`);
               }
               else if (evt.type === 'file_created') {
@@ -2551,7 +2562,10 @@ program
       const args = [__filename, 'chat'];
       if (opts.model) args.push('--model', opts.model);
       if (opts.provider) args.push('--provider', opts.provider);
-      const child = spawn(process.execPath, args, { stdio: 'inherit' });
+      const child = spawn(process.execPath, args, {
+        stdio: 'inherit',
+        env: { ...process.env, HAKSTER_SUPPRESS_INTRO: '1' },
+      });
       child.on('exit', (code) => process.exit(code || 0));
     } catch (err) {
       console.error(`Failed to resume: ${err.message}`);
@@ -2591,5 +2605,8 @@ if (process.argv.length <= 2) {
   process.argv.push('chat');
 }
 
-// License gate is checked at top of file before program.parse
-program.parse();
+// Do not dispatch a command until the paid-license check has completed.
+if (_skipLicenseGate) program.parse();
+else _haksterLicenseGate()
+  .then(() => program.parse())
+  .catch((e) => { console.error('License check failed:', e.message); process.exit(1); });

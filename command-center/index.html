@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hakster Command Center</title>
+<style>
+  :root {
+    --bg: #0a0e14; --panel: #11161f; --panel2: #0d1117; --border: #1e2836;
+    --green: #00ff9c; --green-dim: #00cc7d; --cyan: #22d3ee; --text: #c9d4e3;
+    --muted: #5b6b7f; --red: #ff4d6d; --yellow: #ffd166;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; min-height: 100vh; padding-bottom: 80px; }
+  a { color: var(--cyan); text-decoration: none; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
+
+  header { border-bottom: 1px solid var(--border); padding: 22px 0 16px; background: linear-gradient(180deg, #0c1220 0%, var(--bg) 100%); }
+  header h1 { font-size: 22px; color: var(--green); letter-spacing: 2px; text-transform: uppercase; }
+  header h1 .cursor { animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  header .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  .toolbar { display: flex; gap: 10px; margin: 18px 0; flex-wrap: wrap; align-items: center; }
+  .toolbar input[type=search] { flex: 1; min-width: 220px; background: var(--panel2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; font-family: inherit; font-size: 13px; border-radius: 6px; outline: none; }
+  .toolbar input[type=search]:focus { border-color: var(--green-dim); }
+  select { background: var(--panel2); border: 1px solid var(--border); color: var(--text); padding: 10px 8px; font-family: inherit; font-size: 12px; border-radius: 6px; }
+  .tabbtn { background: var(--panel2); border: 1px solid var(--border); color: var(--muted); padding: 8px 14px; font-family: inherit; font-size: 12px; cursor: pointer; border-radius: 6px; text-transform: uppercase; letter-spacing: 1px; }
+  .tabbtn.active { color: var(--green); border-color: var(--green-dim); background: #06251a; }
+
+  .stats { display: flex; gap: 16px; font-size: 11px; color: var(--muted); margin-bottom: 14px; flex-wrap: wrap; }
+  .stats b { color: var(--cyan); }
+  .security-terminal { background: #080d12; border: 1px solid #184333; border-radius: 8px; margin: 18px 0 22px; overflow: hidden; }
+  .security-terminal header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: #0a1513; }
+  .security-terminal h2 { color: var(--green); font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase; }
+  .security-terminal .term-status { color: var(--muted); font-size: 10px; margin-top: 4px; }
+  .security-terminal button { background: #06251a; color: var(--green); border: 1px solid var(--green-dim); border-radius: 5px; padding: 7px 10px; font: inherit; font-size: 10px; cursor: pointer; }
+  .security-events { max-height: 340px; overflow: auto; }
+  .security-event { display: grid; grid-template-columns: 150px 105px minmax(150px, 1fr); gap: 8px 14px; padding: 10px 14px; border-bottom: 1px solid #141d26; font-size: 10px; }
+  .security-event:last-child { border-bottom: 0; }
+  .security-event time, .security-event .event-id { color: var(--muted); }
+  .security-event .event-type { color: var(--cyan); text-transform: uppercase; }
+  .security-event .event-meta { color: var(--text); overflow-wrap: anywhere; }
+  .security-event .event-detail { grid-column: 2 / -1; color: #8494a7; overflow-wrap: anywhere; }
+  @media (max-width: 620px) { .security-event { grid-template-columns: 1fr 1fr; } .security-event .event-meta { grid-column: 1 / -1; } .security-event .event-detail { grid-column: 1 / -1; } }
+
+  h2.group { font-size: 14px; color: var(--cyan); margin: 26px 0 10px; text-transform: uppercase; letter-spacing: 1.5px; border-left: 3px solid var(--green); padding-left: 10px; }
+  h2.group .cnt { color: var(--muted); font-size: 11px; }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .card .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .card .title { font-size: 13px; color: #e6edf6; font-weight: 700; }
+  .card .meta { font-size: 10px; color: var(--muted); margin: 3px 0 8px; }
+  .card .meta .box { color: var(--green); }
+  .card .cmdbox { position: relative; background: #05080d; border: 1px solid var(--border); border-radius: 6px; padding: 10px 84px 10px 12px; overflow-x: auto; }
+  .card pre { font-size: 12px; line-height: 1.55; white-space: pre; color: var(--green); font-family: inherit; }
+  .copybtn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: #06251a; color: var(--green); border: 1px solid var(--green-dim); border-radius: 5px; padding: 6px 12px; cursor: pointer; font-family: inherit; font-size: 11px; letter-spacing: 1px; white-space: nowrap; }
+  .copybtn:hover { background: var(--green); color: #000; }
+  .copybtn.done { background: var(--green); color: #000; }
+
+  .mem .card pre { color: var(--text); white-space: pre-wrap; }
+  .mem .card .title { color: var(--yellow); }
+
+  form.add { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  form.add h3 { color: var(--green); font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+  form.add input, form.add textarea { width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text); font-family: inherit; font-size: 12px; padding: 9px 10px; border-radius: 6px; margin-bottom: 10px; outline: none; }
+  form.add textarea { min-height: 70px; resize: vertical; }
+  form.add button { background: var(--green); color: #000; border: none; padding: 10px 18px; font-family: inherit; font-weight: 700; font-size: 12px; border-radius: 6px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; }
+  form.add button:hover { background: var(--green-dim); }
+  #addStatus { font-size: 11px; margin-left: 10px; }
+
+  .empty { color: var(--muted); font-size: 12px; padding: 30px; text-align: center; }
+  .hidden { display: none; }
+  footer { text-align: center; color: var(--muted); font-size: 10px; margin-top: 40px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>Hakster Command Center<span class="cursor">_</span></h1>
+    <div class="sub">Every command to run every server — mint + parrot + phantom + cinevault + hakster mcp + bypasses. Copy-paste ready.</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="toolbar">
+    <input type="search" id="q" placeholder="search commands… (e.g. phantom, pm2, bypass, ollama)">
+    <select id="boxFilter">
+      <option value="">all boxes</option>
+      <option value="mint">mint</option>
+      <option value="parrot">parrot</option>
+      <option value="session">session-added</option>
+    </select>
+    <select id="srcFilter"><option value="">all sources</option></select>
+    <button class="tabbtn active" data-tab="stack" onclick="setTab('stack')">Core Stack</button>
+    <button class="tabbtn" data-tab="all" onclick="setTab('all')">All Commands</button>
+    <button class="tabbtn" data-tab="mem" onclick="setTab('mem')">Memories</button>
+    <button class="tabbtn" data-tab="add" onclick="setTab('add')">+ Add</button>
+  </div>
+  <div class="stats" id="stats"></div>
+
+  <section class="security-terminal" aria-labelledby="security-title">
+    <header>
+      <div><h2 id="security-title">Security Terminal · Shared Ads</h2><div class="term-status" id="securityStatus" role="status">Loading shared ad activity…</div></div>
+      <button type="button" id="securityRefresh">REFRESH</button>
+    </header>
+    <div class="security-events" id="securityEvents" aria-live="polite"><div class="empty">Loading events…</div></div>
+  </section>
+
+  <div id="tab-add" class="hidden">
+    <form class="add" id="addForm">
+      <h3>Add command (auto-indexes new session commands)</h3>
+      <input id="addTitle" placeholder="Title — what it does" maxlength="120">
+      <input id="addSection" placeholder="Category (e.g. CineVault, Phantom, Bypass, Parrot)" maxlength="80">
+      <textarea id="addCmd" placeholder="The command (multi-line ok)"></textarea>
+      <button type="submit">Add to Command Center</button><span id="addStatus"></span>
+    </form>
+  </div>
+
+  <div id="tab-stack"></div>
+  <div id="tab-all" class="hidden"></div>
+  <div id="tab-mem" class="hidden"></div>
+
+  <footer>command center · haksterai.com · regenerated from ~/haksterai.md, ~/SCRIPTS.md, ~/phantom-knowledge.md + parrot box MDs</footer>
+</div>
+
+<script>
+function authHeaders() { const t = localStorage.getItem('hakster_google_token'); return t ? { 'x-api-key': t } : {}; }
+
+// ── Owner gate: Command Center is owner-emails-only ──
+if (!authHeaders()['x-api-key']) { window.location.replace('/'); }
+else setTimeout(async function() {
+  try {
+    const me = await (await fetch('/api/auth/me', { headers: authHeaders() })).json();
+    if (!me?.user?.is_owner) window.location.replace('/build');
+  } catch (_) { window.location.replace('/'); }
+}, 300);
+
+let DATA = { stack: [], commands: [], memories: [], user: [] };
+let TAB = 'stack';
+
+async function load() {
+  try {
+    const r = await fetch('/api/commands', { headers: authHeaders() });
+    DATA = await r.json();
+  } catch (e) {
+    document.getElementById('stats').textContent = 'failed to load /api/commands — ' + e;
+    return;
+  }
+  const srcs = [...new Set(DATA.commands.map(c => c.source))];
+  const sf = document.getElementById('srcFilter');
+  for (const s of srcs) {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s.slice(0, 44);
+    sf.appendChild(o);
+  }
+  render();
+}
+
+function setTab(t) {
+  TAB = t;
+  document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  for (const id of ['stack', 'all', 'mem', 'add']) {
+    document.getElementById('tab-' + id).classList.toggle('hidden', id !== t);
+  }
+  render();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function matches(c, q, box, src) {
+  if (box && ((box === 'session') ? (c.source !== 'session-added') : (c.box !== box))) return false;
+  if (src && c.source !== src) return false;
+  if (!q) return true;
+  const hay = (c.title + ' ' + c.section + ' ' + c.cmd + ' ' + (c.source || '')).toLowerCase();
+  return q.split(/\s+/).every(t => hay.includes(t));
+}
+
+function cmdCard(c) {
+  const div = document.createElement('div');
+  div.className = 'card';
+  const meta = c.box ? `<span class="box">${esc(c.box)}</span> · ${esc(c.source || '')}${c.file ? ' · ' + esc(c.file) : ''} · ${esc(c.section || '')}`
+                     : `${esc(c.section || '')}`;
+  div.innerHTML = `<div class="row"><div class="title">${esc(c.title || '')}</div></div>
+    <div class="meta">${meta}</div>
+    <div class="cmdbox"><pre>${esc(c.cmd)}</pre><button class="copybtn">COPY</button></div>`;
+  div.querySelector('.copybtn').onclick = async (ev) => {
+    try { await navigator.clipboard.writeText(c.cmd); } catch (e) {
+      const ta = document.createElement('textarea'); ta.value = c.cmd; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy'); ta.remove();
+    }
+    const b = ev.target; b.textContent = 'COPIED ✓'; b.classList.add('done');
+    setTimeout(() => { b.textContent = 'COPY'; b.classList.remove('done'); }, 1400);
+  };
+  return div;
+}
+
+function groupCards(container, groups) {
+  for (const [name, cards] of groups) {
+    if (!cards.length) continue;
+    const h = document.createElement('h2');
+    h.className = 'group';
+    h.innerHTML = `${esc(name)} <span class="cnt">(${cards.length})</span>`;
+    container.appendChild(h);
+    for (const c of cards) container.appendChild(cmdCard(c));
+  }
+}
+
+function render() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const box = document.getElementById('boxFilter').value;
+  const src = document.getElementById('srcFilter').value;
+  const stats = document.getElementById('stats');
+
+  // Core Stack
+  const stackEl = document.getElementById('tab-stack');
+  stackEl.innerHTML = '';
+  const stackGroups = [];
+  for (const g of DATA.stack || []) {
+    const cards = g.commands.filter(c => matches({ ...c, box: 'mint' }, q, '', '')).map(c => ({ ...c, source: 'core stack', section: g.name }));
+    stackGroups.push([g.name, cards]);
+  }
+  groupCards(stackEl, stackGroups);
+  if (!stackGroups.some(([, c]) => c.length)) stackEl.innerHTML = '<div class="empty">no stack commands match</div>';
+
+  // All Commands
+  const allEl = document.getElementById('tab-all');
+  allEl.innerHTML = '';
+  const all = [...(DATA.user || []).map(c => ({ ...c, box: c.box || 'session', source: 'session-added' })), ...(DATA.commands || [])]
+    .filter(c => matches(c, q, box, src));
+  const byGroup = new Map();
+  for (const c of all) {
+    const key = c.file || c.source || 'other';
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key).push(c);
+  }
+  groupCards(allEl, byGroup);
+  if (!all.length) allEl.innerHTML = '<div class="empty">no commands match</div>';
+
+  // Memories
+  const memEl = document.getElementById('tab-mem');
+  memEl.innerHTML = '';
+  const mems = (DATA.memories || []).filter(m => !q || (m.title + ' ' + m.body).toLowerCase().includes(q));
+  if (mems.length) {
+    const h = document.createElement('h2'); h.className = 'group';
+    h.innerHTML = `Hermes + Claude Memories <span class="cnt">(${mems.length})</span>`;
+    memEl.appendChild(h);
+    for (const m of mems) {
+      const d = document.createElement('div');
+      d.className = 'card';
+      d.innerHTML = `<div class="row"><div class="title">${esc(m.title)}</div><div class="meta">${esc(m.source)}</div></div>
+        <div class="cmdbox"><pre>${esc(m.body)}</pre></div>`;
+      memEl.appendChild(d);
+    }
+  } else memEl.innerHTML = '<div class="empty">no memories match</div>';
+
+  stats.innerHTML = `<span><b>${(DATA.commands || []).length}</b> indexed commands</span>
+    <span><b>${(DATA.user || []).length}</b> session-added</span>
+    <span><b>${(DATA.memories || []).length}</b> memories</span>
+    <span><b>${(DATA.stack || []).reduce((n, g) => n + g.commands.length, 0)}</b> core stack</span>
+    <span>generated ${esc(DATA.generated || '')}</span>`;
+}
+
+async function loadSecurityEvents() {
+  const status = document.getElementById('securityStatus');
+  const list = document.getElementById('securityEvents');
+  try {
+    const response = await fetch('/api/commands/security-events', { headers: authHeaders() });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    const events = Array.isArray(payload.events) ? payload.events : [];
+    list.replaceChildren();
+    if (!events.length) {
+      const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'No sponsored ad events recorded yet.'; list.appendChild(empty);
+    }
+    for (const event of events) {
+      const row = document.createElement('article'); row.className = 'security-event';
+      const time = document.createElement('time'); time.dateTime = String(event.ts || '');
+      const parsed = new Date(event.ts || ''); time.textContent = Number.isNaN(parsed.getTime()) ? 'unknown time' : parsed.toLocaleString();
+      const type = document.createElement('span'); type.className = 'event-type'; type.textContent = String(event.type || 'event');
+      const meta = document.createElement('span'); meta.className = 'event-meta';
+      meta.textContent = `${event.site || 'shared'} · campaign ${event.campaign_id || 'unknown'} · slot ${Number.isInteger(event.slot) ? event.slot : 'feed'}`;
+      const id = document.createElement('span'); id.className = 'event-id'; id.textContent = `ID ${String(event.id || 'unknown')}`;
+      const detail = document.createElement('span'); detail.className = 'event-detail'; detail.textContent = String(event.detail || '');
+      row.append(time, type, meta, id, detail); list.appendChild(row);
+    }
+    status.textContent = `LIVE · ${events.length} recent events · auto-refreshes every 30s`;
+  } catch (error) {
+    status.textContent = `Feed unavailable · ${error.message}`;
+    list.replaceChildren();
+    const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'Could not load the shared Phantom ad event log.'; list.appendChild(empty);
+  }
+}
+
+document.getElementById('securityRefresh').addEventListener('click', loadSecurityEvents);
+setInterval(loadSecurityEvents, 30000);
+
+document.getElementById('q').addEventListener('input', render);
+document.getElementById('boxFilter').addEventListener('change', render);
+document.getElementById('srcFilter').addEventListener('change', render);
+
+document.getElementById('addForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const status = document.getElementById('addStatus');
+  const body = {
+    title: document.getElementById('addTitle').value.trim(),
+    section: document.getElementById('addSection').value.trim() || 'session-added',
+    cmd: document.getElementById('addCmd').value.trim(),
+  };
+  if (!body.cmd) { status.textContent = 'command required'; status.style.color = 'var(--red)'; return; }
+  try {
+    const r = await fetch('/api/commands', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    status.textContent = 'added ✓ — visible under All Commands → session-added'; status.style.color = 'var(--green)';
+    ev.target.reset();
+    await load();
+  } catch (e) {
+    status.textContent = 'failed: ' + e.message; status.style.color = 'var(--red)';
+  }
+});
+
+load();
+loadSecurityEvents();
+</script>
+</body>
+</html>

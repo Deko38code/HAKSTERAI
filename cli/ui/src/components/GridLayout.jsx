@@ -31,12 +31,12 @@ export function GridLayout({ items, availableWidth, getItemKey, renderItem, foot
   const isMultiColumn = columns > 1;
 
   return (
-    <box style={{ flexDirection: 'column', gap: isMultiColumn ? 1 : 0, width: '100%', marginTop }}>
+    <box style={{ flexDirection: 'column', gap: isMultiColumn ? 1 : 0, width: availableWidth, marginTop }}>
       <box
         style={{
           flexDirection: 'row',
           gap: isMultiColumn ? 1 : 0,
-          width: '100%',
+          width: availableWidth,
           alignItems: 'flex-start',
         }}
       >
@@ -57,7 +57,7 @@ export function GridLayout({ items, availableWidth, getItemKey, renderItem, foot
               }}
             >
               {columnItems.map((item, idx) => (
-                <box key={getItemKey(item)} style={{ width: '100%' }}>
+                <box key={getItemKey(item)} style={{ width: columnWidth }}>
                   {renderItem(item, idx, columnWidth)}
                 </box>
               ))}

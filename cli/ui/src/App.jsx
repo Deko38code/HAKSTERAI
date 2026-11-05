@@ -7,6 +7,7 @@ import Composer from './components/Composer.jsx';
 import GridLayout from './components/GridLayout.jsx';
 import GridPanel, { Cell, Meter, Spark } from './components/GridPanel.jsx';
 import StatusBar from './components/StatusBar.jsx';
+import CrushStatus from './components/CrushStatus.jsx';
 import TodoPanel from './components/TodoPanel.jsx';
 import Transcript from './components/Transcript.jsx';
 import useAgentStream from './hooks/useAgentStream.js';
@@ -14,6 +15,8 @@ import catalog from '../../src/models/catalog.js';
 import ads from '../../src/ads/ad-client.js';
 
 const API = process.env.HAKSTER_API_URL || 'http://localhost:3579';
+const MCP_OUTPUT_LINES = 4;
+const MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
 const SYSTEM = process.env.HAKSTER_TUI_SYSTEM
   || 'You are haksterAi running inside a terminal dashboard. Answer briefly and use tools when they are needed.';
 
@@ -51,6 +54,7 @@ export default function App({ version = '0.1.0' }) {
   const [status, setStatus] = useState(null);
   const [statusErr, setStatusErr] = useState(null);
   const [history, setHistory] = useState([]);
+  const [mcpOutputOffset, setMcpOutputOffset] = useState(0);
 
   const agent = useAgentStream({
     api: API,
@@ -98,6 +102,29 @@ export default function App({ version = '0.1.0' }) {
   // down below. The renderer runs every useKeyboard handler, so without the
   // stand-down a `y` meant for the prompt would also reach the shortcut switch.
   const approving = !!agent.pendingConfirm;
+  const showCrushStatus = view === 'chat' && agent.busy;
+  const activeAssistant = [...agent.messages].reverse().find((message) => message.role === 'assistant');
+  const activeTool = activeAssistant?.tools?.slice().reverse().find((tool) => tool.result === null);
+  const latestMcpTool = agent.messages
+    .filter((message) => message.role === 'assistant')
+    .flatMap((message) => message.tools || [])
+    .filter((tool) => tool.mcp || String(tool.name || '').startsWith('mcp__'))
+    .slice(-1)[0] || null;
+  const mcpOutputText = latestMcpTool?.result == null
+    ? 'Waiting for MCP server output…'
+    : String(latestMcpTool.result).replace(/\r/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  const mcpPanelWidth = Math.max(1, Math.max(40, Math.min((cols || 100) - 2, 140)) - 10);
+  const mcpOutputLines = mcpOutputText.split('\n').flatMap((line) => {
+    if (!line) return [' '];
+    const rows = [];
+    for (let i = 0; i < line.length; i += mcpPanelWidth) rows.push(line.slice(i, i + mcpPanelWidth));
+    return rows;
+  });
+  const mcpMaxOffset = Math.max(0, mcpOutputLines.length - MCP_OUTPUT_LINES);
+  const visibleMcpOutput = mcpOutputLines.slice(mcpOutputOffset, mcpOutputOffset + MCP_OUTPUT_LINES);
+  useEffect(() => { setMcpOutputOffset(0); }, [latestMcpTool?.id, latestMcpTool?.result]);
+  const crushPhase = activeAssistant?.phase
+    || (agent.status === 'thinking' ? 'THINK' : agent.status === 'connecting' ? 'PLAN' : 'ACT');
 
   const answerApproval = useCallback(
     (approved, opts) => {
@@ -157,6 +184,10 @@ export default function App({ version = '0.1.0' }) {
       setDockExpanded((v) => !v);
       return;
     }
+    if (key.ctrl && latestMcpTool && (key.name === 'up' || key.name === 'down')) {
+      setMcpOutputOffset((offset) => Math.max(0, Math.min(mcpMaxOffset, offset + (key.name === 'up' ? -1 : 1))));
+      return;
+    }
 
     switch (key.name) {
       case 'a':
@@ -189,7 +220,7 @@ export default function App({ version = '0.1.0' }) {
   // ── Row budget ────────────────────────────────────────────────────────────
   // header 1 · status bar 1 · composer 5 (border 2, input 1, inline ad 1, hint 1)
   // · rail 1 collapsed or 7 expanded · todos: border 2 + header 1 + rows + hint 1
-  const CHROME_ROWS = 1 + 1;
+  const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
   const composerRows = 5;
   const railRows = dockExpanded ? 7 : 1;
   const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 4 : 0;
@@ -197,7 +228,7 @@ export default function App({ version = '0.1.0' }) {
   const approvalRows = approving ? 6 : 0;
   const transcriptRows = Math.max(
     4,
-    (rows || 30) - CHROME_ROWS - composerRows - railRows - todoRows - approvalRows,
+    (rows || 30) - CHROME_ROWS - composerRows - railRows - todoRows - approvalRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0),
   );
 
   const dashboardItems = [
@@ -259,7 +290,7 @@ export default function App({ version = '0.1.0' }) {
               key={m.id}
               label={m.vendor}
               value={`${i === modelIdx ? '▸ ' : ''}${m.id}`}
-              w={Math.max(20, Math.floor((panelW - 4) / 2))}
+              w={Math.max(1, Math.floor((panelW - 6) / 2))}
               color={i === modelIdx ? 'yellow' : 'white'}
             />
           ))}
@@ -273,7 +304,7 @@ export default function App({ version = '0.1.0' }) {
             renderItem={(item, index, columnWidth) => (
               <GridPanel title={item.title} width={columnWidth} hint={item.hint}>
                 {item.cells.map((c) => (
-                  <Cell key={c.label} label={c.label} value={c.value} color={c.color} w={Math.max(14, Math.floor((columnWidth - 4) / 2))} />
+                  <Cell key={c.label} label={c.label} value={c.value} color={c.color} w={Math.max(1, Math.floor((columnWidth - 6) / 2))} />
                 ))}
               </GridPanel>
             )}
@@ -308,6 +339,32 @@ export default function App({ version = '0.1.0' }) {
               emptyHint="Type a task and the agent runs it with tools. Tab moves focus to the ad slot; esc stops a run."
             />
           </box>
+
+          {latestMcpTool ? (
+            <GridPanel
+              title={`MCP Output · ${String(latestMcpTool.name || '').split('__')[1] || 'server'}`}
+              width={panelW}
+              borderColor="magenta"
+              hint={`${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} · Ctrl+↑/↓`}
+            >
+              <box style={{ flexDirection: 'column', width: Math.max(1, panelW - 4) }}>
+                {visibleMcpOutput.map((line, index) => {
+                    return <text key={`mcp-output-${index}`} fg="white">{String(line || ' ')}</text>;
+                })}
+              </box>
+            </GridPanel>
+          ) : null}
+
+          {showCrushStatus ? (
+            <box style={{ flexShrink: 0 }}>
+              <CrushStatus
+                width={panelW}
+                phase={crushPhase}
+                activity={activeTool?.name || ''}
+                elapsedMs={agent.elapsedMs}
+              />
+            </box>
+          ) : null}
 
           <box style={{ flexShrink: 0 }}>
             <AdRailSlot

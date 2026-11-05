@@ -1,0 +1,844 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'haksterAi — Agentic CLI for Developers',
+  description = 'haksterAi is an AI-powered CLI that turns your terminal into an agentic engineering powerhouse.'
+} = Astro.props;
+
+const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname);
+const ownerAdminPage = Astro.url.pathname.replace(/\/+$/, '').startsWith('/admin');
+const haksterBuildId = new Date().toISOString();
+---
+
+<!doctype html>
+<html lang="en" data-admin-page={ownerAdminPage ? 'pending' : undefined} data-hakster-build={haksterBuildId}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png" />
+    <meta property="og:image" content="/haksterai-logo.png" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <title>{title}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/xterm.css" />
+    <meta name="haksterai-build" content={haksterBuildId} />
+    <style>
+      @keyframes hakterm-admin-pulse {
+        0%, 100% { box-shadow: 0 0 12px rgba(0, 255, 100, .20); border-color: rgba(0, 255, 136, .72); }
+        50% { box-shadow: 0 0 24px rgba(0, 255, 100, .52); border-color: rgba(126, 255, 179, .98); }
+      }
+      .hakterm-admin-link { animation: hakterm-admin-pulse 1.8s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) { .hakterm-admin-link { animation: none; } }
+      #admin-pin-gate[aria-hidden="false"] { display: grid !important; }
+      html[data-admin-page="pending"] body > :not(#admin-pin-gate),
+      html[data-admin-page="pin"] body > :not(#admin-pin-gate),
+      html[data-admin-page="locked"] body > :not(#admin-pin-gate) { visibility: hidden !important; }
+    </style>
+  </head>
+  <body>
+    <!-- Navbar -->
+    <header id="navbar" class="fixed top-0 left-0 right-0 z-50 border-b border-[#1e1e2e] bg-[#0a0a0f]/80 backdrop-blur-md transition-shadow duration-300">
+      <nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+
+        <!-- Logo -->
+        <a href="/" class="flex items-center gap-3 group">
+          <span class="text-[#e2e8f0] font-bold text-2xl md:text-3xl tracking-tight">hakster<span class="text-[#7c3aed]">Ai</span></span>
+        </a>
+
+        <!-- Desktop nav links -->
+        <div class="hidden md:flex items-center gap-2 bg-[#111118]/80 border border-[#1e1e2e] rounded-full px-2 py-1.5 backdrop-blur-sm">
+          <div id="admin-tools" data-owner-only="true" class="relative hidden items-center">
+            <button id="admin-tools-btn" type="button" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#fbbf24] hover:bg-[#fbbf24]/10 transition-all flex items-center gap-1.5" aria-expanded="false" aria-haspopup="true" aria-controls="admin-tools-menu">🔐 Admin <span class="text-[10px]">▾</span></button>
+            <div id="admin-tools-menu" class="hidden absolute right-0 top-[calc(100%+10px)] w-56 rounded-xl border border-[#fbbf24]/30 bg-[#111118] p-2 shadow-2xl z-[60]">
+              <a href="/labs" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🧪 Labs</a>
+              <a href="/portal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🌐 Portal</a>
+              <a href="/dashboard" data-admin-only="true" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">📊 Dashboard</a>
+              <a href="/admin/email" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">📧 Email Monitor</a>
+              <a href="/admin/skills" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🧠 Skills & Brain</a>
+              <a href="/hack" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">⚡ Hack Lab</a>
+              <a href="/terminal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">⌨️ Terminal</a>
+              <a href="/hakterm/" title="Open HakTerm" class="hakterm-admin-link group my-1 flex items-center gap-2 rounded-xl border border-[#00ff88]/80 bg-gradient-to-r from-[#064527] via-[#075333] to-[#064b3d] px-3 py-2.5 text-[#baffd6] shadow-[0_0_16px_rgba(0,255,100,0.28)] transition-all hover:-translate-y-0.5 hover:border-[#b5ffd2] hover:shadow-[0_0_25px_rgba(0,255,100,0.48)]">
+                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#00ff88]/60 bg-[#00ff88]/20 text-base text-[#24ff91]">⚡</span>
+                <span class="min-w-0 flex-1"><span class="block text-sm font-extrabold tracking-wide">HakTerm :8099</span><span class="block text-[9px] font-medium uppercase tracking-[0.14em] text-[#8fffc0]">Agent terminal</span></span>
+                <span class="rounded-md border border-[#00ff88]/45 bg-[#00ff88]/10 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[#a5ffca]">OPEN ↗</span>
+              </a>
+              <a href="/commands" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🎛️ Command Center</a>
+            </div>
+          </div>
+          <a href="/miniforge/" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5" title="Open Chat"><span>💬</span> Chat</a>
+        </div>
+
+        <!-- Desktop CTA + user badge + GitHub -->
+        <div class="hidden md:flex items-center gap-3">
+          <div id="nav-user-badge" class="hidden items-center gap-2.5 px-3 py-1.5 rounded-lg border border-[#1e1e2e] bg-[#111118]">
+            <div id="nav-user-avatar" class="w-7 h-7 rounded-full bg-[#7c3aed]/20 border border-[#7c3aed]/30 flex items-center justify-center text-xs font-bold text-[#a855f7]"></div>
+            <span id="nav-user-name" class="text-sm text-[#e2e8f0] font-medium max-w-[100px] truncate"></span>
+            <span id="nav-user-id" class="hidden rounded bg-[#7c3aed]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#c084fc]"></span>
+            <button id="nav-logout-btn" class="text-[#ef4444] hover:text-red-400 transition-colors text-xs" title="Sign out">⏻</button>
+          </div>
+          <div id="nav-signin-btn" class="hidden">
+            <a href="/api/auth/google" class="inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6d28d9] transition-colors">
+              <span>🔐</span> Sign In
+            </a>
+          </div>
+          <a
+            href="https://github.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-[#64748b] hover:text-[#e2e8f0] transition-colors"
+            aria-label="GitHub"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+            </svg>
+          </a>
+        </div>
+
+        <!-- Mobile hamburger + quick logout -->
+        <div class="md:hidden flex items-center gap-2">
+          <button id="mobile-logout-btn" class="hidden flex items-center justify-center w-9 h-9 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 text-[#ef4444] transition-colors hover:bg-[#ef4444]/20" aria-label="Sign out" title="Sign out">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+          </button>
+          <button
+            id="menu-btn"
+            class="md:hidden flex flex-col justify-center items-center w-9 h-9 gap-1.5 rounded-lg border border-[#1e1e2e] bg-[#111118] hover:border-[#7c3aed]/50 transition-colors"
+            aria-label="Toggle menu"
+            aria-expanded="false"
+          >
+          <span id="bar1" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300 origin-center"></span>
+          <span id="bar2" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300"></span>
+          <span id="bar3" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300 origin-center"></span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- Mobile menu (hidden by default) -->
+      <div
+      id="mobile-menu"
+      class="md:hidden hidden border-t border-[#1e1e2e] bg-[#0a0a0f]/95 backdrop-blur-md"
+      >
+      <div class="mx-auto max-w-6xl px-6 py-4 flex flex-col gap-4">
+        <div id="mobile-admin-tools" data-owner-only="true" class="hidden flex-col gap-2">
+          <button id="mobile-admin-tools-btn" type="button" class="w-full flex items-center justify-between rounded-lg border border-[#fbbf24]/30 bg-[#fbbf24]/5 px-3 py-2.5 text-sm font-semibold text-[#fbbf24]" aria-expanded="false" aria-controls="mobile-admin-tools-menu">🔐 Admin <span>▾</span></button>
+          <div id="mobile-admin-tools-menu" class="hidden flex-col gap-1 rounded-xl border border-[#fbbf24]/20 bg-[#111118]/80 p-2">
+            <a href="/labs" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🧪 Labs</a>
+            <a href="/portal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🌐 Portal</a>
+            <a href="/dashboard" data-admin-only="true" class="hidden rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">📊 Dashboard</a>
+            <a href="/admin/email" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">📧 Email Monitor</a>
+            <a href="/admin/skills" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🧠 Skills & Brain</a>
+            <a href="/hack" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">⚡ Hack Lab</a>
+            <a href="/terminal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">⌨️ Terminal</a>
+            <a href="/hakterm/" title="Open HakTerm" class="hakterm-admin-link flex items-center gap-3 rounded-xl border border-[#00ff88]/80 bg-gradient-to-r from-[#064527] via-[#075333] to-[#064b3d] px-3 py-2.5 text-sm font-bold text-[#baffd6] shadow-[0_0_16px_rgba(0,255,100,0.28)]">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#00ff88]/60 bg-[#00ff88]/20 text-lg text-[#24ff91]">⚡</span>
+              <span class="flex-1">HakTerm :8099 <span class="ml-1 text-[10px] font-medium uppercase tracking-wider text-[#8fffc0]">Agent terminal</span></span>
+              <span class="text-xs text-[#75ffbd]">↗</span>
+            </a>
+            <a href="/commands" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🎛️ Command Center</a>
+          </div>
+        </div>
+        <a href="/miniforge/" class="mobile-nav-link text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2" title="Open Chat"><span>💬</span> Chat</a>
+        <!-- Mobile user badge + logout -->
+        <div id="mobile-user-section" class="hidden pt-3">
+          <div class="flex items-center gap-2.5 px-1 pb-3 border-b border-[#1e1e2e]">
+            <div id="mobile-user-avatar" class="w-8 h-8 rounded-full bg-[#7c3aed]/20 border border-[#7c3aed]/30 flex items-center justify-center text-sm font-bold text-[#a855f7]"></div>
+            <div class="flex-1 min-w-0">
+              <div id="mobile-user-name" class="text-sm text-[#e2e8f0] font-medium truncate"></div>
+              <div id="mobile-user-email" class="text-xs text-[#64748b] truncate"></div>
+              <div id="mobile-user-id" class="text-[10px] font-bold text-[#a855f7] truncate"></div>
+            </div>
+          </div>
+          <button id="mobile-menu-logout" class="w-full mt-3 flex items-center justify-center gap-2 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 hover:bg-[#ef4444]/20 text-[#ef4444] text-sm font-semibold py-2.5 transition">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+            Sign Out
+          </button>
+        </div>
+        <div class="flex items-center gap-3 pt-2">
+          <a
+            href="https://github.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-[#64748b] hover:text-[#e2e8f0] transition-colors"
+            aria-label="GitHub"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    {showGlobalFullscreen && (
+      <button type="button" id="global-fullscreen-btn" class="global-fullscreen-btn" title="Fullscreen" aria-label="Fullscreen" aria-pressed="false">
+        <svg class="fullscreen-enter" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5"/>
+        </svg>
+        <svg class="fullscreen-exit" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6"/>
+        </svg>
+      </button>
+    )}
+
+    <!-- Page content -->
+    <main>
+      <slot />
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-[#1e1e2e] bg-[#0a0a0f] py-12 mt-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="flex items-center gap-2">
+            <span class="text-[#e2e8f0] font-bold">hakster<span class="text-[#7c3aed]">Ai</span></span>
+          </div>
+          <div class="flex items-center gap-6 text-sm text-[#64748b]">
+            <a href="/hack" data-owner-only="true" class="hidden hover:text-[#00ff88] transition-colors text-[#00ff88] font-semibold">⚡ Hack Lab</a>
+            <a href="/terminal" data-owner-only="true" class="hidden hover:text-[#a855f7] transition-colors">⌨️ Terminal</a>
+            <a href="/portal" data-owner-only="true" class="hidden hover:text-[#e2e8f0] transition-colors">🌐 Portal</a>
+            <a href="/miniforge/" class="hover:text-[#e2e8f0] transition-colors">💬 Chat</a>
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="hover:text-[#e2e8f0] transition-colors">GitHub</a>
+          </div>
+          <p class="text-xs text-[#64748b]">
+            © {new Date().getFullYear()} haksterAi. Built for the terminal.
+          </p>
+        </div>
+      </div>
+    </footer>
+
+    <div id="admin-pin-gate" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="admin-pin-title" style="display:none; position:fixed; inset:0; z-index:1000; place-items:center; padding:16px; background:rgba(0,0,0,.88);">
+      <section class="w-full max-w-xs rounded-2xl border border-amber-300/30 bg-[#111118] p-6 text-center text-white shadow-2xl">
+        <div id="admin-pin-title" class="text-lg font-bold text-amber-300">Admin PIN</div>
+        <p id="admin-pin-subtitle" class="mt-2 text-xs tracking-wider text-slate-400">ENTER PIN TO ACCESS ADMIN</p>
+        <div class="my-5 flex justify-center gap-2" aria-hidden="true">
+          <span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300"></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300"></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300"></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300"></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300"></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300"></span>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          {['1','2','3','4','5','6','7','8','9','clear','0','back'].map((key) => (
+            <button type="button" data-admin-pin-key={key} aria-label={key === 'clear' ? 'Clear PIN' : key === 'back' ? 'Delete last digit' : `Digit ${key}`} class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95">{key === 'clear' ? 'CLR' : key === 'back' ? '⌫' : key}</button>
+          ))}
+        </div>
+        <p id="admin-pin-error" class="mt-3 min-h-5 text-sm text-rose-400" role="status" aria-live="polite"></p>
+        <button type="button" data-admin-pin-close class="mt-2 rounded-lg px-4 py-2 text-sm text-slate-400 hover:bg-white/5">Cancel</button>
+      </section>
+    </div>
+
+    <aside id="haksterai-problem-toast" role="alert" aria-live="assertive" hidden style="position:fixed;right:18px;bottom:18px;z-index:2000;width:min(440px,calc(100vw - 36px));border:1px solid rgba(248,113,113,.45);border-radius:16px;background:#111118;color:#e2e8f0;box-shadow:0 12px 42px rgba(0,0,0,.55);padding:16px;font:14px/1.45 system-ui,sans-serif">
+      <div style="display:flex;align-items:center;gap:8px;color:#fca5a5;font-weight:800"><span aria-hidden="true">⚠</span><span>HaksterAI noticed a problem</span><button id="haksterai-problem-close" type="button" aria-label="Dismiss problem" style="margin-left:auto;background:transparent;color:#94a3b8;border:0;font-size:20px;cursor:pointer">×</button></div>
+      <p id="haksterai-problem-message" style="margin:10px 0;color:#cbd5e1;overflow-wrap:anywhere"></p>
+      <div style="display:flex;gap:8px"><button id="haksterai-problem-copy" type="button" style="border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:9px;padding:7px 11px;cursor:pointer">Copy</button><button id="haksterai-problem-popout" type="button" style="border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:9px;padding:7px 11px;cursor:pointer">Pop out</button></div>
+    </aside>
+    <aside id="haksterai-update-toast" role="status" aria-live="polite" hidden style="position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:1999;width:min(560px,calc(100vw - 28px));border:1px solid rgba(124,58,237,.55);border-radius:14px;background:#111118;color:#e2e8f0;box-shadow:0 12px 42px rgba(0,0,0,.5);padding:12px 14px;font:14px/1.45 system-ui,sans-serif">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:190px"><strong style="color:#c4b5fd">HaksterAI update ready</strong><br /><span style="color:#94a3b8;font-size:12px">A newer version is available.</span></span><button id="haksterai-update-now" type="button" style="border:0;background:#7c3aed;color:white;border-radius:9px;padding:8px 12px;font-weight:700;cursor:pointer">Update</button><button id="haksterai-update-later" type="button" style="border:1px solid #334155;background:#1e293b;color:#cbd5e1;border-radius:9px;padding:8px 12px;cursor:pointer">Later</button></div>
+    </aside>
+
+    <script is:inline>
+      (() => {
+        const problem = document.getElementById('haksterai-problem-toast');
+        const message = document.getElementById('haksterai-problem-message');
+        let lastProblem = '';
+        const showProblem = (value) => {
+          const text = String(value || 'An unexpected error occurred.').replace(/[\\r\\n\\t]+/g, ' ').slice(0, 900);
+          if (!problem || !message || !text || text === lastProblem) return;
+          lastProblem = text;
+          message.textContent = text;
+          problem.hidden = false;
+        };
+        window.addEventListener('error', (event) => showProblem(event.message || 'A page script failed to load.'));
+        window.addEventListener('unhandledrejection', (event) => showProblem(event.reason?.message || event.reason || 'A background request failed.'));
+        window.addEventListener('haksterai:problem', (event) => showProblem(event.detail?.message || event.detail));
+        document.getElementById('haksterai-problem-close')?.addEventListener('click', () => { problem.hidden = true; });
+        document.getElementById('haksterai-problem-copy')?.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(message.textContent || ''); } catch { showProblem('Clipboard access was blocked by this browser.'); }
+        });
+        document.getElementById('haksterai-problem-popout')?.addEventListener('click', () => {
+          const win = window.open('', '_blank');
+          if (!win) return showProblem('The browser blocked the pop-out window.');
+          win.opener = null;
+          const title = win.document.createElement('title'); title.textContent = 'HaksterAI problem details';
+          const heading = win.document.createElement('h1'); heading.textContent = 'HaksterAI noticed a problem';
+          const body = win.document.createElement('pre'); body.textContent = message.textContent || '';
+          win.document.head.append(title); win.document.body.append(heading, body);
+        });
+
+        const update = document.getElementById('haksterai-update-toast');
+        const currentBuild = document.documentElement.dataset.haksterBuild || '';
+        const laterKey = 'haksterai-update-later-until';
+        const checkUpdate = async () => {
+          if (!currentBuild || document.visibilityState !== 'visible') return;
+          try {
+            const url = new URL(location.pathname, location.origin);
+            url.searchParams.set('_hakster_version_check', String(Date.now()));
+            const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', headers: { 'x-hakster-version-check': '1' } });
+            if (!response.ok) return;
+            const html = await response.text();
+            const match = html.match(/<meta\s+name=["']haksterai-build["']\s+content=["']([^"']+)/i);
+            if (!match || match[1] === currentBuild) return;
+            const deferredUntil = Number(localStorage.getItem(laterKey) || 0);
+            if (Date.now() >= deferredUntil && update) update.hidden = false;
+          } catch { /* Offline checks are quiet; retry on the next interval. */ }
+        };
+        document.getElementById('haksterai-update-now')?.addEventListener('click', () => {
+          localStorage.removeItem(laterKey);
+          location.reload();
+        });
+        document.getElementById('haksterai-update-later')?.addEventListener('click', () => {
+          localStorage.setItem(laterKey, String(Date.now() + 30 * 60 * 1000));
+          if (update) update.hidden = true;
+        });
+        window.setTimeout(checkUpdate, 15000);
+        window.setInterval(checkUpdate, 120000);
+      })();
+    </script>
+
+    <script is:inline src="/js/session-timeout.js"></script>
+
+    <!-- Global JS: mobile menu + scroll shadow + smooth scroll + user badge + logout -->
+    <script>
+      // ── Auth gate: redirect to landing if not signed in ─────────
+      (function() {
+        const path = window.location.pathname;
+        if (path === '/') return;
+        // /admin pages stay visually concealed until the server verifies the owner.
+        if (path === '/admin' || path.startsWith('/admin/')) return;
+        const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
+        const authParam = new URLSearchParams(window.location.search).get('google_auth');
+        if (!token && !authParam) {
+          const returnTo = path === '/miniforge/' || path === '/miniforge' ? '/miniforge/' : path;
+          window.location.replace(`/?signin=1&redirect=${encodeURIComponent(returnTo)}`);
+          return;
+        }
+        if (path === '/dashboard' || path === '/dashboard/') {
+          if (!token) return;
+          fetch('/api/auth/authorize-page?page=dashboard', { headers: { 'x-api-key': token } })
+            .then(async (res) => {
+              if (res.ok) return;
+              let data = {};
+              try { data = await res.json(); } catch {}
+              window.location.href = data.redirect || '/';
+            })
+            .catch(() => { window.location.href = '/'; });
+        }
+        // Owner-only pages: Terminal, Hack Lab, Command Center. Signed-in
+        // non-owners land in the chat UI; anonymous users are already
+        // redirected above.
+        const ownerPaths = ['/terminal', '/hack', '/commands', '/cockpit', '/dashboard', '/labs', '/portal', '/hakterm'];
+        const normPath = path.replace(/\/+$/, '') || '/';
+        if (ownerPaths.includes(normPath)) {
+          if (!token) return; // auth gate above handled it
+          const apiBase = window.location.port === '4321' ? 'http://localhost:3579' : '';
+          fetch(apiBase + '/api/auth/me', { headers: { 'x-api-key': token } })
+            .then(async (res) => {
+              if (!res.ok) { window.location.href = '/'; return; }
+              const data = await res.json().catch(() => null);
+              if (!data?.user?.is_owner) window.location.href = '/miniforge/';
+            })
+            .catch(() => { window.location.href = '/'; });
+        }
+      })();
+
+      // ── Redirect protected nav links to Google sign-in if not logged in ─
+      (function() {
+        const API = window.location.port === '4321' ? 'http://localhost:3579' : '';
+        document.querySelectorAll('.requires-auth').forEach((link) => {
+          link.addEventListener('click', (e) => {
+            const token = localStorage.getItem('hakster_google_token');
+            if (token) return;
+            e.preventDefault();
+            const href = link.getAttribute('href');
+            sessionStorage.setItem('hakster_post_auth_redirect', href || '/dashboard');
+            window.location.href = `${API}/api/auth/google/redirect`;
+          });
+        });
+      })();
+
+      // ── Session ─────────────────────────────────────────────────
+      // Remember who is signed in across reloads and end the session after
+      // five minutes without activity.
+      const SESSION_IDLE_MS = 5 * 60 * 1000;
+      const ACTIVITY_KEY = 'hakster_last_activity';
+      const REMEMBER_KEY = 'hakster_remembered_user';
+
+      function isSignedIn() {
+        return !!(localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'));
+      }
+
+      function rememberUser() {
+        try {
+          const u = JSON.parse(localStorage.getItem('hakster_google_user')
+                    || localStorage.getItem('hakster_user_data') || '{}');
+          if (u && (u.email || u.name || u.username)) {
+            localStorage.setItem(REMEMBER_KEY, JSON.stringify({
+              email: u.email || '', name: u.name || u.username || '',
+              at: Date.now(),
+            }));
+          }
+        } catch (_) {}
+      }
+
+      // ── Global logout function ──────────────────────────────────
+      function globalLogout() {
+        rememberUser();                     // keep the identity for next sign-in
+        // Revoke the admin PIN session before navigating away. The storage event
+        // also locks admin pages that are open in another tab.
+        sessionStorage.removeItem('hakster_admin_pin_session');
+        localStorage.setItem('hakster_signed_out_at', String(Date.now()));
+        window.dispatchEvent(new Event('hakster:signout'));
+        localStorage.removeItem('hakster_google_token');
+        localStorage.removeItem('hakster_google_user');
+        localStorage.removeItem('hakster_user_data');
+        localStorage.removeItem('hakster_api_key');
+        localStorage.removeItem('hakster_user');
+        localStorage.removeItem('hakster_last_activity');
+        window.location.href = '/';
+      }
+      window.globalLogout = globalLogout;
+
+      // Lock an already-open admin page when this tab or another tab signs out.
+      window.addEventListener('storage', (event) => {
+        if (event.key === 'hakster_signed_out_at') {
+          sessionStorage.removeItem('hakster_admin_pin_session');
+          window.dispatchEvent(new Event('hakster:signout'));
+        }
+      });
+
+      // Start the idle clock on load and refresh it on real activity.
+      let localLastActivity = Number(localStorage.getItem(ACTIVITY_KEY)) || 0;
+      if (isSignedIn() && !localLastActivity) {
+        localLastActivity = Date.now();
+        localStorage.setItem(ACTIVITY_KEY, String(localLastActivity));
+      }
+      (function idleWatch() {
+        let lastWrite = 0;
+        const enforceIdleTimeout = () => {
+          if (!isSignedIn()) return;
+          const sharedLastActivity = Number(localStorage.getItem(ACTIVITY_KEY)) || 0;
+          const lastActivity = Math.max(localLastActivity, sharedLastActivity);
+          if (lastActivity && Date.now() - lastActivity >= SESSION_IDLE_MS) globalLogout();
+        };
+        const bump = () => {
+          if (!isSignedIn()) return;
+          enforceIdleTimeout();
+          if (!isSignedIn()) return;
+          const now = Date.now();
+          localLastActivity = now;
+          if (now - lastWrite >= 15000) { // share activity across tabs, throttled
+            lastWrite = now;
+            localStorage.setItem(ACTIVITY_KEY, String(now));
+          }
+        };
+        ['click', 'keydown', 'mousemove', 'scroll', 'touchstart']
+          .forEach(ev => window.addEventListener(ev, bump, { passive: true }));
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') enforceIdleTimeout();
+        });
+        enforceIdleTimeout();
+        setInterval(enforceIdleTimeout, 5000);
+      })();
+
+      // ── Show user badge + logout buttons if signed in ───────────
+      (function() {
+        const token = localStorage.getItem('hakster_google_token');
+        const userData = localStorage.getItem('hakster_user_data');
+        const googleUserData = localStorage.getItem('hakster_google_user');
+        if (!token) return;
+
+        // Parse stored user data (name, email, avatar)
+        let user = {};
+        try { user = JSON.parse(userData || '{}'); } catch {}
+        let googleUser = {};
+        try { googleUser = JSON.parse(googleUserData || '{}'); } catch {}
+        user = { ...googleUser, ...user };
+
+        function renderUserBadge(currentUser) {
+          const userId = currentUser.id || currentUser.userId || currentUser.sub || '';
+          const maskedUserId = userId && userId.length > 14 ? `${userId.slice(0, 8)}…${userId.slice(-4)}` : userId;
+          const userName = currentUser.name || currentUser.username || currentUser.email || 'User';
+
+          if (navBadge) {
+            navBadge.classList.remove('hidden');
+            navBadge.classList.add('flex');
+            const nameEl = document.getElementById('nav-user-name');
+            const idEl = document.getElementById('nav-user-id');
+            const avatarEl = document.getElementById('nav-user-avatar');
+            if (nameEl) nameEl.textContent = userName;
+            if (idEl && userId) { idEl.textContent = `#${maskedUserId}`; idEl.title = `User ID #${userId}`; idEl.classList.remove('hidden'); }
+            if (avatarEl) avatarEl.textContent = userName.charAt(0).toUpperCase();
+          }
+
+          if (mobileSection) {
+            mobileSection.classList.remove('hidden');
+            const nameEl = document.getElementById('mobile-user-name');
+            const emailEl = document.getElementById('mobile-user-email');
+            const idEl = document.getElementById('mobile-user-id');
+            const avatarEl = document.getElementById('mobile-user-avatar');
+            if (nameEl) nameEl.textContent = userName;
+            if (emailEl) emailEl.textContent = currentUser.email || '';
+            if (idEl) { idEl.textContent = userId ? `ID #${maskedUserId}` : ''; idEl.title = userId ? `User ID #${userId}` : ''; }
+            if (avatarEl) avatarEl.textContent = userName.charAt(0).toUpperCase();
+          }
+        }
+
+        // Desktop navbar badge
+        const navBadge = document.getElementById('nav-user-badge');
+        const navSignin = document.getElementById('nav-signin-btn');
+
+        // Mobile quick logout button
+        const mobileLogout = document.getElementById('mobile-logout-btn');
+
+        // Mobile menu user section
+        const mobileSection = document.getElementById('mobile-user-section');
+        renderUserBadge(user);
+        if (navSignin) navSignin.classList.add('hidden');
+        if (mobileLogout) mobileLogout.classList.remove('hidden');
+
+        fetch('/api/auth/me', { headers: { 'x-api-key': token } })
+          .then((res) => res.ok ? res.json() : null)
+          .then((data) => {
+            if (!data?.user) return;
+            const dbUser = {
+              ...user,
+              ...data.user,
+              name: data.user.username || data.user.email || user.name || 'User',
+            };
+            localStorage.setItem('hakster_google_user', JSON.stringify({ ...googleUser, ...data.user }));
+            localStorage.setItem('hakster_user_data', JSON.stringify({
+              id: dbUser.id || '',
+              name: dbUser.name,
+              email: dbUser.email || '',
+              picture: dbUser.picture || '',
+            }));
+            renderUserBadge(dbUser);
+            document.querySelectorAll('[data-admin-only="true"]').forEach((el) => {
+              el.classList.toggle('hidden', !dbUser.is_owner);
+              el.classList.toggle('flex', Boolean(dbUser.is_owner));
+            });
+            document.querySelectorAll('[data-owner-only="true"]').forEach((el) => {
+              const isOwner = Boolean(dbUser.is_owner);
+              el.classList.toggle('hidden', !isOwner);
+              el.classList.toggle('flex', isOwner);
+            });
+          })
+          .catch(() => {});
+
+        // Wire up logout buttons
+        document.getElementById('nav-logout-btn')?.addEventListener('click', globalLogout);
+        document.getElementById('mobile-logout-btn')?.addEventListener('click', globalLogout);
+        document.getElementById('mobile-menu-logout')?.addEventListener('click', globalLogout);
+      })();
+
+      // ── Admin tools dropdown ─────────────────────────────────────
+      const adminTools = document.getElementById('admin-tools');
+      const adminToolsBtn = document.getElementById('admin-tools-btn');
+      const adminToolsMenu = document.getElementById('admin-tools-menu');
+      const mobileAdminTools = document.getElementById('mobile-admin-tools');
+      const mobileAdminToolsBtn = document.getElementById('mobile-admin-tools-btn');
+      const mobileAdminToolsMenu = document.getElementById('mobile-admin-tools-menu');
+      const adminPinGate = document.getElementById('admin-pin-gate');
+      const adminPinSubtitle = document.getElementById('admin-pin-subtitle');
+      const adminPinError = document.getElementById('admin-pin-error');
+      const adminPinDots = [...document.querySelectorAll('[data-admin-pin-dot]')];
+      const ADMIN_GATE_PIN_KEY = 'hakster_admin_pin';
+      const ADMIN_GATE_SESSION_KEY = 'hakster_admin_pin_session';
+      let adminGatePin = '';
+      let adminGatePendingPin = '';
+      let adminGateMode = 'unlock';
+      let adminGateOnSuccess = null;
+      function paintAdminGatePin() {
+        adminPinDots.forEach((dot, index) => {
+          dot.classList.toggle('bg-amber-300', index < adminGatePin.length);
+          dot.classList.toggle('shadow-[0_0_10px_#fcd34d]', index < adminGatePin.length);
+        });
+      }
+      function closeAdminPinGate() {
+        adminPinGate?.setAttribute('aria-hidden', 'true');
+        adminGatePin = '';
+        paintAdminGatePin();
+      }
+      function openAdminPinGate(onSuccess) {
+        if (sessionStorage.getItem(ADMIN_GATE_SESSION_KEY) === '1') return onSuccess();
+        adminGateOnSuccess = onSuccess;
+        adminGatePin = '';
+        adminGatePendingPin = '';
+        adminGateMode = localStorage.getItem(ADMIN_GATE_PIN_KEY) ? 'unlock' : 'setup_new';
+        adminPinSubtitle.textContent = adminGateMode === 'setup_new' ? 'SET YOUR 6-DIGIT PIN' : 'ENTER PIN TO ACCESS ADMIN';
+        adminPinError.textContent = '';
+        paintAdminGatePin();
+        adminPinGate?.setAttribute('aria-hidden', 'false');
+      }
+      window.openHaksterAdminPinGate = openAdminPinGate;
+      function submitAdminGatePin() {
+        if (adminGatePin.length !== 6) return;
+        if (adminGateMode === 'setup_new') {
+          adminGatePendingPin = adminGatePin;
+          adminGatePin = '';
+          adminGateMode = 'setup_confirm';
+          adminPinSubtitle.textContent = 'CONFIRM YOUR 6-DIGIT PIN';
+          paintAdminGatePin();
+          return;
+        }
+        if (adminGateMode === 'setup_confirm' && adminGatePin === adminGatePendingPin) {
+          localStorage.setItem(ADMIN_GATE_PIN_KEY, adminGatePin);
+        } else if (adminGateMode === 'setup_confirm') {
+          adminPinError.textContent = 'PINs did not match. Start again.';
+          adminGatePin = '';
+          adminGatePendingPin = '';
+          adminGateMode = 'setup_new';
+          adminPinSubtitle.textContent = 'SET YOUR 6-DIGIT PIN';
+          paintAdminGatePin();
+          return;
+        } else if (adminGatePin !== localStorage.getItem(ADMIN_GATE_PIN_KEY)) {
+          adminPinError.textContent = 'Wrong PIN. Try again.';
+          adminGatePin = '';
+          paintAdminGatePin();
+          return;
+        }
+        sessionStorage.setItem(ADMIN_GATE_SESSION_KEY, '1');
+        const callback = adminGateOnSuccess;
+        adminGateOnSuccess = null;
+        closeAdminPinGate();
+        callback?.();
+        window.dispatchEvent(new Event('hakster:admin-unlocked'));
+      }
+      window.addEventListener('hakster:signout', () => {
+        sessionStorage.removeItem(ADMIN_GATE_SESSION_KEY);
+        closeAdminTools();
+        closeMobileAdminTools();
+        if (adminPinGate) adminPinGate.setAttribute('aria-hidden', 'true');
+      });
+      function pressAdminGatePin(key) {
+        adminPinError.textContent = '';
+        if (key === 'clear') adminGatePin = '';
+        else if (key === 'back') adminGatePin = adminGatePin.slice(0, -1);
+        else if (/^\d$/.test(key) && adminGatePin.length < 6) adminGatePin += key;
+        paintAdminGatePin();
+        if (adminGatePin.length === 6) window.setTimeout(submitAdminGatePin, 120);
+      }
+      adminPinGate?.querySelectorAll('[data-admin-pin-key]').forEach((button) => {
+        button.addEventListener('click', () => pressAdminGatePin(button.getAttribute('data-admin-pin-key') || ''));
+      });
+      adminPinGate?.querySelector('[data-admin-pin-close]')?.addEventListener('click', closeAdminPinGate);
+      document.addEventListener('keydown', (event) => {
+        if (adminPinGate?.getAttribute('aria-hidden') === 'true') return;
+        if (/^\d$/.test(event.key)) { event.preventDefault(); pressAdminGatePin(event.key); }
+        else if (event.key === 'Backspace') { event.preventDefault(); pressAdminGatePin('back'); }
+        else if (event.key === 'Delete') { event.preventDefault(); pressAdminGatePin('clear'); }
+        else if (event.key === 'Escape') {
+          if (adminPath) {
+            document.documentElement.dataset.adminPage = 'locked';
+            window.location.replace('/');
+          } else closeAdminPinGate();
+        }
+      });
+
+      // Verify account ownership before rendering any admin page. The PIN is a
+      // second, local lock only; admin data endpoints enforce owner access too.
+      const adminPath = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/');
+      if (adminPath) {
+        const adminRoot = document.documentElement;
+        const apiBase = window.location.port === '4321' ? 'http://localhost:3579' : '';
+        let adminCheckInFlight = false;
+        const lockAdminPage = () => {
+          sessionStorage.removeItem(ADMIN_GATE_SESSION_KEY);
+          adminRoot.dataset.adminPage = 'locked';
+        };
+        const verifyAdminPage = async () => {
+          if (adminCheckInFlight) return;
+          adminCheckInFlight = true;
+          try {
+            const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || '';
+            if (!token) throw new Error('Sign in required.');
+            const response = await fetch(apiBase + '/api/auth/me', {
+              headers: { 'x-api-key': token },
+              cache: 'no-store',
+            });
+            const data = response.ok ? await response.json() : null;
+            if (!data?.user?.is_owner) throw new Error('Owner access required.');
+            if (adminRoot.dataset.adminPage === 'ready') return;
+            adminRoot.dataset.adminPage = 'pin';
+            window.openHaksterAdminPinGate?.(() => {
+              adminRoot.dataset.adminPage = 'ready';
+            });
+          } catch {
+            lockAdminPage();
+            sessionStorage.removeItem(ADMIN_GATE_SESSION_KEY);
+            window.location.replace(localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') ? '/miniforge/' : '/');
+          } finally {
+            adminCheckInFlight = false;
+          }
+        };
+        window.addEventListener('hakster:signout', () => {
+          lockAdminPage();
+          window.location.replace('/');
+        });
+        verifyAdminPage();
+        window.setInterval(() => {
+          if (document.visibilityState === 'visible') verifyAdminPage();
+        }, 60000);
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') verifyAdminPage();
+        });
+        adminPinGate?.querySelector('[data-admin-pin-close]')?.addEventListener('click', () => {
+          lockAdminPage();
+          window.location.replace('/');
+        });
+      }
+      function toggleAdminMenu(menu, button) {
+        const open = menu?.classList.contains('hidden');
+        if (!open) {
+          menu?.classList.add('hidden');
+          button?.setAttribute('aria-expanded', 'false');
+          return;
+        }
+        openAdminPinGate(() => {
+          menu?.classList.remove('hidden');
+          if (menu === mobileAdminToolsMenu) menu?.classList.add('flex');
+          button?.setAttribute('aria-expanded', 'true');
+        });
+      }
+      function closeAdminTools() {
+        adminToolsMenu?.classList.add('hidden');
+        adminToolsBtn?.setAttribute('aria-expanded', 'false');
+      }
+      function closeMobileAdminTools() {
+        mobileAdminToolsMenu?.classList.add('hidden');
+        mobileAdminToolsMenu?.classList.remove('flex');
+        mobileAdminToolsBtn?.setAttribute('aria-expanded', 'false');
+      }
+      mobileAdminToolsBtn?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        toggleAdminMenu(mobileAdminToolsMenu, mobileAdminToolsBtn);
+      });
+      mobileAdminToolsMenu?.addEventListener('click', (event) => {
+        if (event.target instanceof Element && event.target.closest('a')) closeMobileAdminTools();
+      });
+      document.addEventListener('click', (event) => {
+        if (mobileAdminTools && !mobileAdminTools.contains(event.target)) closeMobileAdminTools();
+      });
+      adminToolsBtn?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        toggleAdminMenu(adminToolsMenu, adminToolsBtn);
+      });
+      adminToolsMenu?.addEventListener('click', (event) => {
+        if (event.target instanceof Element && event.target.closest('a')) closeAdminTools();
+      });
+      document.addEventListener('click', (event) => {
+        if (adminTools && !adminTools.contains(event.target)) closeAdminTools();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeAdminTools();
+      });
+
+      // ── Mobile menu toggle ──────────────────────────────────────
+      const menuBtn = document.getElementById('menu-btn');
+      const mobileMenu = document.getElementById('mobile-menu');
+      const bar1 = document.getElementById('bar1');
+      const bar2 = document.getElementById('bar2');
+      const bar3 = document.getElementById('bar3');
+
+      let menuOpen = false;
+
+      menuBtn.addEventListener('click', () => {
+        menuOpen = !menuOpen;
+        menuBtn.setAttribute('aria-expanded', String(menuOpen));
+
+        if (menuOpen) {
+          mobileMenu.classList.remove('hidden');
+          // Animate hamburger → X
+          bar1.style.transform = 'translateY(8px) rotate(45deg)';
+          bar2.style.opacity = '0';
+          bar3.style.transform = 'translateY(-8px) rotate(-45deg)';
+        } else {
+          mobileMenu.classList.add('hidden');
+          bar1.style.transform = '';
+          bar2.style.opacity = '1';
+          bar3.style.transform = '';
+        }
+      });
+
+      // Close mobile menu when a nav link is clicked
+      document.querySelectorAll('.mobile-nav-link').forEach((link) => {
+        link.addEventListener('click', () => {
+          menuOpen = false;
+          mobileMenu.classList.add('hidden');
+          menuBtn.setAttribute('aria-expanded', 'false');
+          bar1.style.transform = '';
+          bar2.style.opacity = '1';
+          bar3.style.transform = '';
+        });
+      });
+
+      // ── Scroll shadow on navbar ─────────────────────────────────
+      const navbar = document.getElementById('navbar');
+
+      window.addEventListener('scroll', () => {
+        if (window.scrollY > 20) {
+          navbar.style.boxShadow = '0 4px 24px 0 rgba(0,0,0,0.5)';
+          navbar.style.borderBottomColor = 'rgba(124,58,237,0.2)';
+        } else {
+          navbar.style.boxShadow = '';
+          navbar.style.borderBottomColor = '';
+        }
+      }, { passive: true });
+
+      // ── Smooth scroll for all anchor links ─────────────────────
+      document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+        anchor.addEventListener('click', (e) => {
+          const href = anchor.getAttribute('href');
+          if (!href || href === '#') return;
+          const target = document.querySelector(href);
+          if (!target) return;
+          e.preventDefault();
+          const navH = navbar.offsetHeight;
+          const top = (target).getBoundingClientRect().top + window.scrollY - navH - 16;
+          window.scrollTo({ top, behavior: 'smooth' });
+        });
+      });
+
+      // ── Global fullscreen button ────────────────────────────────
+      const fullscreenBtn = document.getElementById('global-fullscreen-btn');
+      function setGlobalFullscreenState(active) {
+        if (!fullscreenBtn) return;
+        fullscreenBtn.classList.toggle('active', active);
+        fullscreenBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        fullscreenBtn.title = active ? 'Exit fullscreen' : 'Fullscreen';
+        fullscreenBtn.setAttribute('aria-label', fullscreenBtn.title);
+      }
+      fullscreenBtn?.addEventListener('click', async () => {
+        try {
+          if (document.fullscreenElement) {
+            await document.exitFullscreen();
+          } else {
+            await document.documentElement.requestFullscreen();
+          }
+        } catch {
+          document.body.classList.toggle('global-fullscreen-fallback');
+          setGlobalFullscreenState(document.body.classList.contains('global-fullscreen-fallback'));
+        }
+      });
+      document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement) document.body.classList.remove('global-fullscreen-fallback');
+        setGlobalFullscreenState(Boolean(document.fullscreenElement) || document.body.classList.contains('global-fullscreen-fallback'));
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && document.body.classList.contains('global-fullscreen-fallback')) {
+          document.body.classList.remove('global-fullscreen-fallback');
+          setGlobalFullscreenState(false);
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -28,27 +28,45 @@ async function dispatchSubAgent(role, task, cwd) {
 }
 
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
-let inputBuffer = '';
-rl.on('line', (line) => { inputBuffer += line + '\n'; });
-rl.on('close', async () => {
-  try {
-    const msg = JSON.parse(inputBuffer);
-    if (msg.method === 'initialize') {
-      console.log(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'subagent-bridge', version: '1.0.0' } } }));
-      return;
-    }
-    if (msg.method === 'tools/list') {
-      console.log(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'dispatch_subagent', description: 'Delegate a focused sub-task to a free-tier sub-agent. Roles: coder, recon, debugger, general.', inputSchema: { type: 'object', properties: { role: { type: 'string', enum: ['coder', 'recon', 'debugger', 'general'], description: 'Sub-agent role' }, task: { type: 'string', description: 'The task to perform' }, cwd: { type: 'string', description: 'Working directory' } }, required: ['role', 'task'] } }] } }));
-      return;
-    }
-    if (msg.method === 'tools/call') {
-      const args = msg.params?.arguments || {};
-      const { provider, result } = await dispatchSubAgent(args.role || 'general', args.task || '', args.cwd);
-      console.log(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `[${provider}] ${result}` }] } }));
-      return;
-    }
-    console.log(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }));
-  } catch (e) {
-    console.log(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } }));
+
+async function handleMessage(line) {
+  if (!line.trim()) return;
+  let msg;
+  try { msg = JSON.parse(line); }
+  catch (e) {
+    process.stderr.write(`Invalid MCP JSON-RPC line: ${e.message}\n`);
+    return;
   }
-});
+  // Notifications have no id and require no response.
+  if (msg.id === undefined || msg.id === null) return;
+  if (msg.method === 'initialize') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {
+      protocolVersion: '2024-11-05', capabilities: { tools: {} },
+      serverInfo: { name: 'subagent-bridge', version: '1.0.0' }
+    } }) + '\n');
+    return;
+  }
+  if (msg.method === 'tools/list') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { tools: [{
+      name: 'dispatch_subagent',
+      description: 'Delegate a focused sub-task to a free-tier sub-agent. Roles: coder, recon, debugger, general.',
+      inputSchema: { type: 'object', properties: {
+        role: { type: 'string', enum: ['coder', 'recon', 'debugger', 'general'], description: 'Sub-agent role' },
+        task: { type: 'string', description: 'The task to perform' },
+        cwd: { type: 'string', description: 'Working directory' }
+      }, required: ['role', 'task'] }
+    }] } }) + '\n');
+    return;
+  }
+  if (msg.method === 'tools/call') {
+    const args = msg.params?.arguments || {};
+    const { provider, result } = await dispatchSubAgent(args.role || 'general', args.task || '', args.cwd);
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `[${provider}] ${result}` }] } }) + '\n');
+    return;
+  }
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }) + '\n');
+}
+
+rl.on('line', (line) => { void handleMessage(line).catch((e) => {
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } }) + '\n');
+}); });

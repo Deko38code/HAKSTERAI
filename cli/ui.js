@@ -35,54 +35,32 @@ const VERSION = '1.1.0';
 // ── Thinking phrases per phase (like Claude's reasoning display) ──────────
 const PHRASES = {
   THINK: [
-    'Let me think through this...',
-    'Analyzing the codebase...',
-    'Reading through the logic...',
-    'Working through the problem...',
-    'Checking how the pieces fit...',
-    'Tracing the execution path...',
-    'Thinking about the best approach...',
-    'Scanning for relevant patterns...',
-    'Mapping out the solution...',
-    'Breaking this down step by step...',
-    'Considering edge cases...',
-    'Looking at the full picture...',
+    'Thinking through the problem...',
+    'Reasoning carefully...',
+    'Analyzing the request...',
+    'Connecting concepts...',
   ],
   PLAN: [
-    'Planning the approach...',
-    'Mapping out the steps...',
-    'Structuring the solution...',
-    'Deciding what tools to use...',
-    'Ordering the operations...',
-    'Figuring out the best path...',
+    'Formulating a plan...',
+    'Mapping out steps...',
+    'Structuring the approach...',
   ],
   ACT: [
-    'Executing tools...',
-    'Running commands...',
-    'Making changes...',
-    'Working on it...',
-    'Calling tools...',
-    'Building the solution...',
-    'Applying fixes...',
+    'Executing command...',
+    'Running tool...',
+    'Taking action...',
   ],
   OBSERVE: [
-    'Reviewing results...',
-    'Observing the output...',
-    'Checking what came back...',
-    'Analyzing the response...',
-    'Looking at the data...',
+    'Observing output...',
+    'Reading results...',
+    'Checking response...',
   ],
   REFLECT: [
-    'Reflecting on progress...',
-    'Evaluating the approach...',
-    'Did that work?',
     'Assessing the outcome...',
     'Learning from this step...',
   ],
   CONSOLIDATE: [
     'Consolidating findings...',
-    'Summarizing results...',
-    'Wrapping up the turn...',
     'Compiling the answer...',
     'Putting it all together...',
   ],
@@ -94,89 +72,70 @@ const PHRASES = {
 };
 
 // ── Thinking animation ───────────────────────────────────────────────────
-function thinkingAnimation(modelHint, phase) {
-  // Ice spinner frames — cool-toned and readable in xterm.
+function thinkingAnimation(_modelHint, phase, startedAt = Date.now()) {
+  // Keep the regular terminal's status line in sync with HakTerm Admin.
   const FRAMES = ['❄', '✦', '✧', '✶', '✧', '✦'];
   const SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
   const GRAD = [51, 87, 117, 153, 117, 87];
-  // Phase-specific colors
-  const PHASE_COL = {
-    THINK:       '\x1b[38;5;75m',   // bright blue
-    PLAN:        '\x1b[38;5;141m',  // purple
-    ACT:         '\x1b[38;5;118m',  // green
-    OBSERVE:     '\x1b[38;5;81m',   // cyan
-    REFLECT:     '\x1b[38;5;215m',  // orange
-    CONSOLIDATE: '\x1b[38;5;220m',  // gold
-    DEFAULT:     '\x1b[38;5;75m',
+  const PHASE_HEX = {
+    THINK: '#58a6ff', PLAN: '#c084fc', ACT: '#3fb950',
+    OBSERVE: '#39c5cf', REFLECT: '#d29922', CONSOLIDATE: '#ffd700', DEFAULT: '#58a6ff',
   };
-  // Phase-specific emojis for richer display
   const PHASE_EMOJI = {
-    THINK:       '🧠',
-    PLAN:        '📋',
-    ACT:         '⚡',
-    OBSERVE:     '👁',
-    REFLECT:     '🪞',
-    CONSOLIDATE: '📦',
-    DEFAULT:     '◇',
+    THINK: '🧠', PLAN: '📋', ACT: '⚡', OBSERVE: '👁',
+    REFLECT: '🪞', CONSOLIDATE: '📦', DEFAULT: '◇',
   };
-
   let frame = 0, shimF = 0, tick = 0;
-  let phrases = (phase && PHRASES[phase]) || PHRASES.DEFAULT;
-  let phraseIdx = Math.floor(Math.random() * phrases.length);
-  const startMs = Date.now();
-  let currentModel = modelHint || '';
-  let currentPhase = phase || 'DEFAULT';
+  let currentPhase = String(phase || 'DEFAULT').toUpperCase();
+  let phrases = PHRASES[currentPhase] || PHRASES.DEFAULT;
+  let phraseIdx = 0;
   let currentActivity = '';
 
-  const colorForElapsed = (ms) => {
-    if (ms < 5000)  return '\x1b[38;5;118m'; // green
-    if (ms < 15000) return '\x1b[38;5;226m'; // yellow
-    return '\x1b[38;5;208m';                  // orange — taking a while
+  const ansiHex = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    return `\x1b[38;2;${(n >> 16) & 255};${(n >> 8) & 255};${n & 255}m`;
   };
-
+  const colorForElapsed = (ms) => ansiHex(ms < 5000 ? '#3fb950' : ms < 15000 ? '#d29922' : '#f85149');
   const fmtElapsed = (ms) => {
     const s = Math.floor(ms / 1000);
-    if (s < 60) return `${s}s`;
-    return `${Math.floor(s/60)}m${String(s%60).padStart(2,'0')}s`;
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
   };
 
   const render = () => {
-    const elapsed = Date.now() - startMs;
-    const col     = colorForElapsed(elapsed);
+    const elapsed = Math.max(0, Date.now() - startedAt);
+    const col = colorForElapsed(elapsed);
     const spinner = FRAMES[frame % FRAMES.length];
-    const gradC   = `\x1b[38;5;${GRAD[frame % GRAD.length]}m`;
-    const pcol    = PHASE_COL[currentPhase] || PHASE_COL.DEFAULT;
-    const emoji   = PHASE_EMOJI[currentPhase] || '◇';
-    const phrase  = currentActivity || phrases[phraseIdx];
-    const time    = fmtElapsed(elapsed);
-    const mtag    = currentModel ? `\x1b[38;5;240m${currentModel} ` : '';
-    // Rolling 3-char shimmer wave
-    const s0 = SHIMMER[shimF % SHIMMER.length];
-    const s1 = SHIMMER[(shimF + 1) % SHIMMER.length];
-    const s2 = SHIMMER[(shimF + 2) % SHIMMER.length];
-    const shimmer = `${s0}${s1}${s2}`;
+    const grad = GRAD[frame % GRAD.length];
+    const gradC = `\x1b[38;2;${grad};${Math.floor(grad * 0.7)};${Math.floor(grad * 1.2)}m`;
+    const phaseColor = ansiHex(PHASE_HEX[currentPhase] || PHASE_HEX.DEFAULT);
+    const emoji = PHASE_EMOJI[currentPhase] || '◇';
+    const time = fmtElapsed(elapsed);
+    const fallbackPhrase = phrases[phraseIdx % phrases.length];
+    const rawPhrase = currentActivity || fallbackPhrase;
+    const maxPhraseWidth = Math.max(1, (process.stdout.columns || 100) - 34 - time.length);
+    const phrase = rawPhrase.length > maxPhraseWidth ? `${rawPhrase.slice(0, Math.max(0, maxPhraseWidth - 1))}…` : rawPhrase;
+    const shimmer = [0, 1, 2].map((offset) => SHIMMER[(shimF + offset) % SHIMMER.length]).join('');
+    const line = `  ${gradC}⟦${col}\x1b[1m${spinner}\x1b[0m${gradC}⟧\x1b[0m ${emoji} ${phaseColor}${currentPhase}\x1b[0m ${col}${phrase}\x1b[0m  ${gradC}${shimmer}\x1b[0m  \x1b[38;5;240m${time}\x1b[0m`;
 
-    const line = `  ${gradC}⟦${col}\x1b[1m${spinner}\x1b[0m${gradC}⟧\x1b[0m ${pcol}${emoji} ${C.bold}${currentPhase}${C.reset} ${mtag}${col}${phrase}\x1b[0m  ${gradC}${shimmer}\x1b[0m  \x1b[38;5;240m${time}\x1b[0m`;
-
-    // \x1b[2K erases the whole line in one atomic terminal op — no manual
-    // space-padding/repeat() allocation, no two-step erase-then-paint flicker.
     process.stdout.write('\r\x1b[2K' + line);
     frame++;
     shimF++;
     tick++;
-    if (tick % 8 === 0) phraseIdx = (phraseIdx + 1) % phrases.length;
+    if (tick % 8 === 0) phraseIdx++;
   };
 
   render();
-  const timer = setInterval(render, 50);
-  timer.updateModel = (m) => { currentModel = m; };
-  timer.updatePhase = (p) => {
-    currentPhase = p || 'DEFAULT';
-    phrases = (p && PHRASES[p]) || PHRASES.DEFAULT;
-    phraseIdx = Math.floor(Math.random() * phrases.length);
+  const timer = setInterval(render, 80);
+  timer.updatePhase = (nextPhase) => {
+    currentPhase = String(nextPhase || 'DEFAULT').toUpperCase();
+    phrases = PHRASES[currentPhase] || PHRASES.DEFAULT;
+    phraseIdx = 0;
+  };
+  timer.rebase = (nextStartedAt = Date.now()) => {
+    startedAt = nextStartedAt;
   };
   timer.updateActivity = (activity) => {
-    currentActivity = String(activity || '').trim().slice(0, 96);
+    currentActivity = String(activity || '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/[\r\n\t]/g, ' ').trim();
   };
   timer.stop = (finalLabel) => {
     clearInterval(timer);

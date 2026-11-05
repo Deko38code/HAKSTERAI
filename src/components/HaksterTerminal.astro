@@ -1,0 +1,524 @@
+---
+/**
+ * Zip-style haksterAI PTY terminal.
+ * Props:
+ *   id - unique DOM id for separate terminals
+ *   ptyMode - shell or crush
+ *   autoCommand - optional command to run after connect
+ */
+const {
+  id = 'hakster-terminal',
+  ptyMode = 'shell',
+  autoCommand = '',
+} = Astro.props;
+const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
+---
+
+<div id={id + '-panel'} class="hakster-pty-panel">
+  <div class="hakster-pty-toolbar">
+    <span class="hakster-pty-title">{title}</span>
+    <div class="hakster-pty-actions">
+      <button id={id + '-copy'} class="hakster-pty-btn" type="button" title="Copy selection">Copy</button>
+      <button id={id + '-fullscreen'} class="hakster-pty-icon" type="button" title="Fullscreen" aria-label="Fullscreen">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l4 4m8-4h4m0 0v4m0-4l-4 4M4 16v4m0 0h4m-4 0l4-4m8 4h4m0 0v-4m0 4l-4-4"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+  <div id={id + '-wrapper'} class="hakster-pty-wrapper">
+    <div id={id + '-container'} class="hakster-pty-container"></div>
+    <button id={id + '-scroll-bottom'} class="hakster-scroll-bottom hidden" type="button" title="Scroll to bottom" aria-label="Scroll to bottom">
+      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<style is:global>
+  .hakster-pty-panel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: #0a0a0f;
+    border: 1px solid #1e1e2e;
+    overflow: hidden;
+  }
+  .hakster-pty-toolbar {
+    height: 30px;
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    background: #111118;
+    border-bottom: 1px solid #1e1e2e;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .hakster-pty-title {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .hakster-pty-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hakster-pty-btn,
+  .hakster-pty-icon {
+    border: 1px solid #1e1e2e;
+    background: #0d0d14;
+    color: #94a3b8;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    line-height: 1;
+  }
+  .hakster-pty-btn {
+    border-radius: 4px;
+    padding: 4px 7px;
+  }
+  .hakster-pty-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .hakster-pty-btn:hover,
+  .hakster-pty-icon:hover {
+    color: #e2e8f0;
+    border-color: #7c3aed;
+  }
+  .hakster-pty-wrapper {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .hakster-pty-container {
+    width: 100%;
+    height: 100%;
+  }
+  .hakster-scroll-bottom {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    z-index: 50;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid rgba(168,85,247,0.4);
+    background: rgba(124,58,237,0.9);
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 10px 24px rgba(124,58,237,0.3);
+    animation: haksterScrollArrowPulse 2s ease-in-out infinite;
+  }
+  .hakster-scroll-bottom.hidden {
+    display: none;
+  }
+  .hakster-scroll-bottom:not(.hidden) {
+    display: flex;
+  }
+  @keyframes haksterScrollArrowPulse {
+    0%, 100% { opacity: 0.85; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(-3px); }
+  }
+</style>
+
+<link rel="stylesheet" href="/css/xterm.css" />
+<script is:inline src="/js/xterm.js"></script>
+<script is:inline src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/xterm-addon-webgl.min.js"></script>
+<script is:inline src="/js/addon-fit.js"></script>
+
+<script define:vars={{ termId: id, ptyMode, autoCommand }}>
+(function() {
+  const TID = termId;
+  const PTY_MODE = ptyMode === 'crush' ? 'crush' : 'shell';
+  const AUTO_COMMAND = String(autoCommand || '');
+
+  const panel = document.getElementById(TID + '-panel');
+  const container = document.getElementById(TID + '-container');
+  const scrollArrowBtn = document.getElementById(TID + '-scroll-bottom');
+  const copyBtn = document.getElementById(TID + '-copy');
+  const fullscreenBtn = document.getElementById(TID + '-fullscreen');
+
+  if (!panel || !container || !window.Terminal || !window.FitAddon?.FitAddon) {
+    if (panel) panel.innerHTML = '<div style="color:#f87171;padding:1rem">Terminal failed to load</div>';
+    return;
+  }
+
+  let term = null;
+  let fit = null;
+  let ws = null;
+  let resizeObserver = null;
+  let pingTimer = null;
+  let fitRaf = 0;
+  let scrollRaf = 0;
+  let scrollBurstUntil = 0;
+  let autoScrollEnabled = true;
+  const decoder = new TextDecoder('utf-8');
+
+  function scheduleFit() {
+    if (fitRaf) cancelAnimationFrame(fitRaf);
+    fitRaf = requestAnimationFrame(() => {
+      if (!fit || !term) return;
+      try { fit.fit(); } catch {}
+      sendResize();
+    });
+  }
+
+  function sendResize() {
+    if (ws?.readyState === WebSocket.OPEN && term) {
+      ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+    }
+  }
+
+  function sendInput(data) {
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input', data }));
+      return true;
+    }
+    return false;
+  }
+
+  function sendCommand(text, execute) {
+    const data = String(text || '') + (execute === false ? '' : '\r');
+    if (sendInput(data)) return true;
+    if (term) term.writeln(String(text || ''));
+    return false;
+  }
+
+  function isAtBottom() {
+    const viewport = term?.element?.querySelector('.xterm-viewport');
+    if (!viewport) return true;
+    return viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 5;
+  }
+
+  function showScrollArrow() {
+    scrollArrowBtn?.classList.remove('hidden');
+  }
+
+  function hideScrollArrow() {
+    scrollArrowBtn?.classList.add('hidden');
+  }
+
+  function scrollToBottom() {
+    term?.scrollToBottom();
+    autoScrollEnabled = true;
+    hideScrollArrow();
+  }
+
+  function scheduleSteadyScroll(durationMs = 220) {
+    if (!autoScrollEnabled || !term) return;
+    scrollBurstUntil = Math.max(scrollBurstUntil, Date.now() + durationMs);
+    if (scrollRaf) return;
+    const tick = () => {
+      scrollRaf = 0;
+      if (!autoScrollEnabled || !term) return;
+      term.scrollToBottom();
+      const viewport = term.element?.querySelector('.xterm-viewport');
+      if (viewport) viewport.scrollTop = viewport.scrollHeight;
+      hideScrollArrow();
+      if (Date.now() < scrollBurstUntil) {
+        scrollRaf = requestAnimationFrame(tick);
+      }
+    };
+    scrollRaf = requestAnimationFrame(tick);
+  }
+
+  function writeBanner() {
+    if (!term) return;
+    term.write('\x1b[38;2;124;58;237m');
+    term.write('  __  __      __        __            ___  ___\r\n');
+    term.write(' / / / /___ _/ /_______/ /____  _____/   |/ (_) \r\n');
+    term.write('/ /_/ / __ `/ //_/ ___/ __/ _ \\/ ___/ /| / / /  \r\n');
+    term.write('/ __  / /_/ / ,< (__  ) /_/  __/ /  / ___ / /   \r\n');
+    term.write('/_/ /_/\\__,_/_/|_/____/\\__/\\___/_/  /_/  |_/_/  \r\n');
+    term.write('\x1b[0m');
+    term.write('\x1b[90mReal PTY terminal. Ctrl+Shift+C copies, Ctrl+Shift+V pastes.\x1b[0m\r\n\r\n');
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ptyHost = location.port === '4321' ? location.hostname + ':3579' : location.host;
+    ws = new WebSocket(proto + '//' + ptyHost + '/pty?mode=' + encodeURIComponent(PTY_MODE));
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+      scheduleFit();
+      if (pingTimer) clearInterval(pingTimer);
+      pingTimer = window.setInterval(() => {
+        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+      }, 15000);
+      if (AUTO_COMMAND) {
+        setTimeout(() => sendInput(AUTO_COMMAND.replace(/\n?$/, '\n')), 200);
+      }
+    };
+  function writePtyOutput(data) {
+      if (!term || !data) return;
+      try {
+        window.dispatchEvent(new CustomEvent('hakster:pty-output', {
+          detail: { id: TID, mode: PTY_MODE, data: String(data) }
+        }));
+      } catch {}
+      term.write(data);
+      if (autoScrollEnabled) {
+        term.scrollToBottom();
+        scheduleSteadyScroll();
+      }
+    }
+
+    ws.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        writePtyOutput(decoder.decode(event.data, { stream: true }));
+        return;
+      }
+      if (event.data instanceof Blob) {
+        event.data.arrayBuffer()
+          .then((buffer) => writePtyOutput(decoder.decode(buffer, { stream: true })))
+          .catch(() => {});
+        return;
+      }
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'pong') return;
+        if (msg.type === 'heartbeat') return;
+        if (msg.type === 'pty' && term) {
+          writePtyOutput(msg.data);
+          return;
+        }
+        if (msg.type === 'exit' && term) {
+          term.write('\r\n\x1b[90m[shell exited]\x1b[0m\r\n');
+        }
+      } catch {
+        if (typeof event.data === 'string' && term) term.write(event.data);
+      }
+    };
+    ws.onclose = () => {
+      if (pingTimer) {
+        clearInterval(pingTimer);
+        pingTimer = null;
+      }
+      if (term) term.write('\r\n\x1b[91m[disconnected]\x1b[0m\r\n');
+    };
+    ws.onerror = () => {
+      if (term) term.write('\r\n\x1b[91m[connection error]\x1b[0m\r\n');
+    };
+  }
+
+  function reconnect() {
+    if (pingTimer) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
+    if (ws && ws.readyState !== WebSocket.CLOSED) {
+      try { ws.close(); } catch {}
+    }
+    setTimeout(connect, 250);
+  }
+
+  function initTerminal() {
+    if (term) return;
+    term = new Terminal({
+      theme: {
+        background: '#0a0a0f',
+        foreground: '#e2e8f0',
+        cursor: '#7c3aed',
+        cursorAccent: '#0a0a0f',
+        selectionBackground: '#7c3aed55',
+        selectionForeground: '#ffffff',
+        black: '#0a0a0f',
+        red: '#f87171',
+        green: '#22c55e',
+        yellow: '#facc15',
+        blue: '#60a5fa',
+        magenta: '#a855f7',
+        cyan: '#22d3ee',
+        white: '#e2e8f0',
+        brightBlack: '#64748b',
+        brightRed: '#fca5a5',
+        brightGreen: '#4ade80',
+        brightYellow: '#fde047',
+        brightBlue: '#93c5fd',
+        brightMagenta: '#c084fc',
+        brightCyan: '#67e8f9',
+        brightWhite: '#f8fafc',
+      },
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: PTY_MODE === 'crush' ? 14 : 16,
+      lineHeight: PTY_MODE === 'crush' ? 1.22 : 1.28,
+      letterSpacing: 0,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      scrollback: 10000,
+      fastScrollModifier: 'alt',
+      fastScrollSensitivity: 8,
+      scrollSensitivity: 1,
+      smoothScrollDuration: 80,
+      convertEol: false,
+      rightClickSelectsWord: true,
+      macOptionIsMeta: true,
+      windowsMode: false,
+      allowProposedApi: true,
+    });
+    try { if (window.WebglAddon) { term.loadAddon(new WebglAddon()); } } catch (_) {}
+    fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(container);
+    if (PTY_MODE !== 'crush') writeBanner();
+    scheduleFit();
+    container.tabIndex = 0;
+    container.addEventListener('mousedown', () => term?.focus());
+    container.addEventListener('click', () => term?.focus());
+
+    const viewport = term.element?.querySelector('.xterm-viewport');
+    if (viewport) {
+      let scrollTimeout = null;
+      viewport.addEventListener('scroll', () => {
+        if (scrollTimeout) clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+          if (isAtBottom()) {
+            autoScrollEnabled = true;
+            hideScrollArrow();
+          } else {
+            autoScrollEnabled = false;
+            showScrollArrow();
+          }
+        }, 50);
+      });
+    }
+
+    term.onData((data) => {
+      sendInput(data);
+      if (data.length > 0 && data !== '\x1b[A' && data !== '\x1b[B' && data !== '\x1b[C' && data !== '\x1b[D') {
+        autoScrollEnabled = true;
+        hideScrollArrow();
+      }
+    });
+
+    term.attachCustomKeyEventHandler((arg) => {
+      if (arg.type !== 'keydown') return true;
+      if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyC') {
+        const selection = term.getSelection();
+        if (selection) navigator.clipboard.writeText(selection).catch(() => {});
+        return false;
+      }
+      if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyV') {
+        navigator.clipboard.readText().then((text) => {
+          if (text) sendInput(text.replace(/\n/g, '\r'));
+        }).catch(() => {});
+        return false;
+      }
+      if (arg.ctrlKey && arg.shiftKey && arg.code === 'KeyA') {
+        term.selectAll();
+        return false;
+      }
+      return true;
+    });
+
+    scrollArrowBtn?.addEventListener('click', scrollToBottom);
+
+    container.addEventListener('paste', (e) => {
+      const text = e.clipboardData?.getData('text/plain') || '';
+      if (text) {
+        e.preventDefault();
+        sendInput(text.replace(/\n/g, '\r'));
+      }
+    });
+    container.addEventListener('copy', (e) => {
+      const selection = term?.getSelection();
+      if (selection) {
+        e.preventDefault();
+        e.clipboardData?.setData('text/plain', selection);
+      }
+    });
+    container.addEventListener('contextmenu', (e) => {
+      const selection = term?.getSelection();
+      if (selection) {
+        e.preventDefault();
+        navigator.clipboard.writeText(selection).catch(() => {});
+      }
+    });
+    container.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+
+    resizeObserver = new ResizeObserver(() => scheduleFit());
+    resizeObserver.observe(container);
+    scrollArrowBtn?.addEventListener('click', scrollToBottom);
+    copyBtn?.addEventListener('click', () => {
+      const selection = term?.getSelection();
+      if (selection) navigator.clipboard.writeText(selection).catch(() => {});
+    });
+    fullscreenBtn?.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else panel.requestFullscreen?.().catch(() => {});
+    });
+
+    connect();
+    setTimeout(() => {
+      term?.focus();
+      container?.focus();
+    }, 100);
+  }
+
+  function termWrite(text) {
+    if (!term) return;
+    term.write(String(text || ''));
+    if (autoScrollEnabled) {
+      term.scrollToBottom();
+      scheduleSteadyScroll();
+    }
+  }
+
+  function termWriteln(text) {
+    if (!term) return;
+    term.writeln(String(text || ''));
+    if (autoScrollEnabled) {
+      term.scrollToBottom();
+      scheduleSteadyScroll();
+    }
+  }
+
+  function termClear() {
+    term?.clear();
+    term?.write('\x1b[H');
+  }
+
+  function plainDecoderLine(label) {
+    if (term) term.writeln(label);
+  }
+
+  window.__crushTerminals = window.__crushTerminals || {};
+  const pane = {
+    get term() { return term; },
+    get fit() { return fit; },
+    get ws() { return ws; },
+  };
+  window.__crushTerminals[TID] = {
+    panes: [pane],
+    get active() { return pane; },
+    write: termWrite,
+    writeln: termWriteln,
+    send: sendCommand,
+    reconnect,
+    clear: termClear,
+    scrollToBottom,
+    fastDecoder: () => plainDecoderLine('[DECODER] ready'),
+    scrambler: () => plainDecoderLine('[SCRAMBLER] decoder armed'),
+    crackingCode: () => plainDecoderLine('[CRACKING CODE] scramble -> decode -> unlock'),
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initTerminal, { once: true });
+  } else {
+    initTerminal();
+  }
+})();
+</script>

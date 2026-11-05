@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const { globSync } = require('glob');
+const { renderSnapshotRows } = require('./terminal-image');
 const os = require('os');
 const crypto = require('crypto');
 const net = require('net');
@@ -1400,10 +1401,16 @@ let _autolearnCache = { errors: 0, lessons: 0, outcomes: 0, success_rate: 0, _ts
 function getAutolearnStats() {
  const now = Date.now();
  if (now - _autolearnCache._ts < 10000) return _autolearnCache;
+ // The Python bridge is optional; don't repeatedly invoke Python when its
+ // external module isn't installed. The Node autolearn engine remains active.
+ if (!fs.existsSync('/home/ghost/claude-code-proxy/brain_autolearn.py')) {
+  _autolearnCache._ts = now;
+  return _autolearnCache;
+ }
  try {
   const { execSync } = require('child_process');
   const cmd = "python3 -c \"import sys; sys.path.insert(0,'/home/ghost/claude-code-proxy'); import brain_autolearn,json; c=brain_autolearn.init_db(); e=c.execute('SELECT COUNT(*) FROM errors').fetchone()[0]; l=c.execute('SELECT COUNT(*) FROM errors WHERE lesson_generated=1').fetchone()[0]; o=c.execute('SELECT COUNT(*) FROM outcomes').fetchone()[0]; s=c.execute('SELECT AVG(success) FROM outcomes').fetchone()[0] or 0; print(json.dumps({'errors':e,'lessons':l,'outcomes':o,'success_rate':round(s,2)})); c.close()\"";
-  const out = execSync(cmd, { timeout: 3000 }).toString().trim();
+  const out = execSync(cmd, { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
   _autolearnCache = JSON.parse(out);
   _autolearnCache._ts = now;
  } catch {}
@@ -1914,6 +1921,9 @@ function workingPhrase() {
 
 // ── Ice spinner (ported from cli/ui.js thinkingAnimation) ────────────────
 const ICE_FRAMES  = ['❄', '✦', '✧', '✶', '✧', '✦'];
+// HakTerm's Live Agent dot pulses in a 1.1s ease-in-out cycle. Four terminal
+// frames at 275ms preserve that cadence while MCP discovery runs.
+const HAKTERM_PULSE_FRAMES = ['○', '◉', '●', '◉'];
 const ICE_SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
 const ICE_GRAD    = [51, 87, 117, 153, 117, 87];
 const ICE_PHASE_COL = {
@@ -2012,6 +2022,7 @@ let _awaitingConfirm  = false;  // True while waiting on a y/N dangerous-command
 let processing = false;  // (hoisted to module scope so agentLoop's status-bar interval can read it; repl() resets this on each session)
 let _mcpReady = false;   // true once MCP servers finish loading in repl() — prevents idle auto-review from firing mid-load
 let _pendingSudoPassword = null;  // sudo password typed into the approval popout (fed to `sudo -S` via stdin so sudo actually works headlessly)
+let _keyringUnlockFn = null;       // TUI-only masked prompt for an explicitly reported locked Linux keyring
 
 // ── Readline/panel race tracker ──
 // The user can type ahead into the readline prompt WHILE the agent is streaming
@@ -2026,6 +2037,7 @@ let _pendingSudoPassword = null;  // sudo password typed into the approval popou
 // _writePanel can tell whether anything landed on screen since its last render.
 let _replRl = null;
 let _rlWriteSeq = 0;
+let _showInlineImages = process.env.HAKSTER_TUI_SHOW_IMAGES !== '0';
 
 // ── Humane focus nudges — encouraging prompts to get back on task ──
 const FOCUS_NUDGES = [
@@ -3341,6 +3353,74 @@ function tuiReset() {
 }
 
 // ── Banner — HaksterAI puff-letter header ────────────────────────────────
+async function showHaksterBootAnimation() {
+  if (!process.stdout.isTTY) return;
+  // Character mapping mirrors HakTerm's CrushTerminal scScramble in dsterm/index.html.
+  const scScramble = (text, offset = 0) => {
+    let out = '';
+    const n = (Math.random() * 1e9) | 0;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      const pos = i + offset;
+      if (/[A-Za-z]/.test(ch)) {
+        const alphabet = ch === ch.toUpperCase() ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' : 'abcdefghijklmnopqrstuvwxyz';
+        const value = (Math.imul(pos + n + 1, 2654435761) + ch.charCodeAt(0) * 101) >>> 0;
+        let next = alphabet[value % alphabet.length];
+        if (next === ch) next = alphabet[(value + 13) % alphabet.length];
+        out += next;
+      } else if (/[0-9]/.test(ch)) {
+        out += String.fromCharCode(48 + ((Math.imul(pos + n, 40503) >>> 0) % 10));
+      } else out += ch;
+    }
+    return out;
+  };
+  const title = 'HAKSTERAI';
+  const colors = [135, 141, 183, 213, 171, 183, 183, 135, 141, 92];
+  const render = (scrambledTitle, pulse) => drawBox('❄️ Live Agent', [
+    scrambledTitle,
+    `Status: booting  ${C.info}${pulse}${C.reset}`,
+    'Phase: THINK'
+  ], 36, C.success);
+  let lineCount = 0;
+  const paint = (value, pulse, first = false, colorIndex = 0) => {
+    const color = `\x1b[38;5;${colors[colorIndex % colors.length]}m`;
+    const frame = render(`${color}${value}${C.reset}`, pulse);
+    lineCount = frame.split('\n').length;
+    if (!first) process.stdout.write(`\x1b[${lineCount}A\x1b[0J`);
+    process.stdout.write(frame + '\n');
+  };
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const current = scScramble(title).split('');
+  process.stdout.write('\x1b[?25l');
+  paint(current.join(''), HAKTERM_PULSE_FRAMES[0], true, 0);
+  // Match HakTerm scAnimate's 48 scramble frames and eased character decode,
+  // condensed to this single-line title so CLI startup remains quick.
+  for (let frame = 1; frame <= 48; frame++) {
+    for (let i = 0; i < title.length; i++) {
+      if (/[A-Za-z]/.test(title[i])) {
+        const alphabet = title[i] === title[i].toUpperCase() ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' : 'abcdefghijklmnopqrstuvwxyz';
+        current[i] = alphabet[Math.floor(Math.random() * alphabet.length)];
+      }
+    }
+    paint(current.join(''), HAKTERM_PULSE_FRAMES[frame % HAKTERM_PULSE_FRAMES.length], false, frame);
+    await delay(16);
+  }
+  const steps = Math.min(30, Math.max(18, Math.ceil(title.length / 4)));
+  for (let frame = 1; frame <= steps; frame++) {
+    const progress = frame / steps;
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const target = Math.min(title.length, Math.max(1, Math.floor(eased * title.length)));
+    for (let i = 0; i < title.length; i++) {
+      if (i < target) current[i] = title[i];
+      else current[i] = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
+    }
+    paint(current.join(''), HAKTERM_PULSE_FRAMES[frame % HAKTERM_PULSE_FRAMES.length], false, frame + 48);
+    await delay(16);
+  }
+  paint(title, HAKTERM_PULSE_FRAMES[3], false, 9);
+  process.stdout.write('\x1b[?25h\n');
+}
+
 function banner() {
   // Dynamically count skills from .hakster/skills/
   const skillsDirs = getSkillDirs();
@@ -3352,7 +3432,9 @@ function banner() {
   // Built-in tool count is the snapshot taken before MCP tools were merged into TOOLS.
   // Using TOOLS.length here double-counts MCP (they're already in TOOLS after initMcpTools).
   const builtInTools = (typeof _builtinToolCount === 'number') ? _builtinToolCount : TOOLS.length - mcpToolCount;
-  const toolLabel = mcpToolCount > 0 ? `${builtInTools} + ${mcpToolCount} MCP` : `${builtInTools}`;
+  const toolLabel = !_mcpReady
+    ? `${builtInTools} + MCP loading`
+    : mcpToolCount > 0 ? `${builtInTools} + ${mcpToolCount} MCP` : `${builtInTools}`;
   // Memory notes: aggregate notes.json across ALL hakster roots (not just WORK_DIR).
   let memCount = 0;
   for (const root of getHaksterRoots()) {
@@ -3361,6 +3443,8 @@ function banner() {
       if (Array.isArray(notes)) memCount += notes.length;
     } catch (_) {}
   }
+  let learnedBankCount = 0;
+  try { learnedBankCount = autolearn.getMemoryStats(getHaksterRoots().filter(root => path.basename(root) === '.hakster')).bankEntries; } catch (_) {}
 
   const W = _termWidth() - 6;  // 6 = border + padding chars
   const bdr = C.bgSubtle + C.bold;  // Charcoal borders (HaksterAI-style)
@@ -3443,7 +3527,7 @@ function banner() {
   lines.push(outerLine(`${versionStr}${' '.repeat(halfPad)}${statusStr}`));
 
   // Stat line — HaksterAI-style with ◇ bullet separators
-  lines.push(outerLine(`${C.info}${C.bold}tools${R} ${C.fgBase}${toolLabel}${R} ${C.fgSubtle}◇${R} ${C.secondary}${C.bold}skills${R} ${C.fgBase}${skillCount}${R} ${C.fgSubtle}◇${R} ${C.success}${C.bold}mems${R} ${C.fgBase}${memCount}${R} ${C.fgSubtle}◇${R} ${C.cyan}${C.bold}queue${R} ${C.fgBase}${msgSize()}${R} ${C.fgSubtle}◇${R} ${C.error}${C.bold}⚠ confirm${R}`));
+  lines.push(outerLine(`${C.info}${C.bold}tools${R} ${C.fgBase}${toolLabel}${R} ${C.fgSubtle}◇${R} ${C.secondary}${C.bold}skills${R} ${C.fgBase}${skillCount}${R} ${C.fgSubtle}◇${R} ${C.success}${C.bold}mems${R} ${C.fgBase}${memCount} notes · ${learnedBankCount} learned${R} ${C.fgSubtle}◇${R} ${C.cyan}${C.bold}queue${R} ${C.fgBase}${msgSize()}${R} ${C.fgSubtle}◇${R} ${C.error}${C.bold}⚠ confirm${R}`));
 
   // Separator before panels
   lines.push(outerSep());
@@ -4546,14 +4630,24 @@ function asyncShell(command, opts = {}) {
       clearTimeout(timer);
       if (resolved) return;
       resolved = true;
+      let result;
       if (killed) {
         const out = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
-        resolve({ ok: false, stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? -1, killed: true, output: out + `\n[timeout after ${timeout}s]` });
+        result = { ok: false, stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? -1, killed: true, output: out + `\n[timeout after ${timeout}s]` };
       } else if (code !== 0) {
-        resolve({ ok: false, stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code, output: [stdout.trim(), stderr.trim(), `exit code: ${code}`].filter(Boolean).join('\n') });
+        result = { ok: false, stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code, output: [stdout.trim(), stderr.trim(), `exit code: ${code}`].filter(Boolean).join('\n') };
       } else {
-        resolve({ ok: true, stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 0, output: stdout.trim() || '(command produced no output)' });
+        result = { ok: true, stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 0, output: stdout.trim() || '(command produced no output)' };
       }
+      const looksLikeLockedKeyring = /(?:keyring|secret service|gnome[- ]keyring|org\.freedesktop\.secrets).{0,100}\blocked\b|\blocked\b.{0,100}(?:keyring|secret service|org\.freedesktop\.secrets)/i.test(result.output);
+      if (looksLikeLockedKeyring && _keyringUnlockFn) {
+        Promise.resolve(_keyringUnlockFn()).then(unlocked => {
+          result.output += unlocked
+            ? '\nLinux keyring unlocked. The original command was not repeated; review its output and retry it if appropriate.'
+            : '\nLinux keyring unlock cancelled or failed; the original command was not repeated.';
+          resolve(result);
+        }).catch(() => resolve(result));
+      } else resolve(result);
     });
 
     child.on('error', (err) => {
@@ -5609,7 +5703,20 @@ ${trunc(md, 12000)}`;
 
   async snapshot({ url, width = 1280, height = 800 }) {
     try {
-      // Use a headless approach: fetch page, extract key visual info
+      let screenshotPath = '';
+      if (process.stdout.isTTY && _showInlineImages) {
+        try {
+          const page = await getPage();
+          await page.setViewport({ width: Math.max(320, Math.min(2560, Number(width) || 1280)), height: Math.max(240, Math.min(1600, Number(height) || 800)) });
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+          await sleep(350);
+          const screenshotDir = '/tmp/hakster_screenshots';
+          if (!fs.existsSync(screenshotDir)) fs.mkdirSync(screenshotDir, { recursive: true });
+          screenshotPath = path.join(screenshotDir, `snapshot_${Date.now()}.png`);
+          await page.screenshot({ path: screenshotPath, type: 'png' });
+        } catch (_) { screenshotPath = ''; }
+      }
+      // Keep the compact page summary while capturing a rendered screenshot for the TUI.
       const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
       const html = await resp.text();
       // Extract title, meta, headings, links, forms, images
@@ -5635,6 +5742,7 @@ ${trunc(md, 12000)}`;
       if (images.length) lines.push(`Images:`, ...images.map(i => `  🖼 ${i}`), '');
       lines.push('', `Page text (first 2000 chars):`, bodyText.substring(0, 1500));
       if (bodyText.length > 1500) lines.push(`... (${bodyText.length - 1500} more chars)`);
+      if (screenshotPath) lines.push('', `Snapshot image saved: ${screenshotPath}`);
       return lines.join('\n');
     } catch (err) {
       return `Error snapshotting ${url}: ${err.message}`;
@@ -9209,6 +9317,15 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
         if (nudgeInterval) { clearInterval(nudgeInterval); nudgeInterval = null; }
       }
       }
+      const keyringDiagnostic = typeof result === 'string' ? result : (() => { try { return JSON.stringify(result); } catch (_) { return ''; } })();
+      if (_keyringUnlockFn
+        && /(?:keyring|secret service|gnome[- ]keyring|org\.freedesktop\.secrets).{0,100}\blocked\b|\blocked\b.{0,100}(?:keyring|secret service|org\.freedesktop\.secrets)/i.test(keyringDiagnostic)
+        && !/Linux keyring (?:unlocked|unlock cancelled)/i.test(keyringDiagnostic)) {
+        const unlocked = await _keyringUnlockFn().catch(() => false);
+        result = `${keyringDiagnostic}\n${unlocked
+          ? 'Linux keyring unlocked. The original action was not repeated; review the result and retry it if appropriate.'
+          : 'Keyring unlock was cancelled or failed. No retry was made.'}`;
+      }
       // ── Store successful read-only results for future rerun cache hits ──
       if (!_cacheHit && result !== undefined && result !== null && isReadOnlyTool(_baseFn, fnArgs)) {
         const _rs = String(result);
@@ -9336,6 +9453,17 @@ process.stdout.write(`\r\x1b[K${C.success}✓ Retry after compact succeeded${C.r
       const tuiStatus = isErr ? 'error' : 'ok';
       // Pass result summary to grid (truncated to 80 chars inside tuiToolDone)
       tuiToolDone(fnName, tuiStatus, String(result).substring(0, 200));
+      if (!silent && !isErr && _showInlineImages && process.stdout.isTTY && ['snapshot', 'browser_screenshot'].includes(_baseFn)) {
+        const imagePath = String(result).match(/(?:Snapshot image saved|Screenshot saved):\s*(\/tmp\/hakster_screenshots\/[^\s)]+\.(?:png|jpe?g|webp))/i)?.[1];
+        if (imagePath) {
+          try {
+            const preview = await renderSnapshotRows(imagePath, { maxWidth: Math.min(56, BOX_W - 8), maxRows: 13 });
+            const imageRows = preview?.rows || [`${C.fgMuted}Inline preview unavailable; image saved at:${C.reset}`, imagePath];
+            const title = preview ? `📸 LIVE SNAPSHOT · ${preview.width}×${preview.height}` : '📸 SNAPSHOT IMAGE';
+            log(drawBox(title, imageRows, BOX_W, C.cyan));
+          } catch (_) { /* a failed thumbnail must never fail the agent tool turn */ }
+        }
+      }
       const resultStr = String(result);
       _announceRutCount = 0;  // a tool was called — no longer an announce rut
       if (!isErr) _forcedFinish = false;  // successful tool after a break = genuine recovery (clear forced-finish)
@@ -9851,22 +9979,22 @@ function loadSession() {
 async function repl() {
   fs.mkdirSync(path.join(os.homedir(), '.hakster'), { recursive: true });
 
-  // Wire MCP log/status to our output functions
-  setMcpLogFn((text) => { console.log(text); });
+  // Keep MCP connection chatter out of the interactive terminal. Set
+  // HAKSTER_MCP_DEBUG=1 only when detailed connection diagnostics are needed.
+  setMcpLogFn((text) => { if (process.env.HAKSTER_MCP_DEBUG === '1') console.log(text); });
   setMcpStatusFn((text) => { /* status bar not used in REPL */ });
 
-  // Initialize MCP servers (non-fatal if fails)
-  console.log(`${C.cyan}🔌 Loading MCP servers...${C.reset}`);
-  const _mcpStart = Date.now();
-  await initMcpTools();
-  _mcpReady = true;  // MCP loaded — idle auto-review can now fire safely
-  const _mcpElapsed = ((Date.now() - _mcpStart) / 1000).toFixed(1);
-  const mcpInfo = mcpStatus();
-  if (mcpInfo.length > 0) {
-    console.log(`${C.green}✓ ${mcpInfo.length} MCP server(s) connected, ${getMcpTools().length} tool(s) discovered${C.reset} ${C.dim}(${_mcpElapsed}s)${C.reset}`);
-  } else {
-    console.log(`${C.dim}  No MCP servers configured${C.reset}`);
-  }
+  // Start MCP discovery immediately, but don't block the resume choice or
+  // other local startup work on slow package downloads and handshakes.
+  _mcpReady = false;
+  const _mcpStartupPromise = Promise.resolve()
+    .then(() => initMcpTools())
+    .catch(() => {})
+    .finally(() => { _mcpReady = true; });
+  await showHaksterBootAnimation();
+  console.log(_mcpReady
+    ? `${C.green}🔌 MCP ready: ${mcpStatus().filter(server => server.initialized).length} server(s), ${getMcpTools().length} tool(s).${C.reset}`
+    : `${C.dim}🔌 MCP tools are connecting in the background; the full roster will be checked before chat starts.${C.reset}`);
 
   // ── Check skills ──────────────────────────────────────────────────────
   console.log(`${C.cyan}📋 Loading skills...${C.reset}`);
@@ -9927,20 +10055,11 @@ async function repl() {
   } else {
     console.log(`${C.dim}  No memory notes — fresh start${C.reset}`);
   }
-
-  // ── Context budget estimate ────────────────────────────────────────────
-  const builtInToolCount = _builtinToolCount;
-  const mcpToolCount = getMcpTools().length;
-  const totalTools = TOOLS.length;
-  // Context budget: system prompt + tools + conversation history
-  const sysPromptSize = buildSystemPrompt().length;
-  const toolJsonSize = JSON.stringify(TOOLS).length;
-  const estimatedTokens = Math.ceil((sysPromptSize + toolJsonSize) / 4); // ~4 chars/token for mixed content
-  const budgetMax = 131072; // gpt-oss:120b-cloud context window
-  const budgetPct = ((estimatedTokens / budgetMax) * 100).toFixed(1);
-  const budgetColor = parseFloat(budgetPct) > 80 ? C.red : parseFloat(budgetPct) > 50 ? C.yellow : C.green;
-  console.log(`${budgetColor}📐 Context: ~${estimatedTokens.toLocaleString()} / ${budgetMax.toLocaleString()} tokens (${budgetPct}%)${C.reset} ${C.dim}[sys:${Math.ceil(sysPromptSize/4)} tools:${Math.ceil(toolJsonSize/4)}]${C.reset}`);
-  console.log(`${C.bold}🔧 ${totalTools} tools${C.reset} (${builtInToolCount} built-in + ${mcpToolCount} MCP)${C.reset}`);
+  try {
+    const memoryRoots = getHaksterRoots().filter(root => path.basename(root) === '.hakster');
+    const _memoryStats = autolearn.getMemoryStats(memoryRoots);
+    console.log(`${C.dim}  Learned memory: ${_memoryStats.bankEntries} banked lessons across ${_memoryStats.populatedBanks} banks · ${_memoryStats.rawEntries} pending${C.reset}`);
+  } catch (_) {}
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -9976,7 +10095,9 @@ async function repl() {
   let spinnerIdx = 0;
   let spinnerInterval = null;
 
-  function startSpinner(label) {
+  function startSpinner(label, frames = ICE_FRAMES, intervalMs = Math.round(80 / SCROLL_SPEED)) {
+    if (spinnerInterval) clearInterval(spinnerInterval);
+    spinnerFrames = frames;
     spinnerIdx = 0;
     spinnerInterval = setInterval(() => {
       const frame = spinnerFrames[spinnerIdx % spinnerFrames.length];
@@ -9987,7 +10108,7 @@ async function repl() {
       process.stdout.write(`\r${gradC}⟦${pcol}\x1b[1m${frame}\x1b[0m${gradC}⟧\x1b[0m ${C.fgMuted}${label}...${C.reset} ${gradC}${s0}${s1}\x1b[0m   `);
       spinnerIdx++; _iceShimF++;
       if (spinnerIdx % 8 === 0) _icePhraseIdx++;
-    }, Math.round(80 / SCROLL_SPEED));
+    }, intervalMs);
   }
   function stopSpinner() {
     if (spinnerInterval) { clearInterval(spinnerInterval); spinnerInterval = null; }
@@ -10047,11 +10168,8 @@ async function repl() {
         '',
         `${_CRUSH.bgGreen}${_CRUSH.dark}${C.bold} 1 Allow once ${C.reset}  ${_CRUSH.bgGold}${_CRUSH.dark}${C.bold} 2 This session ${C.reset}  ${_CRUSH.bgPurple}${_CRUSH.dark}${C.bold} 3 Permanent ${C.reset}  ${_CRUSH.bgRed}${_CRUSH.dark}${C.bold} 4 Deny ${C.reset}`,
       ];
-      const promptLabel = isSudo ? `${accentBg}${_CRUSH.dark}${C.bold} \ud83d\udd11 sudo ${C.reset} password / 1/2/3/4: `
-                                 : `${accentBg}${_CRUSH.dark}${C.bold} 1/2/3/4 ${C.reset} `;
-      _crushPanel({ accent, title: `${titleTag} — APPROVAL REQUIRED`, bodyLines, promptLabel, mask: isSudo }).then((answer) => {
-        _awaitingConfirm = false;  // Resume status bar / stall guard / panels
-        _lastActivityTime = Date.now();
+      const promptLabel = `${accentBg}${_CRUSH.dark}${C.bold} 1/2/3/4 ${C.reset} `;
+      _crushPanel({ accent, title: `${titleTag} — APPROVAL REQUIRED`, bodyLines, promptLabel }).then(async (answer) => {
         const a = answer.trim().toLowerCase();
         let decision = false;
         // Numbered button selection (1/2/3/4) or legacy (y/a/n)
@@ -10059,8 +10177,22 @@ async function repl() {
         else if (a === '2' || a === 'a') decision = 'allowlist';
         else if (a === '3' || a === 'p') decision = 'permanent';
         else if (a === '4' || a === 'n' || a === '') decision = false;
-        else if (isSudo && a.length > 0) decision = true;
-        // Permanent allowlist: persist to disk
+        let sudoPassword = null;
+        if (isSudo && decision) {
+          const entered = await _crushPanel({
+            accent: _CRUSH.red,
+            title: '🔑 SUDO AUTHENTICATION',
+            bodyLines: ['The command was approved above.', 'Enter the system password. Input is masked and used only for this command.'],
+            promptLabel: `${_CRUSH.bgRed}${_CRUSH.dark}${C.bold} 🔑 password ${C.reset} `,
+            mask: true,
+          });
+          sudoPassword = String(entered || '').trim();
+          if (!sudoPassword) decision = false;
+        }
+        _awaitingConfirm = false;  // Resume status bar / stall guard after both prompts
+        _lastActivityTime = Date.now();
+        // Persist a permanent allowlist choice only after any required sudo
+        // password was entered, so cancelling the secret prompt grants nothing.
         if (decision === 'permanent') {
           _localAllowlist.add(_cmdSig(fnName, fnArgs));
           try {
@@ -10072,9 +10204,14 @@ async function repl() {
           } catch (_) {}
           decision = true;
         }
-        _pendingSudoPassword = isSudo && decision ? answer.trim() : null;
+        _pendingSudoPassword = isSudo && decision ? sudoPassword : null;
         resolve(decision);
         if (!answer) rl.prompt();
+      }).catch(() => {
+        _awaitingConfirm = false;
+        _pendingSudoPassword = null;
+        resolve(false);
+        try { rl.prompt(); } catch (_) {}
       });
     });
   };
@@ -10204,6 +10341,13 @@ async function repl() {
   // Covers the working output via the alt-screen buffer (crush's blur backdrop).
   // `mask: true` hides typed input (sudo password) with bullets.
   const _crushPanel = ({ accent, title, bodyLines, promptLabel, mask = false }) => new Promise((resolve) => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      if (mask) {
+        process.stdout.write(`${C.error}Masked password entry requires an interactive TTY; approval denied safely.${C.reset}\n`);
+        resolve('');
+      } else askPlain(promptLabel).then(resolve);
+      return;
+    }
     const termCols = process.stdout.columns || 100;
     const termRows = process.stdout.rows || 30;
     const cols = Math.max(60, termCols - 2);
@@ -10233,10 +10377,40 @@ async function repl() {
     const lead = Math.max(0, Math.floor((cols - _vlen(promptLabel)) / 2));
     process.stdout.write('\n' + ' '.repeat(lead));
     (mask ? askMasked : askPlain)(promptLabel).then((answer) => {
+      if (mask && Array.isArray(rl.history)) rl.history = rl.history.filter(entry => entry !== answer);
       process.stdout.write('\x1b[?1049l');
       resolve(answer);
     });
   });
+
+  _keyringUnlockFn = async () => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+    _awaitingConfirm = true;
+    stopSpinner();
+    try {
+      const password = await _crushPanel({
+        accent: _CRUSH.gold,
+        title: '🔐 LINUX KEYRING LOCKED',
+        bodyLines: ['A command reported that the Linux keyring is locked.', 'Enter its password to unlock the existing keyring.', 'Input is masked, used only for this unlock, and never saved.'],
+        promptLabel: `${_CRUSH.bgGold}${_CRUSH.dark}${C.bold} 🔐 keyring password ${C.reset} `,
+        mask: true,
+      });
+      const secret = String(password || '').trim();
+      if (!secret) return false;
+      return await new Promise(resolve => {
+        const child = spawn('gnome-keyring-daemon', ['--unlock'], {
+          env: process.env,
+          stdio: ['pipe', 'ignore', 'ignore'],
+        });
+        child.once('error', () => resolve(false));
+        child.once('close', code => resolve(code === 0));
+        try { child.stdin.end(secret + '\n'); } catch (_) { resolve(false); }
+      });
+    } finally {
+      _awaitingConfirm = false;
+      _lastActivityTime = Date.now();
+    }
+  };
 
 // ── Crush-style popup: centered box on alternate screen. ←/→ or hotkeys
   // move focus; Enter confirms; Esc cancels. Shows options like [y] [n] [c].
@@ -10513,6 +10687,46 @@ async function repl() {
   } else {
     history = [{ role: 'system', content: buildSystemPrompt() }];
   }
+
+  // Do not expose an incomplete tool roster to the interactive prompt. The
+  // resume choice above remains immediate; after it, finish MCP discovery with
+  // a spinner and show a compact roster summary instead of raw server logs.
+  if (!_mcpReady) {
+    startSpinner('Loading MCP tool roster', HAKTERM_PULSE_FRAMES, 275);
+    await _mcpStartupPromise;
+    stopSpinner();
+  }
+  const configuredMcpNames = new Set();
+  for (const root of getHaksterRoots()) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(root, 'mcp.json'), 'utf8'));
+      for (const name of Object.keys(cfg.mcpServers || {})) configuredMcpNames.add(name);
+    } catch (_) {}
+  }
+  const loadedMcp = mcpStatus();
+  const loadedMcpNames = new Set(loadedMcp.map(server => server.name));
+  const missingMcpNames = [...configuredMcpNames].filter(name => !loadedMcpNames.has(name));
+  const emptyMcpNames = loadedMcp.filter(server => server.toolCount === 0).map(server => server.name);
+  const mcpToolCount = getMcpTools().length;
+  const initializedMcpCount = loadedMcp.filter(server => server.initialized).length;
+  const lazyMcpCount = loadedMcp.filter(server => server.lazy).length;
+  const mcpReportRows = [
+    `Servers: ${loadedMcpNames.size}/${configuredMcpNames.size} registered · ${initializedMcpCount} connected · ${lazyMcpCount} on-demand`,
+    `MCP tool definitions: ${mcpToolCount} · CLI tools ready: ${TOOLS.length} (${_builtinToolCount} built-in + ${mcpToolCount} MCP)`
+  ];
+  if (missingMcpNames.length) mcpReportRows.push(`Not registered: ${missingMcpNames.slice(0, 7).join(', ')}${missingMcpNames.length > 7 ? ` +${missingMcpNames.length - 7} more` : ''}`);
+  if (emptyMcpNames.length) mcpReportRows.push(`No tool definitions: ${emptyMcpNames.slice(0, 7).join(', ')}${emptyMcpNames.length > 7 ? ` +${emptyMcpNames.length - 7} more` : ''}`);
+  console.log(drawBox('MCP STARTUP', mcpReportRows, BOX_W, missingMcpNames.length || emptyMcpNames.length ? C.mustard : C.success));
+
+  // Estimate context only after the MCP tool definitions are fully merged.
+  const sysPromptSize = buildSystemPrompt().length;
+  const toolJsonSize = JSON.stringify(TOOLS).length;
+  const estimatedTokens = Math.ceil((sysPromptSize + toolJsonSize) / 4);
+  const budgetMax = 131072;
+  const budgetPct = ((estimatedTokens / budgetMax) * 100).toFixed(1);
+  const budgetColor = parseFloat(budgetPct) > 80 ? C.red : parseFloat(budgetPct) > 50 ? C.yellow : C.green;
+  console.log(`${budgetColor}📐 Context: ~${estimatedTokens.toLocaleString()} / ${budgetMax.toLocaleString()} tokens (${budgetPct}%)${C.reset} ${C.dim}[sys:${Math.ceil(sysPromptSize / 4)} tools:${Math.ceil(toolJsonSize / 4)}]${C.reset}`);
+
   let idleTimer = null;
   processing = false;  // reset module-level flag for this REPL session (hoisted out so agentLoop can read it)
   let _lastIdleReview = 0;
@@ -10536,15 +10750,17 @@ async function repl() {
     _idleReviewCount++;
     _lastIdleReview = Date.now();
     const reviewNum = _idleReviewCount;
-    console.log(`\n${C.bgSubtle}${T.hashFill(50, C.fgMuted)}${C.reset}`);
-    console.log(`${C.fgMuted}🔍 Idle Auto-Review #${reviewNum}${C.reset} ${C.dim}${new Date().toLocaleTimeString()}${C.reset}`);
-    console.log(`${C.bgSubtle}${T.thin.repeat(50)}${C.reset}`);
+    const reviewPanels = [];
 
     const run = async (cmd) => { try { const r = await asyncShell(cmd, { timeout: 10 }); return r.ok ? r.stdout.trim() : null; } catch (_) { return null; } };
+    const printReviewBox = (title, rows, color = C.cyan) => {
+      reviewPanels.push(drawBox(title, rows.length ? rows : ['No data available'], BOX_W, color));
+    };
+    printReviewBox(`IDLE AUTO-REVIEW #${reviewNum}`, [new Date().toLocaleTimeString(), 'Refreshing service, port, resource, and memory status'], C.info);
 
     // 1. PM2 services — auto-restart dead ones
-    console.log(`${C.bold}${C.cyan}📦 Services${C.reset}`);
     const serviceMap = { haksterai: 3579, cinevault: 8081, miniforge: 5555 };
+    const serviceRows = [];
     const pm2out = await run('pm2 list --no-color 2>/dev/null');
     if (pm2out) {
       const lines = pm2out.split('\n');
@@ -10553,53 +10769,56 @@ async function repl() {
         if (m) {
           const color = m[2] === 'online' ? C.green : C.red;
           const port = serviceMap[m[1].toLowerCase()] || '?';
-          console.log(`  ${color}${m[2] === 'online' ? '✓' : '✗'}${C.reset} ${m[1]} :${port} ${color}${m[2]}${C.reset}`);
+          serviceRows.push(`${color}${m[2] === 'online' ? '✓' : '✗'}${C.reset} ${m[1]} :${port} ${color}${m[2]}${C.reset}`);
           if (m[2] !== 'online' && serviceMap[m[1].toLowerCase()]) {
-            console.log(`  ${C.yellow}↻ Auto-restarting ${m[1]}...${C.reset}`);
+            serviceRows.push(`${C.yellow}↻ Auto-restarting ${m[1]}...${C.reset}`);
             await run(`pm2 restart ${m[1]} 2>/dev/null`);
             try {
               const resp = await fetch(`http://localhost:${serviceMap[m[1].toLowerCase()]}/api/health`, { signal: AbortSignal.timeout(5000) });
-              if (resp.ok) console.log(`  ${C.green}✓ ${m[1]} restarted OK${C.reset}`);
-              else console.log(`  ${C.yellow}⚠ ${m[1]} up but health=${resp.status}${C.reset}`);
+              if (resp.ok) serviceRows.push(`${C.green}✓ ${m[1]} restarted OK${C.reset}`);
+              else serviceRows.push(`${C.yellow}⚠ ${m[1]} up but health=${resp.status}${C.reset}`);
             } catch (_) {
-              console.log(`  ${C.red}✗ ${m[1]} health check failed${C.reset}`);
+              serviceRows.push(`${C.red}✗ ${m[1]} health check failed${C.reset}`);
             }
           }
         }
       }
     } else {
-      console.log(`  ${C.red}✗ PM2 error${C.reset}`);
+      serviceRows.push(`${C.red}✗ PM2 error${C.reset}`);
     }
+    printReviewBox('SERVICES', serviceRows, C.cyan);
 
     // 2. Health endpoints
-    console.log(`${C.bold}${C.cyan}🏥 Health${C.reset}`);
+    const healthRows = [];
     for (const [name, port] of Object.entries(serviceMap)) {
       try {
         const resp = await fetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(3000) });
         const text = await resp.text();
-        console.log(`  ${resp.ok ? C.green : C.yellow}${resp.ok ? '✓' : '⚠'}${C.reset} ${name} :${port} → ${resp.status} ${text.substring(0, 50)}`);
+        healthRows.push(`${resp.ok ? C.green : C.yellow}${resp.ok ? '✓' : '⚠'}${C.reset} ${name} :${port} → ${resp.status} ${text.substring(0, 50)}`);
       } catch (_) {
-        console.log(`  ${C.red}✗${C.reset} ${name} :${port} → unreachable`);
+        healthRows.push(`${C.red}✗${C.reset} ${name} :${port} → unreachable`);
       }
     }
+    printReviewBox('API HEALTH', healthRows, C.cyan);
 
     // 3. System resources
-    console.log(`${C.bold}${C.cyan}💻 System${C.reset}`);
+    const systemRows = [];
     const mem = await run('free -h | head -2 | tail -1');
-    if (mem) { const p = mem.split(/\s+/); console.log(`  RAM  ${p[2] || '?'} used / ${p[1] || '?'} total`); }
+    if (mem) { const p = mem.split(/\s+/); systemRows.push(`RAM  ${p[2] || '?'} used / ${p[1] || '?'} total`); }
     const disk = await run('df -h / | tail -1');
-    if (disk) { const p = disk.split(/\s+/); console.log(`  Disk ${p[2] || '?'} used / ${p[1] || '?'} total (${p[4] || '?'})`); }
+    if (disk) { const p = disk.split(/\s+/); systemRows.push(`Disk ${p[2] || '?'} used / ${p[1] || '?'} total (${p[4] || '?'})`); }
     const tempRaw = await run('cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null');
     if (tempRaw) {
       const tempC = (parseInt(tempRaw) / 1000).toFixed(1);
       const tempColor = parseFloat(tempC) > 80 ? C.red : parseFloat(tempC) > 70 ? C.yellow : C.green;
-      console.log(`  Temp ${tempColor}${tempC}°C${C.reset}`);
+      systemRows.push(`Temp ${tempColor}${tempC}°C${C.reset}`);
     }
     const load = await run('uptime');
-    if (load) { const lm = load.match(/load average:\s*([\d.,]+)/); console.log(`  Load ${lm ? lm[1] : load}`); }
+    if (load) { const lm = load.match(/load average:\s*([\d.,]+)/); systemRows.push(`Load ${lm ? lm[1] : load}`); }
+    printReviewBox('SYSTEM RESOURCES', systemRows, C.cyan);
 
     // 4. Skill hot-reload — count EVERY .md skill across all roots (recursive, deduped)
-    console.log(`${C.bold}${C.cyan}📚 Skills${C.reset}`);
+    const skillRows = [];
     try {
       const roots = getHaksterRoots();
       const seen = new Set();
@@ -10616,24 +10835,41 @@ async function repl() {
               const stat = fs.statSync(f);
               if (Date.now() - stat.mtimeMs < 300000) {
                 newSkills++;
-                if (newSkills <= 12) console.log(`  ${C.green}✦${C.reset} ${path.relative(root, f)} ${C.dim}(updated)${C.reset}`);
+                if (newSkills <= 12) skillRows.push(`${C.green}✦${C.reset} ${path.relative(root, f)} ${C.dim}(updated)${C.reset}`);
               }
             } catch (_) {}
           }
         } catch (_) {}
       }
-      console.log(`  ${skillCount} skills loaded across ${roots.length} roots${newSkills > 0 ? ` (${C.green}${newSkills} new/updated${C.reset})` : ''}`);
-    } catch (_) { console.log(`  ${C.yellow}⚠ skill scan error${C.reset}`); }
+      skillRows.push(`${skillCount} skills loaded across ${roots.length} roots${newSkills > 0 ? ` (${C.green}${newSkills} new/updated${C.reset})` : ''}`);
+    } catch (_) { skillRows.push(`${C.yellow}⚠ skill scan error${C.reset}`); }
+    printReviewBox('📚 Skills', skillRows, C.cyan);
 
     // 5. Self-repair: own process health
-    console.log(`${C.bold}${C.cyan}🔧 Self-Check${C.reset}`);
+    const selfCheckRows = [];
     const ownMem = process.memoryUsage();
     const heapUsed = (ownMem.heapUsed / 1024 / 1024).toFixed(1);
     const rss = (ownMem.rss / 1024 / 1024).toFixed(1);
     const rssColor = ownMem.rss > 512 * 1024 * 1024 ? C.red : ownMem.rss > 256 * 1024 * 1024 ? C.yellow : C.green;
-    console.log(`  PID  ${process.pid}`);
-    console.log(`  Heap ${heapUsed}MB  RSS ${rssColor}${rss}MB${C.reset}`);
-    console.log(`  Uptime ${Math.floor(process.uptime() / 60)}m  History ${history.length} msgs  Tools ${_toolCallCount}`);
+    selfCheckRows.push(`PID  ${process.pid}`);
+    selfCheckRows.push(`Heap ${heapUsed}MB  RSS ${rssColor}${rss}MB${C.reset}`);
+    selfCheckRows.push(`Uptime ${Math.floor(process.uptime() / 60)}m  History ${history.length} msgs  Tools ${_toolCallCount}`);
+    printReviewBox('SELF CHECK', selfCheckRows, C.cyan);
+    const liveToolName = typeof _tuiCurrentTool === 'string'
+      ? _tuiCurrentTool
+      : (_tuiCurrentTool && (_tuiCurrentTool.name || _tuiCurrentTool.tool)) || '—';
+    printReviewBox('❄️ Live Agent', [
+      `Status: ${processing ? 'active' : 'waiting'}`,
+      `Phase: ${processing ? _tuiPhase : 'IDLE'}`,
+      `Tool: ${liveToolName}`,
+      `Turns: ${_sessionPerf.roundsUsed || _tuiStep || 0}`,
+      `Detail: ${processing ? (_activityDetail || 'Agent working.') : 'Idle auto-review complete.'}`
+    ], C.info);
+    printReviewBox('🤖 Model', [
+      `Provider: ${_familyFor(MODEL) || 'Ollama'}`,
+      `Model: ${MODEL}`,
+      'Version: v2.1'
+    ], C.primary);
 
     // 6. Ports — list our known services UP TOP (up/down), not just bars.
     const EXPECTED_PORTS = [
@@ -10654,20 +10890,34 @@ async function repl() {
         if (m2) openPorts.add(Number(m2[1]));
       }
     }
-    console.log(`${C.bold}${C.cyan}🔌 Ports${C.reset}`);
+    const portRows = [];
+    const detectedPorts = [...openPorts].sort((a, b) => a - b);
+    const listenerLabels = detectedPorts.map(port => `:${port}${portProc[String(port)] ? `/${portProc[String(port)]}` : ''}`);
+    portRows.push(`Listening TCP ports (${detectedPorts.length}):`);
+    if (!listenerLabels.length) portRows.push('none detected');
+    for (let i = 0; i < listenerLabels.length; i += 7) {
+      portRows.push(listenerLabels.slice(i, i + 7).join('  '));
+    }
+    const onlinePortLabels = EXPECTED_PORTS
+      .filter(svc => openPorts.has(svc.port))
+      .map(svc => `:${svc.port} ${svc.name}`);
+    portRows.push(`Tracked services online ${onlinePortLabels.length}/${EXPECTED_PORTS.length}: ${onlinePortLabels.join(', ') || 'none'}`);
     for (const svc of EXPECTED_PORTS) {
       const up = openPorts.has(svc.port);
       const proc = portProc[String(svc.port)] || (up ? 'listening' : '');
       const tag = up ? `${C.green}●${C.reset} :${svc.port} ${C.fgBase}${svc.name}${C.reset}${proc ? C.dim + ' (' + proc + ')' + C.reset : ''}`
                      : `${C.red}○${C.reset} :${svc.port} ${C.fgMuted}${svc.name}${C.reset} ${C.dim}down${C.reset}`;
-      console.log(`  ${tag}  ${C.fgMuted}${svc.proto}://localhost:${svc.port}${C.reset}`);
+      portRows.push(`${tag}  ${C.fgMuted}${svc.proto}://localhost:${svc.port}${C.reset}`);
     }
+    printReviewBox('ONLINE PORTS', portRows, C.cyan);
 
     // 📁 File integrity — important files present vs missing (%)
     const _fi = fileIntegrity();
     const _fiBar = (() => { const bl = 20, f = Math.round(_fi.pct / 100 * bl); const c = _fi.pct >= 90 ? C.success : _fi.pct >= 60 ? C.mustard : C.error; return c + '█'.repeat(f) + C.fgSubtle + '░'.repeat(bl - f) + C.reset; })();
-    console.log(`${C.bold}${C.cyan}📁 Files${C.reset} ${C.dim}(${_fi.present}/${_fi.total} important)${C.reset}`);
-    console.log(`  ${_fiBar} ${_fi.pct}%${_fi.missing.length ? '  ' + C.error + 'missing: ' + _fi.missing.join(', ') + C.reset : '  ' + C.success + 'all present' + C.reset}`);
+    const fileRows = [`${_fiBar} ${_fi.pct}%  ${_fi.present}/${_fi.total} important files`];
+    if (_fi.missing.length) fileRows.push(..._fi.missing.map(file => `${C.error}Missing: ${file}${C.reset}`));
+    else fileRows.push(`${C.success}✓ all important files present${C.reset}`);
+    printReviewBox('FILE INTEGRITY', fileRows, C.cyan);
     for (const f of _fi.missing) { if (!_smartMissedFiles.has(f)) { _smartMissedFiles.add(f); bumpSmart(-10, 'file-missing:' + f); } }
     for (const f of [..._smartMissedFiles]) { if (!_fi.missing.includes(f)) { _smartMissedFiles.delete(f); bumpSmart(5, 'file-restored:' + f); } }
     // 🧠 Idle recovery: when the CLI is idle (not actively working), smartness
@@ -10688,21 +10938,21 @@ async function repl() {
     const _sLabelCol = _smartScore >= 66 ? C.success : _smartScore >= 33 ? C.mustard : C.error;
     // Flair: 💪 when he's strong/sharp, ⚠️ hazard when slipping, ☠️ when suffering.
     const _sEmoji = _smartScore >= 66 ? '💪' : _smartScore >= 50 ? '🙂' : _smartScore >= 33 ? '⚠️' : '☠️';
-    console.log(`${C.bold}${C.cyan}🧠 Smartness${C.reset} ${C.dim}(this task)${C.reset}`);
-    console.log(`  ${smartBar()}  ${_sLabelCol}${C.bold}${_sLabel}${C.reset} ${_sEmoji}`);
-    console.log(`  ${autolearnBar()}  ${C.fgSubtle}Autolearn (session reward)${C.reset}`);
-    console.log(perfRow());
+    printReviewBox('SMARTNESS', [
+      `${smartBar()}  ${_sLabelCol}${C.bold}${_sLabel}${C.reset} ${_sEmoji}`,
+      `${autolearnBar()}  ${C.fgSubtle}Autolearn (session reward)${C.reset}`,
+    ], C.info);
+    const performanceLines = perfRow().split('\n').map(line => line.trim()).filter(Boolean);
+    printReviewBox('📊 Session Stats', performanceLines.slice(1), C.info);
     reviewTranscript(history, { verbose: false });  // 📝 on idle: review transcript + log the point map
-    console.log(`${C.bgSubtle}${T.hashFill(50, C.fgMuted)}${C.reset}`);
-    console.log(`${C.dim}✓ Auto-review #${reviewNum} complete. Next in ${IDLE_TIMEOUT_MS / 1000}s.${C.reset}\n`);
+    printReviewBox('RECAP', [
+      `Ports online: ${detectedPorts.length} TCP listeners · tracked services ${onlinePortLabels.length}/${EXPECTED_PORTS.length}`,
+      `API health: ${healthRows.filter(row => row.includes('✓')).length}/${healthRows.length} responding`,
+      `Review complete · next check in ${IDLE_TIMEOUT_MS / 1000}s`
+    ], C.success);
+    _writePanel('IDLE REVIEW', reviewPanels.join('\n'));
+    if (!process.stdout.isTTY) rl.prompt();
     startIdleTimer();
-    // The review above prints via raw console.log (not the log() wrapper), so it
-    // never invalidated _lastPanelName — the next _writePanel call would otherwise
-    // think it can still scroll up in-place over a panel that's now scrolled far
-    // off-screen behind all this review output, clobbering whatever's actually
-    // on screen. Reset it here, same as log() does, before redrawing the prompt.
-    _lastPanelName = null;
-    rl.prompt();
   }
 
   function startIdleTimer() {
@@ -10715,6 +10965,7 @@ async function repl() {
 
   // ── Handle input ────────────────────────────────────────────────────
   function handleInput(input) {
+    const isResumeHandshake = _resumeFirstInput;
     input = (input || '').trim();
     // On the very first input after a resume, even empty (Enter) or casual
     // greetings should trigger the agent so it asks "resume or new?".
@@ -10884,6 +11135,7 @@ async function repl() {
           { cmd: '/review',   desc: 'Idle auto-review (services, health, smartness, files)' },
           { cmd: '/clear',    desc: 'Clear session history + start fresh' },
           { cmd: '/img',      desc: 'Image generation mode' },
+          { cmd: '/show-images', desc: 'Toggle live screenshot previews in the TUI' },
           { cmd: '/tools',    desc: 'List MCP tools + servers' },
           { cmd: '/memory',   desc: 'Show memory state' },
           { cmd: '/status',   desc: 'Session + system status' },
@@ -10913,6 +11165,12 @@ async function repl() {
       return;
     }
 
+    if (input === '/show-images') {
+      _showInlineImages = !_showInlineImages;
+      console.log(`${C.cyan}📸 Live screenshot previews ${_showInlineImages ? `${C.success}on` : `${C.fgMuted}off`}${C.reset}`);
+      rl.prompt();
+      return;
+    }
     if (input === '/review' || input === '/health') {
       runIdleAutoReview();
       return;
@@ -11284,6 +11542,17 @@ async function repl() {
     (async () => {
       try {
         serverNotify(`Agent started: ${input.substring(0, 80)}`, { type: 'task', priority: 'high' });
+        // The one-line resume handshake is just a conversational prompt; don't
+        // make it wait for optional MCP processes to finish booting.
+        if (!_mcpReady && !isResumeHandshake) {
+          _agentActivity = 'Reading';
+          _activityDetail = 'MCP tools initializing';
+          stopSpinner();
+          startSpinner('Connecting MCP tools');
+          await _mcpStartupPromise;
+          stopSpinner();
+          startSpinner('Processing');
+        }
         await agentLoop(input, history, false, { lowToken: process.env.HAKSTER_LOW_TOKEN === '1' || process.env.HAKSTER_LOW_TOKEN === 'true' });
         stopSpinner();
         console.log(`\n${C.success}${C.bold}✓ Done${C.reset} ${C.bgSubtle}${T.hashFill(20, C.success)}${C.reset}`);

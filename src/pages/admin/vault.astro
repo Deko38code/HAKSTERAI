@@ -1,0 +1,124 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout title="haksterAi Vault" description="Owner-only backups for important HaksterAI data.">
+  <main class="mx-auto min-h-screen max-w-5xl px-5 pb-16 pt-28 text-slate-100">
+    <nav class="mb-5 text-sm text-slate-500"><a href="/" class="hover:text-violet-300">Home</a> <span class="px-2">›</span><a href="/commands" class="hover:text-violet-300">Command Center</a> <span class="px-2">›</span><span class="text-amber-300">Vault</span></nav>
+    <section class="rounded-3xl border border-amber-300/20 bg-gradient-to-br from-[#17151f] to-[#0c0c12] p-6 sm:p-9">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div><p class="mb-2 text-xs font-bold uppercase tracking-[.25em] text-amber-300">Owner storage</p><h1 class="text-3xl font-bold">🔐 Vault</h1><p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Create dated server-side backups of HaksterAI’s local database and Telegram chat ID registry. The database includes saved application data and account records. Environment files and API key configuration are excluded.</p></div>
+        <span id="vault-auth-status" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400">Checking owner access…</span>
+      </div>
+      <div class="mt-8 grid gap-4 sm:grid-cols-3">
+        <article class="rounded-2xl border border-white/10 bg-black/20 p-5"><p class="text-xs uppercase tracking-wider text-slate-500">Backup contents</p><h2 class="mt-2 font-semibold">App database + Telegram IDs</h2><p class="mt-2 text-sm text-slate-400">Keeps user/application data and account records. No .env files are copied.</p></article>
+        <article class="rounded-2xl border border-white/10 bg-black/20 p-5"><p class="text-xs uppercase tracking-wider text-slate-500">Storage</p><h2 class="mt-2 font-semibold">On this HaksterAI server</h2><p class="mt-2 text-sm text-slate-400">Each timestamped snapshot is stored in the protected server data directory.</p></article>
+        <article class="rounded-2xl border border-white/10 bg-black/20 p-5"><p class="text-xs uppercase tracking-wider text-slate-500">Restore</p><h2 class="mt-2 font-semibold">Snapshots retained</h2><p class="mt-2 text-sm text-slate-400">This page lists snapshots and their files. Restore is intentionally not enabled yet.</p></article>
+      </div>
+      <div class="mt-7 flex flex-wrap items-center gap-3">
+        <button id="vault-create-backup" type="button" disabled class="rounded-xl bg-amber-300 px-5 py-3 font-bold text-black transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-40">Create server backup</button>
+        <button id="vault-unlock" type="button" class="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-white/5">Enter Vault PIN</button>
+        <p id="vault-status" role="status" class="text-sm text-slate-400">Owner check is required. The Vault PIN must also be configured on the server.</p>
+      </div>
+      <div id="vault-backups" class="mt-6 grid gap-2"></div>
+      <div class="mt-8 rounded-xl border border-amber-300/15 bg-amber-300/5 p-4 text-xs leading-5 text-amber-100/70">Snapshots contain application/account data. They stay on this server and are not encrypted by this feature. Keep server disk access restricted and use your normal encrypted off-site backup for disaster recovery.</div>
+    </section>
+  </main>
+  <script>
+    const apiBase = window.location.port === '4321' ? 'http://localhost:3579' : '';
+    const token = localStorage.getItem('hakster_google_token') || '';
+    const authBadge = document.getElementById('vault-auth-status')!;
+    const createButton = document.getElementById('vault-create-backup') as HTMLButtonElement;
+    const unlockButton = document.getElementById('vault-unlock') as HTMLButtonElement;
+    const status = document.getElementById('vault-status')!;
+    const backupList = document.getElementById('vault-backups')!;
+    let adminPin = '';
+
+    async function verifyOwner() {
+      const response = await fetch(apiBase + '/api/auth/me', { headers: { 'x-api-key': token } });
+      const data = response.ok ? await response.json() : null;
+      if (!data?.user?.is_owner && data?.user?.role !== 'admin') throw new Error('Owner access required.');
+      authBadge.textContent = 'Owner verified';
+      authBadge.className = 'rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1.5 text-xs text-emerald-300';
+      unlockButton.disabled = false;
+    }
+
+    function showPinpad(): Promise<string> {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4';
+        overlay.innerHTML = `<section role="dialog" aria-modal="true" aria-label="Vault PIN" class="w-full max-w-xs rounded-2xl border border-amber-300/30 bg-[#111118] p-5 text-white shadow-2xl"><div class="mb-4 flex items-center justify-between"><h2 class="font-bold text-amber-300">Vault PIN</h2><button type="button" data-close class="rounded-lg px-2 py-1 text-slate-400 hover:bg-white/10" aria-label="Close">✕</button></div><input data-pin type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="12" class="mb-3 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-center text-2xl tracking-[.5em]" aria-label="PIN"/><div class="grid grid-cols-3 gap-2">${[1,2,3,4,5,6,7,8,9,'Clear',0,'Enter'].map(n => `<button type="button" data-key="${n}" class="rounded-xl border border-white/10 bg-white/5 py-3 font-semibold hover:bg-white/10">${n}</button>`).join('')}</div></section>`;
+        const input = overlay.querySelector('[data-pin]') as HTMLInputElement;
+        const finish = (value: string) => { overlay.remove(); resolve(value); };
+        overlay.querySelector('[data-close]')?.addEventListener('click', () => finish(''));
+        overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(''); });
+        overlay.querySelectorAll('[data-key]').forEach((key) => key.addEventListener('click', () => {
+          const value = (key as HTMLElement).dataset.key || '';
+          if (value === 'Clear') input.value = '';
+          else if (value === 'Enter') { if (input.value) finish(input.value); }
+          else if (input.value.length < 12) input.value += value;
+          input.focus();
+        }));
+        input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && input.value) finish(input.value); if (event.key === 'Escape') finish(''); });
+        document.body.appendChild(overlay); input.focus();
+      });
+    }
+
+    async function loadBackups() {
+      const response = await fetch(apiBase + '/api/admin/vault/backups', { headers: { 'x-api-key': token, 'x-admin-pin': adminPin } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load backups.');
+      backupList.innerHTML = '';
+      if (!data.backups?.length) { backupList.innerHTML = '<p class="rounded-xl border border-white/10 p-4 text-sm text-slate-500">No snapshots yet.</p>'; return; }
+      data.backups.forEach((backup: any) => {
+        const row = document.createElement('article');
+        row.className = 'rounded-xl border border-white/10 bg-black/20 p-4';
+        const title = document.createElement('p'); title.className = 'font-mono text-sm text-slate-200'; title.textContent = backup.name;
+        const details = document.createElement('p'); details.className = 'mt-1 text-xs text-slate-500'; details.textContent = (backup.files || []).join(' · ') || 'No files copied';
+        row.append(title, details); backupList.appendChild(row);
+      });
+    }
+
+    verifyOwner().catch((error) => {
+      authBadge.textContent = 'Vault locked';
+      status.textContent = error.message || 'Could not verify owner access.';
+      unlockButton.disabled = true;
+    });
+
+    unlockButton.addEventListener('click', async () => {
+      try {
+        await verifyOwner();
+        adminPin = await showPinpad();
+        if (!adminPin) return;
+        const response = await fetch(apiBase + '/api/admin/pin/verify', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': token }, body: JSON.stringify({ pin: adminPin }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'PIN verification failed.');
+        createButton.disabled = false;
+        unlockButton.textContent = '✓ Vault unlocked';
+        await loadBackups();
+        status.textContent = 'Vault unlocked. Existing backups are listed below.';
+      } catch (error: any) {
+        adminPin = '';
+        status.textContent = error.message || 'PIN verification failed.';
+      }
+    });
+
+    createButton.addEventListener('click', async () => {
+      createButton.disabled = true;
+      status.textContent = 'Collecting approved Command Center data…';
+      try {
+        await verifyOwner();
+        if (!adminPin) throw new Error('Unlock the Vault with your PIN first.');
+        const response = await fetch(apiBase + '/api/admin/vault/backups', { method: 'POST', headers: { 'x-api-key': token, 'x-admin-pin': adminPin } });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not create backup.');
+        status.textContent = `Backup created · ${data.backup.files.join(', ') || 'no files found'}`;
+        await loadBackups();
+      } catch (error: any) {
+        status.textContent = error.message || 'Backup failed.';
+      } finally {
+        createButton.disabled = !adminPin;
+      }
+    });
+  </script>
+</Layout>

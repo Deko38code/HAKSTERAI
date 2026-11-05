@@ -641,6 +641,71 @@ async function firecrawlScrape(url) {
   return res.json?.data?.markdown || res.json?.data?.content || JSON.stringify(res.json?.data, null, 2);
 }
 
+let _scraperApiKeyIndex = 0;
+async function scraperApiScrape(url, options = {}) {
+  let target;
+  try { target = new URL(url); } catch { throw new Error('A valid http(s) URL is required'); }
+  if (!['http:', 'https:'].includes(target.protocol)) throw new Error('Only http(s) URLs can be scraped');
+  if (target.username || target.password) throw new Error('URLs containing credentials cannot be scraped');
+
+  let keys = [];
+  try {
+    keys = fs.readFileSync('/home/ghost/.scraperapi_keys', 'utf8').split(/\r?\n/).map(k => k.trim()).filter(Boolean);
+  } catch { /* report the configured-tool state below */ }
+  if (!keys.length) throw new Error('ScraperAPI is not configured');
+
+  const start = _scraperApiKeyIndex++ % keys.length;
+  keys = keys.slice(start).concat(keys.slice(0, start));
+  const key = keys[0];
+  {
+    const params = new URLSearchParams({ api_key: key, url: target.toString() });
+    if (options.render === true) params.set('render', 'true');
+    if (options.premium === true) params.set('premium', 'true');
+    if (options.country_code) {
+      const countryCode = String(options.country_code).toLowerCase();
+      if (!/^[a-z]{2}$/.test(countryCode)) throw new Error('country_code must be a two-letter code');
+      params.set('country_code', countryCode);
+    }
+    const body = await new Promise((resolve, reject) => {
+      const req = require('https').get(`https://api.scraperapi.com/?${params}`, {
+        headers: { 'User-Agent': 'HaksterAI/1.0' }, timeout: 60000,
+      }, (res) => {
+        const chunks = [];
+        let size = 0;
+        res.on('data', chunk => {
+          if (size >= 50000) return;
+          const accepted = chunk.subarray(0, 50000 - size);
+          chunks.push(accepted);
+          size += accepted.length;
+        });
+        res.on('end', () => resolve({ status: res.statusCode || 0, text: Buffer.concat(chunks).toString('utf8') }));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => req.destroy(new Error('ScraperAPI request timed out')));
+    });
+    if (body.status >= 200 && body.status < 300) return body.text;
+    if ([401, 403, 429].includes(body.status) && keys.length > 1) {
+      // Rotate once to a second configured key only for auth/rate-limit failures.
+      _scraperApiKeyIndex++;
+      const retryKey = keys[1];
+      const retryParams = new URLSearchParams(params);
+      retryParams.set('api_key', retryKey);
+      const retry = await new Promise((resolve, reject) => {
+        const req = require('https').get(`https://api.scraperapi.com/?${retryParams}`, { timeout: 60000 }, (res) => {
+          const chunks = []; let size = 0;
+          res.on('data', chunk => { if (size >= 50000) return; const accepted = chunk.subarray(0, 50000 - size); chunks.push(accepted); size += accepted.length; });
+          res.on('end', () => resolve({ status: res.statusCode || 0, text: Buffer.concat(chunks).toString('utf8') }));
+        });
+        req.on('error', reject);
+        req.on('timeout', () => req.destroy(new Error('ScraperAPI request timed out')));
+      });
+      if (retry.status >= 200 && retry.status < 300) return retry.text;
+      throw new Error(`ScraperAPI request failed (HTTP ${retry.status})`);
+    }
+    throw new Error(`ScraperAPI request failed (HTTP ${body.status || 'network error'})`);
+  }
+}
+
 function localKnowledgeFallback(query) {
   const q = String(query || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
   if (/\btupac\b/.test(q) || /\b2pac\b/.test(q) || /\bshukur\b/.test(q) || /\bshakur\b/.test(q)) {
@@ -1665,6 +1730,23 @@ const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'hakster_scrape',
+      description: 'Scrape a webpage through HaksterAI ScraperAPI with rotating server-side keys. Use when a page needs JavaScript rendering or blocks ordinary fetches. Rendering and premium proxies may consume more credits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'HTTP or HTTPS URL to scrape' },
+          render: { type: 'boolean', description: 'Enable JavaScript rendering (uses more credits)' },
+          premium: { type: 'boolean', description: 'Use premium proxies (uses more credits)' },
+          country_code: { type: 'string', description: 'Optional two-letter proxy country code' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'save_memory',
       description: 'Save a fact, preference, decision, or piece of context to persistent memory. The agent can recall this across all future sessions. Use when the user shares preferences, important facts about their setup, architecture decisions, or any information worth remembering.',
       parameters: {
@@ -2252,7 +2334,7 @@ Sub-Agent Roster:
 - Build Agent: use spawn_agent for isolated implementation work on a component, route, API endpoint, or integration while you inspect adjacent files.
 - Script Agent: use spawn_agent for shell, Node, Python, migration, setup, install, maintenance, and automation scripts.
 - QA Agent: use spawn_agent for focused test/build/log review, regression checks, syntax checks, and UI verification notes.
-- Firecrawl Agent: use spawn_agent plus web_search/firecrawl_scrape for current websites, docs, reference pages, competitor pages, and API examples. If Firecrawl keys are configured, prefer Firecrawl for search/scrape.
+- Firecrawl Agent: use spawn_agent plus web_search/firecrawl_scrape for current websites, docs, reference pages, competitor pages, and API examples. Use hakster_scrape when a page blocks normal fetching or needs JavaScript rendering. ScraperAPI credentials stay server-side.
 - Ops Agent: use spawn_agent for PM2/service/port/log/health diagnostics when the coding change touches a running app.
 - Keep sub-agent tasks specific and bounded. Merge their findings into your own final decision; do not blindly trust a sub-agent result.
 
@@ -3170,6 +3252,15 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
           return `🌐 Scraped: ${url}\n\n${markdown}`;
         } catch (err) {
           return `Error: Firecrawl scrape failed: ${err.message}`;
+        }
+      }
+      case 'hakster_scrape': {
+        if (!args.url) return 'Error: url is required';
+        try {
+          const content = await scraperApiScrape(args.url, args);
+          return `🌐 ScraperAPI scrape complete.\n\n${content}`;
+        } catch (err) {
+          return `Error: ScraperAPI scrape failed: ${err.message}`;
         }
       }
       case 'save_memory': {
