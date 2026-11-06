@@ -2,7 +2,7 @@
 import Layout from '../../layouts/Layout.astro';
 ---
 
-<Layout title="Admin — Email Monitor | haksterAi" description="Owner-only, read-only Gmail inbox monitor.">
+<Layout title="Admin — Email Monitor | haksterAi" description="Owner-only Gmail inbox and sending monitor.">
   <main class="mx-auto min-h-screen max-w-6xl px-5 pb-16 pt-28 text-slate-100">
     <nav class="mb-5 text-sm text-slate-500"><a href="/" class="hover:text-violet-300">Home</a> <span class="px-2">›</span><span class="text-amber-300">Admin</span> <span class="px-2">›</span><span class="text-slate-300">Email Monitor</span></nav>
 
@@ -11,25 +11,34 @@ import Layout from '../../layouts/Layout.astro';
         <div>
           <p class="mb-2 text-xs font-bold uppercase tracking-[.25em] text-violet-300">Owner admin tool</p>
           <h1 class="text-3xl font-bold">📧 Gmail Monitor</h1>
-          <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Connect one Gmail inbox to view its latest 20 inbox messages. Access is read-only: this tool cannot send, delete, or modify email.</p>
+          <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Connect one Gmail inbox to view recent incoming messages and send email from that account.</p>
         </div>
         <span id="gmail-auth-status" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400">Checking owner access…</span>
       </div>
 
       <div class="mt-7 grid gap-4 md:grid-cols-3">
-        <article class="rounded-2xl border border-white/10 bg-black/20 p-5"><p class="text-xs uppercase tracking-wider text-slate-500">Permission</p><h2 class="mt-2 font-semibold">Gmail read-only</h2><p class="mt-2 text-sm text-slate-400">Google grants the narrow <code class="text-violet-200">gmail.readonly</code> scope. HaksterAI never requests send or delete access.</p></article>
+        <article class="rounded-2xl border border-white/10 bg-black/20 p-5"><p class="text-xs uppercase tracking-wider text-slate-500">Permission</p><h2 class="mt-2 font-semibold">Read and send</h2><p class="mt-2 text-sm text-slate-400">Google grants <code class="text-violet-200">gmail.readonly</code> and <code class="text-violet-200">gmail.send</code>. The monitor cannot delete or modify messages.</p></article>
         <article class="rounded-2xl border border-white/10 bg-black/20 p-5"><p class="text-xs uppercase tracking-wider text-slate-500">Token storage</p><h2 class="mt-2 font-semibold">Encrypted on the server</h2><p class="mt-2 text-sm text-slate-400">The refresh token is encrypted at rest and is never returned to this page. Message previews are fetched when you refresh and are not saved.</p></article>
-        <article class="rounded-2xl border border-amber-300/15 bg-amber-300/5 p-5"><p class="text-xs uppercase tracking-wider text-amber-200/70">Google setup</p><h2 class="mt-2 font-semibold text-amber-100">One-time configuration</h2><p class="mt-2 text-sm text-amber-100/70">Enable the Gmail API and register <code class="break-all text-xs">https://haksterai.com/api/admin/gmail/callback</code> in the Google OAuth client. Gmail read-only is a restricted scope; add the owner account as a test user, or complete Google’s verification and security review for production access.</p></article>
+        <article class="rounded-2xl border border-amber-300/15 bg-amber-300/5 p-5"><p class="text-xs uppercase tracking-wider text-amber-200/70">Google setup</p><h2 class="mt-2 font-semibold text-amber-100">One-time configuration</h2><p class="mt-2 text-sm text-amber-100/70">Enable the Gmail API and register <code class="break-all text-xs">https://haksterai.com/api/admin/gmail/callback</code> in the Google OAuth client. Inbox access uses a restricted scope; Google may require test-user access or OAuth verification.</p></article>
       </div>
 
       <div class="mt-7 flex flex-wrap items-center gap-3">
-        <button id="gmail-connect" type="button" class="rounded-xl bg-violet-400 px-5 py-3 font-bold text-black transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">Connect Gmail · read-only</button>
+        <button id="gmail-connect" type="button" class="rounded-xl bg-violet-400 px-5 py-3 font-bold text-black transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">Connect Gmail · inbox + send</button>
         <button id="gmail-refresh" type="button" disabled class="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">↻ Refresh inbox</button>
         <button id="gmail-disconnect" type="button" disabled class="rounded-xl border border-rose-300/20 px-4 py-3 text-sm font-semibold text-rose-200 transition hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-40">Disconnect Gmail</button>
         <span id="gmail-status" role="status" aria-live="polite" class="text-sm text-slate-400">Checking Gmail connection…</span>
       </div>
 
       <div id="gmail-address" class="mt-4 hidden text-sm text-violet-200"></div>
+      <form id="gmail-compose" class="mt-6 hidden rounded-2xl border border-white/10 bg-black/20 p-4 sm:p-5">
+        <h2 class="mb-4 text-lg font-semibold">Send an email</h2>
+        <div class="grid gap-3">
+          <label class="grid gap-1.5 text-sm text-slate-300">To<input id="gmail-to" type="email" autocomplete="email" maxlength="254" required class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-slate-100 outline-none focus:border-violet-300/50"></label>
+          <label class="grid gap-1.5 text-sm text-slate-300">Subject<input id="gmail-subject" type="text" maxlength="200" required class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-slate-100 outline-none focus:border-violet-300/50"></label>
+          <label class="grid gap-1.5 text-sm text-slate-300">Message<textarea id="gmail-body" rows="6" maxlength="20000" required class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-slate-100 outline-none focus:border-violet-300/50"></textarea></label>
+          <div class="flex flex-wrap items-center gap-3"><button id="gmail-send" type="submit" class="rounded-xl bg-violet-400 px-5 py-2.5 font-bold text-black transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">Send email</button><span id="gmail-send-status" role="status" aria-live="polite" class="text-sm text-slate-400"></span></div>
+        </div>
+      </form>
       <div id="gmail-messages" class="mt-6 grid gap-3"></div>
     </section>
   </main>
@@ -45,6 +54,9 @@ import Layout from '../../layouts/Layout.astro';
       const disconnectButton = document.getElementById('gmail-disconnect');
       const address = document.getElementById('gmail-address');
       const messages = document.getElementById('gmail-messages');
+      const compose = document.getElementById('gmail-compose');
+      const sendButton = document.getElementById('gmail-send');
+      const sendStatus = document.getElementById('gmail-send-status');
       const headers = { 'x-api-key': token };
       const params = new URLSearchParams(location.search);
       const errorText = {
@@ -52,7 +64,7 @@ import Layout from '../../layouts/Layout.astro';
         denied: 'Google access was declined. No Gmail connection was saved.',
         code: 'Google did not return an authorization code. Start again.',
         token: 'Google could not complete the authorization exchange.',
-        scope: 'Gmail read-only access was not granted. No connection was saved.',
+        scope: 'Gmail inbox and send permissions were not both granted. No connection was saved.',
         profile: 'HaksterAI could not verify the connected Gmail inbox.',
         refresh_token: 'Google did not provide offline access. Reconnect and approve the requested access.',
         connection: 'Gmail could not be connected. Check Google API and OAuth setup.',
@@ -119,6 +131,7 @@ import Layout from '../../layouts/Layout.astro';
           status.textContent = `Showing ${data.messages?.length || 0} recent inbox messages.`;
           address.textContent = `Connected inbox: ${data.email}`;
           address.classList.remove('hidden');
+          compose.classList.remove('hidden');
           refreshButton.disabled = false;
           disconnectButton.disabled = false;
         } catch (error) {
@@ -152,6 +165,13 @@ import Layout from '../../layouts/Layout.astro';
             address.textContent = `Connected inbox: ${data.email}`;
             address.classList.remove('hidden');
             disconnectButton.disabled = false;
+            if (data.sendEnabled) {
+              connectButton.textContent = 'Reconnect Gmail';
+              compose.classList.remove('hidden');
+            } else {
+              connectButton.textContent = 'Grant Gmail send access';
+              status.textContent = 'Inbox is connected. Approve the requested Google send permission to enable composing and sending.';
+            }
             await loadMessages();
           } else {
             status.textContent = 'Connect an authorized Gmail inbox to begin. Google API and callback setup must be complete first.';
@@ -164,7 +184,7 @@ import Layout from '../../layouts/Layout.astro';
 
       connectButton.addEventListener('click', async () => {
         connectButton.disabled = true;
-        status.textContent = 'Preparing Google consent…';
+        status.textContent = 'Preparing Google consent for inbox and send access…';
         try {
           const response = await fetch(apiBase + '/api/admin/gmail/connect', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: '{}' });
           const data = await response.json().catch(() => ({}));
@@ -176,8 +196,27 @@ import Layout from '../../layouts/Layout.astro';
         }
       });
       refreshButton.addEventListener('click', loadMessages);
+      compose.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        sendButton.disabled = true;
+        sendStatus.textContent = 'Sending…';
+        try {
+          const response = await fetch(apiBase + '/api/admin/gmail/send', {
+            method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, cache: 'no-store',
+            body: JSON.stringify({ to: document.getElementById('gmail-to').value, subject: document.getElementById('gmail-subject').value, body: document.getElementById('gmail-body').value })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.ok) throw new Error(data.error || 'Gmail could not confirm the send.');
+          compose.reset();
+          sendStatus.textContent = `Sent to ${data.to}.`;
+        } catch (error) {
+          sendStatus.textContent = error.message || 'Could not send the email.';
+        } finally {
+          sendButton.disabled = false;
+        }
+      });
       disconnectButton.addEventListener('click', async () => {
-        if (!window.confirm('Revoke HaksterAI’s Gmail read-only access?')) return;
+        if (!window.confirm('Revoke HaksterAI’s Gmail inbox and send access?')) return;
         disconnectButton.disabled = true;
         status.textContent = 'Revoking Gmail access…';
         try {
@@ -187,6 +226,7 @@ import Layout from '../../layouts/Layout.astro';
           messages.replaceChildren();
           address.textContent = '';
           address.classList.add('hidden');
+          compose.classList.add('hidden');
           refreshButton.disabled = true;
           connectButton.disabled = false;
           status.textContent = 'Gmail access revoked. The saved refresh token was cleared from the active connection.';

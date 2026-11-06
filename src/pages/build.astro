@@ -1179,6 +1179,9 @@ import Layout from '../layouts/Layout.astro';
 
   <script>
     const API = location.port === '4321' ? 'http://localhost:3579' : '';
+    function getStoredAuthToken(): string | null {
+      return localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
+    }
     const chatForm = document.getElementById('chat-form')!;
     const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
     const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
@@ -1936,7 +1939,7 @@ import Layout from '../layouts/Layout.astro';
       if (chatTermWs && chatTermWs.readyState !== WebSocket.CLOSED) return;
       terminalStatus.textContent = 'connecting...';
       terminalStatus.style.color = '#fbbf24';
-      const ptyKey = localStorage.getItem('hakster_google_token') || '';
+      const ptyKey = getStoredAuthToken() || '';
       const wsUrl = `${getWsBase()}/ws/pty${ptyKey ? '?key=' + encodeURIComponent(ptyKey) : ''}`;
       chatTermWs = new WebSocket(wsUrl);
       chatTermWs.binaryType = 'arraybuffer';
@@ -2382,7 +2385,7 @@ import Layout from '../layouts/Layout.astro';
             ...ctx,
             // Pass google token so server can link this session to the authenticated user
             // even when accessing from a different machine on the network
-            google_token: localStorage.getItem('hakster_google_token') || undefined,
+            google_token: getStoredAuthToken() || undefined,
           }),
         });
       } catch (e) { /* silent — don't block chat if this fails */ }
@@ -3437,8 +3440,10 @@ import Layout from '../layouts/Layout.astro';
       conv.messages.push(userMsg); saveConversation(conv); addMessageBubble(userMsg); renderHistoryList();
       const endpoint = chatAgent === 'hakterm' ? '/hakterm/api/run' : (agentMode ? `${API}/api/agent/run` : `${API}/api/chat`);
       const authHeaders: Record<string,string> = { 'Content-Type': 'application/json' };
-      const gtoken = localStorage.getItem('hakster_google_token');
-      if (gtoken && chatAgent === 'hakster') authHeaders['x-api-key'] = gtoken;
+      const gtoken = getStoredAuthToken();
+      // All chat backends share the HaksterAI account session. HakTerm is also
+      // proxied through the signed-in app, so it must receive this key too.
+      if (gtoken) authHeaders['x-api-key'] = gtoken;
       let fileCreatedThisStream = false;
       let assistantContent = '';
       try {
@@ -3450,7 +3455,7 @@ import Layout from '../layouts/Layout.astro';
             .join('\n\n');
           const haktermPrompt = history ? `Earlier conversation:\n${history}\n\nUser: ${userPrompt}` : userPrompt;
           const res = await fetch(endpoint, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: authHeaders,
             body: JSON.stringify({ sessionId: `haksterai-${conv.id}`, prompt: haktermPrompt, cwd: activeProjectCwd || undefined }),
           });
           if (!res.ok || !res.body) {
@@ -3870,7 +3875,7 @@ import Layout from '../layouts/Layout.astro';
       const provider = ['dall-e-3', 'gpt-image-1'].includes(model) ? 'openai' : 'pollinations';
       try {
         const res = await fetch(`${API}/api/images/generate`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...(localStorage.getItem('hakster_google_token') ? { 'x-api-key': localStorage.getItem('hakster_google_token')! } : {}) },
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...(getStoredAuthToken() ? { 'x-api-key': getStoredAuthToken()! } : {}) },
           body: JSON.stringify({ provider, model, prompt, size, quality }),
         });
         const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Image generation failed');
@@ -3914,7 +3919,7 @@ import Layout from '../layouts/Layout.astro';
         if (!data.configured) return;
 
         // Check for existing session
-        const storedToken = localStorage.getItem('hakster_google_token');
+        const storedToken = getStoredAuthToken();
         const storedUser = localStorage.getItem('hakster_google_user');
         if (storedToken && storedUser) {
           try {
@@ -4020,7 +4025,7 @@ import Layout from '../layouts/Layout.astro';
 
     // Fetch and display usage stats
     async function loadUsageStats() {
-      const token = localStorage.getItem('hakster_google_token');
+      const token = getStoredAuthToken();
       if (!token) return;
       try {
         const res = await fetch(`${API}/api/usage`, { headers: { 'x-api-key': token } });
@@ -4079,7 +4084,7 @@ import Layout from '../layouts/Layout.astro';
 
       overlay.querySelectorAll('button[data-plan]').forEach((btn) => {
         btn.addEventListener('click', async () => {
-          const token = localStorage.getItem('hakster_google_token');
+          const token = getStoredAuthToken();
           if (!token) {
             overlay.remove();
             window.location.href = '/?signin=1&redirect=/build';
@@ -4119,7 +4124,7 @@ import Layout from '../layouts/Layout.astro';
     }
 
     async function loadReferralCard() {
-      const token = localStorage.getItem('hakster_google_token');
+      const token = getStoredAuthToken();
       const card = document.getElementById('sidebar-referral-card');
       const linkBtn = document.getElementById('sidebar-referral-link') as HTMLButtonElement | null;
       const tokenEl = document.getElementById('sidebar-token-balance');
@@ -4233,7 +4238,7 @@ import Layout from '../layouts/Layout.astro';
       window.history.replaceState({}, '', window.location.pathname);
       if (checkout === 'success') {
         showCheckoutBanner(`✓ Payment successful${plan ? ' — ' + plan + ' plan activated' : ''}`, '#16a34a');
-        const token = localStorage.getItem('hakster_google_token');
+        const token = getStoredAuthToken();
         if (token) {
           try {
             const res = await fetch(`${API}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -4283,7 +4288,7 @@ import Layout from '../layouts/Layout.astro';
         const tg = (window as any).Telegram?.WebApp;
         if (!tg || !tg.initData) return; // not opened inside Telegram
         tg.ready();
-        if (localStorage.getItem('hakster_google_token')) return; // already signed in
+        if (getStoredAuthToken()) return; // already signed in
         const ref = (localStorage.getItem('hakster_referral_code') || (tg as any).startParam || '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 24);
         const res = await fetch(`${API}/api/auth/telegram/webapp`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4307,13 +4312,13 @@ import Layout from '../layouts/Layout.astro';
     checkStripeCheckoutResult(); // Handle Stripe checkout redirect result
 
     // ── Sign-in gate: chat is for signed-in users only ──
-    if (!localStorage.getItem('hakster_google_token')) {
+    if (!getStoredAuthToken()) {
       window.location.replace('/?signin=1&redirect=/build');
     }
 
     // ── Owner-only surfaces inside chat: embedded terminal + pentester panel ──
     (function gateOwnerOnlyPanels() {
-      const token = localStorage.getItem('hakster_google_token');
+      const token = getStoredAuthToken();
       const API = window.location.port === '4321' ? 'http://localhost:3579' : '';
       fetch(API + '/api/auth/me', { headers: token ? { 'x-api-key': token } : {} })
         .then((res) => res.ok ? res.json() : null)

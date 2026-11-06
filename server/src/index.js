@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const { Readable } = require('node:stream');
 const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
+const { publicAgentRoster } = require('./agent/agent-roster');
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
 const stuckMonitor = require('./agent/stuckMonitor');
 // ── Autoflow: 6-phase loop + autolearn + approval modules ──
@@ -1365,6 +1366,11 @@ app.get('/api/agent/capabilities', (_req, res) => {
     localTools,
     os: osInfo,
   });
+});
+
+app.get('/api/agent/roster', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ agents: publicAgentRoster(), delegation: { parallelLimit: 3, followups: true, providerMode: 'configured-provider' } });
 });
 
 // ── MCP Status endpoint ──────────────────────────────────────────────────
@@ -6551,8 +6557,8 @@ app.get('/api/auth/google/client-id', (_req, res) => {
   res.json({ clientId: GOOGLE_CLIENT_ID, configured: !!GOOGLE_CLIENT_ID });
 });
 
-// ── Owner-only Gmail monitor (read-only OAuth; refresh token stays encrypted on this server) ──
-const GMAIL_MONITOR_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+// ── Owner-only Gmail monitor (read + send OAuth; refresh token stays encrypted on this server) ──
+const GMAIL_MONITOR_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send'];
 const GMAIL_MONITOR_CALLBACK = '/api/admin/gmail/callback';
 const gmailMonitorOAuthStates = new Map();
 const gmailMonitorDir = path.join(os.homedir(), '.hakster', 'gmail-monitor');
@@ -6633,7 +6639,14 @@ app.get('/api/admin/gmail/status', requireOwner, (req, res) => {
   try {
     const connection = readGmailMonitorConnection(req.user.id);
     const configured = Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && gmailMonitorRedirectUri());
-    res.json({ configured, connected: Boolean(connection?.refreshToken), email: connection?.email || '', scope: GMAIL_MONITOR_SCOPE, requiredRedirectUri: 'https://haksterai.com/api/admin/gmail/callback' });
+    res.json({
+      configured,
+      connected: Boolean(connection?.refreshToken),
+      sendEnabled: Boolean(connection?.scopes?.includes('https://www.googleapis.com/auth/gmail.send')),
+      email: connection?.email || '',
+      scope: GMAIL_MONITOR_SCOPES,
+      requiredRedirectUri: 'https://haksterai.com/api/admin/gmail/callback',
+    });
   } catch {
     res.status(503).json({ configured: false, connected: false, error: 'Gmail connection storage needs attention. Reconnect after server setup.', requiredRedirectUri: 'https://haksterai.com/api/admin/gmail/callback' });
   }
@@ -6652,7 +6665,7 @@ app.post('/api/admin/gmail/connect', requireOwner, (req, res) => {
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: GMAIL_MONITOR_SCOPE,
+    scope: GMAIL_MONITOR_SCOPES.join(' '),
     access_type: 'offline',
     prompt: 'consent select_account',
     include_granted_scopes: 'true',
@@ -6681,7 +6694,8 @@ app.get(GMAIL_MONITOR_CALLBACK, async (req, res) => {
     });
     if (!tokenResponse.ok) return fail('token');
     const tokens = await tokenResponse.json();
-    if (!String(tokens.scope || '').split(/\s+/).includes(GMAIL_MONITOR_SCOPE) || !tokens.access_token) return fail('scope');
+    const grantedScopes = String(tokens.scope || '').split(/\s+/);
+    if (!GMAIL_MONITOR_SCOPES.every((scope) => grantedScopes.includes(scope)) || !tokens.access_token) return fail('scope');
     const profileResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${tokens.access_token}` }, signal: AbortSignal.timeout(12000) });
     if (!profileResponse.ok) return fail('profile');
     const profile = await profileResponse.json();
@@ -6694,7 +6708,7 @@ app.get(GMAIL_MONITOR_CALLBACK, async (req, res) => {
       } catch {}
     }
     if (!email || !refreshToken) return fail('refresh_token');
-    writeGmailMonitorConnection(pending.userId, { email, refreshToken, connectedAt: new Date().toISOString(), ownerUserId: pending.userId });
+    writeGmailMonitorConnection(pending.userId, { email, refreshToken, scopes: grantedScopes, connectedAt: new Date().toISOString(), ownerUserId: pending.userId });
     return res.redirect('/admin/email?gmail=connected');
   } catch {
     return fail('connection');
@@ -6738,6 +6752,47 @@ app.get('/api/admin/gmail/messages', requireOwner, async (req, res) => {
     res.json({ email: connection.email, messages: messages.filter(Boolean) });
   } catch {
     res.status(502).json({ error: 'Gmail is temporarily unavailable. Try refreshing.' });
+  }
+});
+
+app.post('/api/admin/gmail/send', requireOwner, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const to = String(req.body?.to || '').trim();
+  const subject = String(req.body?.subject || '').trim();
+  const body = String(req.body?.body || '').trim();
+  if (!to || to.length > 254 || !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(to)) return res.status(400).json({ error: 'Enter one valid recipient email address' });
+  if (!subject || subject.length > 200 || /[\r\n]/.test(subject)) return res.status(400).json({ error: 'Enter a subject of 1–200 characters' });
+  if (!body || body.length > 20000) return res.status(400).json({ error: 'Enter a message of 1–20,000 characters' });
+  let connection;
+  try { connection = readGmailMonitorConnection(req.user.id); }
+  catch { return res.status(503).json({ error: 'Gmail connection storage needs attention' }); }
+  if (!connection?.refreshToken) return res.status(409).json({ error: 'Connect an authorized Gmail inbox first' });
+  try {
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET, refresh_token: connection.refreshToken, grant_type: 'refresh_token' }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!tokenResponse.ok) return res.status(401).json({ error: 'Gmail authorization expired. Reconnect the inbox with send permission.', reconnectRequired: true });
+    const tokenData = await tokenResponse.json();
+    const header = (name, value) => `${name}: ${value.replace(/[\r\n]/g, ' ')}`;
+    const encodedSubject = /^[\x20-\x7E]*$/.test(subject) ? subject : `=?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`;
+    const encodedBody = Buffer.from(body.replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64').match(/.{1,76}/g)?.join('\r\n') || '';
+    const mime = [header('To', to), header('Subject', encodedSubject), 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', encodedBody].join('\r\n');
+    const raw = Buffer.from(mime, 'utf8').toString('base64url');
+    const sendResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST', headers: { Authorization: `Bearer ${tokenData.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw }), signal: AbortSignal.timeout(15000),
+    });
+    if (!sendResponse.ok) {
+      const detail = await sendResponse.json().catch(() => ({}));
+      if (sendResponse.status === 403) return res.status(403).json({ error: 'Google has not granted Gmail send permission. Reconnect and approve sending access.' });
+      return res.status(502).json({ error: String(detail.error?.message || 'Gmail could not send this message').slice(0, 300) });
+    }
+    const sent = await sendResponse.json();
+    res.json({ ok: true, id: String(sent.id || '').slice(0, 200), to });
+  } catch {
+    res.status(502).json({ error: 'Gmail is temporarily unavailable. The message send could not be confirmed.' });
   }
 });
 
@@ -7488,13 +7543,15 @@ app.use('/miniforge', (req, res, next) => {
         const value = req.get(name);
         if (value) forwardHeaders[name] = value;
       }
+      const hasWireBody = Number(req.get('content-length') || 0) > 0 || Boolean(req.get('transfer-encoding'));
+      const hasParsedBody = hasWireBody && req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body);
       const upstream = await fetch(`http://127.0.0.1:5555${upstreamPath}`, {
         method,
         headers: forwardHeaders,
-        body: ['GET', 'HEAD'].includes(method) ? undefined
-          : (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)
-            ? JSON.stringify(req.body) : req),
-        duplex: ['GET', 'HEAD'].includes(method) || (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) ? undefined : 'half',
+        body: ['GET', 'HEAD'].includes(method) || !hasWireBody
+          ? undefined
+          : (hasParsedBody ? JSON.stringify(req.body) : req),
+        duplex: ['GET', 'HEAD'].includes(method) || !hasWireBody || hasParsedBody ? undefined : 'half',
         signal: AbortSignal.timeout(120000),
       });
       res.status(upstream.status);
@@ -7543,7 +7600,7 @@ app.use('/hakterm', (req, res, next) => {
       upstream.headers.forEach((value, key) => {
         if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) res.setHeader(key, value);
       });
-      if (req.method === 'HEAD') return res.end();
+      if (req.method === 'HEAD' || !upstream.body) return res.end();
       Readable.fromWeb(upstream.body).pipe(res);
     } catch (error) {
       console.error('[hakterm-proxy] local HakTerm request failed:', error.message);

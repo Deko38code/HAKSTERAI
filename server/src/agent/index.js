@@ -13,6 +13,7 @@ const path = require('path');
 const readline = require('readline');
 const { globSync } = require('glob');
 const { renderSnapshotRows } = require('./terminal-image');
+const { AGENT_TYPES, getAgentRole, delegationGuidance } = require('./agent-roster');
 const os = require('os');
 const crypto = require('crypto');
 const net = require('net');
@@ -1051,6 +1052,7 @@ function _buildProjectTOC() {
 
 function buildSystemPrompt(clientContext) {
   let prompt = SYSTEM_PROMPT.replace('${DYNAMIC_MACHINE_CONTEXT}', getMachineContext());
+  prompt += delegationGuidance();
 
   // Inject client device context if available (from browser detection)
   if (clientContext && typeof clientContext === 'object') {
@@ -1300,12 +1302,30 @@ function getHaksterRoots() {
 function getSkillDirs() {
   const dirs = getHaksterRoots().map(root => path.join(root, 'skills'));
   dirs.push('/home/ghost/skills');
+  // Last-resort copies from the Mint backup; current project skills stay first.
+  dirs.push('/home/ghost/mint-backup/home/haksterAi/.hakster/skills');
+  dirs.push('/home/ghost/mint-backup/home/ghost/skills');
   // de-dup, drop non-existent
   const out = [];
   for (const d of Array.from(new Set(dirs))) {
     try { if (fs.existsSync(d)) out.push(d); } catch (_) {}
   }
   return out;
+}
+
+// Merge skill trees by relative name. Earlier/current directories win, and
+// later fallback directories only fill names that are absent from the primary.
+function getUniqueSkillFiles() {
+  const files = new Map();
+  for (const skillsDir of getSkillDirs()) {
+    try {
+      for (const file of globSync(path.join(skillsDir, '**', '*.md'))) {
+        const name = path.relative(skillsDir, file).replace(/\\/g, '/').replace(/\.md$/, '');
+        if (!files.has(name)) files.set(name, { file, name });
+      }
+    } catch (_) {}
+  }
+  return [...files.values()];
 }
 
 // (Idle review prompt removed — health checks now run directly via shell, no model call)
@@ -1757,7 +1777,8 @@ let _verifyRetried = false;         // Whether the verify-before-answer nudge al
 let _anyToolCallMade = false;       // Whether any tool call has happened yet this agentLoop call (survives empty-response retries, unlike raw turn index)
 const SEMANTIC_LOOP_WINDOW = 5;    // How many recent responses to check (was 3)
 const SEMANTIC_LOOP_THRESHOLD = 3; // How many similar prefixes → loop detected (was 2, raised to reduce false positives)
-let _messageQueue = [];            // Queue of incoming messages (flushed on stuck loop)
+let _messageQueue = [];            // Ordinary queued tasks (flushed on stuck loop)
+let _steerQueue = [];               // User steering messages for the active agent run
 let _batch = null;                 // Paste-batching state: { lines: string[], timer: NodeJS.Timeout }
 let _stuckCooldown = 0;             // After stuck-loop break, skip this many queued messages to prevent re-loop
 let _shellRepeatBreak = false;      // Set by shell executor when a generic repeat-loop is detected;
@@ -2036,6 +2057,34 @@ let _keyringUnlockFn = null;       // TUI-only masked prompt for an explicitly r
 // readline output write (including our own rl.prompt(true) redraws below) so
 // _writePanel can tell whether anything landed on screen since its last render.
 let _replRl = null;
+let _steerPromptActive = false;
+let _idleReplPrompt = '';
+function _steerStatusRowsUp() {
+  if (!_replRl) return 1;
+  const cols = Math.max(1, process.stdout.columns || 80);
+  const promptCols = _replRl.getPrompt().replace(/\x1b\[[0-9;]*m/g, '').length;
+  const cursorCols = Math.max(0, Number(_replRl.cursor) || 0);
+  return 1 + Math.floor((promptCols + cursorCols) / cols);
+}
+function _writeAboveSteerPrompt(line) {
+  if (!_replRl || !_steerPromptActive || !process.stdout.isTTY) return false;
+  process.stdout.write(`\x1b[s\x1b[${_steerStatusRowsUp()}A\r\x1b[2K`);
+  if (line) process.stdout.write(line);
+  process.stdout.write('\x1b[u');
+  return true;
+}
+function _showSteerPrompt() {
+  if (!_replRl || _steerPromptActive || !process.stdin.isTTY || !process.stdout.isTTY) return;
+  _idleReplPrompt = _replRl.getPrompt();
+  _replRl.setPrompt(`${C.bgSubtle}${C.fgBase} haksterAI steer ${C.reset}${C.primary}${C.bold}❯${C.reset} `);
+  _steerPromptActive = true;
+  _replRl.prompt(true);
+}
+function _restoreIdlePrompt() {
+  if (!_replRl || !_steerPromptActive) return;
+  _replRl.setPrompt(_idleReplPrompt);
+  _steerPromptActive = false;
+}
 let _rlWriteSeq = 0;
 let _showInlineImages = process.env.HAKSTER_TUI_SHOW_IMAGES !== '0';
 
@@ -3422,12 +3471,7 @@ async function showHaksterBootAnimation() {
 }
 
 function banner() {
-  // Dynamically count skills from .hakster/skills/
-  const skillsDirs = getSkillDirs();
-  let skillCount = 0;
-  for (const skillsDir of skillsDirs) {
-    try { skillCount += globSync(path.join(skillsDir, '**', '*.md')).length; } catch (_) {}
-  }
+  const skillCount = getUniqueSkillFiles().length;
   const mcpToolCount = getMcpTools().length;
   // Built-in tool count is the snapshot taken before MCP tools were merged into TOOLS.
   // Using TOOLS.length here double-counts MCP (they're already in TOOLS after initMcpTools).
@@ -4048,7 +4092,7 @@ let TOOLS = [
     type: 'function',
     function: {
       name: 'sub_agent',
-      description: 'CRITICAL POWER TOOL: Spawn one or more sub-agents that run in parallel. Each sub-agent gets its own conversation and can use ALL tools. MUCH faster than doing things sequentially. ALWAYS use this when you have 2+ independent tasks. Use for: running multiple independent tasks simultaneously, researching multiple topics at once, parallelizing file edits, checking multiple services. Returns each sub-agent result. Max 3 sub-agents per call.',
+      description: 'Spawn up to 3 independent specialist sub-agents in parallel. Select agent_type from the configured Hakterm roster when the task fits a specialty. Results return to you for verification and integration.',
       parameters: {
         type: 'object',
         properties: {
@@ -4060,6 +4104,7 @@ let TOOLS = [
               properties: {
                 goal: { type: 'string', description: 'What this sub-agent should accomplish' },
                 name: { type: 'string', description: 'Short name for this task (e.g. "check-ports", "fix-auth")' },
+                agent_type: { type: 'string', enum: AGENT_TYPES, description: 'Optional specialist: claude, kiro, codex, copilot, phantom, phantom-claw, phantom-cli, pi, hermes, hakster, deepseek, or local.' },
               },
               required: ['goal'],
             },
@@ -4067,6 +4112,36 @@ let TOOLS = [
           },
         },
         required: ['tasks'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'spawn_agent',
+      description: 'Delegate one focused task to a configured specialist. The returned session_id can be steered later with followup_agent; integrate and verify the returned work yourself.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task: { type: 'string', description: 'A self-contained task for the specialist.' },
+          agent_type: { type: 'string', enum: AGENT_TYPES, description: 'Specialist role: claude, kiro, codex, copilot, phantom, phantom-claw, phantom-cli, pi, hermes, hakster, deepseek, or local.' },
+        },
+        required: ['task'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'followup_agent',
+      description: 'Send steering or a follow-up request to a previously spawned specialist and return its updated result. Provide the session_id from spawn_agent.',
+      parameters: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'The returned sub-agent session ID.' },
+          message: { type: 'string', description: 'The steering or follow-up instructions.' },
+        },
+        required: ['session_id', 'message'],
       },
     },
   },
@@ -5768,7 +5843,9 @@ process.stdout.write(`\r\x1b[K${C.info}◇ Spawning ${tasksToRun.length} sub-age
       const taskName = task.name || `task-${i + 1}`;
       // G8.1 fill: fork parent context into the subagent so it does not
       // re-discover what the parent already mapped.
-      const subHist = [{ role: 'system', content: buildSystemPrompt() }];
+      const role = getAgentRole(task.agent_type);
+      const roleBrief = role ? `\n\nSPECIALIST ROLE: ${role.name} (@${role.handle}) — ${role.focus}.\n${role.prompt}` : '';
+      const subHist = [{ role: 'system', content: buildSystemPrompt() + roleBrief }];
       const _parentPlan = (taskState.summary && taskState.summary()) || '';
       const _parentTask = (_currentTaskAnchor && _currentTaskAnchor.content) ? String(_currentTaskAnchor.content).slice(0, 800) : '';
       subHist.push({ role: 'user', content: `PARENT CONTEXT (do not re-diagnose; build on this):\n${_parentPlan || '(no parent plan recorded)'}${_parentTask ? `\nActive parent task: ${_parentTask}` : ''}\n\nYOUR SUBTASK — fully self-contained assignment: ${task.goal}` });
@@ -5792,6 +5869,24 @@ process.stdout.write(`\r\x1b[K${C.primary} ◆ ${taskName}: ${task.goal.substrin
       results.push(`--- ${s.name} (${s.status}) ---\n${s.result}`);
     }
     return results.join('\n\n');
+  },
+
+  async spawn_agent({ task, agent_type }) {
+    try {
+      const { spawnSubAgent } = require('../subagent');
+      return await spawnSubAgent(task, process.cwd(), process.env.DEFAULT_PROVIDER || process.env.HAKSTER_PROVIDER || 'ollama', undefined, { agentType: agent_type });
+    } catch (err) {
+      return `Error spawning specialist: ${err.message}`;
+    }
+  },
+
+  async followup_agent({ session_id, message }) {
+    try {
+      const { followupSubAgent } = require('../subagent');
+      return await followupSubAgent(session_id, message);
+    } catch (err) {
+      return `Error steering specialist: ${err.message}`;
+    }
   },
 
   async codex({ prompt, model, cwd, timeout = 120 }) {
@@ -8098,7 +8193,10 @@ function log(text) {
   // Clear the status bar line before writing log output — otherwise the
   // status bar's \r-locked line gets pushed into scrollback by this log line,
   // creating the "stacking status bars" effect.
-  if (_statusBarInterval) process.stdout.write('\r\x1b[2K');
+  if (_statusBarInterval) {
+    if (_steerPromptActive) _writeAboveSteerPrompt('');
+    else process.stdout.write('\r\x1b[2K');
+  }
   _logFn(text);
   // Any regular log output invalidates in-place panel scroll — the next
   // panel render can't scroll up over random log lines, it must append below.
@@ -8109,7 +8207,32 @@ function log(text) {
 
 // ── Spinner (TUI-aware, with elapsed-time nudge) ──────────────────────
 let _statusFn = null; // set by TUI to update status bar
+let _haktermThinkingSpinner = null;
 function startSpinner(label) {
+  // When running in Hakster's TUI, use the same phase-aware animation as the
+  // HakTerm CLI (`cli/ui.js`). Its renderer owns the line while active so the
+  // compact dashboard status bar must pause instead of overwriting it.
+  if (_statusFn && process.stdout.isTTY) {
+    try {
+      _showSteerPrompt();
+      const animation = require('../../../cli/ui').thinkingAnimation(
+        MODEL,
+        _tuiPhase,
+        Date.now(),
+        line => _writeAboveSteerPrompt(line || ''),
+      );
+      if (/retry/i.test(String(label || ''))) animation.updateActivity('retrying the model request');
+      _haktermThinkingSpinner = animation;
+      return {
+        stop(msg) {
+          animation.stop();
+          if (_haktermThinkingSpinner === animation) _haktermThinkingSpinner = null;
+          _statusFn('Ready');
+          if (msg) log(msg);
+        },
+      };
+    } catch (_) { /* preserve the existing fallback spinner if the TUI module is unavailable */ }
+  }
   if (_statusFn) {
     const startMs = Date.now();
     let i = 0;
@@ -8234,6 +8357,7 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
     const statusBarFrames = ICE_FRAMES;
     let sbarIdx = 0;
     _statusBarInterval = setInterval(() => {
+      if (_haktermThinkingSpinner) return; // HakTerm's thinking animation owns the status line.
       if (_awaitingConfirm) return;  // Don't clobber the open y/N readline prompt
       const elapsed = ((Date.now() - _activityStart) / 1000).toFixed(0);
       const frame = statusBarFrames[sbarIdx % statusBarFrames.length];
@@ -8270,14 +8394,16 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
       const _pulseCol = _isBad ? C.error : C.success;
       const _greenPulse = processing && _blinkOn;  // kept for compat
       const _blinkPrompt = ((_isBad || _greenPulse) ? _pulseCol + C.bold : C.fgMuted) + ' haksterAI ' + C.reset + (_blinkOn ? (_isBad ? _pulseCol + C.bold : (processing ? _pulseCol + C.bold : C.primary + C.bold)) : C.fgSubtle) + '\u276f' + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ';
-      const waitingInfo = _messageQueue.length > 0 ? ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.mustard + '📬' + C.reset + C.fgBase + _messageQueue.length + ' waiting' + C.reset : '';
+      const waitingCount = _messageQueue.length + _steerQueue.length;
+      const waitingInfo = waitingCount > 0 ? ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.mustard + '📬' + C.reset + C.fgBase + waitingCount + (_steerQueue.length ? ' steering' : ' waiting') + C.reset : '';
       const _fullLine = _blinkPrompt + (_currentTopic ? C.fgSubtle + '\ud83c\udfaf ' + _currentTopic.slice(0, 35) + C.reset + ' ' + C.fgSubtle + '\u2502' + C.reset + ' ' : '') + C.bgSubtle + ' ' + actColor + C.bold + icon + C.reset + actColor + C.bold + ' ' + primaryText + C.reset + detail + ' ' + _iceGradC + _icePhaseC + C.bold + frame + C.reset + _iceShimmer + ' ' + turnInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + C.fgMuted + elapsed + 's' + C.reset + ' ' + tokInfo + ' ' + costInfo + pendingStr + waitingInfo + ' ' + C.fgSubtle + '│' + C.reset + ' ' + servicesChip() + mcpChip() + smartCompact() + ' ' + C.reset + ' ' + (_isBad ? (_blinkOn ? C.error + C.bold + '\u25cf' + C.reset : C.error + '\u25cf' + C.reset) : (_greenPulse ? C.success + C.bold + '\u25cf' + C.reset : (processing ? C.fgSubtle + '\u25cf' + C.reset : C.fgSubtle + '\u25cb' + C.reset))) + '   ';
       // Bound to terminal width before writing. Field lengths (burnRate, tokInfo,
       // pendingStr, topic) change every tick — an unbounded line silently crosses
       // the column count, the terminal auto-wraps to a real new physical line, and
       // the next tick's bare '\r' only rewinds to THAT line, stranding the old
       // content in scrollback forever (looks like a scrolling log, not one line).
-      process.stdout.write('\r\x1b[2K' + truncateVisible(_fullLine, (process.stdout.columns || 120) - 1));
+      const statusLine = truncateVisible(_fullLine, (process.stdout.columns || 120) - 1);
+      if (!_writeAboveSteerPrompt(statusLine)) process.stdout.write('\r\x1b[2K' + statusLine);
     }, 500);
     // Clear status bar on exit — use once + guard to prevent listener leak
     if (!_sigIntHandlerRegistered) {
@@ -8290,7 +8416,22 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
   tuiSetPhase('THINK');
 
   let lastHadToolCalls = false;
+  const applySteeringMessages = () => {
+    if (silent || _steerQueue.length === 0) return false;
+    const updates = _steerQueue.splice(0, 8);
+    const steering = updates.map(message => String(message).trim()).filter(Boolean).join('\n\n').slice(0, 16000);
+    if (!steering) return false;
+    history.push({
+      role: 'system',
+      content: `LIVE USER STEERING — incorporate this update into the task immediately. Stop or change the current approach as requested, while preserving completed work:\n\n${steering}`,
+    });
+    _currentTaskAnchor = history[history.length - 1];
+    _currentTopic = steering.replace(/\s+/g, ' ').slice(0, 50);
+    log(`${C.cyan}↳ Applying live steering update${updates.length > 1 ? ` (${updates.length} messages)` : ''}.${C.reset}`);
+    return true;
+  };
   for (let turn = 0; turn < _maxTurns; turn++) {
+    applySteeringMessages();
     _sessionPerf.roundsUsed = turn + 1; _sessionPerf.elapsedMs = Date.now() - _sessionPerf.started; _sessionPerf.maxRounds = _maxTurns;
     // ── Auto-consolidation at every 50 rounds: compact context + consolidate
     //    memory, then continue for another 50. Rolling — the agent never
@@ -8388,6 +8529,12 @@ process.stdout.write(`\r\x1b[K${C.fgMuted}◇ Skipping compact — still in tool
       _agentActivity = 'Thinking'; _activityDetail = `Turn ${turn + 1}/${_maxTurns}`; _activityStart = Date.now();
       response = await callOllama(_historyForCall, TOOLS, { onToken: tokenCallback, lowToken: _lowToken });
       _lastActivityTime = Date.now();
+      // A steering message received while the model was thinking supersedes
+      // this response; never execute tools from the stale response.
+      if (applySteeringMessages()) {
+        if (spinner) spinner.stop('');
+        continue;
+      }
       const _rContent = (response?.message?.content || '');
       const _rThinking = (response?.message?.thinking || '');
       const _rTC = response?.message?.tool_calls?.length || 0;
@@ -8428,6 +8575,10 @@ process.stdout.write(`\r\x1b[K${C.fgMuted}◇ Skipping compact — still in tool
         else log(`${C.error}× API error after retries: ${lastErr.message}${C.reset}`);
         break;
       }
+    }
+    if (applySteeringMessages()) {
+      if (spinner) spinner.stop('');
+      continue;
     }
     if (spinner) spinner.stop('');
 
@@ -9998,19 +10149,12 @@ async function repl() {
 
   // ── Check skills ──────────────────────────────────────────────────────
   console.log(`${C.cyan}📋 Loading skills...${C.reset}`);
-  const skillsDirs = getSkillDirs();
-  let skillCount = 0;
+  const skillFiles = getUniqueSkillFiles();
+  const skillCount = skillFiles.length;
   const skillCategories = {};
-  for (const skillsDir of skillsDirs) {
-    try {
-      const files = globSync(path.join(skillsDir, '**', '*.md'));
-      skillCount += files.length;
-      for (const f of files) {
-        const rel = path.relative(skillsDir, f).replace(/\.md$/, '');
-        const cat = rel.includes('/') ? rel.split('/').slice(0, -1).join('/') : 'root';
-        skillCategories[cat] = (skillCategories[cat] || 0) + 1;
-      }
-    } catch (_) {}
+  for (const { name } of skillFiles) {
+    const cat = name.includes('/') ? name.split('/').slice(0, -1).join('/') : 'root';
+    skillCategories[cat] = (skillCategories[cat] || 0) + 1;
   }
   if (skillCount > 0) {
     const topCats = Object.entries(skillCategories)
@@ -10112,13 +10256,19 @@ async function repl() {
   }
   function stopSpinner() {
     if (spinnerInterval) { clearInterval(spinnerInterval); spinnerInterval = null; }
-    process.stdout.write('\r' + ' '.repeat(40) + '\r');
+    if (_steerPromptActive) _writeAboveSteerPrompt('');
+    else process.stdout.write('\r' + ' '.repeat(40) + '\r');
   }
 
   // ── Wire log & status to straight stdout ──────────────────────────────
   _logFn = (text) => {
     stopSpinner();
-    process.stdout.write(text + '\n');
+    if (_steerPromptActive && _replRl) {
+      process.stdout.write(`\x1b[s\x1b[${_steerStatusRowsUp()}A\r\x1b[2K${text}\n`);
+      _replRl.prompt(true);
+    } else {
+      process.stdout.write(text + '\n');
+    }
   };
   _statusFn = (text) => {
     statusText = text;
@@ -10688,16 +10838,11 @@ async function repl() {
     history = [{ role: 'system', content: buildSystemPrompt() }];
   }
 
-  // Do not expose an incomplete tool roster to the interactive prompt. The
-  // resume choice above remains immediate; after it, finish MCP discovery with
-  // a spinner and show a compact roster summary instead of raw server logs.
-  if (!_mcpReady) {
-    startSpinner('Loading MCP tool roster', HAKTERM_PULSE_FRAMES, 275);
-    await _mcpStartupPromise;
-    stopSpinner();
-  }
+  // MCP discovery is deliberately non-blocking: a slow optional server must
+  // never hold the TUI prompt hostage. Built-in tools are ready immediately;
+  // discovered MCP tools are merged into TOOLS as each startup completes.
   const configuredMcpNames = new Set();
-  for (const root of getHaksterRoots()) {
+  for (const root of [...getHaksterRoots(), '/home/ghost/mint-backup/home/haksterAi/.hakster']) {
     try {
       const cfg = JSON.parse(fs.readFileSync(path.join(root, 'mcp.json'), 'utf8'));
       for (const name of Object.keys(cfg.mcpServers || {})) configuredMcpNames.add(name);
@@ -10714,6 +10859,7 @@ async function repl() {
     `Servers: ${loadedMcpNames.size}/${configuredMcpNames.size} registered · ${initializedMcpCount} connected · ${lazyMcpCount} on-demand`,
     `MCP tool definitions: ${mcpToolCount} · CLI tools ready: ${TOOLS.length} (${_builtinToolCount} built-in + ${mcpToolCount} MCP)`
   ];
+  if (!_mcpReady) mcpReportRows.push('MCP discovery continues in background; built-in tools and the prompt are ready.');
   if (missingMcpNames.length) mcpReportRows.push(`Not registered: ${missingMcpNames.slice(0, 7).join(', ')}${missingMcpNames.length > 7 ? ` +${missingMcpNames.length - 7} more` : ''}`);
   if (emptyMcpNames.length) mcpReportRows.push(`No tool definitions: ${emptyMcpNames.slice(0, 7).join(', ')}${emptyMcpNames.length > 7 ? ` +${emptyMcpNames.length - 7} more` : ''}`);
   console.log(drawBox('MCP STARTUP', mcpReportRows, BOX_W, missingMcpNames.length || emptyMcpNames.length ? C.mustard : C.success));
@@ -10728,10 +10874,12 @@ async function repl() {
   console.log(`${budgetColor}📐 Context: ~${estimatedTokens.toLocaleString()} / ${budgetMax.toLocaleString()} tokens (${budgetPct}%)${C.reset} ${C.dim}[sys:${Math.ceil(sysPromptSize / 4)} tools:${Math.ceil(toolJsonSize / 4)}]${C.reset}`);
 
   let idleTimer = null;
+  let _selectedAgent = null;
   processing = false;  // reset module-level flag for this REPL session (hoisted out so agentLoop can read it)
   let _lastIdleReview = 0;
   let _idleReviewCount = 0;
   _messageQueue = [];  // Reset module-level queue for this REPL session
+  _steerQueue = [];
   _batch = null;       // Reset paste-batching state
   _lastAssistantResponse = '';  // Reset module-level loop detection for this session
   _noProgressCount = 0;  // Reset no-progress loop detection for this session
@@ -10965,7 +11113,6 @@ async function repl() {
 
   // ── Handle input ────────────────────────────────────────────────────
   function handleInput(input) {
-    const isResumeHandshake = _resumeFirstInput;
     input = (input || '').trim();
     // On the very first input after a resume, even empty (Enter) or casual
     // greetings should trigger the agent so it asks "resume or new?".
@@ -11130,6 +11277,10 @@ async function repl() {
     if (input === '/') {
       (async () => {
         const cmds = [
+          { cmd: '/agent',    desc: 'Choose a specialized agent' },
+          { cmd: '/permissions', desc: 'Review and change tool approval mode' },
+          { cmd: '/skills',   desc: 'Show available skills' },
+          { cmd: '/mcp',      desc: 'MCP server and tool status' },
           { cmd: '/model',    desc: 'Switch model (crush-style menu)' },
           { cmd: '/repair',   desc: 'Self-repair — check + fix native modules, services' },
           { cmd: '/review',   desc: 'Idle auto-review (services, health, smartness, files)' },
@@ -11394,7 +11545,8 @@ async function repl() {
       return;
     }
     if (input === '/help') {
-      console.log(`  ${C.primary}${C.bold}/clear${C.reset}  Clear history    ${C.primary}${C.bold}/model${C.reset}  Show model    ${C.primary}${C.bold}/review${C.reset}  Health check    ${C.primary}${C.bold}/skills${C.reset}  Skills count    ${C.primary}${C.bold}/tools${C.reset}  Tool list    ${C.primary}${C.bold}/mcp${C.reset}  MCP status    ${C.primary}${C.bold}/queue${C.reset}  Input+notif queues    ${C.primary}${C.bold}/img${C.reset}  Image gen    ${C.primary}${C.bold}/exit${C.reset}  Quit`);
+      console.log(`  ${C.primary}${C.bold}/agent${C.reset}  Agent menu    ${C.primary}${C.bold}/permissions${C.reset}  Approval panel    ${C.primary}${C.bold}/clear${C.reset}  Clear history    ${C.primary}${C.bold}/model${C.reset}  Switch model`);
+      console.log(`  ${C.primary}${C.bold}/review${C.reset}  Health check    ${C.primary}${C.bold}/skills${C.reset}  Skills count    ${C.primary}${C.bold}/tools${C.reset}  Tool list    ${C.primary}${C.bold}/mcp${C.reset}  MCP status    ${C.primary}${C.bold}/queue${C.reset}  Queues    ${C.primary}${C.bold}/img${C.reset}  Image gen    ${C.primary}${C.bold}/exit${C.reset}  Quit`);
       console.log(`  ${C.tertiary}${C.bold}${T.star}${C.reset}  ${C.fgMuted}Paste an image file path, URL, or base64 data to analyze it${C.reset}`);
       console.log(`  ${C.primary}${C.bold}🎨 /img${C.reset}  ${C.fgMuted}Enter image generation mode — type prompts to generate images${C.reset}`);
       console.log(`  ${C.fgSubtle}${T.dots(60)}${C.reset}`);
@@ -11405,7 +11557,8 @@ async function repl() {
     if (input === '/queue') {
       const notifCount = msgSize();
       const inputCount = _messageQueue.length;
-      if (notifCount === 0 && inputCount === 0) {
+      const steerCount = _steerQueue.length;
+      if (notifCount === 0 && inputCount === 0 && steerCount === 0) {
         console.log(`\n  ${C.dim}Queues are empty${C.reset}\n`);
       } else {
         console.log(`\n${C.bold}${C.cyan}📬 Queues${C.reset}`);
@@ -11414,6 +11567,9 @@ async function repl() {
         } else {
           console.log(`  ${C.dim}⏳ Input queue: empty${C.reset}`);
         }
+        console.log(steerCount > 0
+          ? `  ${C.bold}↳ Live steering: ${steerCount} update(s) pending${C.reset}`
+          : `  ${C.dim}↳ Live steering: empty${C.reset}`);
         if (notifCount > 0) {
           console.log(`  ${C.bold}📬 Notification queue: ${notifCount} pending${C.reset}  ${C.dim}(async events, MCP updates)${C.reset}`);
           const items = msgPeek(20);
@@ -11432,12 +11588,79 @@ async function repl() {
       rl.prompt();
       return;
     }
+    if (input === '/agent') {
+      (async () => {
+        const agents = [
+          { name: 'ai', desc: 'General AI assistant' },
+          { name: 'automator', desc: 'Automation workflows' },
+          { name: 'coder', desc: 'Code tasks (can invoke configured coding backends)' },
+          { name: 'debugger', desc: 'Debugging support' },
+          { name: 'exploit', desc: 'Authorized security testing' },
+          { name: 'security', desc: 'Security review' },
+        ];
+        const bodyLines = [
+          _CRUSH.muted + 'Select an agent by number, name, or filter. It will be used for your next request.' + C.reset,
+          '',
+          ...agents.map((a, i) => `  ${_CRUSH.purple}${i + 1}${C.reset} ${_CRUSH.text}${C.bold}${a.name}${C.reset} ${_CRUSH.muted}${a.desc}${C.reset}`),
+        ];
+        const answer = (await _crushPanel({ accent: _CRUSH.purple, title: '🤖 HAKSTER AGENTS', bodyLines, promptLabel: `${_CRUSH.bgPurple}${_CRUSH.dark}${C.bold} # / name / filter ${C.reset} ` })).trim();
+        if (!answer) { rl.prompt(); return; }
+        const matches = agents.filter(a => a.name === answer.toLowerCase() || a.name.includes(answer.toLowerCase()) || a.desc.toLowerCase().includes(answer.toLowerCase()));
+        const selected = /^\d+$/.test(answer) ? agents[Number(answer) - 1] : matches.length === 1 ? matches[0] : null;
+        if (!selected) { console.log(C.yellow + (matches.length > 1 ? 'More than one agent matches; enter its exact name.' : 'No matching agent.') + C.reset); rl.prompt(); return; }
+        _selectedAgent = selected.name;
+        console.log(`${C.green}${selected.name} selected. Your next task will be routed through the normal agent tool approval flow.${C.reset}`);
+        rl.prompt();
+      })();
+      return;
+    }
+    if (input === '/permissions') {
+      (async () => {
+        const rows = [
+          `Current mode: ${_approvalMode}`,
+          '',
+          'suggest: prompts before dangerous actions (recommended default)',
+          'auto-edit: permits file edits; still prompts for dangerous shell actions',
+          'full-auto: skips confirmations for dangerous actions',
+          '',
+          'Full-auto requires a separate confirmation each time you select it.',
+        ];
+        const selected = await _crushButtons({
+          accent: _CRUSH.gold,
+          title: '🔐 TOOL PERMISSIONS',
+          bodyLines: rows,
+          buttons: [
+            { hotkey: 's', label: 'Suggest', value: SUGGEST, color: _CRUSH.green },
+            { hotkey: 'a', label: 'Auto-edit', value: AUTO_EDIT, color: _CRUSH.gold },
+            { hotkey: 'f', label: 'Full-auto', value: FULL_AUTO, color: _CRUSH.red },
+            { hotkey: 'c', label: 'Cancel', value: null, color: _CRUSH.muted },
+          ],
+        });
+        if (!selected) { rl.prompt(); return; }
+        if (selected === FULL_AUTO) {
+          const confirmed = await _crushButtons({
+            accent: _CRUSH.red,
+            title: '⚠ ENABLE FULL-AUTO?',
+            bodyLines: ['Dangerous actions will run without asking for confirmation.', 'This applies to the current Hakster session.'],
+            buttons: [
+              { hotkey: 'y', label: 'Enable full-auto', value: true, color: _CRUSH.red },
+              { hotkey: 'n', label: 'Keep current mode', value: false, color: _CRUSH.green },
+            ],
+          });
+          if (confirmed !== true) { rl.prompt(); return; }
+        }
+        setApprovalMode(selected);
+        console.log(`${C.gold}Approval mode set to ${_approvalMode}.${C.reset}`);
+        rl.prompt();
+      })();
+      return;
+    }
     if (input === '/mcp') {
       const servers = mcpStatus();
       const mcpTools = getMcpTools();
       if (servers.length === 0) {
         console.log(`\n  ${C.yellow}${C.bold}No MCP servers connected${C.reset}`);
-        console.log(`  ${C.dim}Add servers to .hakster/mcp.json${C.reset}\n`);
+        console.log(`  ${C.dim}${!_mcpReady ? 'MCP discovery is still running in the background; try /mcp again shortly.' : 'Add servers to .hakster/mcp.json'}${C.reset}\n`);
       } else {
         console.log(`\n${C.bold}${C.cyan}🔌 MCP Servers: ${servers.length}${C.reset}  ${C.bold}${C.magenta}Tools: ${mcpTools.length}${C.reset}\n`);
         for (const s of servers) {
@@ -11465,22 +11688,14 @@ async function repl() {
     }
 
     if (input === '/skills') {
-      const skillsDirs = getSkillDirs();
-      let total = 0;
-      const categories = [];
-      for (const skillsDir of skillsDirs) {
-        try {
-          const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-          for (const entry of entries) {
-            if (entry.isFile() && entry.name.endsWith('.md')) {
-              total++;
-            } else if (entry.isDirectory()) {
-              const count = globSync(path.join(skillsDir, entry.name, '**', '*.md')).length;
-              if (count > 0) { categories.push({ name: entry.name, count }); total += count; }
-            }
-          }
-        } catch (_) {}
+      const skillFiles = getUniqueSkillFiles();
+      const categoryCounts = new Map();
+      for (const { name } of skillFiles) {
+        const category = name.includes('/') ? name.split('/')[0] : '';
+        if (category) categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
       }
+      const total = skillFiles.length;
+      const categories = [...categoryCounts].map(([name, count]) => ({ name, count }));
       console.log(`\n${C.bold}${C.cyan}🔧 Tools: ${TOOLS.length}${C.reset}  ${C.bold}${C.magenta}📚 Skills: ${total} loaded${C.reset}`);
       categories.sort((a, b) => b.count - a.count).forEach(c => {
         console.log(`  ${C.cyan}${c.name}${C.reset} ${C.dim}(${c.count})${C.reset}`);
@@ -11508,7 +11723,7 @@ async function repl() {
       }
     }
 
-    // Run agent loop (or queue if busy — with paste batching)
+    // Run a task, or steer the active task when the input bar is open.
     if (processing) {
       // ── Multi-line paste batching ──
       // Lines arriving within the batch window get merged into one message
@@ -11516,44 +11731,23 @@ async function repl() {
       // creating 60 separate agentLoop calls.
       // Key fix: use a separate object for batch state instead of attaching
       // properties to the Array (which can be lost on .length=0 reset).
-      if (!_batch) _batch = { lines: [], timer: null };
-      _batch.lines.push(input);
-      // Show live batching feedback (overwrites previous line)
-      const batchNum = _batch.lines.length;
-      process.stdout.write(`\r${C.dim}⏳ Batching (${batchNum} line${batchNum !== 1 ? 's' : ''})...${C.reset}   `);
-      // Reset batch window on each new line (debounce — 500ms for slow pastes)
-      if (_batch.timer) clearTimeout(_batch.timer);
-      _batch.timer = setTimeout(() => {
-        // Batch window closed — merge all lines into one queue entry
-        const lineCount = _batch.lines.length;
-        const merged = _batch.lines.join('\n');
-        _batch = null;
-        _messageQueue.push(merged);
-        // Clear the batching line, then print final queue status
-        process.stdout.write(`\r${' '.repeat(60)}\r`);  // clear the "Batching..." line
-        console.log(`${C.fgMuted}◇ Queued (1 batch, ${lineCount} line${lineCount !== 1 ? 's' : ''}, queue depth ${_messageQueue.length})${C.reset}`);
-      }, 500);
+      _steerQueue.push(input);
+      rl.prompt();
       return;
     }
     processing = true;
     _currentTopic = input.substring(0, 50);
     _statusFn(`${T.sparkle} Processing...`);
-    startSpinner('Processing');
+    const agentInput = _selectedAgent
+      ? `Use the run_agent tool with agent "${_selectedAgent}" for this task: ${input}`
+      : input;
+    _selectedAgent = null;
     (async () => {
       try {
-        serverNotify(`Agent started: ${input.substring(0, 80)}`, { type: 'task', priority: 'high' });
-        // The one-line resume handshake is just a conversational prompt; don't
-        // make it wait for optional MCP processes to finish booting.
-        if (!_mcpReady && !isResumeHandshake) {
-          _agentActivity = 'Reading';
-          _activityDetail = 'MCP tools initializing';
-          stopSpinner();
-          startSpinner('Connecting MCP tools');
-          await _mcpStartupPromise;
-          stopSpinner();
-          startSpinner('Processing');
-        }
-        await agentLoop(input, history, false, { lowToken: process.env.HAKSTER_LOW_TOKEN === '1' || process.env.HAKSTER_LOW_TOKEN === 'true' });
+        serverNotify(`Agent started: ${agentInput.substring(0, 80)}`, { type: 'task', priority: 'high' });
+        // MCP connections are optional and initialize in the background. Do
+        // not delay the first task; built-ins work now and MCP tools join later.
+        await agentLoop(agentInput, history, false, { lowToken: process.env.HAKSTER_LOW_TOKEN === '1' || process.env.HAKSTER_LOW_TOKEN === 'true' });
         stopSpinner();
         console.log(`\n${C.success}${C.bold}✓ Done${C.reset} ${C.bgSubtle}${T.hashFill(20, C.success)}${C.reset}`);
         serverNotify('Agent task completed', { type: 'task', priority: 'normal' });
@@ -11565,6 +11759,7 @@ async function repl() {
       processing = false;
       _agentActivity = 'Idle'; _activityDetail = '';
       _statusFn('Ready');
+      _restoreIdlePrompt();
       if (_stallGuardTimer) { clearInterval(_stallGuardTimer); _stallGuardTimer = null; }
       if (_statusBarInterval) { clearInterval(_statusBarInterval); _statusBarInterval = null; }
       process.stdout.write('\r' + ' '.repeat(80) + '\r');  // clear status bar
@@ -11584,8 +11779,8 @@ async function repl() {
           console.log(`${C.dim}   (${skip} queued message(s) skipped — stuck-loop cooldown)${C.reset}`);
         }
       }
-      if (_messageQueue.length > 0) {
-        const next = _messageQueue.shift();
+      if (_steerQueue.length > 0 || _messageQueue.length > 0) {
+        const next = _steerQueue.length > 0 ? _steerQueue.shift() : _messageQueue.shift();
         handleInput(next);
       } else {
         rl.prompt();

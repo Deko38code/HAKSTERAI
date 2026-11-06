@@ -6,11 +6,42 @@
 
 const { OpenAI } = require('openai');
 const { PROVIDERS, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, executeAgentTool } = require('./providers');
+const { getAgentRole } = require('./agent/agent-roster');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
-async function spawnSubAgent(task, cwd, provider = null, model = null) {
+const SUBAGENT_SESSIONS = new Map();
+const MAX_SUBAGENT_SESSIONS = 50;
+const MAX_SUBAGENT_TURNS = 3;
+
+async function runSubAgent(session, userMessage) {
+  session.messages.push({ role: 'user', content: userMessage });
+  const subTools = AGENT_TOOLS.filter(t => !['spawn_agent', 'followup_agent', 'sub_agent'].includes(t.function.name));
+  let responseText = '';
+  for (let turn = 0; turn < MAX_SUBAGENT_TURNS; turn++) {
+    const response = await session.client.chat.completions.create({
+      model: session.model,
+      messages: session.messages,
+      tools: subTools,
+      tool_choice: turn < MAX_SUBAGENT_TURNS - 1 ? 'auto' : 'none',
+    });
+    const assistantMsg = response.choices[0]?.message;
+    if (!assistantMsg) throw new Error('Provider returned no sub-agent response');
+    session.messages.push(assistantMsg);
+    responseText = assistantMsg.content || '';
+    if (!assistantMsg.tool_calls?.length) return responseText || '(sub-agent completed with no text output)';
+    for (const tc of assistantMsg.tool_calls) {
+      let toolArgs;
+      try { toolArgs = JSON.parse(tc.function.arguments); } catch { toolArgs = {}; }
+      const result = await executeAgentTool(tc.function.name, toolArgs, session.cwd);
+      session.messages.push({ role: 'tool', tool_call_id: tc.id, content: result.length > 4000 ? result.slice(0, 4000) + '\n...(truncated)' : result });
+    }
+  }
+  return (responseText || '(sub-agent hit max turns)') + '\n\n⚠️ Sub-agent reached max turns.';
+}
+
+async function spawnSubAgent(task, cwd, provider = null, model = null, options = {}) {
   const prov = provider || process.env.DEFAULT_PROVIDER || process.env.HAKSTER_PROVIDER || 'ollama';
   const cfg = PROVIDERS[prov] || PROVIDERS['ollama'];
   if (!cfg) return 'Error: No provider configured for sub-agent';
@@ -37,7 +68,9 @@ async function spawnSubAgent(task, cwd, provider = null, model = null) {
     }).join('\n');
   } catch { dirListing = '(unreadable)'; }
 
-  const subSystemPrompt = `${AGENT_SYSTEM_PROMPT}
+  const role = getAgentRole(options.agentType);
+  const roleBrief = role ? `\n\nSPECIALIST ROLE: ${role.name} (@${role.handle}) — ${role.focus}.\n${role.prompt}` : '';
+  const subSystemPrompt = `${AGENT_SYSTEM_PROMPT}${roleBrief}
 
 You are a SUB-AGENT handling a focused sub-task. Be concise and direct. Complete the task and report results.
 
@@ -50,56 +83,30 @@ Files in CWD:
 ${dirListing}
 === END MACHINE CONTEXT ===`;
 
-  const messages = [
-    { role: 'system', content: subSystemPrompt },
-    { role: 'user', content: task },
-  ];
-
-  const maxSubTurns = 3;
-  // No spawn_agent inside sub-agent — prevent infinite nesting
-  const subTools = AGENT_TOOLS.filter(t => t.function.name !== 'spawn_agent');
+  const messages = [{ role: 'system', content: subSystemPrompt }];
 
   try {
-    for (let turn = 0; turn < maxSubTurns; turn++) {
-      const response = await client.chat.completions.create({
-        model: subModel,
-        messages,
-        tools: subTools,
-        tool_choice: turn < maxSubTurns - 1 ? 'auto' : 'none',
-      });
-
-      const choice = response.choices[0];
-      const assistantMsg = choice.message;
-      messages.push(assistantMsg);
-
-      // If no tool calls, we're done
-      if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) {
-        return assistantMsg.content || '(sub-agent completed with no text output)';
-      }
-
-      // Execute each tool call
-      for (const tc of assistantMsg.tool_calls) {
-        const toolName = tc.function.name;
-        let toolArgs;
-        try { toolArgs = JSON.parse(tc.function.arguments); } catch { toolArgs = {}; }
-
-        const result = await executeAgentTool(toolName, toolArgs, cwd);
-        const truncated = result.length > 4000 ? result.slice(0, 4000) + '\n...(truncated)' : result;
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: truncated,
-        });
-      }
-    }
-
-    // Max turns reached — return last assistant content
-    const lastAssistant = messages.filter(m => m.role === 'assistant').pop();
-    return (lastAssistant?.content || '(sub-agent hit max turns)') + '\n\n⚠️ Sub-agent reached max turns.';
+    const sessionId = require('crypto').randomUUID();
+    const session = { client, model: subModel, cwd, messages, role: role?.id || null, updatedAt: Date.now() };
+    const result = await runSubAgent(session, task);
+    SUBAGENT_SESSIONS.set(sessionId, session);
+    while (SUBAGENT_SESSIONS.size > MAX_SUBAGENT_SESSIONS) SUBAGENT_SESSIONS.delete(SUBAGENT_SESSIONS.keys().next().value);
+    return `Delegated${role ? ` to ${role.name} (@${role.handle})` : ''}. session_id=${sessionId}\n\n${result}`;
   } catch (err) {
     return `Error: Sub-agent failed: ${err.message}`;
   }
 }
 
-module.exports = { spawnSubAgent };
+async function followupSubAgent(sessionId, message) {
+  const session = SUBAGENT_SESSIONS.get(String(sessionId || ''));
+  if (!session) return 'Error: sub-agent session not found or expired (sessions are in-memory and expire when the server restarts).';
+  try {
+    const result = await runSubAgent(session, String(message || ''));
+    session.updatedAt = Date.now();
+    return `Follow-up from ${session.role ? `@${session.role}` : 'sub-agent'} (session_id=${sessionId}):\n\n${result}`;
+  } catch (err) {
+    return `Error: sub-agent follow-up failed: ${err.message}`;
+  }
+}
+
+module.exports = { spawnSubAgent, followupSubAgent };

@@ -9,6 +9,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env'), ove
 
 // Approval mode — bypass confirmation prompts in FULL_AUTO / AUTO_EDIT
 const { FULL_AUTO, shouldConfirm: shouldConfirmApproval } = require('./agent/approval');
+const { AGENT_TYPES, delegationGuidance } = require('./agent/agent-roster');
 
 // MCP integration — lazy-loaded to avoid circular require
 let _isMcpTool, _callMcpTool;
@@ -1612,13 +1613,29 @@ const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'spawn_agent',
-      description: 'Spawn a sub-agent to handle a specific sub-task. The sub-agent gets the same tools as you. Use for parallelizing work or handing off focused tasks.',
+      description: 'Spawn a specialist sub-agent for a focused task. Use agent_type when a task matches a configured role. The result includes a session_id; call followup_agent with it to steer the same specialist and receive its updated result. Roles use the configured provider/model unless a vendor-specific runner is installed.',
       parameters: {
         type: 'object',
         properties: {
           task: { type: 'string', description: 'The task description for the sub-agent' },
+          agent_type: { type: 'string', enum: require('./agent/agent-roster').AGENT_TYPES, description: 'Optional role ID: claude, kiro, codex, copilot, phantom, phantom-claw, phantom-cli, pi, hermes, hakster, deepseek, local.' },
         },
         required: ['task'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'followup_agent',
+      description: 'Send additional instructions or a steering response to a previously spawned sub-agent and return its updated answer. Use the session_id from spawn_agent. Sessions are process-local and expire on server restart.',
+      parameters: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'The session_id returned by spawn_agent.' },
+          message: { type: 'string', description: 'New instructions or clarification for that same sub-agent.' },
+        },
+        required: ['session_id', 'message'],
       },
     },
   },
@@ -2098,6 +2115,7 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
   }
 
   let prompt = AGENT_SYSTEM_PROMPT_BASE;
+  prompt += delegationGuidance();
 
   // Inject a compact, refreshed project map with file:line anchors.
   try {
@@ -2969,7 +2987,11 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
       case 'spawn_agent': {
         // Cloud sub-agent: call the same model with the task and return results
         const { spawnSubAgent } = require('./subagent');
-        return await spawnSubAgent(args.task, cwd, provider || 'ollama', model || undefined);
+        return await spawnSubAgent(args.task, cwd, provider || 'ollama', model || undefined, { agentType: args.agent_type });
+      }
+      case 'followup_agent': {
+        const { followupSubAgent } = require('./subagent');
+        return await followupSubAgent(args.session_id, args.message);
       }
       case 'browser_navigate': {
         const page = await getAgentPage();

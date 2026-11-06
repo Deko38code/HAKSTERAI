@@ -35,6 +35,7 @@ import threading
 import re
 import urllib.request
 import urllib.parse
+import glob
 
 # Ensure phantom package is importable
 sys.path.insert(0, "/home/ghost")
@@ -42,6 +43,48 @@ sys.path.insert(0, "/home/ghost")
 PROXY_URL = "http://localhost:8082"
 OLlama_URL = "http://localhost:11434"  # kept for model listing fallback
 DEFAULT_MODEL = os.environ.get("HP1000_MODEL") or "glm-5.3:cloud"  # proxy maps this to glm-5.2:cloud
+
+# Mirror Crush's configured skill roots into Hakster's MCP skill tools. Keep this
+# intentionally scoped to the Crush skills_paths; the broader CLI skill library
+# remains available to the standalone Hakster TUI only.
+CRUSH_SKILL_DIRS = [
+    "/home/ghost/.hermes/hermes-agent/skills",
+    "/home/ghost/.hermes/skills",
+    "/home/ghost/haksterAi/pentest-agents/skills",
+    "/home/ghost/haksterAi/.hakster/skills",
+    "/home/ghost/.hakster/skills",
+]
+
+def crush_skill_files():
+    """Return unique Markdown skills from Crush's configured skills_paths."""
+    found = {}
+    for root in CRUSH_SKILL_DIRS:
+        for filename in glob.glob(os.path.join(root, "**", "*.md"), recursive=True):
+            rel = os.path.relpath(filename, root).replace(os.sep, "/")
+            found.setdefault(rel, filename)
+    return found
+
+def crush_skill_list(category: str = "") -> str:
+    """List Crush-configured skills, optionally narrowed to a folder prefix."""
+    skills = crush_skill_files()
+    prefix = category.strip().strip("/")
+    names = sorted(name for name in skills if not prefix or name.startswith(prefix + "/"))
+    if not names:
+        return f"No Crush skills found{f' in {prefix}' if prefix else ''}."
+    return f"Crush skills ({len(names)}):\n" + "\n".join(f"- {name[:-3]}" for name in names)
+
+def crush_skill_load(name: str) -> str:
+    """Read one Markdown skill by relative name from Crush's configured roots."""
+    requested = name.strip().replace("\\", "/").removeprefix("./")
+    if not requested or requested.startswith("/") or ".." in requested.split("/"):
+        return "Invalid skill name. Use a name returned by hakster_skill_list."
+    if not requested.endswith(".md"):
+        requested += ".md"
+    filename = crush_skill_files().get(requested)
+    if not filename:
+        return f"Crush skill not found: {name}\nUse hakster_skill_list to see available skills."
+    with open(filename, "r", encoding="utf-8") as skill_file:
+        return f"Crush skill: {requested[:-3]}\n{'-' * 40}\n{skill_file.read()}"
 
 # ── Ollama helpers ────────────────────────────────────────────────────────────
 
@@ -209,6 +252,25 @@ def get_tool_list() -> list[dict]:
             "name": "hakster_models",
             "description": "List all available Ollama models on this machine.",
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+        {
+            "name": "hakster_skill_list",
+            "description": "List skills from the skill paths configured in Crush's local Crush terminal config. These are exposed only through Hakster MCP; use the returned relative skill name with hakster_skill_load.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"category": {"type": "string", "description": "Optional folder prefix such as devops or security."}},
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "hakster_skill_load",
+            "description": "Load full Markdown instructions for one skill from Crush's configured skill paths through Hakster MCP.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "Relative skill name returned by hakster_skill_list; include subfolder if present."}},
+                "required": ["name"],
+                "additionalProperties": False,
+            },
         },
         {
             "name": "run_shell",
@@ -394,6 +456,18 @@ or several in parallel, via the deployed script's CLI mode."""
 
 def handle_tool(name: str, args: dict) -> dict:
     """Execute a tool and return MCP content result."""
+
+    if name == "hakster_skill_list":
+        return {"content": [{"type": "text", "text": crush_skill_list(args.get("category", ""))}]}
+
+    if name == "hakster_skill_load":
+        skill_name = args.get("name", "")
+        if not isinstance(skill_name, str):
+            return {"content": [{"type": "text", "text": "Error: name must be a string"}], "isError": True}
+        try:
+            return {"content": [{"type": "text", "text": crush_skill_load(skill_name)}]}
+        except OSError as exc:
+            return {"content": [{"type": "text", "text": f"Could not read Crush skill: {exc}"}], "isError": True}
 
     if name == "hakster_agent":
         task = args.get("task", "")

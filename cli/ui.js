@@ -72,7 +72,7 @@ const PHRASES = {
 };
 
 // ── Thinking animation ───────────────────────────────────────────────────
-function thinkingAnimation(_modelHint, phase, startedAt = Date.now()) {
+function thinkingAnimation(_modelHint, phase, startedAt = Date.now(), renderLine = null) {
   // Keep the regular terminal's status line in sync with HakTerm Admin.
   const FRAMES = ['❄', '✦', '✧', '✶', '✧', '✦'];
   const SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
@@ -117,7 +117,8 @@ function thinkingAnimation(_modelHint, phase, startedAt = Date.now()) {
     const shimmer = [0, 1, 2].map((offset) => SHIMMER[(shimF + offset) % SHIMMER.length]).join('');
     const line = `  ${gradC}⟦${col}\x1b[1m${spinner}\x1b[0m${gradC}⟧\x1b[0m ${emoji} ${phaseColor}${currentPhase}\x1b[0m ${col}${phrase}\x1b[0m  ${gradC}${shimmer}\x1b[0m  \x1b[38;5;240m${time}\x1b[0m`;
 
-    process.stdout.write('\r\x1b[2K' + line);
+    if (typeof renderLine === 'function') renderLine(line);
+    else process.stdout.write('\r\x1b[2K' + line);
     frame++;
     shimF++;
     tick++;
@@ -139,7 +140,8 @@ function thinkingAnimation(_modelHint, phase, startedAt = Date.now()) {
   };
   timer.stop = (finalLabel) => {
     clearInterval(timer);
-    process.stdout.write('\r\x1b[2K');
+    if (typeof renderLine === 'function') renderLine(null);
+    else process.stdout.write('\r\x1b[2K');
     if (finalLabel) process.stdout.write(finalLabel + '\n');
   };
   return timer;

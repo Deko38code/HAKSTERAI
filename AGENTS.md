@@ -45,6 +45,14 @@ Hakster agent loop guidance:
 - If a server-side change needs a restart to take effect, tell the user, let them finish their CLI work, and restart only on their go-ahead (or apply on the next natural restart). `pm2 restart/stop/reload haksterAi` and `systemctl restart pm2-root` are confirmation-gated for this reason.
 - Shell commands must never hang the agent: every `exec_shell` is bounded by a timeout (default 15s, max 120s) with a hard process-group kill. Do not run interactive or long-lived foreground commands (`tail -f`, REPLs, `npm start`, `ssh` without a password, servers) in `exec_shell` — background them with PM2/nohup or use the browser terminal.
 
+## Fix-Only Service and GitHub Safety Rule (effective 2026-11-05)
+
+- Protect HaksterAI and every other working service. Diagnose the reported failure first, then make the smallest patch that fixes that exact failure. Do not refactor, reconfigure, replace, disable, stop, or restart a healthy service as part of an unrelated fix.
+- Always add fallbacks; never replace a working tool, skill, config, route, or service. Keep the current source first and use fallback sources only when an entry or file is missing or the primary fails. Merge by name so fallback copies do not duplicate or shadow working entries.
+- Before editing an existing file, make and verify a unique timestamped backup. Preserve unrelated changes and user data. Do not delete or clean project files. After a patch, run the narrowest syntax check and a bounded health check; report any check that could not complete instead of claiming success.
+- A service restart is allowed only when the fix requires it, the owner explicitly authorized it, and no active CLI/chat session will be interrupted. Prefer applying source guidance dynamically or waiting for the next natural restart when that is sufficient.
+- Follow the Git Commit Policy below for GitHub work: inspect status and the exact diff; stage only individually reviewed files; commit only requested, verified changes; never force-push or amend another person's commit. Do not push to GitHub unless the owner explicitly asks.
+
 ## Git Commit Policy (standing authorization — confirmed 2026-07-24)
 
 Commit is pre-authorized for this repo at all times when the work is clean and safe — no need to ask before each commit. "Clean and safe" means:

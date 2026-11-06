@@ -199,7 +199,7 @@ function connectServer(serverName, config) {
 
     child.on('error', (err) => {
       _logFn(`  [MCP:${serverName}] process error: ${err.message}`);
-      mcpServers.delete(serverName);
+      if (mcpServers.get(serverName) === server) mcpServers.delete(serverName);
     });
 
     child.on('close', (code) => {
@@ -210,14 +210,14 @@ function connectServer(serverName, config) {
         rej(new Error(`MCP server "${serverName}" exited`));
       }
       server.pending.clear();
-      mcpServers.delete(serverName);
+      if (mcpServers.get(serverName) === server) mcpServers.delete(serverName);
 
       // Auto-retry heavy servers killed by OOM (code null = signal death).
       // Serena is the heaviest (~300MB with TypeScript LSP) and most likely to
       // get OOM-killed when all 15 MCP servers spawn simultaneously on a 7GB box.
       // Retry once after a 5s delay to let memory settle, with a flag to prevent
       // infinite retry loops.
-      if (code === null && !server._retried && serverName === 'serena') {
+      if (code === null && !server._retried && !server._intentionalStop && serverName === 'serena') {
         server._retried = true;
         _logFn(`  [MCP:${serverName}] likely OOM-killed — retrying in 5s...`);
         setTimeout(() => {
@@ -291,8 +291,9 @@ function connectServer(serverName, config) {
       } catch (err) {
         _logFn(`  [MCP:${serverName}] initialization failed: ${err.message}`);
         // Clean up
+        server._intentionalStop = true;
         try { child.kill('SIGTERM'); } catch (_) {}
-        mcpServers.delete(serverName);
+        if (mcpServers.get(serverName) === server) mcpServers.delete(serverName);
         reject(err);
       }
     })();
@@ -428,11 +429,6 @@ async function loadMcpServers(configDirs) {
     }
   }
 
-  if (configs.length === 0) {
-    _logFn('  [MCP] No MCP servers configured');
-    return { tools: [], servers: [] };
-  }
-
   // Dedupe by server name across config dirs — first definition wins.
   // hivemind is defined in BOTH ~/.hakster/mcp.json and the project .hakster/mcp.json;
   // connecting it twice doubles the handshake cost and RAM for zero gain.
@@ -442,6 +438,68 @@ async function loadMcpServers(configDirs) {
     _seenMcpNames.add(name);
     return true;
   });
+
+  // Mint is an additive last-resort source. Existing definitions always stay
+  // first; Mint only fills absent servers or supplies a command/args retry.
+  // Retain the current env so an older copy cannot replace newer credentials.
+  try {
+    const mintPath = '/home/ghost/mint-backup/home/haksterAi/.hakster/mcp.json';
+    const fallbackJson = JSON.parse(fs.readFileSync(mintPath, 'utf-8'));
+    for (const [name, mintConfig] of Object.entries(fallbackJson.mcpServers || {})) {
+      const current = configs.find(entry => entry.name === name);
+      if (!current) {
+        // Use inherited process env only; never revive secrets from an old backup.
+        configs.push({ name, config: { ...mintConfig, env: {} }, fallbackConfigs: [] });
+        _logFn(`  [MCP:${name}] added from Mint fallback config`);
+        continue;
+      }
+      const currentArgs = JSON.stringify(current.config.args || []);
+      const mintArgs = JSON.stringify(mintConfig.args || []);
+      if (current.config.command === mintConfig.command && currentArgs === mintArgs) continue;
+      current.fallbackConfigs ||= [];
+      const fallback = {
+        ...current.config,
+        command: mintConfig.command,
+        args: mintConfig.args || [],
+        env: current.config.env || {},
+      };
+      if (!current.fallbackConfigs.some(candidate => candidate.command === fallback.command && JSON.stringify(candidate.args || []) === JSON.stringify(fallback.args || []))) {
+        current.fallbackConfigs.push(fallback);
+      }
+    }
+  } catch (_) {
+    // Other boxes may not have a Mint snapshot; current configs remain usable.
+  }
+
+  if (configs.length === 0) {
+    _logFn('  [MCP] No MCP servers configured');
+    return { tools: [], servers: [] };
+  }
+
+  async function connectWithFallbacks(name, config, fallbackConfigs = []) {
+    const candidates = [config, ...fallbackConfigs];
+    let lastError;
+    for (let index = 0; index < candidates.length; index++) {
+      try {
+        await connectServer(name, candidates[index]);
+        const server = mcpServers.get(name);
+        if (!server) throw new Error('server exited during initialization');
+        if (server.tools.length === 0 && index + 1 < candidates.length) {
+          server._intentionalStop = true;
+          try { server.child?.kill('SIGTERM'); } catch (_) {}
+          if (mcpServers.get(name) === server) mcpServers.delete(name);
+          throw new Error('server returned no tool definitions');
+        }
+        if (server) server.fallbackConfigs = candidates.slice(index + 1);
+        if (index > 0) _logFn(`  [MCP:${name}] connected with fallback ${index}`);
+        return;
+      } catch (err) {
+        lastError = err;
+        if (index + 1 < candidates.length) _logFn(`  [MCP:${name}] primary config failed; trying fallback ${index + 1}`);
+      }
+    }
+    throw lastError || new Error(`MCP server "${name}" has no usable config`);
+  }
 
   // Tier-based lazy loading for 7GB RAM boxes.
   //
@@ -462,12 +520,12 @@ async function loadMcpServers(configDirs) {
 
   const tier1Configs = [];
   const lazyConfigs = [];
-  for (const { name, config } of configs) {
+  for (const { name, config, fallbackConfigs } of configs) {
     const tier = config.tier || 1;
     if (tier <= 1) {
-      tier1Configs.push({ name, config });
+      tier1Configs.push({ name, config, fallbackConfigs });
     } else {
-      lazyConfigs.push({ name, config });
+      lazyConfigs.push({ name, config, fallbackConfigs });
     }
   }
 
@@ -483,8 +541,8 @@ async function loadMcpServers(configDirs) {
   // Spawn tier 1 servers (staggered — light anti-OOM pacing, trimmed from 250ms:
   // 4.7GB+ free RAM makes 120ms plenty; saves ~1.4s of pure sleep at startup)
   const tier1Results = await Promise.allSettled(
-    sortedTier1.map(({ name, config }, i) =>
-      new Promise(r => setTimeout(r, i * 120 + (HEAVY_SERVERS.has(name) ? 1200 : 0))).then(() => connectServer(name, config))
+    sortedTier1.map(({ name, config, fallbackConfigs }, i) =>
+      new Promise(r => setTimeout(r, i * 120 + (HEAVY_SERVERS.has(name) ? 1200 : 0))).then(() => connectWithFallbacks(name, config, fallbackConfigs))
     )
   );
 
@@ -502,42 +560,51 @@ async function loadMcpServers(configDirs) {
   // ~4× faster than one-at-a-time on boxes with 11 lazy servers. Cap of 3 keeps
   // the transient RAM spike ≈ three short-lived probe processes. Heavy servers
   // (serena: Python + language server + dashboard) still go last, alone.
-  async function probeAndRegisterLazy(name, config) {
+  async function probeAndRegisterLazy(name, config, fallbackConfigs = []) {
     _logFn(`  [MCP:${name}] probing (lazy, tier ${config.tier})...`);
-    try {
-      const probe = await probeServerTools(name, config);
-      if (probe.ok && probe.tools.length > 0) {
-        // Register as lazy: store config + tools but no child process
-        mcpServers.set(name, {
-          name,
-          config,
-          child: null,
-          tools: probe.tools,
-          buffer: '',
-          pending: new Map(),
-          initialized: false,
-          lazy: true,
-        });
-        _logFn(`  [MCP:${name}] lazy-registered with ${probe.tools.length} tool(s)`);
-      } else {
-        _logFn(`  [MCP:${name}] probe failed: ${probe.error || 'no tools'} — will spawn on-demand`);
-        // Still register as lazy with empty tools — callMcpTool will spawn on demand
-        mcpServers.set(name, {
-          name,
-          config,
-          child: null,
-          tools: [],
-          buffer: '',
-          pending: new Map(),
-          initialized: false,
-          lazy: true,
-        });
+    const candidates = [config, ...fallbackConfigs];
+    let activeConfig = config;
+    let activeFallbacks = fallbackConfigs;
+    let selectedProbe = null;
+    let lastError = '';
+    for (let index = 0; index < candidates.length; index++) {
+      try {
+        const probe = await probeServerTools(name, candidates[index]);
+        if (probe.ok && probe.tools.length > 0) {
+          activeConfig = candidates[index];
+          activeFallbacks = candidates.slice(index + 1);
+          selectedProbe = probe;
+          if (index > 0) _logFn(`  [MCP:${name}] tool definitions found with fallback ${index}`);
+          break;
+        }
+        lastError = probe.error || 'no tools';
+        if (index + 1 < candidates.length) _logFn(`  [MCP:${name}] primary probe unavailable; trying fallback ${index + 1}`);
+      } catch (err) {
+        lastError = err.message;
+        if (index + 1 < candidates.length) _logFn(`  [MCP:${name}] primary probe failed; trying fallback ${index + 1}`);
       }
-    } catch (err) {
-      _logFn(`  [MCP:${name}] probe error: ${err.message} — will spawn on-demand`);
+    }
+    if (selectedProbe) {
+      // Register as lazy: store config + tools but no child process.
+      mcpServers.set(name, {
+        name,
+        config: activeConfig,
+        fallbackConfigs: activeFallbacks,
+        child: null,
+        tools: selectedProbe.tools,
+        buffer: '',
+        pending: new Map(),
+        initialized: false,
+        lazy: true,
+      });
+      _logFn(`  [MCP:${name}] lazy-registered with ${selectedProbe.tools.length} tool(s)`);
+    } else {
+      _logFn(`  [MCP:${name}] probe failed: ${lastError || 'no tools'} — will spawn on-demand`);
+      // Keep all candidates for a later tool call; primary stays first.
       mcpServers.set(name, {
         name,
         config,
+        fallbackConfigs,
         child: null,
         tools: [],
         buffer: '',
@@ -554,13 +621,13 @@ async function loadMcpServers(configDirs) {
   await Promise.all(
     Array.from({ length: Math.min(3, probeQueue.length) }, async () => {
       while (probeQueue.length) {
-        const { name, config } = probeQueue.shift();
-        await probeAndRegisterLazy(name, config);
+        const { name, config, fallbackConfigs } = probeQueue.shift();
+        await probeAndRegisterLazy(name, config, fallbackConfigs);
       }
     })
   );
-  for (const { name, config } of heavyLazy) {
-    await probeAndRegisterLazy(name, config);
+  for (const { name, config, fallbackConfigs } of heavyLazy) {
+    await probeAndRegisterLazy(name, config, fallbackConfigs);
   }
   return { tools: getMcpTools(), servers: connected };
 }
@@ -620,16 +687,34 @@ async function callMcpTool(fullFnName, args) {
   // Lazy-spawn tier 2/3 servers on first tool call
   if (server.lazy && (!server.child || !server.initialized)) {
     _logFn(`  [MCP:${serverName}] lazy-spawning (tier ${server.config.tier}) for tool: ${toolName}...`);
-    try {
-      await connectServer(serverName, server.config);
-      server = mcpServers.get(serverName); // re-fetch after connectServer replaced it
-      if (!server || !server.initialized) {
-        throw new Error(`lazy-spawn succeeded but server not initialized`);
+    const candidates = [server.config, ...(server.fallbackConfigs || [])];
+    let lastError;
+    for (let index = 0; index < candidates.length; index++) {
+      try {
+        await connectServer(serverName, candidates[index]);
+        server = mcpServers.get(serverName); // re-fetch after connectServer replaced it
+        if (!server || !server.initialized) throw new Error('server did not initialize');
+        if (!server.tools.some(tool => tool.name === toolName)) {
+          if (index + 1 < candidates.length) {
+            server._intentionalStop = true;
+            try { server.child?.kill('SIGTERM'); } catch (_) {}
+            if (mcpServers.get(serverName) === server) mcpServers.delete(serverName);
+            throw new Error(`server did not expose tool ${toolName}`);
+          }
+          lastError = new Error(`fallback server did not expose tool ${toolName}`);
+          break;
+        }
+        server.fallbackConfigs = candidates.slice(index + 1);
+        if (index > 0) _logFn(`  [MCP:${serverName}] lazy-spawned with fallback ${index}`);
+        _logFn(`  [MCP:${serverName}] lazy-spawned, ${server.tools.length} tool(s) available`);
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (index + 1 < candidates.length) _logFn(`  [MCP:${serverName}] lazy spawn failed; trying fallback ${index + 1}`);
       }
-      _logFn(`  [MCP:${serverName}] lazy-spawned, ${server.tools.length} tool(s) available`);
-    } catch (err) {
-      throw new Error(`MCP server "${serverName}" lazy-spawn failed: ${err.message}`);
     }
+    if (lastError) throw new Error(`MCP server "${serverName}" lazy-spawn failed: ${lastError.message}`);
   }
 
   if (!server || !server.initialized) {
