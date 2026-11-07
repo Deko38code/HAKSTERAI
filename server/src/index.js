@@ -239,7 +239,7 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:4321,http://
 const FS_ROOT = process.env.FS_ROOT || process.cwd();
 
 // ── Usage limits ─────────────────────────────────────────────────
-const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED !== 'false'; // default: ON — free users get 10 questions
+const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED !== 'false'; // default: ON — free users get 10 AI inputs
 const FREE_USAGE_LIMIT = 10;
 const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
 const REFERRAL_REWARD_TOKENS = parseInt(process.env.REFERRAL_REWARD_TOKENS || '10000', 10);
@@ -334,8 +334,8 @@ const PRICING_CATALOG = [
     id: 'free',
     name: 'HaksterAI Free',
     stripeProductName: 'HaksterAI Free',
-    description: 'Free users get 10 commands or questions, then must upgrade.',
-    features: ['10 free commands or questions', 'Upgrade required after free limit', 'Local Ollama support', 'Basic chat and terminal tools'],
+    description: 'Free users get 10 AI inputs across chat, agents, scripts, and generation, then must upgrade.',
+    features: ['10 free AI inputs across chat, agents, scripts, and generation', 'Upgrade required after free limit', 'Local Ollama support', 'Basic chat and terminal tools'],
     prices: [
       {
         id: 'free',
@@ -448,8 +448,14 @@ function parseOAuthState(state) {
 
 const MINIFORGE_SSO_RETURN_PATHS = new Set(['/miniforge/', '/miniforge/app/']);
 function safeMiniforgeReturnTo(value) {
-  const target = String(value || '');
-  return MINIFORGE_SSO_RETURN_PATHS.has(target) ? target : '';
+  const target = String(value || '').trim();
+  // Accept the no-trailing-slash spellings too and normalize them. Otherwise a
+  // sign-in started from /miniforge or /miniforge/app lost its returnTo and the
+  // callback fell through to /build, which looked like a random redirect.
+  const normalized = target === '/miniforge' ? '/miniforge/'
+    : target === '/miniforge/app' ? '/miniforge/app/'
+    : target;
+  return MINIFORGE_SSO_RETURN_PATHS.has(normalized) ? normalized : '';
 }
 
 function makeOAuthState(referralCode, returnTo = '') {
@@ -2070,16 +2076,18 @@ app.get('/api/integrations', (_req, res) => {
 //    execTools dispatcher in cli/tools.js) that don't run the full agent loop
 //    and so never see FIRECRAWL_API_KEY directly — this reuses the same
 //    rotating-key firecrawlScrape/firecrawlSearch already used by the agent.
-app.post('/api/agent/firecrawl', async (req, res) => {
+app.post('/api/agent/firecrawl', requireSignedIn, async (req, res) => {
   const { action = 'scrape', url, query } = req.body || {};
+  if (action === 'search' && !query) return res.status(400).json({ ok: false, error: 'search requires query' });
+  if (action !== 'search' && !url) return res.status(400).json({ ok: false, error: 'scrape requires url' });
+  const usageCheck = reserveUsage(getUserByApiKey(req));
+  if (!usageCheck.allowed) return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   try {
     if (action === 'search') {
-      if (!query) return res.status(400).json({ ok: false, error: 'search requires query' });
       const results = await firecrawlSearch(query, 5);
       const text = results.map(r => `${r.title}\n${r.url}\n${r.snippet}`).join('\n\n') || 'No results';
       return res.json({ ok: true, output: `🔥 Firecrawl search: ${query}\n\n${text}` });
     }
-    if (!url) return res.status(400).json({ ok: false, error: 'scrape requires url' });
     const markdown = await firecrawlScrape(url);
     res.json({ ok: true, output: `🔥 Firecrawl scrape ${url}\n${String(markdown).slice(0, 12000)}` });
   } catch (err) {
@@ -2399,7 +2407,7 @@ app.post('/api/chat', requireSignedIn, async (req, res) => {
   }
   // Usage check
   const user = getUserByApiKey(req);
-  const usageCheck = checkUsageLimit(user);
+  const usageCheck = reserveUsage(user);
   if (!usageCheck.allowed) {
     return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   }
@@ -2430,7 +2438,6 @@ app.post('/api/chat', requireSignedIn, async (req, res) => {
     }
 
     res.json(result);
-    incrementUsage(user);
   } catch (err) {
     const db = getDb();
     const reqId = uuidv4();
@@ -2453,7 +2460,7 @@ app.post('/api/chat/stream', requireSignedIn, async (req, res) => {
   }
   // Usage check
   const user = getUserByApiKey(req);
-  const usageCheck = checkUsageLimit(user);
+  const usageCheck = reserveUsage(user);
   if (!usageCheck.allowed) {
     return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   }
@@ -2503,6 +2510,13 @@ app.post('/api/chat/stream', requireSignedIn, async (req, res) => {
     if (finalMeta) {
       const db = getDb();
       const reqId = uuidv4();
+      // Builder/miniapp clients post a fresh sessionId that was never persisted.
+      // requests.session_id has a FK to sessions(id), so ensure the row exists
+      // before logging or the insert fails with FOREIGN KEY constraint failed.
+      if (sessionId) {
+        db.prepare(`INSERT OR IGNORE INTO sessions (id, title, provider, model) VALUES (?, ?, ?, ?)`)
+          .run(sessionId, 'Chat session', finalMeta.provider || provider, finalMeta.model || model);
+      }
       db.prepare(
         `INSERT INTO requests (id, session_id, type, provider, model, input_tokens, output_tokens, latency_ms, cost, status)
          VALUES (?, ?, 'stream', ?, ?, ?, ?, ?, ?, 'ok')`
@@ -2516,7 +2530,6 @@ app.post('/api/chat/stream', requireSignedIn, async (req, res) => {
     }
 
     res.write(`data: ${JSON.stringify({ type: 'done', ...(finalMeta || {}) })}\n\n`);
-    incrementUsage(user);
     res.end();
   } catch (err) {
     console.error('[stream] error:', err);
@@ -2789,6 +2802,11 @@ app.post('/api/agent/run', requireSignedIn, async (req, res) => {
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'messages array required' });
   }
+  const user = getUserByApiKey(req);
+  const usageCheck = reserveUsage(user);
+  if (!usageCheck.allowed) {
+    return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
+  }
   // ── Persist the incoming user turn (shared session history — lets a Telegram
   //    bot conversation and a website chat tab pointed at the same sessionId
   //    see each other's turns). Deliberately scoped to just the user message,
@@ -2799,13 +2817,6 @@ app.post('/api/agent/run', requireSignedIn, async (req, res) => {
   if (sessionId) {
     try { persistUserTurn(sessionId, provider, model, messages); } catch (e) { console.error('[session] persist failed:', e.message); }
   }
-  // Usage check
-  const user = getUserByApiKey(req);
-  const usageCheck = checkUsageLimit(user);
-  if (!usageCheck.allowed) {
-    return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
-  }
-
   let cfg = PROVIDERS[provider];
   if (!cfg) {
     // Unknown provider — fast-bypass to the waterfall rather than 400.
@@ -3009,7 +3020,6 @@ app.post('/api/agent/run', requireSignedIn, async (req, res) => {
   if (directImageIntent) {
     try {
       await runDirectImageIntent(directImageIntent);
-      incrementUsage(user);
     } catch (err) {
       const msg = err.message || String(err);
       res.write(`data: ${JSON.stringify({ type: 'error', error: msg })}\n\n`);
@@ -3167,7 +3177,6 @@ app.post('/api/agent/run', requireSignedIn, async (req, res) => {
         outputTokens: result.usage?.output_tokens || 0,
         cost: result.costUsd || 0,
       })}\n\n`);
-      incrementUsage(user);
     } catch (err) {
       console.error('[claude-cli] run failed:', err.message || err);
       res.write(`data: ${JSON.stringify({ type: 'error', error: (err.message || String(err)).slice(0, 500) })}\n\n`);
@@ -4596,7 +4605,6 @@ ${dirListing}
     clearInterval(heartbeat);
     res.write(`data: ${JSON.stringify({ type: 'max_turns', maxTurns })}\n\n`);
     recordThisAgentUsage();
-    incrementUsage(user);
     res.end();
   } catch (err) {
     clearInterval(heartbeat);
@@ -4855,23 +4863,21 @@ function parseArtifacts(content) {
 }
 
 // POST /api/generate — Generate an app from description with full agent loop + tools
-app.post('/api/generate', async (req, res) => {
+app.post('/api/generate', requireSignedIn, async (req, res) => {
   const defaultCfg = getHaksterModelConfig();
   const { provider = defaultCfg.provider, model = defaultCfg.model, description, thinking = false, images = [] } = req.body;
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
   if (!description && images.length === 0) return res.status(400).json({ error: 'description or images required' });
+  const cfg = PROVIDERS[provider];
+  if (!cfg) return res.status(400).json({ error: `Unknown provider: ${provider}` });
   // Usage check
   const user = getUserByApiKey(req);
-  const usageCheck = checkUsageLimit(user);
+  const usageCheck = reserveUsage(user);
   if (!usageCheck.allowed) {
     return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   }
-
-  const cfg = PROVIDERS[provider];
-  if (!cfg) return res.status(400).json({ error: `Unknown provider: ${provider}` });
-
   const sessionId = req.body.sessionId || null;
   const FS_ROOT = process.env.FS_ROOT || path.join(__dirname, '..', 'data');
   const workDir = req.body.cwd || path.join(FS_ROOT, 'workspaces', sessionId || 'build-default');
@@ -5452,12 +5458,12 @@ app.get('/preview/:id', (req, res) => {
 });
 
 // ── Image Generation ────────────────────────────────────────────────
-app.post('/api/images/generate', async (req, res) => {
+app.post('/api/images/generate', requireSignedIn, async (req, res) => {
   const { provider = 'pollinations', model, prompt, size = '1024x1024', quality = 'hd', operation = 'generate', imageUrl, enhance = false } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
   // Usage check
   const user = getUserByApiKey(req);
-  const usageCheck = checkUsageLimit(user);
+  const usageCheck = reserveUsage(user);
   if (!usageCheck.allowed) {
     return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   }
@@ -5466,7 +5472,6 @@ app.post('/api/images/generate', async (req, res) => {
     const imageModel = model || (provider === 'pollinations' ? 'zimage' : 'dall-e-3');
     const result = await generateImage({ provider, model: imageModel, prompt, size, quality, operation, imageUrl, enhance });
     res.json(result);
-    incrementUsage(user);
   } catch (err) {
     console.error('[image-gen] error:', err);
     const msg = err.message || String(err);
@@ -5476,10 +5481,12 @@ app.post('/api/images/generate', async (req, res) => {
 });
 
 // ── Image Analysis (Vision) ────────────────────────────────────────
-app.post('/api/images/analyze', async (req, res) => {
+app.post('/api/images/analyze', requireSignedIn, async (req, res) => {
   const { provider = 'openai', model, prompt, imageBase64, imageUrl, mimeType } = req.body;
   if (!imageBase64 && !imageUrl) return res.status(400).json({ error: 'imageBase64 or imageUrl required' });
   if (!prompt) return res.status(400).json({ error: 'prompt required (e.g. "Describe this image" or "Enhance and describe")' });
+  const usageCheck = reserveUsage(getUserByApiKey(req));
+  if (!usageCheck.allowed) return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
 
   try {
     const result = await analyzeImage({ provider, model, prompt, imageBase64, imageUrl, mimeType });
@@ -6351,12 +6358,47 @@ app.get('/api/pricing', (_req, res) => {
 });
 
 // ── Stripe Checkout ── create a Checkout Session for a plan ─────────────
+// Public plan list — the chat surface (/miniforge) and the marketing pages both
+// sell the same HaksterAI subscription, so they render from one verified source
+// instead of each holding its own price copy.
+app.get('/api/stripe/plans', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.json({
+    plans: PRICING_CATALOG.map(plan => ({
+      id: plan.id,
+      name: plan.name,
+      description: plan.description,
+      features: plan.features,
+      prices: plan.prices
+        .filter(price => price.stripePriceId)
+        .map(price => ({
+          id: price.id,
+          name: price.name,
+          billingCycle: price.billingCycle,
+          amount: price.amount,
+          currency: price.currency,
+          priceId: price.stripePriceId,
+        })),
+    })),
+  });
+});
+
+// Same-origin return paths only ('/x', '/miniforge/app/'), never protocol-relative.
+function safeStripeReturnTo(value) {
+  const target = String(value || '').trim();
+  if (!target || target.length > 300) return '';
+  if (!target.startsWith('/') || target.startsWith('//')) return '';
+  if (!/^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$/.test(target)) return '';
+  return target;
+}
+
 app.post('/api/stripe/checkout', async (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(503).json({ error: 'Stripe not configured. Set STRIPE_SECRET_KEY in .env' });
 
   const { priceId, planId, billingCycle } = req.body;
   if (!priceId) return res.status(400).json({ error: 'priceId required' });
+  const returnTo = safeStripeReturnTo(req.body?.returnTo);
 
   // Look up the plan from PRICING_CATALOG to validate
   let plan = null;
@@ -6393,8 +6435,8 @@ app.post('/api/stripe/checkout', async (req, res) => {
       subscription_data: {
         metadata: { userId: String(user.id), planId: plan.id },
       },
-      success_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}/build?checkout=success&plan=${plan.id}`,
-      cancel_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}/?checkout=cancelled`,
+      success_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}${returnTo || '/build'}${(returnTo || '/build').includes('?') ? '&' : '?'}checkout=success&plan=${plan.id}`,
+      cancel_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}${returnTo || '/'}${(returnTo || '/').includes('?') ? '&' : '?'}checkout=cancelled`,
     });
     console.log(`[stripe] checkout session created for user ${user.id}, plan ${plan.id}, session ${session.id}`);
     res.json({ url: session.url, sessionId: session.id });
@@ -6411,11 +6453,12 @@ app.post('/api/stripe/portal', async (req, res) => {
   const user = getUserByApiKey(req);
   if (!user) return res.status(401).json({ error: 'Authentication required' });
   if (!user.stripe_customer_id) return res.status(400).json({ error: 'No Stripe customer account found. Subscribe first.' });
+  const portalReturnTo = safeStripeReturnTo(req.body?.returnTo);
 
   try {
   const session = await stripe.billingPortal.sessions.create({
   customer: user.stripe_customer_id,
-  return_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}/build`,
+  return_url: `${req.headers.origin || req.protocol + '://' + req.get('host')}${portalReturnTo || '/build'}`,
   });
   res.json({ url: session.url });
   } catch (err) {
@@ -7054,34 +7097,45 @@ function getUserByApiKey(req) {
   return db.prepare('SELECT * FROM users WHERE api_key = ?').get(apiKey);
 }
 
-function checkUsageLimit(user) {
-  if (!USAGE_LIMIT_ENABLED) return { allowed: true };
-  if (!user) return { allowed: true }; // no user = no tracking, let it through
-  if (user.plan !== 'free') return { allowed: true, plan: user.plan }; // paid plans unlimited
-  const now = Math.floor(Date.now() / 1000);
-  // Reset count if reset period passed
-  if (user.usage_reset_at && now > user.usage_reset_at) {
-    const db = getDb();
-    db.prepare('UPDATE users SET usage_count = 0, usage_reset_at = ? WHERE id = ?').run(now + USAGE_RESET_DAYS * 86400, user.id);
-    user.usage_count = 0;
-    user.usage_reset_at = now + USAGE_RESET_DAYS * 86400;
-  }
-  if (user.usage_count >= FREE_USAGE_LIMIT) {
-    return { allowed: false, limit: FREE_USAGE_LIMIT, used: user.usage_count, plan: user.plan };
-  }
-  return { allowed: true, used: user.usage_count, limit: FREE_USAGE_LIMIT, plan: user.plan };
-}
+function reserveUsage(user) {
+  if (!USAGE_LIMIT_ENABLED || !user) return { allowed: true }; // Internal localhost callers have no account to meter.
+  if (user.plan !== 'free') return { allowed: true, plan: user.plan };
 
-function incrementUsage(user) {
-  if (!user) return;
   const db = getDb();
-  // Set reset_at if not yet set
-  if (!user.usage_reset_at) {
-    db.prepare('UPDATE users SET usage_count = usage_count + 1, usage_reset_at = ? WHERE id = ?')
-      .run(Math.floor(Date.now() / 1000) + USAGE_RESET_DAYS * 86400, user.id);
-  } else {
-    db.prepare('UPDATE users SET usage_count = usage_count + 1 WHERE id = ?').run(user.id);
-  }
+  const now = Math.floor(Date.now() / 1000);
+  const nextResetAt = now + USAGE_RESET_DAYS * 86400;
+  const reserve = db.transaction((userId) => {
+    const current = db.prepare('SELECT plan, COALESCE(usage_count, 0) AS usage_count, usage_reset_at FROM users WHERE id = ?').get(userId);
+    if (!current) return { allowed: false, limit: FREE_USAGE_LIMIT, used: FREE_USAGE_LIMIT, remaining: 0, plan: 'free' };
+    if (current.plan !== 'free') return { allowed: true, plan: current.plan };
+
+    let used = Number(current.usage_count) || 0;
+    let resetAt = Number(current.usage_reset_at) || 0;
+    if (resetAt && now > resetAt) {
+      used = 0;
+      resetAt = nextResetAt;
+      db.prepare('UPDATE users SET usage_count = 0, usage_reset_at = ? WHERE id = ? AND plan = \'free\'').run(resetAt, userId);
+    }
+    if (used >= FREE_USAGE_LIMIT) {
+      return { allowed: false, limit: FREE_USAGE_LIMIT, used, remaining: 0, plan: 'free' };
+    }
+
+    const result = db.prepare(`UPDATE users
+      SET usage_count = COALESCE(usage_count, 0) + 1, usage_reset_at = COALESCE(usage_reset_at, ?)
+      WHERE id = ? AND plan = 'free' AND COALESCE(usage_count, 0) < ?`).run(resetAt || nextResetAt, userId, FREE_USAGE_LIMIT);
+    if (result.changes !== 1) {
+      const latest = db.prepare('SELECT COALESCE(usage_count, 0) AS usage_count, plan FROM users WHERE id = ?').get(userId);
+      const latestUsed = Number(latest?.usage_count) || 0;
+      if (latest && latest.plan !== 'free') return { allowed: true, plan: latest.plan };
+      return { allowed: false, limit: FREE_USAGE_LIMIT, used: latestUsed, remaining: 0, plan: 'free' };
+    }
+
+    used += 1;
+    user.usage_count = used;
+    user.usage_reset_at = resetAt || nextResetAt;
+    return { allowed: true, used, limit: FREE_USAGE_LIMIT, remaining: FREE_USAGE_LIMIT - used, plan: 'free' };
+  });
+  return reserve(user.id);
 }
 
 // GET /api/usage — returns current usage stats for the authenticated user
@@ -7525,6 +7579,15 @@ app.use('/miniforge', (req, res, next) => {
     ['POST', /^\/api\/auth\/(register|login)$/],
     ['POST', /^\/api\/auth\/hakster-google$/],
     ['GET', /^\/api\/auth\/me$/],
+    // Free and paid customer surfaces. Miniforge authenticates these itself
+    // (JWT authMiddleware), so they must reach it instead of being rejected by
+    // the owner gate — otherwise the Pro upgrade/billing buttons and app
+    // creation are dead ends for every non-owner account.
+    ['POST', /^\/api\/pay\/(checkout|portal)$/],
+    ['POST', /^\/api\/apps$/],
+    ['PUT', /^\/api\/apps\/[a-zA-Z0-9_-]+$/],
+    ['DELETE', /^\/api\/apps\/[a-zA-Z0-9_-]+$/],
+    ['GET', /^\/api\/user\/creator-credits$/],
     ['POST', /^\/api\/apps\/[a-zA-Z0-9_-]+\/chat(\/stream)?$/],
     ['POST', /^\/api\/apps\/[a-zA-Z0-9_-]+\/(image|rate)$/],
     ['POST', /^\/api\/apps\/[a-zA-Z0-9_-]+\/memory(\/auto-learn)?$/],
@@ -7543,6 +7606,12 @@ app.use('/miniforge', (req, res, next) => {
         const value = req.get(name);
         if (value) forwardHeaders[name] = value;
       }
+      // Tell Miniforge where the browser actually is so customer-facing links
+      // (Stripe success/cancel/portal returns) point at the public mount and
+      // not at its local listener.
+      if (req.get('host')) forwardHeaders['x-forwarded-host'] = req.get('host');
+      forwardHeaders['x-forwarded-proto'] = String(req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')).split(',')[0].trim();
+      forwardHeaders['x-forwarded-prefix'] = '/miniforge/app';
       const hasWireBody = Number(req.get('content-length') || 0) > 0 || Boolean(req.get('transfer-encoding'));
       const hasParsedBody = hasWireBody && req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body);
       const upstream = await fetch(`http://127.0.0.1:5555${upstreamPath}`, {
@@ -7609,6 +7678,112 @@ app.use('/hakterm', (req, res, next) => {
   };
   if (publicAsset) return forward();
   return requireOwner(req, res, forward);
+});
+
+// ── Owner-only admin pages ────────────────────────────────────────
+// The admin HTML is never handed to a visitor who has not proved owner status.
+// The public path returns a small gate page; it asks the server who the browser
+// is and only then pulls the real page body from a requireOwner endpoint. The
+// page's own PIN pad stays in place as a second, local lock.
+const ADMIN_PAGES = {
+  users: 'admin/users/index.html',
+  telegram: 'admin/telegram/index.html',
+  email: 'admin/email/index.html',
+  skills: 'admin/skills/index.html',
+  vault: 'admin/vault/index.html',
+};
+app.get('/api/admin/page/:page', requireOwner, (req, res) => {
+  const page = String(req.params.page || '').toLowerCase();
+  const file = ADMIN_PAGES[page];
+  if (!file) return res.status(404).json({ error: 'Unknown admin page' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  return res.sendFile(path.join(distPath, file));
+});
+app.use('/admin', (req, res, next) => {
+  if (!['GET', 'HEAD'].includes(req.method)) return next();
+  const page = String(req.path || '/').replace(/^\/+/, '').split('/')[0].toLowerCase();
+  if (!ADMIN_PAGES[page]) return next();
+  res.status(200);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.send(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="haksterAi admin."><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><title>Admin — haksterAi</title><style>html,body{height:100%;margin:0;background:#0a0a0f;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}.box{background:#111118;border:1px solid #7c3aed;border-radius:16px;padding:32px 28px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 40px #7c3aed33}.t{font-weight:800;letter-spacing:1px;font-size:1.05rem;margin-bottom:6px}.s{color:#94a3b8;font-size:.8rem;line-height:1.5;margin-bottom:18px;word-break:break-word}a{display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border-radius:9px;padding:10px 16px}a[hidden]{display:none}</style></head><body><div id="gate"><div class="box"><div class="t">HAKSTER ADMIN</div><div class="s" id="msg">Verifying owner session…</div><a id="signin" hidden href="/?signin=1&redirect=${encodeURIComponent('/admin/' + page + '/')}">Sign in as owner</a></div></div><script>(async () => {const page=${JSON.stringify(page)};const msg=document.getElementById('msg');const signin=document.getElementById('signin');const fail=t=>{msg.textContent=t;signin.hidden=false;};const key=(()=>{try{return localStorage.getItem('hakster_google_token')||localStorage.getItem('hakster_api_key')||'';}catch{return '';}})();if(!key){fail('Sign in with the owner account to open admin.');return;}try{const meRes=await fetch('/api/auth/me',{headers:{'x-api-key':key},cache:'no-store'});const me=meRes.ok?await meRes.json():null;if(!me||!me.user||!me.user.is_owner){fail('This area is owner-only. Sign in with the owner account.');return;}const pageRes=await fetch('/api/admin/page/'+encodeURIComponent(page),{headers:{'x-api-key':key},cache:'no-store'});if(!pageRes.ok){fail('Owner session could not open this page ('+pageRes.status+').');return;}const html=await pageRes.text();document.open();document.write(html);document.close();}catch(e){fail('Admin could not load: '+((e&&e.message)||'network error'));}})();</script></body></html>`);
+});
+
+// ── Media Studio — sandboxed media-only terminal agent ─────────────
+// Runs Codex CLI or OMP inside bubblewrap with only a media workspace mounted.
+const mediaAgent = require('./media-agent');
+const mediaRuns = new Map(); // userId -> startedAt (one concurrent run per account)
+
+app.get('/api/media/projects', requireSignedIn, (req, res) => {
+  try {
+    res.json({ ok: true, projects: mediaAgent.listProjects() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/media/files', requireSignedIn, (req, res) => {
+  try {
+    const slug = mediaAgent.safeProject(req.query.project || 'untitled');
+    res.json({ ok: true, project: slug, files: mediaAgent.listProjectFiles(slug) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/media/file', requireSignedIn, (req, res) => {
+  const target = mediaAgent.resolveProjectFile(req.query.project, req.query.path);
+  if (!target) return res.status(404).json({ error: 'File not found' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(target);
+});
+
+app.post('/api/media/run', requireSignedIn, async (req, res) => {
+  const engine = req.body?.engine === 'codex' ? 'codex' : 'omp';
+  const prompt = String(req.body?.prompt || '').trim();
+  const project = req.body?.project || 'untitled';
+  const timeoutMs = Number(req.body?.timeoutMs) || undefined;
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  if (prompt.length > 8000) return res.status(400).json({ error: 'prompt too long (max 8000 chars)' });
+
+  const uid = String(req.user?.id || 'anon');
+  if (mediaRuns.has(uid)) return res.status(409).json({ error: 'A media run is already in progress for your account' });
+  mediaRuns.set(uid, Date.now());
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  let closed = false;
+  res.on('close', () => { closed = true; });
+  const send = (obj) => { if (!closed) { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} } };
+  const heartbeat = setInterval(() => { if (!closed) { try { res.write(':heartbeat\n\n'); } catch {} } }, 15000);
+
+  try {
+    await mediaAgent.runMediaAgent({
+      engine,
+      prompt,
+      project,
+      timeoutMs,
+      onEvent: send,
+    });
+  } catch (err) {
+    console.error('[media] run failed:', err);
+    send({ type: 'error', message: err.message });
+  } finally {
+    clearInterval(heartbeat);
+    mediaRuns.delete(uid);
+    if (!closed) { try { res.write('data: {"type":"end"}\n\n'); res.end(); } catch {} }
+  }
+});
+
+app.get(['/studio', '/studio/'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'media-studio.html'));
 });
 
 if (fs.existsSync(distPath)) {

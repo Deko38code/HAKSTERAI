@@ -46,7 +46,7 @@ import Layout from '../../layouts/Layout.astro';
   <script is:inline>
     (() => {
       const apiBase = location.port === '4321' ? 'http://localhost:3579' : '';
-      const token = localStorage.getItem('hakster_google_token') || '';
+      const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || '';
       const authBadge = document.getElementById('gmail-auth-status');
       const status = document.getElementById('gmail-status');
       const connectButton = document.getElementById('gmail-connect');

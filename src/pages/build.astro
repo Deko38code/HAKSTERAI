@@ -3812,7 +3812,7 @@ import Layout from '../layouts/Layout.astro';
         if (!hadResults || err.message?.includes('limit')) {
           let errorContent = `Error: ${err.message || String(err)}`;
           if (err.status === 402 || (err.message && err.message.includes('limit'))) {
-            errorContent = '⚠️ **Free usage limit reached**\n\nFree users get 10 commands/questions. **Upgrade to a paid plan for unlimited access.**\n\n→ Click an option below to subscribe via Stripe.';
+            errorContent = '⚠️ **Free usage limit reached**\n\nFree users get 10 AI inputs across chat, agents, scripts, and generation. **Upgrade to a paid plan to continue.**\n\n→ Choose a plan below to subscribe via Stripe.';
             // Show upgrade modal
             showUpgradeModal();
           }
@@ -4058,17 +4058,17 @@ import Layout from '../layouts/Layout.astro';
         <div style="background:#111118;border:1px solid #7c3aed/50;border-radius:16px;padding:32px;max-width:480px;width:90%;box-shadow:0 0 64px rgba(124,58,237,0.3);">
           <div style="text-align:center;margin-bottom:24px;">
             <div style="font-size:28px;font-weight:bold;color:#a855f7;margin-bottom:8px;">Upgrade to Pro</div>
-            <div style="font-size:14px;color:#94a3b8;">You've used all 10 free questions. Pick a plan to keep building.</div>
+            <div style="font-size:14px;color:#94a3b8;">You've used all 10 free AI inputs across chat, agents, scripts, and generation. Pick a plan to keep going.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:12px;">
             <button data-plan="pro" data-price="pro_monthly" style="background:#7c3aed;color:white;border:none;border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-              <span>Pro — $19.99/mo</span><span style="font-size:12px;opacity:0.8;">Unlimited</span>
+              <span>Pro — $29.99/mo</span><span style="font-size:12px;opacity:0.8;">Unlimited</span>
             </button>
-            <button data-plan="starter" data-price="starter_monthly" style="background:#0891b2;color:white;border:none;border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-              <span>Starter — $9.99/mo</span><span style="font-size:12px;opacity:0.8;">More usage</span>
+            <button data-plan="pro" data-price="starter_monthly" style="background:#0891b2;color:white;border:none;border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+              <span>Starter — $9.99/mo</span><span style="font-size:12px;opacity:0.8;">Unlimited</span>
             </button>
             <button data-plan="enterprise" data-price="enterprise_monthly" style="background:#111118;color:#fbbf24;border:1px solid rgba(251,191,36,0.35);border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-              <span>Enterprise — $100/mo</span><span style="font-size:12px;opacity:0.8;">Team</span>
+              <span>Enterprise — $99.99/mo</span><span style="font-size:12px;opacity:0.8;">Team</span>
             </button>
           </div>
           <div id="upgrade-modal-error" style="color:#ef4444;font-size:13px;text-align:center;margin-top:12px;min-height:18px;"></div>
