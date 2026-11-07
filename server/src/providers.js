@@ -87,6 +87,14 @@ const PROVIDERS = {
     type: 'openai-compat',
     apiKey: 'ollama',
   },
+  deepseek: {
+    name: 'DeepSeek',
+    baseURL: 'https://api.deepseek.com/v1',
+    defaultModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+    apiKey: process.env.DEEPSEEK_API_KEY || '',
+    apiKeyEnv: 'DEEPSEEK_API_KEY',
+    type: 'deepseek',
+  },
   anthropic: {
     name: 'Anthropic Claude',
     defaultModel: 'claude-sonnet-4-5',
@@ -518,6 +526,14 @@ function getClient(provider) {
         timeout: 120000,
       });
 
+    case 'deepseek':
+      // DeepSeek's OpenAI-compatible API. Key is read only from the server environment.
+      return new OpenAI({
+        apiKey: cfg.apiKey || process.env.DEEPSEEK_API_KEY || '',
+        baseURL: cfg.baseURL,
+        timeout: 120000,
+      });
+
     default:
       throw new Error(`Unhandled provider type: ${cfg.type}`);
   }
@@ -772,7 +788,7 @@ function isRefusal(text) {
 // process UID is ghost. `claude` then can't find ghost's OAuth credentials
 // (~/.claude.json) or its own binary on PATH. Force the real home/PATH so
 // the CLI always resolves against the authenticated ghost account.
-const CLAUDE_CLI_HOME = '/home/ghost';
+const CLAUDE_CLI_HOME = process.env.CLAUDE_CLI_HOME || '/home/ghost';
 function claudeCliEnv() {
   const { ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ...rest } = process.env;
   return {
