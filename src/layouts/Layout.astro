@@ -67,6 +67,7 @@ const haksterBuildId = new Date().toISOString();
               <a href="/portal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🌐 Portal</a>
               <a href="/dashboard" data-admin-only="true" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">📊 Dashboard</a>
               <a href="/admin/email" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">📧 Email Monitor</a>
+              <a href="/admin/mail" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">📬 Mail</a>
               <a href="/admin/skills" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🧠 Skills & Brain</a>
               <a href="/hack" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">⚡ Hack Lab</a>
               <a href="/terminal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">⌨️ Terminal</a>
@@ -138,6 +139,7 @@ const haksterBuildId = new Date().toISOString();
             <a href="/portal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🌐 Portal</a>
             <a href="/dashboard" data-admin-only="true" class="hidden rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">📊 Dashboard</a>
             <a href="/admin/email" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">📧 Email Monitor</a>
+            <a href="/admin/mail" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">📬 Mail</a>
             <a href="/admin/skills" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🧠 Skills & Brain</a>
             <a href="/hack" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">⚡ Hack Lab</a>
             <a href="/terminal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">⌨️ Terminal</a>
@@ -569,7 +571,15 @@ const haksterBuildId = new Date().toISOString();
         paintAdminGatePin();
       }
       function openAdminPinGate(onSuccess) {
+        // Already open: keep the entry in progress instead of resetting the pad.
+        // A status re-check used to call this again and wipe a half-typed PIN.
+        if (adminPinGate?.getAttribute('aria-hidden') === 'false') {
+          if (onSuccess) adminGateOnSuccess = onSuccess;
+          return;
+        }
         if (sessionStorage.getItem(ADMIN_GATE_SESSION_KEY) === '1') return onSuccess();
+        // A page with its own PIN pad owns the lock until it is unlocked.
+        if (document.querySelector('[data-page-admin-pin="true"]')) return;
         adminGateOnSuccess = onSuccess;
         adminGatePin = '';
         adminGatePendingPin = '';
@@ -668,6 +678,13 @@ const haksterBuildId = new Date().toISOString();
             const data = response.ok ? await response.json() : null;
             if (!data?.user?.is_owner) throw new Error('Owner access required.');
             if (adminRoot.dataset.adminPage === 'ready') return;
+            // Some admin pages ship their own branded PIN pad. Only one pad may be live,
+            // otherwise the second appears right after the first unlocks and both pads
+            // receive the same key presses. Let the page's pad own the lock.
+            if (document.querySelector('[data-page-admin-pin="true"]')) {
+              adminRoot.dataset.adminPage = 'ready';
+              return;
+            }
             adminRoot.dataset.adminPage = 'pin';
             window.openHaksterAdminPinGate?.(() => {
               adminRoot.dataset.adminPage = 'ready';

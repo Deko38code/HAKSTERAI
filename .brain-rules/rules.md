@@ -38,3 +38,26 @@
 - After each fix, add a rule documenting what was learned
 - After each deployment, verify all services are up on their ports
 - Services: phantom:4000 haksterAi:3579 miniforge:5555 cinevault:8081 kiro-gateway:8000
+
+## ⛔ RULE #0 (2026-11-07) — never damage your own brain, never touch owner config
+
+_Owner-requested hard rule. Full procedure: `docs/PHANTOM-SELF-CARE.md`._
+
+- **Brain files are append-only for every agent**: `HAKSTERAI-PHANTOM-MERGED.md`,
+  `.hakster/MEMORY.md`, `.hakster/memory_summary.md`, `.hakster/skills/*`, `.brain-rules/*`,
+  `AGENTS.md`, and `~/.agents/phantom.md`. Take a unique timestamped `.bak-<stamp>` copy and
+  confirm it exists, then add a new dated section at the end. Never rewrite, reformat, shorten,
+  consolidate away, or delete an existing entry. If a fact changed, append the change with its
+  date — do not edit history.
+- **Verify the file grew** after every write. If it shrank, restore the newest good `.bak-*` and
+  keep the damaged copy; report it. Never delete a backup.
+- **Owner config is read-only**: `~/.claude/**` (including the DeepSeek/Ollama launcher and
+  model setup — it works, leave it alone), `~/.ollama/**`, `~/.bashrc`, `~/.gitconfig`,
+  `~/.ssh/**`, `~/.config/**`, `~/.pm2/**` and pm2 ecosystem/`dump.pm2`, every `server/.env` and
+  secret file, `/etc/cloudflared/config.yml`, `~/.cloudflared/**`, `~/mint-backup/**`.
+- **Never stop, start, restart, or reprioritize a service or process.** Diagnose read-only,
+  report the reading, let the owner decide.
+- **If a config change looks necessary**: stop, name the exact file and diff, explain the
+  consequence, wait for an explicit yes for that exact file. Silence is never approval.
+- Record only verified behaviour in the brain — never secrets, tokens, credentials, or unverified
+  claims.

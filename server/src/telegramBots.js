@@ -13,6 +13,7 @@ const http = require('http');
 const readline = require('readline');
 const { chat, firecrawlScrape } = require('./providers');
 const { getDb } = require('./db');
+const { handleSecurityCommand, securityDigest } = require('./telegramSecurityBot');
 let _autolearn = null, _memoryEngine = null, _smartRouter = null;
 try { _autolearn = require('./agent/autolearn'); } catch (_) {}
 try { _memoryEngine = require('./agent/memory-engine'); } catch (_) {}
@@ -230,6 +231,7 @@ const ROLES = {
   TELEGRAM_BOT_TOKEN_4: { name: 'debugger',     job: 'error-log / crashed-service hunter', username: null, bot: null, chatIds: new Set() },
   TELEGRAM_BOT_TOKEN_5: { name: 'uptime watchdog', job: 'uptime monitor',              username: null, bot: null, chatIds: new Set() },
   TELEGRAM_BOT_TOKEN_6: { name: 'system health',   job: 'system health reporter',       username: null, bot: null, chatIds: new Set() },
+  TELEGRAM_BOT_TOKEN_7: { name: 'security',        job: 'read-only security posture + audit', username: null, bot: null, chatIds: new Set() },
 };
 
 const CHAT_IDS_FILE = path.join(ENV_ROOT, 'data', 'telegram_chat_ids.json');
@@ -454,6 +456,7 @@ function initBots() {
 
   startWatchdog();
   startHealthReporter();
+  startSecurityReporter();
   startCoderReport();
   startReconReport();
   startDebuggerReport();
@@ -499,6 +502,36 @@ async function handleMessage(roleKey, msg) {
       return bot.sendMessage(chatId, `❌ RMT verification failed: ${j.error || "HTTP " + r.status} — regenerate the link in Settings and try again.`);
     } catch (e) {
       return bot.sendMessage(chatId, `❌ RMT verification unreachable (rmt server down?): ${e.message}`);
+    }
+  }
+
+  // ── Role 7: security posture bot (read-only checks, never changes the host) ──
+  if (roleKey === 'TELEGRAM_BOT_TOKEN_7') {
+    const reply = await handleSecurityCommand(text);
+    if (reply) {
+      try { return await bot.sendMessage(chatId, reply, { parse_mode: 'Markdown' }); }
+      catch { return bot.sendMessage(chatId, reply); }
+    }
+    return bot.sendMessage(chatId, 'Send /help for the read-only security checks (/security, /ports, /ssh, /fw, /updates, /users).');
+  }
+
+  // ── Marketplace mini app — any role bot opens it ──
+  if (/^\/(?:market|marketplace|shop|prices?)\b/i.test(text)) {
+    const appUrl = process.env.MARKETPLACE_APP_URL || 'https://haksterai.com/marketplace/';
+    try {
+      return await bot.sendMessage(chatId,
+        '🛍 *HaksterAI Marketplace*\n\nPlans, $999 fully built catalog sites, and the site market.',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: 'Open Marketplace', web_app: { url: appUrl } }],
+              [{ text: 'All plans', url: 'https://haksterai.com/plans' }],
+            ],
+          },
+        });
+    } catch (e) {
+      return bot.sendMessage(chatId, `HaksterAI Marketplace: ${appUrl}`);
     }
   }
 
@@ -598,7 +631,7 @@ async function handleMessage(roleKey, msg) {
       const report = await runUptimeCheck();
       return bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
     }
-    return bot.sendMessage(chatId, '🛡 *haksterAI Watchdog*\n\n`/status` — check haksterAi / cinevault / kiro-gateway');
+    return bot.sendMessage(chatId, '🛡 *haksterAI Watchdog*\n\n`/status` — check haksterAi / cinevault / DeepSeek');
   }
 
   // ── Role 6: system health bot ──
@@ -622,7 +655,7 @@ async function runUptimeCheck() {
   const ports = [
     { name: 'haksterAi', port: 3579 },
     { name: 'cine-vault-live', port: 8081 },
-    { name: 'kiro-gateway', port: 8000 },
+    { name: 'DeepSeek (Ollama)', port: 11434 },
   ];
   const lines = [];
   for (const svc of ports) {
@@ -840,6 +873,25 @@ function startHealthReporter() {
     const report = await runSystemHealth();
     await sendToRole('TELEGRAM_BOT_TOKEN_6', `⚠️ *Health Alert*: ${issues.join(', ')}\n\n${report}`, { parse_mode: 'Markdown' });
   }, HEALTH_MS);
+}
+
+// Security digest: every 12h, only when the posture signature changed.
+function startSecurityReporter() {
+  const INTERVAL_MS = 12 * 60 * 60 * 1000;
+  let _lastSig = '';
+  setInterval(async () => {
+    const role = ROLES.TELEGRAM_BOT_TOKEN_7;
+    if (!role || !role.bot || role.chatIds.size === 0) return;
+    try {
+      const report = await securityDigest();
+      const sig = report.replace(/\d+/g, '#').slice(0, 400);
+      if (sig === _lastSig) return;             // same posture — stay quiet
+      _lastSig = sig;
+      await sendToRole('TELEGRAM_BOT_TOKEN_7', report, { parse_mode: 'Markdown' });
+    } catch (e) {
+      console.error('[telegram:security] digest failed:', e.message);
+    }
+  }, INTERVAL_MS);
 }
 
 // Public push helpers used by index.js or other modules

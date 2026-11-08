@@ -73,3 +73,7 @@ __pycache__/
 /command-center/user-commands.json
 /command-center/stack.json
 /command-center/parrot/
+
+# Astro builds to a temp dir before the reviewed overlay into dist/
+.tmp-build-*/
+.tmp-mailbuild/

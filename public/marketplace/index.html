@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HaksterAI Marketplace</title>
+<meta name="description" content="HaksterAI plans, $999 fully built catalog sites, and the TopReels site marketplace.">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #0a0b12;
+    --surface: #12141d;
+    --surface-2: #171a25;
+    --border: #262a38;
+    --text: #eef1f7;
+    --muted: #9aa3b5;
+    --accent: #b6ff2e;
+    --accent-text: #0a0b12;
+    --gold: #ffd166;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 16px 16px calc(28px + env(safe-area-inset-bottom));
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  header.hero {
+    display: flex; align-items: center; gap: 12px;
+    padding: 18px 16px; border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, #12141d, #1d1630);
+  }
+  .logo {
+    width: 44px; height: 44px; border-radius: 12px; flex: 0 0 auto;
+    background: radial-gradient(circle at 30% 30%, #b6ff2e, #4f8a00 70%);
+    display: grid; place-items: center; color: #0a0b12; font-weight: 900; font-size: 18px;
+  }
+  .hero h1 { font-size: 17px; margin: 0; letter-spacing: .04em; }
+  .hero p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
+  h2 { font-size: 15px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 26px 0 10px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; margin: 0 0 12px;
+  }
+  .card h3 { margin: 0 0 4px; font-size: 15.5px; }
+  .card .desc { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .price-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+  .pill {
+    border: 1px solid var(--border); background: var(--surface-2);
+    border-radius: 999px; padding: 6px 12px; font-size: 12.5px; color: var(--text);
+  }
+  .pill strong { color: var(--accent); }
+  .pill.feature { border-radius: 10px; }
+  a.btn, button.btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--accent);
+    background: var(--accent); color: var(--accent-text);
+    font: 700 14px/1 system-ui, sans-serif; text-decoration: none; cursor: pointer;
+  }
+  a.btn.ghost, button.btn.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  .stack { display: grid; gap: 8px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 420px) { .grid2 { grid-template-columns: 1fr; } }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .badge {
+    display: inline-block; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+    border: 1px solid var(--gold); color: var(--gold); border-radius: 999px; padding: 3px 9px; margin-bottom: 8px;
+  }
+  .skeleton { color: var(--muted); font-size: 13px; }
+  .error { color: #ff9b9b; font-size: 13px; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 11.5px; text-align: center; line-height: 1.7; }
+  footer a { color: var(--muted); }
+  ul.features { margin: 0 0 12px; padding-left: 18px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="logo">H</div>
+  <div>
+    <h1>HAKSTERAI MARKETPLACE</h1>
+    <p id="greeting">Plans, catalog sites, and site market</p>
+  </div>
+</header>
+
+<h2>Membership &amp; plans</h2>
+<section id="plans" aria-live="polite">
+  <div class="card"><p class="skeleton">Loading live plans…</p></div>
+</section>
+
+<h2>Fully built sites — $999</h2>
+<section class="card">
+  <span class="badge">Our catalog</span>
+  <h3>Choose any site from our catalog, fully built</h3>
+  <p class="desc">Pick a build we have already designed and we finish it for you — real pages, your brand, your domain, launched.</p>
+  <div class="price-row">
+    <span class="pill"><strong>$999</strong> one-time</span>
+    <span class="pill">Fully built</span>
+    <span class="pill">Published + verified</span>
+  </div>
+  <ul class="features" id="catalog-list">
+    <li>Loading catalog…</li>
+  </ul>
+  <a class="btn" id="catalog-cta" href="https://rmt.haksterai.com/apps/sites/topreels-3230f40cc3/index.html#site-market" target="_blank" rel="noopener">Request this build →</a>
+  <p class="meta">Builds are confirmed by the owner before work starts. Availability and the final quote are confirmed on request — nothing is charged by this page.</p>
+</section>
+
+<h2>Site market</h2>
+<section id="market">
+  <div class="card"><p class="skeleton">Loading live listings…</p></div>
+</section>
+
+<h2>More from HaksterAI</h2>
+<section class="grid2">
+  <a class="btn ghost" href="https://haksterai.com/plans" target="_blank" rel="noopener">All plans</a>
+  <a class="btn ghost" href="https://haksterai.com/chat" target="_blank" rel="noopener">Open HaksterAI</a>
+</section>
+
+<footer>
+  Built and powered by <a href="https://haksterai.com" target="_blank" rel="noopener">HaksterAI</a> · haksterai.com<br>
+  Prices shown here are loaded live from the HaksterAI plan catalog. Build and market quotes are confirmed by the owner.
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  if (tg) {
+    try {
+      tg.ready();
+      tg.expand();
+      if (tg.setHeaderColor) tg.setHeaderColor('#0a0b12');
+      if (tg.setBackgroundColor) tg.setBackgroundColor('#0a0b12');
+    } catch (e) { /* standalone browser */ }
+    try {
+      var u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+      if (u && (u.first_name || u.username)) {
+        document.getElementById('greeting').textContent = 'Welcome, ' + (u.first_name || u.username) + ' — plans and sites below.';
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function open(url) {
+    if (!url) return;
+    try {
+      if (tg && tg.openLink) return tg.openLink(url);
+    } catch (e) { /* fall through */ }
+    window.open(url, '_blank', 'noopener');
+  }
+  document.addEventListener('click', function (ev) {
+    var el = ev.target.closest('[data-open]');
+    if (!el) return;
+    ev.preventDefault();
+    open(el.getAttribute('data-open'));
+  });
+
+  function money(amount, currency) {
+    var n = Number(amount);
+    if (!isFinite(n)) return '';
+    var value = n / 100;
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency', currency: String(currency || 'usd').toUpperCase(),
+        minimumFractionDigits: value % 1 ? 2 : 0, maximumFractionDigits: 2
+      }).format(value);
+    } catch (e) {
+      return '$' + value.toFixed(2);
+    }
+  }
+
+  function cycleLabel(c) {
+    if (c === 'monthly') return ' / month';
+    if (c === 'yearly' || c === 'annual') return ' / year';
+    if (c === 'weekly') return ' / week';
+    return c ? ' / ' + c : '';
+  }
+
+  var planBox = document.getElementById('plans');
+
+  function renderPlans(plans) {
+    planBox.textContent = '';
+    var shown = 0;
+    plans.forEach(function (plan) {
+      var prices = (plan.prices || []).filter(function (p) { return p && p.amount; });
+      if (!prices.length && plan.id === 'free') return; // free tier is described on the site, not sold here
+      shown++;
+      var card = document.createElement('div');
+      card.className = 'card';
+      var h = document.createElement('h3');
+      h.textContent = plan.name || plan.id;
+      card.appendChild(h);
+      if (plan.description) {
+        var d = document.createElement('p');
+        d.className = 'desc';
+        d.textContent = plan.description;
+        card.appendChild(d);
+      }
+      var row = document.createElement('div');
+      row.className = 'price-row';
+      if (!prices.length) {
+        var np = document.createElement('span');
+        np.className = 'pill';
+        np.textContent = 'Contact us for pricing';
+        row.appendChild(np);
+      }
+      prices.forEach(function (p) {
+        var pill = document.createElement('span');
+        pill.className = 'pill';
+        var strong = document.createElement('strong');
+        strong.textContent = money(p.amount, p.currency);
+        pill.appendChild(strong);
+        pill.appendChild(document.createTextNode((p.name ? ' ' + p.name : '') + cycleLabel(p.billingCycle)));
+        row.appendChild(pill);
+      });
+      card.appendChild(row);
+      var cta = document.createElement('a');
+      cta.className = 'btn';
+      cta.href = 'https://haksterai.com/plans';
+      cta.target = '_blank';
+      cta.rel = 'noopener';
+      cta.textContent = prices.length ? 'Choose ' + (plan.name || plan.id) + ' →' : 'Talk to us →';
+      card.appendChild(cta);
+      planBox.appendChild(card);
+    });
+    if (!shown) {
+      planBox.innerHTML = '<div class="card"><p class="error">No paid plans are configured right now.</p></div>';
+    }
+  }
+
+  fetch('/api/stripe/plans', { headers: { accept: 'application/json' } })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (data) {
+      var plans = (data && data.plans) || [];
+      if (!plans.length) throw new Error('empty catalog');
+      renderPlans(plans);
+    })
+    .catch(function (err) {
+      planBox.innerHTML = '<div class="card"><p class="error">Live prices could not be loaded (' +
+        String(err.message || 'network').replace(/[<>&]/g, '') +
+        '). <a href="https://haksterai.com/plans" target="_blank" rel="noopener">Open the plans page</a>.</p></div>';
+    });
+
+  // Catalog builds (names come from the maintained TopReels starter roster).
+  var CATALOG = ['TapLocal', 'BookBloom', 'CartDash', 'MenuMingle', 'EventNest',
+                 'GearGlow', 'HomeSpark', 'StayScout', 'CreatorKit', 'ClassPop'];
+  var list = document.getElementById('catalog-list');
+  list.textContent = '';
+  CATALOG.forEach(function (name) {
+    var li = document.createElement('li');
+    li.textContent = name;
+    list.appendChild(li);
+  });
+
+  // TopReels / RMT site market — live when the API allows this origin.
+  var marketBox = document.getElementById('market');
+  var MARKET_URL = 'https://rmt.haksterai.com/api/topreels/marketplace/listings';
+  var MARKET_PAGE = 'https://rmt.haksterai.com/apps/sites/topreels-3230f40cc3/index.html#site-market';
+
+  function renderMarket(listings) {
+    marketBox.textContent = '';
+    if (!listings.length) {
+      marketBox.innerHTML = '<div class="card"><p class="desc">No listings are active right now.</p>' +
+        '<a class="btn ghost" href="' + MARKET_PAGE + '" target="_blank" rel="noopener">Open the site market</a></div>';
+      return;
+    }
+    listings.forEach(function (item) {
+      var card = document.createElement('div');
+      card.className = 'card';
+      var h = document.createElement('h3');
+      h.textContent = item.title || 'Listing';
+      card.appendChild(h);
+      if (item.description) {
+        var d = document.createElement('p');
+        d.className = 'desc';
+        d.textContent = item.description;
+        card.appendChild(d);
+      }
+      var row = document.createElement('div');
+      row.className = 'price-row';
+      var mode = document.createElement('span');
+      mode.className = 'pill';
+      mode.textContent = item.mode === 'bids' ? 'Private bids' : 'For sale';
+      row.appendChild(mode);
+      if (item.mode === 'bids') {
+        var min = document.createElement('span');
+        min.className = 'pill';
+        min.textContent = 'Bids start at $99';
+        row.appendChild(min);
+      } else if (item.ask_price_cents) {
+        var ask = document.createElement('span');
+        ask.className = 'pill';
+        var strong = document.createElement('strong');
+        strong.textContent = money(item.ask_price_cents, 'usd');
+        ask.appendChild(strong);
+        ask.appendChild(document.createTextNode(' ask'));
+        row.appendChild(ask);
+      }
+      card.appendChild(row);
+      var cta = document.createElement('a');
+      cta.className = 'btn ghost';
+      cta.href = MARKET_PAGE;
+      cta.target = '_blank';
+      cta.rel = 'noopener';
+      cta.textContent = 'View listing →';
+      card.appendChild(cta);
+      marketBox.appendChild(card);
+    });
+  }
+
+  fetch(MARKET_URL, { headers: { accept: 'application/json' } })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (data) {
+      var listings = (data && data.listings) || [];
+      renderMarket(listings.filter(function (l) { return l && (l.title || l.site_url); }));
+    })
+    .catch(function () {
+      marketBox.innerHTML = '<div class="card"><p class="desc">Live listings open on the site market — the listing feed is only readable from the site itself.</p>' +
+        '<a class="btn ghost" href="' + MARKET_PAGE + '" target="_blank" rel="noopener">Open the site market</a></div>';
+    });
+})();
+</script>
+</body>
+</html>

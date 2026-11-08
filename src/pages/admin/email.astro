@@ -59,6 +59,11 @@ import Layout from '../../layouts/Layout.astro';
       const sendStatus = document.getElementById('gmail-send-status');
       const headers = { 'x-api-key': token };
       const params = new URLSearchParams(location.search);
+      const POPUP_FLAG = 'haksterai_gmail_popup_pending';
+      const POPUP_CHANNEL = 'haksterai-gmail-monitor';
+      let gmailChannel = null;
+      let popupPoll = 0;
+      try { gmailChannel = new BroadcastChannel(POPUP_CHANNEL); } catch (_) { gmailChannel = null; }
       const errorText = {
         state: 'The Google authorization expired or could not be verified. Start again.',
         denied: 'Google access was declined. No Gmail connection was saved.',
@@ -70,6 +75,26 @@ import Layout from '../../layouts/Layout.astro';
         connection: 'Gmail could not be connected. Check Google API and OAuth setup.',
         owner: 'The HaksterAI owner account changed during authorization. Sign in again and retry.'
       };
+      // Return leg of the secure OAuth window. Google consent always opens in its own popup,
+      // so this page is what that popup lands on. It hands the result to the admin panel over
+      // a same-origin channel and then closes; the panel itself never navigates away.
+      const popupFlagAt = Number(localStorage.getItem(POPUP_FLAG) || 0);
+      const popupReturn = Boolean(popupFlagAt) && Date.now() - popupFlagAt < 15 * 60 * 1000
+        && (params.get('gmail') === 'connected' || params.has('gmail_error'));
+      if (popupReturn) {
+        localStorage.removeItem(POPUP_FLAG);
+        const popupOk = params.get('gmail') === 'connected';
+        const popupCode = params.get('gmail_error') || '';
+        try { gmailChannel?.postMessage({ type: 'haksterai-gmail-result', ok: popupOk, error: popupCode }); } catch (_) {}
+        try { window.close(); } catch (_) {}
+        setTimeout(() => {
+          try {
+            document.body.innerHTML = '<main style="font:15px/1.6 system-ui,sans-serif;color:#e2e8f0;background:#0c0c12;min-height:100vh;display:grid;place-items:center;margin:0;padding:24px;text-align:center"><div><h1 style="font-size:18px;margin:0 0 8px">' + (popupOk ? 'Gmail connected' : 'Gmail connection incomplete') + '</h1><p style="margin:0;color:#94a3b8">' + (popupOk ? 'You can close this window.' : 'You can close this window and try again from the admin panel.') + '</p></div></main>';
+          } catch (_) {}
+        }, 150);
+        return;
+      }
+
       if (params.has('gmail_error')) status.textContent = errorText[params.get('gmail_error')] || 'Gmail setup did not complete.';
       else if (params.get('gmail') === 'connected') status.textContent = 'Gmail connected. Checking the inbox…';
 
@@ -189,12 +214,67 @@ import Layout from '../../layouts/Layout.astro';
           const response = await fetch(apiBase + '/api/admin/gmail/connect', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: '{}' });
           const data = await response.json().catch(() => ({}));
           if (!response.ok || !data.authorizationUrl) throw new Error(data.error || 'Google OAuth setup is incomplete.');
-          location.assign(data.authorizationUrl);
+          // Google consent always runs in its own secure window. Open a same-origin blank first so
+          // a blocked popup is detectable (noopener would return null either way), then sever the
+          // opener link and send that window to Google. This panel is never navigated away.
+          localStorage.setItem(POPUP_FLAG, String(Date.now()));
+          const popup = window.open('', 'haksterai-gmail-oauth', 'popup=yes,width=520,height=760');
+          if (!popup) {
+            localStorage.removeItem(POPUP_FLAG);
+            throw new Error('Your browser blocked the secure Google window. Allow popups for haksterai.com, then press Connect Gmail again.');
+          }
+          try { popup.opener = null; } catch (_) {}
+          try { popup.location.replace(data.authorizationUrl); } catch (_) { popup.location.href = data.authorizationUrl; }
+          status.textContent = 'Finish Google sign-in in the secure window. This panel stays here.';
+          watchSecureWindow();
         } catch (error) {
           status.textContent = error.message || 'Could not start Google consent.';
           connectButton.disabled = false;
         }
       });
+
+      // Fallback for browsers where the popup cannot reach the channel: wait for the server-side
+      // connection to appear and refresh the panel in place. Never navigates this page.
+      function watchSecureWindow() {
+        clearInterval(popupPoll);
+        const startedAt = Date.now();
+        popupPoll = setInterval(async () => {
+          if (!localStorage.getItem(POPUP_FLAG)) { clearInterval(popupPoll); return; }
+          if (Date.now() - startedAt > 180000) {
+            clearInterval(popupPoll);
+            localStorage.removeItem(POPUP_FLAG);
+            connectButton.disabled = false;
+            status.textContent = 'Still waiting for Google. If the secure window was closed, press Connect Gmail again.';
+            return;
+          }
+          try {
+            const check = await fetch(apiBase + '/api/admin/gmail/status', { headers, cache: 'no-store' });
+            const state = await check.json().catch(() => ({}));
+            if (check.ok && state.connected && state.sendEnabled) {
+              clearInterval(popupPoll);
+              localStorage.removeItem(POPUP_FLAG);
+              status.textContent = 'Gmail connected. Refreshing the inbox…';
+              initialize();
+            }
+          } catch (_) {}
+        }, 4000);
+      }
+
+      if (gmailChannel) {
+        gmailChannel.addEventListener('message', (event) => {
+          const message = event.data || {};
+          if (message.type !== 'haksterai-gmail-result') return;
+          clearInterval(popupPoll);
+          localStorage.removeItem(POPUP_FLAG);
+          if (message.ok) {
+            status.textContent = 'Gmail connected. Refreshing the inbox…';
+            initialize();
+          } else {
+            status.textContent = errorText[message.error] || 'Gmail setup did not complete.';
+            connectButton.disabled = false;
+          }
+        });
+      }
       refreshButton.addEventListener('click', loadMessages);
       compose.addEventListener('submit', async (event) => {
         event.preventDefault();

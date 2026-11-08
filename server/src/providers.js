@@ -219,6 +219,16 @@ Object.assign(PROVIDERS, {
   // 2 Ollama cloud accounts (12 free models each)
   'ollama-cloud2': { name: 'Ollama Cloud 2', baseURL: 'https://ollama.com/v1', defaultModel: 'glm-5.2', apiKey: _pk('ollama-cloud2') || process.env.OLLAMA_CLOUD2_API_KEY, type: 'openai-compat' },
   'ollama-cloud3': { name: 'Ollama Cloud 3', baseURL: 'https://ollama.com/v1', defaultModel: 'glm-5.2', apiKey: _pk('ollama-cloud3') || process.env.OLLAMA_CLOUD3_API_KEY, type: 'openai-compat' },
+  // DeepSeek V4.1 Flash on the local Ollama stack — the exact backend the Claude CLI runs on.
+  // Added 2026-11-07 after the Kiro gateway hit its monthly usage limit; Kiro stays defined below
+  // as a dormant fallback. Verified live: /v1/models lists it and a chat completion answers.
+  deepseek: {
+    name: 'DeepSeek V4.1 Flash (Ollama local)',
+    baseURL: process.env.DEEPSEEK_BASE_URL || 'http://127.0.0.1:11434',
+    defaultModel: process.env.DEEPSEEK_MODEL || 'deepseek-v4.1-flash:cloud',
+    apiKey: 'ollama',
+    type: 'openai-compat',
+  },
   // Kiro gateway (local, free Claude via Kiro/AWS)
   'kiro-gateway': { name: 'Kiro Gateway (Claude)', baseURL: 'http://127.0.0.1:8000/v1', defaultModel: 'claude-haiku-4.5', apiKey: 'my-super-secret-password-123', type: 'openai-compat' },
 });
@@ -226,7 +236,7 @@ Object.assign(PROVIDERS, {
 // Waterfall order: hackbot 1st (uncensored bot network, primary brain),
 // gpt-oss 2nd (120b cloud), ollama 3rd (hp-1000, local backup),
 // then sambanova + groq (cloud-free) and on down — rotates to the next on rate-limit.
-const WATERFALL_ORDER = ['hackbot','gpt-oss','ollama','sambanova','groq','groq3','groq4','groq5','groq6','groq7','cerebras','gemini','gemini-flash','mistral','mistral2','nvidia-nim','nvidia-nim2','cohere','llm7','llm7-2','llm7-3','llm7-4','llm7-5','pollinations','puter-sonnet','puter-4o','claude-cli','ollama-cloud2','ollama-cloud3','openrouter','kiro-gateway'];
+const WATERFALL_ORDER = ['hackbot','gpt-oss','ollama','sambanova','groq','groq3','groq4','groq5','groq6','groq7','cerebras','gemini','gemini-flash','mistral','mistral2','nvidia-nim','nvidia-nim2','cohere','llm7','llm7-2','llm7-3','llm7-4','llm7-5','pollinations','puter-sonnet','puter-4o','claude-cli','deepseek','ollama-cloud2','ollama-cloud3','openrouter','kiro-gateway'];
 const _rateLimited = new Map(); // provider -> until ms
 function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
 function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }

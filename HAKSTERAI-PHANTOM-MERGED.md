@@ -10090,3 +10090,356 @@ git-ignored local note for personal workflow details.
 - Host: 10.0.0.147, Port: 8022, User: u0_a584
 - Command: `sshpass -p '122324' ssh -o StrictHostKeyChecking=no -p 8022 u0_a584@10.0.0.147`
 - Phone must have Termux sshd running, same WiFi network required
+
+## 2026-11-07 — RULE #0: Phantom self-care (owner-requested hard rule)
+
+- **Owner instruction (2026-11-07)**: Phantom must never damage its own brain or knowledge
+  files, and never touch the owner's configuration. This rule is also prepended to
+  `~/haksterAi/AGENTS.md` and `/home/ghost/AGENTS.md`, and appended to `.brain-rules/rules.md`.
+- **Written procedure**: `~/haksterAi/docs/PHANTOM-SELF-CARE.md` — read it before any write.
+- **Brain files are append-only**: `HAKSTERAI-PHANTOM-MERGED.md`, `.hakster/MEMORY.md`,
+  `.hakster/memory_summary.md`, `.hakster/skills/*`, `.brain-rules/*`, `AGENTS.md`,
+  `~/.agents/phantom.md`. Take a timestamped `.bak-<stamp>` copy, confirm it exists, then append a
+  new dated section. Never rewrite, reformat, consolidate away, or delete an existing entry.
+- **Verified floors (2026-11-07)**: merged 425,731 B / 10,092 lines; `MEMORY.md` 36,616 B / 536
+  lines; `memory_summary.md` 2,121 B / 48 lines; `raw_memories.json` 5,221 B / 155 lines;
+  `AGENTS.md` 30,755 B / 382 lines; `rules.md` 5,075 B / 40 lines. These may grow, never shrink.
+- **Owner config is read-only**: `~/.claude/**` (including the DeepSeek/Ollama launcher and model
+  setup — working, not a troubleshooting target), `~/.ollama/**`, `~/.bashrc`, `~/.gitconfig`,
+  `~/.ssh/**`, `~/.config/**`, `~/.pm2/**` and pm2 ecosystem/`dump.pm2` files, every `server/.env`
+  and secret file, `/etc/cloudflared/config.yml`, `~/.cloudflared/**`, and `~/mint-backup/**`.
+- **Process safety**: never stop, start, restart, or reprioritize a service or process to lower a
+  number or clear a duplicate. Identify it read-only, report the measurement, let the owner decide.
+- **If a config change seems required**: stop, name the exact file and the exact diff, explain the
+  consequence, and wait for an explicit yes for that exact file. Silence is not approval.
+
+## 2026-11-07 — Junkalot + Mr Ed operations handover for Phantom
+
+- **Owner instruction (2026-11-07)**: Phantom must know the Junkalot work record, the verified
+  money figures, the fixes already made, and the exact non-breaking procedure for patching
+  Mr Ed and junkalot.co. Full runbook: `~/haksterAi/docs/JUNKALOT-PHANTOM-OPERATIONS.md`.
+- **Topology (verified 2026-11-07)**: master/live `/home/ghost694/junkalot` on :5006
+  (`junkalot.service`, `next start -p 5006`, MainPID 388432 active since 2026-11-07 11:58:13 EST,
+  git HEAD 6b2a94c) and editing copy
+  `/home/ghost694/workspace/dekekenneth840@gmail.com/junkalot` on :5007 (HEAD e3a2393).
+  Public site `https://junkalot.co` through the Cloudflare tunnel. The editing copy has no
+  `.env.local`/`.env.production.local`; verification builds run from master. Service restart
+  needs sudo and is always performed by Deke, never by an agent.
+- **Verified money record**: build total $15,375.99 ($15,000 base + $375.99 photo maintenance);
+  credits $2,249 ($2,000 confirmed owner work + one confirmed $249 care payment); live balance
+  $13,126.99; schedule 53 payments from 2027-01-01 — 52 x $249 plus a final $178.99 in May 2031 =
+  $13,126.99 exactly. Care plan $249/month, capped until Deke changes it, 30 days notice for any
+  change. $249 buys about 1.7 to 2.9 hours of ordinary 2026 US developer time (~2.4 h mid-market).
+  Delivered work replaces at $39,000 to $84,000 in 2026 US prices (~$54,000 mid-market), so the
+  contract is roughly 28 percent of mid-market value. Effort about 511 hours (band 460 to 560)
+  across 11 workstreams: 15 site pages, 19 backend services, ~9,400 lines, 54 production builds,
+  67 recorded changes.
+- **Where the numbers live**: `src/app/api/ai-terminal/route.ts` (COACH_SYSTEM line 18, value
+  record block line 72, $249 explanation line 78, COACH_SYSTEM_TAIL line 142, brain read line
+  226, assembly line 333); `src/app/api/internal/payoff-summary/route.ts` lines 10-17 (constants:
+  OWNER_CONFIRMED_PAID_WORK 2000, BASE_WEBSITE_BUILD_TOTAL 15000, PHOTO_MAINTENANCE_ADJUSTMENT
+  375.99, MONTHLY_RATE 249, PAYMENT_BUTTON_START 2027-01-01T08:00:00.000Z) and 53-59 (reconciliation);
+  `src/app/api/admin/invoices/route.ts` lines 17-20 and 77-89; the PhantomIDE invoice agent prompt
+  in both `~/phantom-ide.html` and `~/phantomide/phantom-ide.html` (function
+  `launchInvoiceAgentInTerminal`). Brain `docs/junkalot-brain-current.md` (32,930 B) is read per
+  request, so brain edits are live without a rebuild. Invoice ledger
+  `/home/ghost694/.phantom-invoices.json`; agreement
+  `/home/ghost694/junkalot-invoices/AGREEMENT-JAL-2026-11-07.md`; work record on the Dell at
+  `/home/ghost/backups/junkalot-work-record-2026-11-07.md`; reusable prompt block
+  `docs/coach-value-record-template.md`.
+- **Fixes already made (do not reintroduce)**: (1) a confirmed monthly payment used to count
+  toward confirmedPaid while the full installment count stayed — it now reduces the balance itself
+  (`remainingBalance = remaining - monthlyCredited`) and the month count is derived from the
+  reduced balance, so a paid month is never counted twice; (2) stale $13,000 / $13,375.99 wording
+  reconciled to $15,375.99 total and $13,126.99 balance, with an explicit reconciling line in the
+  coach prompt; (3) the coach now carries a hardcoded owner value record plus guardrails (never
+  inflate, never call it an appraisal, never quote a customer, never turn it into a pitch);
+  (4) a standing rule requires prompt and brain to be updated together and brain entries to be
+  appended only; (5) each production build uses its own stamped `distDir` so a new build never
+  overwrites assets the running server is serving.
+- **Non-breaking patch procedure**: read current state with grep -n; make a unique timestamped
+  `.bak-<stamp>` copy and confirm it with ls -l; patch with Python using a verbatim anchor that
+  must match exactly once (abort otherwise, never sed, never rewrite the file); append rather than
+  replace whenever possible; verify the file grew; build with `npm run build` (the real syntax
+  check for TypeScript); start a throwaway server on port 5098 with
+  `node --env-file=.env.local --env-file=.env.production.local node_modules/next/dist/bin/next start -p 5098`;
+  assert the payoff bridge returns total 15375.99, confirmedPaid 2000, monthlyCredited 249,
+  remaining 13126.99, totalPaymentMonths 53, payoff May 2031; confirm the compiled distDir chunk
+  contains the value record; hand the restart to Deke; then verify live buildId, HTTPS 200 on
+  https://junkalot.co/, and the same numbers on :5006; finally append a dated brain entry in BOTH
+  copies.
+- **Hard stops**: never delete a file, never rewrite the brain, never `git reset` or revert,
+  never edit `.env` or the tunnel, never restart junkalot or haksterAi yourself. If an anchor
+  misses, the build fails, or the numbers do not add up, restore the `.bak`, leave the last
+  healthy state, and report the exact blocker.
+- **Open items (never describe as done)**: the coach text still says 27.5 KB knowledge base while
+  the brain is 32,930 B; the $249 Pay button is hidden until 2027-01-01 by design; Susie must
+  press Connect business Gmail herself; paid-user publishing, hosting fulfilment and the Stripe
+  plan verification remain open in `/home/ghost/AGENTS.md`. The stale $13,000 / $13,375.99 price
+  sentence in both PhantomIDE invoice and payment prompts was corrected to $15,000 / $15,375.99
+  with the $13,126.99 balance on 2026-11-07 (0 stale markers remaining in either copy).
+
+## 2026-11-07 (evening) — Kiro replaced by DeepSeek; Email Monitor blocker named
+
+Verified against the running Dell (haksterAi, PM2 app `hakster`, port 3579, restarted 2026-11-07
+19:05 UTC, restart count 1, online).
+
+**Kiro is quota-dead, not misconfigured.** `kiro-cli chat --no-interactive` on the Dell answers
+`Encountered an error in the response stream: The monthly usage limit has been reached`
+(request_id 044841c0-7581-4590-93a8-be9503d2c96c). The `kiro-gateway` provider also points at
+`http://127.0.0.1:8000/v1`, where nothing listens on the Dell; the Parrot gateway (python, PID
+14223) is bound to Parrot's `127.0.0.1:8000` only and is unreachable across hosts.
+
+**DeepSeek added as the replacement provider.** `server/src/providers.js` now defines
+`deepseek` — `openai-compat`, `baseURL http://127.0.0.1:11434` (override `DEEPSEEK_BASE_URL`),
+`defaultModel deepseek-v4.1-flash:cloud` (override `DEEPSEEK_MODEL`). That is the same Ollama
+backend the Claude CLI runs on. It sits in `WATERFALL_ORDER` immediately after `claude-cli`;
+`kiro-gateway` stays defined as a dormant fallback but is no longer the tail of the chain.
+Live proof: `GET /api/providers` lists it, `GET /api/providers/deepseek/models` returns the
+Ollama tag list, and `POST /api/chat` with `provider=deepseek` returned
+`HAKSTER_LIVE_DEEPSEEK_OK` in 307 ms. Backup: `server/src/providers.js.bak-deepseek-20261107T190529Z`.
+
+**Email Monitor root cause (owner action required).** Every Gmail connect ends at Google's
+`Error 400: redirect_uri_mismatch`. Probed directly against OAuth client
+`123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com`: the URIs
+`https://haksterai.com/api/admin/gmail/callback`, `http://localhost:3579`,
+`http://localhost:3579/api/admin/gmail/callback` and
+`http://127.0.0.1:3579/api/admin/gmail/callback` are all rejected. The client's own
+`server/google-oauth-client.json` recorded `redirect_uris: ["http://localhost:3579"]`, so the
+Console entry has been changed or cleared since. Only the owner can fix this in Google Cloud
+Console: APIs & Services → Credentials → that OAuth client → Authorized redirect URIs → add
+`https://haksterai.com/api/admin/gmail/callback` → Save. The server-side OAuth flow itself is
+complete: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+`GMAIL_MONITOR_REDIRECT_URI=https://haksterai.com/api/admin/gmail/callback` all load from
+`server/.env`; `~/.hakster/gmail-monitor` does not exist yet because no connection has ever
+been saved.
+
+**Connect no longer dead-ends.** The `/api/admin/gmail/connect` route now preflights the
+configured redirect URI against Google and returns a 409 naming the exact Console fix
+(`redirect_uri_mismatch`) or an unrecognised client (`invalid_client`). It blocks only on a
+confirmed answer and proceeds on `unknown`, so a Google timeout can never lock the owner out.
+Backup: `server/src/index.js.bak-gmail-preflight-20261107T190544Z`. Both files pass
+`node --check`; `:3579` and `https://haksterai.com/` both return 200 after the restart; no
+tunnels were touched.
+
+**Correcting an earlier open item:** the coach value record no longer says "27.5 KB". It reads
+"a 35,000+ byte owner knowledge base that grows with every change" (fixed 2026-11-07, both
+Junkalot copies, brain appended in both).
+
+### 2026-11-08 — Gmail monitor: Google consent always opens in its own secure window
+
+Owner request: Google sign-in must always open in a secure window and the admin panel must stay
+in place (same panel). Previously `admin/email` did `location.assign(authorizationUrl)`, so the
+whole admin panel navigated to Google and came back as a fresh page load.
+
+Current behavior (verified in a real headless Chromium against the built page):
+- The Connect button opens a same-origin blank popup, then sets `popup.opener = null` (severing
+  the opener link, equivalent to `noopener`) and sends that window to Google. `noopener` is NOT
+  passed as a feature string on purpose: with `noopener`, `window.open()` returns `null` in every
+  browser, which would make a blocked popup indistinguishable from a successful one. Opening a
+  blank first is what makes the blocked-popup error truthful.
+- The popup lands on `/admin/email?gmail=connected` (or `?gmail_error=<code>`). That page detects
+  the return leg via `localStorage.haksterai_gmail_popup_pending` (written only by the panel that
+  opened the popup, valid 15 minutes), posts `{type:'haksterai-gmail-result', ok, error}` on the
+  same-origin `BroadcastChannel('haksterai-gmail-monitor')`, clears the flag, and closes itself.
+  If the browser refuses `close()`, it shows "Gmail connected — you can close this window"
+  after 150 ms.
+- The panel listens on that channel, refreshes the inbox in place, and never navigates. A 4-second
+  status poll (max 3 minutes) is the fallback for browsers without BroadcastChannel; it ends by
+  re-enabling the button with a plain message instead of leaving the owner stuck.
+- A normal load of `/admin/email?gmail=connected` without the pending flag is untouched.
+
+Files changed (source and built page kept byte-identical in their inline scripts):
+`src/pages/admin/email.astro` and `dist/admin/email/index.html`. Backups:
+`*.bak-gmail-secure-popup-20261108T020918Z`. No `.env`, no config, no pm2 restart, no tunnels
+touched; the server serves `dist/` statically so the change is live without a restart.
+
+Checks run: extracted both inline scripts, `node --check` on each, and compared them (identical).
+Browser test confirmed the success message, the error message with its code, the flag being
+cleared, and normal (non-popup) loads being unaffected.
+
+Still open (unchanged, owner-only): Google Cloud Console must register
+`https://haksterai.com/api/admin/gmail/callback` on OAuth client
+`123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com`. Confirmed 2026-11-08
+that the same client ACCEPTS `https://haksterai.com/api/auth/google/callback` (sign-in works) and
+rejects the Gmail callback with `redirect_uri_mismatch`. The same client id/secret are present on
+Parrot (`/home/ghost694/haksterAi/server/.env`) but Parrot runs no hakster service and has no
+`GMAIL_MONITOR_REDIRECT_URI`, so the live host for this feature is the Dell only.
+
+## 2026-11-08 — Owner mail client (/admin/mail) + single admin PIN pad
+
+**Added an owner-only multi-account mail client.** Files: `server/src/mail-store.js` (new),
+`server/src/mail.js` (new), `src/pages/admin/mail.astro` (new, built to
+`dist/admin/mail/index.html`), `mail` added to `ADMIN_PAGES` in `server/src/index.js`, and a
+📬 Mail entry in the Layout admin menu (desktop + mobile).
+
+- Accounts: the existing Gmail OAuth connection appears as account `gmail` (read + send
+  scopes only, so it cannot change message state), plus any number of IMAP/SMTP accounts
+  added in the UI. New accounts are verified against both servers before being saved.
+- Storage: `~/.hakster/mail/accounts.json` encrypted with AES-256-GCM using a dedicated
+  32-byte key at `~/.hakster/mail/.key` (0600, dir 0700). Every overwrite writes a
+  timestamped `.bak-<stamp>` copy and verifies its SHA-256 first. Removing an account moves
+  the record to an `archived` list inside the store — nothing is deleted.
+- Features: folder list, paged message list, thread grouping with a conversation list so any
+  message in a thread can be opened, sanitised HTML rendered in a `sandbox=""` iframe with a
+  no-script CSP, remote images blocked by default with an explicit "Show remote images"
+  action, attachment download (25 MB cap) via authenticated fetch, mark read/unread/star on
+  IMAP, search (subject/from/to/body), and compose with Cc/Bcc and attachments up to 20 MB.
+- Routes: `/api/admin/mail/{accounts,accounts/remove,folders,messages,search,message,flags,attachment,send}`,
+  all behind `requireOwner`.
+- Dependencies added to `server/package.json`: `imapflow` 2.11.0, `mailparser` 3.14.2,
+  `nodemailer` 10.3.1 (package.json / package-lock backed up first).
+
+**Fixed a duplicate admin PIN pad.** `/admin/users` ships its own branded pinch pad while
+Layout also opened `#admin-pin-gate`, so the second pad appeared immediately after the first
+unlocked and both handled the same key presses. `Layout.astro` now marks the page `ready` and
+skips its own gate when a page owns a pad (`data-page-admin-pin="true"`), and
+`openAdminPinGate()` no longer resets a gate that is already open (a background owner re-check
+used to wipe a half-typed PIN). One pad remains everywhere, still as extra security over the
+admin area.
+
+**Verified (not yet live).** All checks below ran against a local IMAP (hoodiecrow) + SMTP
+(smtp-server) rig and the built pages in headless Chromium:
+route validation, account add with IMAP+SMTP verification, folders, paged list, threading,
+HTML sanitising/script blocking, attachment round-trip, flags, search, SMTP send with
+attachment, encrypted-store round-trip and 0600 modes, PIN set/confirm/reload/keyboard unlock,
+and the Mail UI end to end. **The running pm2 `hakster` process has not been restarted**, so
+`/admin/mail` and the new routes are not served until the owner approves a restart (a CLI
+session must not be active). Gmail connect still needs
+`https://haksterai.com/api/admin/gmail/callback` registered on the OAuth client
+`123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com`.
+
+---
+
+## 2026-11-08 (later) — Customer chat mode: web-only tools, identity, brevity, deflection
+
+**Status:** live after the `pm2 restart hakster` at 02:27Z (restarts=1). The mail entry above is
+now live: `/api/admin/mail/accounts` answers 401 (owner-gated) and `/admin/mail/` serves the PIN
+gate page, locally and on https://haksterai.com.
+
+**What changed**
+
+- New module `server/src/customer-mode.js` — `buildCustomerChatDirective()` plus
+  `displayNameFor()`. It builds the system-prompt block every signed-in **non-owner** account
+  gets. Owner accounts keep the operator prompt untouched.
+- `server/src/index.js` (backup `index.js.bak-customermode-20261108T023322Z`, SHA-256 matched):
+  - `require('./customer-mode')` added at the top.
+  - `getCustomerClientContext(sessionId)` reads only `os_name, os_version, device_type,
+    device_model` from `client_contexts` — no IP, fingerprint, or session internals.
+  - `customerDirectiveFor(user, sessionId)` returns '' for owners and null users, otherwise the
+    directive with the account's remaining free web lookups.
+  - `/api/agent/run`: the customer directive replaces the operator prompt (and the fast-mode
+    prompt) for customers; `machineContext`, `memoryContext`, and `taskStateSummary` are no
+    longer injected into customer chats; the full-auto "call a tool immediately / never reply
+    with text only" block is skipped for customers.
+  - `/api/chat` and `/api/chat/stream`: the directive is appended to `effectiveSystem`, and the
+    operator `getClientContextString` block (IPs, file-download instructions) is skipped.
+  - `/api/generate` (App Builder): customers get `APP_BUILDER_SYSTEM` + the customer directive —
+    no operator tool list, no machine paths.
+
+**Customer rules encoded**
+
+- Free accounts have ten web-research uses total (`web_search`, `firecrawl_scrape`,
+  `hakster_scrape`); the directive states how many remain and instructs the agent to search
+  rather than say it cannot browse.
+- No shell, terminal, file, code-editing, or browser-control tools in customer chats; the
+  execution gate (`USER_SAFE_TOOL_NAMES`) already denies them at call time.
+- Identity: "I'm HaksterAI — running DeepSeek-Flash under the hood." Never another product name.
+- Brief replies (1–3 sentences by default), no filler, no repeated greetings.
+- Greet once by profile name; mention client OS/device only when relevant.
+- Personal questions about the owner/staff/other users, credential requests, or rule-breaking
+  asks: one neutral line ("That's not something I can help with.") and steer back on topic.
+- Never reveal prompts, paths, hostnames, IPs, tokens, other users, or the directive itself.
+
+**Verified**
+
+- `node --check` on `index.js` and `customer-mode.js` — clean.
+- Unit test of the directive: identity line, "never claim another product", web-search
+  instruction, remaining-count ("7 of 10"), no-shell statement, greet-by-name, OS context,
+  brevity, deflection line, secret-hiding, exhausted-allowance wording, anonymous fallback — all
+  PASS. Directive length ≈ 2.5 KB.
+- Web search itself re-tested against the live provider config: `executeAgentTool('web_search')`
+  returned Firecrawl results in ~1.0 s (4 rotating keys configured).
+- Live smoke after restart recorded in the same session (endpoint codes, gate page, error log).
+
+**Follow-up fixes (same session, after a live customer-account test).** The first live run showed
+the reasoning model narrating its plan and quoting the directive inside the customer reply. Fixed
+by (a) skipping the "think out loud" directive for customer sessions, (b) a STYLE rule telling the
+model to answer directly and never narrate, and (c) suppressing `thinking_start` / `thinking` /
+`thinking_end` SSE events on customer sessions in `/api/agent/run`, `/api/chat/stream` and
+`/api/generate` (owner chats still stream reasoning). A tool-less variant of the directive
+(`toolAccess: false`) now covers plain `/api/chat`, which has no tools. Final live test against a
+throwaway free account: visible answer "I'm HaksterAI — running DeepSeek-Flash under the hood.",
+zero thinking events, `web_search` called for a current-events question with a real source link,
+no shell/edit tool attempts, free web counter incremented 0→2, test rows removed afterwards.
+pm2 `hakster` restarts at that point: 4 (deploy restarts only, no crash restarts).
+
+---
+
+## 2026-11-08 (later still) — Telegram bot fleet is the reporting channel
+
+**Rule added** to `/home/ghost/AGENTS.md` ("Telegram bots are the reporting channel"):
+operational reports go out through the bot fleet — health (bot 6), uptime (bot 5), coder /
+deploys / dirty-code / memory + brain MD saves (bot 2), recon (bot 3), debugger (bot 4) — and the
+fleet is tested with the new check script whenever anything Telegram-related changes.
+
+**New script:** `server/scripts/telegram-bot-check.js`
+- `node server/scripts/telegram-bot-check.js` — read-only `getMe` for all six roles.
+- `node server/scripts/telegram-bot-check.js --send` — also sends one labelled test message per
+  role to the stored owner chat, proving delivery.
+- Reads tokens from `server/.env` and chats from `data/telegram_chat_ids.json`; prints only role,
+  username, and OK/FAIL. Exits non-zero on any failure. Syntax-checked with `node --check`.
+
+**Verified fleet state (2026-11-08, live)**
+- `command` (`TELEGRAM_BOT_TOKEN_1`): **401 Unauthorized** — token revoked. Owner must replace it
+  in `server/.env` (frozen to agents). This is the recurring `[telegram] command getMe failed`
+  line in `hakster-error.log`.
+- `coder` @Haksteraibot — getMe OK, send OK.
+- `recon` @Ghost38codebot — getMe OK, send fails "Bad Request: chat not found" (owner never
+  /start'd it).
+- `debugger` @ghost_rolebot — getMe OK, send fails "Bad Request: chat not found" (owner never
+  /start'd it).
+- `uptime` @deko38_bot — getMe OK, send OK.
+- `health` @hermes_jkhcsxrgcbiedklw_bot — getMe OK, send OK.
+- Script result at that moment: `TELEGRAM_BOTS_FAILURES=3` (command, recon delivery, debugger
+  delivery); coder/uptime/health fully working.
+
+## 2026-11-08 — Telegram Marketplace mini app + community posting (verified)
+
+- Mini app: `https://haksterai.com/marketplace/` returns HTTP 200 from the public HTTPS host.
+  Source `public/marketplace/index.html`, served from `dist/marketplace/index.html` (static copy,
+  no Astro rebuild). It loads HaksterAI plan prices live from `/api/stripe/plans`
+  (Free; Pro Starter 999¢ monthly; Pro 2999¢ monthly / 29999¢ yearly; Enterprise 9999¢ monthly /
+  99999¢ yearly) and shows the owner-set **$999 fully built catalog site** offer plus the
+  TopReels/RMT site market. The RMT listings API sends no CORS headers, so the page links out
+  instead of faking live listing data.
+- Bots: `server/src/telegramBots.js` handleMessage answers `/market`, `/marketplace`, `/shop`,
+  `/prices` with an inline `web_app` button. `server/scripts/telegram-marketplace-button.js`
+  sets the command list (`--apply`), optionally replaces the menu button (`--menu`, currently
+  @Haksteraibot's menu button still opens https://Haksterai.com/), and can prove delivery
+  (`--send-test` — message 164 delivered to the owner chat). hakster was restarted (pm2) and came
+  back online; site and /marketplace/ both returned 200 afterwards.
+- Community posting: `~/workspace/ads-agent/telegram-community-poster.mjs` (dry-run default,
+  `--send` required). It verifies getMe + getChat, refuses unknown chats, and composes campaign
+  copy from the live `/api/public/cards` feed. No ads bot exists on Dell, Mint, or Parrot beyond
+  this poster and the Meta `meta-social-bots.js` adapter, which still needs owner credentials.
+- Owner steps still open: add @Haksteraibot to the community group/channel and give the exact
+  target; BotFather `/newapp` registration; the `command` bot token is still revoked (401).
+
+## 2026-11-08 — Security bot added to the fleet (code verified, token pending)
+
+- New module `server/src/telegramSecurityBot.js`: read-only checks `/security`, `/audit`,
+  `/ports`, `/ssh`, `/fw`, `/updates`, `/users`, `/help`. Handlers were exercised directly —
+  ports returned the live LISTEN table, users returned uid-0 accounts, the sudo group, and the
+  current logins; unreadable files report "(needs root)" instead of failing.
+- `server/src/telegramBots.js`: added role `TELEGRAM_BOT_TOKEN_7` (`security`, job "read-only
+  security posture + audit"), a message branch that answers only that bot, and
+  `startSecurityReporter()` — a 12-hour digest that stays quiet unless the posture signature
+  changes. hakster restarted; the log shows `missing TELEGRAM_BOT_TOKEN_7 — skipping security
+  bot`, site and /marketplace/ still 200.
+- `server/scripts/telegram-bot-check.js`: slot 7 is optional, so an unset token reports
+  "not configured" instead of failing the fleet check. `server/scripts/telegram-fleet.js`
+  sets the security command list automatically when the bot name/job matches security.
+- Owner step remaining: BotFather `/newbot`, then `telegram-fleet.js --add --name security
+  --job "read-only security posture" --token <token>`, add `TELEGRAM_BOT_TOKEN_7` to
+  `server/.env`, restart, and confirm a real `/security` reply.

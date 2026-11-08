@@ -244,7 +244,7 @@ import Layout from '../layouts/Layout.astro';
             <button type="button" id="terminal-btn" class="composer-btn" title="Open terminal"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 17 6-6-6-6"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19h8"/></svg></button>
             <button type="button" id="freebuff-btn" data-owner-cli="true" class="composer-pill hidden" title="Open Freebuff CLI for kalilinuxneed@gmail.com">⚡ Freebuff</button>
             <button type="button" id="omp-btn" data-owner-cli="true" class="composer-pill hidden" title="Open OMP CLI with build handoff training">🧭 OMP</button>
-            <button type="button" id="codex-cli-btn" data-owner-cli="true" class="composer-pill hidden" title="Open Codex CLI">⌘ Codex</button>
+            <button type="button" id="codex-cli-btn" data-owner-cli="true" class="composer-pill hidden" title="Open Codex CLI">⌘ Codex</button><button type="button" id="claude-cli-btn" data-owner-cli="true" class="composer-pill hidden" title="Open Claude CLI on the local Ollama DeepSeek route">✳ Claude</button><button type="button" id="deepseek-cli-btn" data-owner-cli="true" class="composer-pill hidden" title="Open DeepSeek directly through local Ollama">🐳 DeepSeek</button>
             <button type="button" id="pentester-btn" class="composer-btn" title="Launch security review agent"><svg class="h-[15px] w-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 17l10 5 10-5M2 12l10 5 10-5"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v6m-3-3h6" /></svg></button>
             <div class="flex-1"></div>
             <button type="submit" id="send-btn" class="send-btn" disabled>
@@ -1597,6 +1597,8 @@ import Layout from '../layouts/Layout.astro';
     const freebuffBtn = document.getElementById('freebuff-btn')!;
     const ompBtn = document.getElementById('omp-btn')!;
     const codexCliBtn = document.getElementById('codex-cli-btn')!;
+    const claudeCliBtn = document.getElementById('claude-cli-btn')!;
+    const deepseekCliBtn = document.getElementById('deepseek-cli-btn')!;
     const chatTerminalPanel = document.getElementById('chat-terminal-panel')!;
     const closeTerminalPanel = document.getElementById('close-terminal-panel')!;
     const terminalContainer = document.getElementById('terminal-container')!;
@@ -1996,15 +1998,17 @@ import Layout from '../layouts/Layout.astro';
       }
     });
     function shellQuote(value: string) { return "'" + value.replace(/'/g, "'\\''") + "'"; }
-    function launchBuildCli(binary: 'freebuff' | 'omp' | 'codex') {
+    function launchBuildCli(binary: 'freebuff' | 'omp' | 'codex' | 'claude' | 'deepseek') {
       if (chatTerminalPanel.classList.contains('hidden')) terminalBtn.click();
       const cliPath = {
         freebuff: '/home/ghost/.npm-global/bin/freebuff',
         omp: '/home/ghost/.local/bin/omp',
         codex: '/home/ghost/.local/bin/codex',
+        claude: '/home/ghost/.local/bin/claude',
+        deepseek: '/usr/local/bin/ollama',
       }[binary];
       const cwdArgs = activeProjectCwd ? ` --cwd ${shellQuote(activeProjectCwd)}` : '';
-      const command = `${shellQuote(cliPath)}${cwdArgs}`;
+      const command = binary === 'deepseek' ? `${shellQuote(cliPath)} run deepseek-v4.1-flash:cloud` : `${shellQuote(cliPath)}${cwdArgs}`;
       let attempts = 0;
       const launch = () => {
         if (chatTermWs?.readyState === WebSocket.OPEN) {
@@ -2021,6 +2025,8 @@ import Layout from '../layouts/Layout.astro';
     freebuffBtn.addEventListener('click', () => launchBuildCli('freebuff'));
     ompBtn.addEventListener('click', () => launchBuildCli('omp'));
     codexCliBtn.addEventListener('click', () => launchBuildCli('codex'));
+    claudeCliBtn.addEventListener('click', () => launchBuildCli('claude'));
+    deepseekCliBtn.addEventListener('click', () => launchBuildCli('deepseek'));
     closeTerminalPanel.addEventListener('click', () => {
       chatTerminalPanel.classList.add('hidden');
       const ma = document.getElementById('messages-area');
@@ -4324,12 +4330,12 @@ import Layout from '../layouts/Layout.astro';
         .then((res) => res.ok ? res.json() : null)
         .then((data) => {
           const isOwner = Boolean(data?.user?.is_owner) || data?.user?.role === 'admin';
-          ['freebuff-btn', 'omp-btn', 'codex-cli-btn'].forEach((id) => {
+          ['freebuff-btn', 'omp-btn', 'codex-cli-btn', 'claude-cli-btn', 'deepseek-cli-btn'].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.classList.toggle('hidden', !isOwner);
           });
           if (isOwner) return;
-          ['terminal-btn', 'freebuff-btn', 'omp-btn', 'codex-cli-btn', 'pentester-btn', 'chat-terminal-panel', 'pentester-panel'].forEach((id) => {
+          ['terminal-btn', 'freebuff-btn', 'omp-btn', 'codex-cli-btn', 'claude-cli-btn', 'deepseek-cli-btn', 'pentester-btn', 'chat-terminal-panel', 'pentester-panel'].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.classList.add('hidden');
           });

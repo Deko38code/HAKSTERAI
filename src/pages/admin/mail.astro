@@ -1,0 +1,755 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout title="Admin — Mail | haksterAi" description="Owner-only multi-account mail client: Gmail and IMAP inboxes, folders, threads, attachments.">
+  <main class="mx-auto min-h-screen max-w-[1500px] px-3 pb-16 pt-24 text-slate-100 sm:px-5">
+    <nav class="mb-4 px-1 text-sm text-slate-500"><a href="/" class="hover:text-violet-300">Home</a> <span class="px-2">›</span><span class="text-amber-300">Admin</span> <span class="px-2">›</span><span class="text-slate-300">Mail</span></nav>
+
+    <section class="overflow-hidden rounded-3xl border border-violet-300/20 bg-gradient-to-br from-[#17151f] to-[#0c0c12]">
+      <header class="flex flex-wrap items-center gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
+        <h1 class="mr-auto flex items-center gap-2 text-lg font-bold"><span aria-hidden="true">📬</span> Mail</h1>
+        <label class="sr-only" for="mail-account">Account</label>
+        <select id="mail-account" class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-300/50"></select>
+        <button id="mail-add-account" type="button" class="rounded-lg border border-white/15 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5">+ Account</button>
+        <button id="mail-compose-open" type="button" class="rounded-lg bg-violet-400 px-4 py-2 text-sm font-bold text-black hover:bg-violet-300">✎ Compose</button>
+      </header>
+
+      <div class="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-2 sm:px-5">
+        <button id="mail-refresh" type="button" class="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5">↻ Refresh</button>
+        <form id="mail-search-form" class="flex flex-1 items-center gap-2" role="search">
+          <input id="mail-search" type="search" maxlength="200" placeholder="Search this folder…" class="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-violet-300/50">
+          <button type="submit" class="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5">Search</button>
+        </form>
+        <label class="flex items-center gap-1.5 text-xs text-slate-400"><input id="mail-threaded" type="checkbox" checked class="accent-violet-400"> Threads</label>
+        <span id="mail-status" role="status" aria-live="polite" class="basis-full text-xs text-slate-500 sm:basis-auto"></span>
+      </div>
+
+      <div class="grid min-h-[70vh] gap-0 lg:grid-cols-[210px_minmax(300px,420px)_1fr]">
+        <aside class="border-b border-white/10 lg:border-b-0 lg:border-r">
+          <div class="flex items-center justify-between px-4 py-2.5">
+            <h2 class="text-xs font-bold uppercase tracking-widest text-slate-500">Folders</h2>
+            <span id="mail-folder-count" class="text-xs text-slate-600"></span>
+          </div>
+          <ul id="mail-folders" class="max-h-64 overflow-y-auto pb-2 lg:max-h-[70vh]"></ul>
+        </aside>
+
+        <section class="border-b border-white/10 lg:border-b-0 lg:border-r" aria-label="Messages">
+          <div class="flex items-center justify-between px-4 py-2.5">
+            <h2 id="mail-list-title" class="truncate text-xs font-bold uppercase tracking-widest text-slate-500">Inbox</h2>
+            <span id="mail-list-count" class="text-xs text-slate-600"></span>
+          </div>
+          <ul id="mail-list" class="max-h-[52vh] overflow-y-auto lg:max-h-[70vh]"></ul>
+          <div class="border-t border-white/10 px-4 py-2">
+            <button id="mail-more" type="button" class="hidden w-full rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5">Load more</button>
+          </div>
+        </section>
+
+        <article class="min-w-0" aria-label="Message">
+          <div id="mail-reader" class="grid h-full place-items-center p-8 text-center text-sm text-slate-500">
+            <div><p class="mb-1 text-3xl" aria-hidden="true">✉️</p><p>Select a message to read it here.</p></div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <!-- Compose -->
+  <div id="mail-compose-modal" class="fixed inset-0 z-50 hidden place-items-center bg-black/70 p-3" role="dialog" aria-modal="true" aria-labelledby="mail-compose-title">
+    <form id="mail-compose-form" class="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-violet-300/25 bg-[#12111a] p-5 shadow-2xl">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 id="mail-compose-title" class="text-lg font-bold">New message</h2>
+        <button id="mail-compose-close" type="button" class="rounded-lg px-2 py-1 text-slate-400 hover:bg-white/5 hover:text-slate-200" aria-label="Close compose">✕</button>
+      </div>
+      <p class="mb-4 text-xs text-slate-500">From <span id="mail-compose-from" class="text-violet-200">—</span></p>
+      <div class="grid gap-2.5">
+        <input id="mail-compose-to" type="text" required placeholder="To — comma separated" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-violet-300/50">
+        <div class="flex gap-2 text-xs">
+          <button id="mail-cc-toggle" type="button" class="rounded border border-white/10 px-2 py-1 text-slate-400 hover:bg-white/5">Cc</button>
+          <button id="mail-bcc-toggle" type="button" class="rounded border border-white/10 px-2 py-1 text-slate-400 hover:bg-white/5">Bcc</button>
+        </div>
+        <input id="mail-compose-cc" type="text" placeholder="Cc" class="hidden rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-violet-300/50">
+        <input id="mail-compose-bcc" type="text" placeholder="Bcc" class="hidden rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-violet-300/50">
+        <input id="mail-compose-subject" type="text" maxlength="300" required placeholder="Subject" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-violet-300/50">
+        <textarea id="mail-compose-body" rows="12" required placeholder="Write your message…" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-violet-300/50"></textarea>
+        <label class="grid gap-1 text-xs text-slate-400">Attachments
+          <input id="mail-compose-files" type="file" multiple class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs file:mr-3 file:rounded file:border-0 file:bg-violet-400 file:px-3 file:py-1 file:font-semibold file:text-black">
+        </label>
+        <ul id="mail-compose-files-list" class="text-xs text-slate-500"></ul>
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <button id="mail-compose-send" type="submit" class="rounded-xl bg-violet-400 px-5 py-2.5 font-bold text-black hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">Send</button>
+          <span id="mail-compose-status" role="status" aria-live="polite" class="text-sm text-slate-400"></span>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Add account -->
+  <div id="mail-account-modal" class="fixed inset-0 z-50 hidden place-items-center bg-black/70 p-3" role="dialog" aria-modal="true" aria-labelledby="mail-account-title">
+    <form id="mail-account-form" class="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-violet-300/25 bg-[#12111a] p-5 shadow-2xl">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 id="mail-account-title" class="text-lg font-bold">Add IMAP account</h2>
+        <button id="mail-account-close" type="button" class="rounded-lg px-2 py-1 text-slate-400 hover:bg-white/5 hover:text-slate-200" aria-label="Close">✕</button>
+      </div>
+      <div class="grid gap-2.5 text-sm">
+        <label class="grid gap-1 text-xs text-slate-400">Provider preset
+          <select id="mail-acc-preset" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100">
+            <option value="custom">Custom / other</option>
+            <option value="gmail">Gmail (app password)</option>
+            <option value="outlook">Outlook / Microsoft 365</option>
+            <option value="yahoo">Yahoo</option>
+            <option value="icloud">iCloud</option>
+            <option value="fastmail">Fastmail</option>
+            <option value="zoho">Zoho</option>
+          </select>
+        </label>
+        <input id="mail-acc-label" type="text" maxlength="80" placeholder="Label (e.g. Work)" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-violet-300/50">
+        <input id="mail-acc-email" type="email" required placeholder="Email address" autocomplete="username" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-violet-300/50">
+        <input id="mail-acc-user" type="text" placeholder="Username (defaults to email)" autocomplete="username" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-violet-300/50">
+        <input id="mail-acc-pass" type="password" required placeholder="Password or app password" autocomplete="current-password" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-violet-300/50">
+        <div class="grid grid-cols-[1fr_88px_auto] items-center gap-2">
+          <input id="mail-acc-imap-host" type="text" required placeholder="IMAP host" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-violet-300/50">
+          <input id="mail-acc-imap-port" type="number" min="1" max="65535" value="993" class="rounded-lg border border-white/10 bg-black/30 px-2 py-2 outline-none focus:border-violet-300/50">
+          <label class="flex items-center gap-1 text-xs text-slate-400"><input id="mail-acc-imap-secure" type="checkbox" checked class="accent-violet-400">TLS</label>
+        </div>
+        <div class="grid grid-cols-[1fr_88px_auto] items-center gap-2">
+          <input id="mail-acc-smtp-host" type="text" required placeholder="SMTP host" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-violet-300/50">
+          <input id="mail-acc-smtp-port" type="number" min="1" max="65535" value="465" class="rounded-lg border border-white/10 bg-black/30 px-2 py-2 outline-none focus:border-violet-300/50">
+          <label class="flex items-center gap-1 text-xs text-slate-400"><input id="mail-acc-smtp-secure" type="checkbox" checked class="accent-violet-400">TLS</label>
+        </div>
+        <p class="text-xs leading-5 text-slate-500">Credentials are encrypted at rest on this server and never returned to the browser. Use an app password where the provider requires one.</p>
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <button id="mail-acc-save" type="submit" class="rounded-xl bg-violet-400 px-5 py-2.5 font-bold text-black hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">Save account</button>
+          <span id="mail-acc-status" role="status" aria-live="polite" class="text-sm text-slate-400"></span>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <script is:inline>
+    (() => {
+      const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || '';
+      const headers = { 'x-api-key': token };
+      const PAGE = 40;
+
+      const state = {
+        accounts: [],
+        account: '',
+        folder: 'INBOX',
+        folders: [],
+        messages: [],
+        total: 0,
+        offset: 0,
+        pageToken: '',
+        selected: null,
+        attachments: [],
+      };
+
+      const el = (id) => document.getElementById(id);
+      const accountSelect = el('mail-account');
+      const statusEl = el('mail-status');
+      const foldersEl = el('mail-folders');
+      const listEl = el('mail-list');
+      const readerEl = el('mail-reader');
+      const listTitle = el('mail-list-title');
+      const listCount = el('mail-list-count');
+      const moreButton = el('mail-more');
+      const threadedBox = el('mail-threaded');
+
+      function setStatus(text, tone) {
+        statusEl.textContent = text || '';
+        statusEl.className = 'basis-full text-xs sm:basis-auto ' + (tone === 'error' ? 'text-rose-300' : tone === 'ok' ? 'text-emerald-300' : 'text-slate-500');
+      }
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, { ...options, headers: { ...headers, ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) }, cache: 'no-store' });
+        let data = {};
+        try { data = await response.json(); } catch (_) { data = {}; }
+        if (!response.ok) {
+          const error = new Error(data.error || ('Request failed (' + response.status + ')'));
+          error.status = response.status;
+          error.data = data;
+          throw error;
+        }
+        return data;
+      }
+
+      const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+      function parseAddress(value) {
+        const text = String(value || '').trim();
+        const match = text.match(/^(.*)<([^>]+)>$/);
+        if (match) return { name: match[1].trim().replace(/^"|"$/g, ''), address: match[2].trim() };
+        return { name: '', address: text };
+      }
+
+      function displayFrom(value) {
+        const parsed = parseAddress(value);
+        return parsed.name || parsed.address || '(unknown sender)';
+      }
+
+      function formatDate(value) {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value).slice(0, 60);
+        const now = new Date();
+        const sameDay = date.toDateString() === now.toDateString();
+        if (sameDay) return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+      }
+
+      async function loadAccounts() {
+        const data = await api('/api/admin/mail/accounts');
+        state.accounts = data.accounts || [];
+        accountSelect.innerHTML = '';
+        if (!state.accounts.length) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = 'No accounts connected';
+          accountSelect.appendChild(option);
+          setStatus('Add an IMAP account, or connect Gmail on the Email Monitor page.', 'error');
+          foldersEl.innerHTML = '';
+          listEl.innerHTML = '';
+          return;
+        }
+        for (const account of state.accounts) {
+          const option = document.createElement('option');
+          option.value = account.id;
+          option.textContent = (account.kind === 'gmail' ? 'Gmail · ' : '') + (account.label || account.email || account.id);
+          accountSelect.appendChild(option);
+        }
+        if (!state.accounts.some((account) => account.id === state.account)) state.account = state.accounts[0].id;
+        accountSelect.value = state.account;
+        updateComposeFrom();
+      }
+
+      function currentAccount() {
+        return state.accounts.find((account) => account.id === state.account) || null;
+      }
+
+      function updateComposeFrom() {
+        const account = currentAccount();
+        el('mail-compose-from').textContent = account ? (account.email || account.label || account.id) : '—';
+      }
+
+      async function loadFolders() {
+        if (!state.account) return;
+        const data = await api('/api/admin/mail/folders?account=' + encodeURIComponent(state.account));
+        state.folders = data.folders || [];
+        el('mail-folder-count').textContent = String(state.folders.length);
+        foldersEl.innerHTML = '';
+        const icons = { inbox: '📥', sent: '📤', drafts: '📝', trash: '🗑️', junk: '🚫', spam: '🚫', archive: '🗄️', all: '📚' };
+        if (!state.folders.some((folder) => folder.id === state.folder)) {
+          state.folder = state.folders[0] ? state.folders[0].id : 'INBOX';
+        }
+        for (const folder of state.folders) {
+          const li = document.createElement('li');
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'flex w-full items-center gap-2 px-4 py-2 text-left text-sm ' + (folder.id === state.folder ? 'bg-violet-400/15 font-semibold text-violet-100' : 'text-slate-300 hover:bg-white/5');
+          const icon = icons[String(folder.role || '').toLowerCase()] || '📁';
+          button.innerHTML = '<span aria-hidden="true">' + icon + '</span><span class="truncate"></span>';
+          button.lastElementChild.textContent = folder.name || folder.id;
+          button.addEventListener('click', () => {
+            state.folder = folder.id;
+            state.offset = 0;
+            state.pageToken = '';
+            state.selected = null;
+            renderReaderEmpty();
+            loadFolders().catch(() => {});
+            loadMessages().catch(() => {});
+          });
+          li.appendChild(button);
+          foldersEl.appendChild(li);
+        }
+      }
+
+      function threadGroups(messages) {
+        if (!threadedBox.checked) return messages.map((message) => ({ key: message.uid, messages: [message] }));
+        const groups = [];
+        const index = new Map();
+        for (const message of messages) {
+          const key = message.thread || ('uid:' + message.uid);
+          const existing = index.get(key);
+          if (existing) existing.messages.push(message);
+          else {
+            const group = { key, messages: [message] };
+            index.set(key, group);
+            groups.push(group);
+          }
+        }
+        for (const group of groups) {
+          group.messages.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+          group.latest = group.messages[group.messages.length - 1];
+        }
+        return groups;
+      }
+
+      function renderList() {
+        listEl.innerHTML = '';
+        const groups = threadGroups(state.messages);
+        listCount.textContent = state.messages.length ? String(state.messages.length) : '';
+        if (!groups.length) {
+          const li = document.createElement('li');
+          li.className = 'px-4 py-10 text-center text-sm text-slate-500';
+          li.textContent = 'No messages in this folder.';
+          listEl.appendChild(li);
+          moreButton.classList.add('hidden');
+          return;
+        }
+        for (const group of groups) {
+          const latest = group.latest;
+          const li = document.createElement('li');
+          const button = document.createElement('button');
+          button.type = 'button';
+          const unread = group.messages.some((message) => message.unread);
+          const active = state.selected && group.messages.some((message) => message.uid === state.selected.uid);
+          button.className = 'w-full border-b border-white/5 px-4 py-2.5 text-left ' + (active ? 'bg-violet-400/10' : 'hover:bg-white/[.04]');
+          button.innerHTML =
+            '<div class="flex items-baseline gap-2">'
+            + '<span class="min-w-0 flex-1 truncate text-sm ' + (unread ? 'font-bold text-slate-100' : 'text-slate-300') + '"></span>'
+            + '<span class="shrink-0 text-[11px] text-slate-500"></span>'
+            + '</div>'
+            + '<div class="mt-0.5 flex items-center gap-1.5">'
+            + (latest.flagged ? '<span class="text-amber-300" aria-label="Starred">★</span>' : '')
+            + (latest.hasAttachments ? '<span class="text-slate-500" aria-label="Has attachments">📎</span>' : '')
+            + '<span class="min-w-0 flex-1 truncate text-xs text-slate-500"></span>'
+            + (group.messages.length > 1 ? '<span class="shrink-0 rounded bg-white/10 px-1.5 text-[10px] text-slate-300"></span>' : '')
+            + '</div>';
+          const spans = button.querySelectorAll('span.min-w-0.flex-1.truncate');
+          spans[0].textContent = (unread ? '● ' : '') + (latest.subject || '(no subject)');
+          button.querySelector('span.shrink-0.text-\\[11px\\]').textContent = formatDate(latest.date);
+          spans[spans.length - 1].textContent = displayFrom(latest.from) + (latest.snippet ? ' — ' + latest.snippet : '');
+          const countBadge = button.querySelector('span.rounded');
+          if (countBadge) countBadge.textContent = String(group.messages.length);
+          button.addEventListener('click', () => {
+            if (group.messages.length > 1) renderThreadList(group);
+            else openMessage(latest).catch(() => {});
+          });
+          li.appendChild(button);
+          listEl.appendChild(li);
+        }
+        moreButton.classList.toggle('hidden', !state.pageToken && state.messages.length >= state.total);
+      }
+
+      async function loadMessages({ append = false } = {}) {
+        if (!state.account || !state.folder) return;
+        setStatus('Loading…');
+        const params = new URLSearchParams({ account: state.account, folder: state.folder, limit: String(PAGE), offset: String(state.offset) });
+        if (state.pageToken) params.set('pageToken', state.pageToken);
+        const data = await api('/api/admin/mail/messages?' + params.toString());
+        state.messages = append ? state.messages.concat(data.messages || []) : (data.messages || []);
+        state.pageToken = data.nextPageToken || '';
+        state.total = Number(data.total) || state.messages.length;
+        listTitle.textContent = state.folder;
+        renderList();
+        setStatus(state.messages.length + ' message' + (state.messages.length === 1 ? '' : 's'), 'ok');
+      }
+
+      function renderReaderEmpty() {
+        readerEl.innerHTML = '<div><p class="mb-1 text-3xl" aria-hidden="true">✉️</p><p>Select a message to read it here.</p></div>';
+      }
+
+      // A threaded row holds more than one message; show the conversation so any
+      // message in it can be opened, not just the newest one.
+      function renderThreadList(group) {
+        state.selected = group.latest;
+        renderList();
+        readerEl.className = 'flex h-full min-w-0 flex-col';
+        readerEl.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'border-b border-white/10 px-4 py-3';
+        head.innerHTML = '<h2 class="text-base font-bold text-slate-100"></h2><p class="mt-1 text-xs text-slate-500"></p>';
+        head.firstElementChild.textContent = group.latest.subject || '(no subject)';
+        head.lastElementChild.textContent = group.messages.length + ' messages in this conversation';
+        const list = document.createElement('ul');
+        list.className = 'min-h-0 flex-1 overflow-auto';
+        for (const message of group.messages.slice().reverse()) {
+          const li = document.createElement('li');
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'w-full border-b border-white/5 px-4 py-3 text-left hover:bg-white/5';
+          button.innerHTML = '<div class="flex gap-2"><span class="min-w-0 flex-1 truncate text-sm text-slate-200"></span><span class="shrink-0 text-[11px] text-slate-500"></span></div><p class="mt-1 truncate text-xs text-slate-500"></p>';
+          const spans = button.querySelectorAll('span');
+          spans[0].textContent = (message.unread ? '● ' : '') + displayFrom(message.from);
+          spans[1].textContent = formatDate(message.date);
+          button.querySelector('p').textContent = message.subject;
+          button.addEventListener('click', () => { openMessage(message).catch(() => {}); });
+          li.appendChild(button);
+          list.appendChild(li);
+        }
+        readerEl.appendChild(head);
+        readerEl.appendChild(list);
+      }
+
+      function readerError(message) {
+        readerEl.innerHTML = '<div class="max-w-md"><p class="mb-2 text-2xl" aria-hidden="true">⚠️</p><p class="text-rose-300"></p></div>';
+        readerEl.querySelector('p.text-rose-300').textContent = message;
+      }
+
+      async function openMessage(summary, { images = false } = {}) {
+        state.selected = summary;
+        renderList();
+        readerEl.innerHTML = '<p class="text-sm text-slate-500">Opening…</p>';
+        let data;
+        try {
+          data = await api('/api/admin/mail/message?account=' + encodeURIComponent(state.account) + '&folder=' + encodeURIComponent(state.folder) + '&uid=' + encodeURIComponent(summary.uid) + (images ? '&images=1' : ''));
+        } catch (error) {
+          readerError(error.message);
+          return;
+        }
+        state.attachments = data.attachments || [];
+        renderReader(data, summary, images);
+        if (summary.unread) {
+          summary.unread = false;
+          renderList();
+          api('/api/admin/mail/flags', { method: 'POST', body: JSON.stringify({ account: state.account, folder: state.folder, uid: summary.uid, seen: true }) }).catch(() => {});
+        }
+      }
+
+      function renderReader(data, summary, images) {
+        readerEl.className = 'flex h-full min-w-0 flex-col';
+        readerEl.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'border-b border-white/10 px-4 py-3';
+        head.innerHTML =
+          '<div class="flex items-start gap-2">'
+          + '<div class="min-w-0 flex-1">'
+          + '<h2 class="truncate text-base font-bold text-slate-100"></h2>'
+          + '<p class="mt-1 truncate text-sm text-slate-400"></p>'
+          + '<p class="mt-0.5 truncate text-xs text-slate-500"></p>'
+          + '</div>'
+          + '<div class="flex shrink-0 gap-1">'
+          + '<button type="button" data-act="star" class="rounded px-2 py-1 text-sm hover:bg-white/5" aria-label="Star message">☆</button>'
+          + '<button type="button" data-act="unread" class="rounded px-2 py-1 text-xs text-slate-400 hover:bg-white/5">Mark unread</button>'
+          + '</div>'
+          + '</div>';
+        head.querySelector('h2').textContent = data.subject || '(no subject)';
+        head.querySelector('p.text-sm').textContent = data.from || '';
+        head.querySelector('p.text-xs').textContent = [data.to ? 'to ' + data.to : '', data.cc ? 'cc ' + data.cc : '', formatDate(data.date)].filter(Boolean).join(' · ');
+
+        head.querySelector('[data-act="star"]').addEventListener('click', async (event) => {
+          const button = event.currentTarget;
+          const next = button.textContent !== '★';
+          button.textContent = next ? '★' : '☆';
+          try {
+            await api('/api/admin/mail/flags', { method: 'POST', body: JSON.stringify({ account: state.account, folder: state.folder, uid: summary.uid, flagged: next }) });
+            summary.flagged = next;
+            renderList();
+          } catch (error) {
+            button.textContent = next ? '☆' : '★';
+            setStatus(error.message, 'error');
+          }
+        });
+        head.querySelector('[data-act="unread"]').addEventListener('click', async () => {
+          try {
+            await api('/api/admin/mail/flags', { method: 'POST', body: JSON.stringify({ account: state.account, folder: state.folder, uid: summary.uid, seen: false }) });
+            summary.unread = true;
+            setStatus('Marked unread', 'ok');
+          } catch (error) {
+            setStatus(error.message, 'error');
+          }
+        });
+
+        if (data.attachments && data.attachments.length) {
+          const bar = document.createElement('div');
+          bar.className = 'flex flex-wrap gap-2 border-b border-white/10 px-4 py-2';
+          for (const attachment of data.attachments) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/5';
+            button.innerHTML = '<span aria-hidden="true">📎</span><span></span><span class="text-slate-500"></span>';
+            button.children[1].textContent = attachment.filename;
+            button.children[2].textContent = formatBytes(attachment.size);
+            button.addEventListener('click', () => downloadAttachment(attachment, button));
+            bar.appendChild(button);
+          }
+          head.appendChild(bar);
+        }
+
+        if (data.blockedImages) {
+          const note = document.createElement('div');
+          note.className = 'flex items-center gap-3 border-b border-amber-300/20 bg-amber-300/5 px-4 py-2 text-xs text-amber-200';
+          note.innerHTML = '<span></span><button type="button" class="rounded border border-amber-300/30 px-2 py-1 font-semibold hover:bg-amber-300/10">Show remote images</button>';
+          note.firstElementChild.textContent = data.blockedImages + ' remote image' + (data.blockedImages === 1 ? '' : 's') + ' blocked for privacy.';
+          note.lastElementChild.addEventListener('click', () => openMessage(summary, { images: true }).catch(() => {}));
+          head.appendChild(note);
+        }
+
+        const body = document.createElement('div');
+        body.className = 'min-h-0 flex-1 overflow-auto bg-white text-black';
+        if (data.html) {
+          const frame = document.createElement('iframe');
+          frame.setAttribute('sandbox', '');
+          frame.setAttribute('referrerpolicy', 'no-referrer');
+          frame.setAttribute('title', 'Message content');
+          frame.className = 'h-full min-h-[320px] w-full border-0';
+          frame.srcdoc = data.html;
+          body.appendChild(frame);
+        } else {
+          const pre = document.createElement('pre');
+          pre.className = 'whitespace-pre-wrap break-words p-4 font-sans text-sm text-slate-800';
+          pre.textContent = data.text || '(no message body)';
+          body.appendChild(pre);
+        }
+        readerEl.appendChild(head);
+        readerEl.appendChild(body);
+      }
+
+      function formatBytes(bytes) {
+        const value = Number(bytes) || 0;
+        if (value < 1024) return value + ' B';
+        if (value < 1024 * 1024) return (value / 1024).toFixed(0) + ' KB';
+        return (value / 1024 / 1024).toFixed(1) + ' MB';
+      }
+
+      async function downloadAttachment(attachment, button) {
+        const original = button.children[1].textContent;
+        button.children[1].textContent = 'Downloading…';
+        try {
+          const response = await fetch('/api/admin/mail/attachment?account=' + encodeURIComponent(state.account) + '&folder=' + encodeURIComponent(state.folder) + '&uid=' + encodeURIComponent(state.selected.uid) + '&part=' + encodeURIComponent(attachment.part), { headers, cache: 'no-store' });
+          if (!response.ok) {
+            let message = 'Download failed';
+            try { message = (await response.json()).error || message; } catch (_) {}
+            throw new Error(message);
+          }
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = attachment.filename || 'attachment';
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 30000);
+          button.children[1].textContent = original;
+        } catch (error) {
+          button.children[1].textContent = original;
+          setStatus(error.message, 'error');
+        }
+      }
+
+      async function runSearch(query) {
+        if (!query) {
+          state.offset = 0;
+          state.pageToken = '';
+          return loadMessages();
+        }
+        setStatus('Searching…');
+        const data = await api('/api/admin/mail/search?account=' + encodeURIComponent(state.account) + '&folder=' + encodeURIComponent(state.folder) + '&q=' + encodeURIComponent(query));
+        state.messages = data.messages || [];
+        state.pageToken = '';
+        state.total = state.messages.length;
+        listTitle.textContent = 'Search: ' + query;
+        renderList();
+        setStatus(state.messages.length + ' result' + (state.messages.length === 1 ? '' : 's'), 'ok');
+      }
+
+      // ── compose ──
+      const composeModal = el('mail-compose-modal');
+      const fileInput = el('mail-compose-files');
+      const fileListEl = el('mail-compose-files-list');
+
+      function openCompose(message) {
+        const account = currentAccount();
+        if (!account) { setStatus('Add a mail account first.', 'error'); return; }
+        updateComposeFrom();
+        el('mail-compose-to').value = message ? message.from || '' : '';
+        el('mail-compose-subject').value = message ? (/^re:/i.test(message.subject || '') ? message.subject : 'Re: ' + (message.subject || '')) : '';
+        el('mail-compose-body').value = '';
+        el('mail-compose-cc').value = '';
+        el('mail-compose-bcc').value = '';
+        fileInput.value = '';
+        fileListEl.innerHTML = '';
+        el('mail-compose-status').textContent = '';
+        composeModal.classList.remove('hidden');
+        composeModal.classList.add('grid');
+        el('mail-compose-to').focus();
+      }
+
+      function closeCompose() {
+        composeModal.classList.add('hidden');
+        composeModal.classList.remove('grid');
+      }
+
+      async function filesToBase64(files) {
+        const out = [];
+        let total = 0;
+        for (const file of files) {
+          if (total + file.size > 20 * 1024 * 1024) throw new Error('Attachments total more than 20 MB');
+          const buffer = await file.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = '';
+          const chunk = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+          }
+          total += file.size;
+          out.push({ filename: file.name, contentType: file.type || 'application/octet-stream', content: btoa(binary) });
+        }
+        return out;
+      }
+
+      // ── add account ──
+      const accountModal = el('mail-account-modal');
+      const presets = {
+        '': {},
+        gmail: { imapHost: 'imap.gmail.com', imapPort: 993, smtpHost: 'smtp.gmail.com', smtpPort: 465 },
+        outlook: { imapHost: 'outlook.office365.com', imapPort: 993, smtpHost: 'smtp.office365.com', smtpPort: 587, smtpSecure: false },
+        yahoo: { imapHost: 'imap.mail.yahoo.com', imapPort: 993, smtpHost: 'smtp.mail.yahoo.com', smtpPort: 465 },
+        icloud: { imapHost: 'imap.mail.me.com', imapPort: 993, smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false },
+        fastmail: { imapHost: 'imap.fastmail.com', imapPort: 993, smtpHost: 'smtp.fastmail.com', smtpPort: 465 },
+        zoho: { imapHost: 'imap.zoho.com', imapPort: 993, smtpHost: 'smtp.zoho.com', smtpPort: 465 },
+      };
+
+      function applyPreset(name) {
+        const preset = presets[name] || {};
+        el('mail-acc-imap-host').value = preset.imapHost || '';
+        el('mail-acc-imap-port').value = String(preset.imapPort || 993);
+        el('mail-acc-imap-secure').checked = preset.imapSecure !== false;
+        el('mail-acc-smtp-host').value = preset.smtpHost || '';
+        el('mail-acc-smtp-port').value = String(preset.smtpPort || 465);
+        el('mail-acc-smtp-secure').checked = preset.smtpSecure !== false;
+      }
+
+      // ── wiring ──
+      accountSelect.addEventListener('change', () => {
+        state.account = accountSelect.value;
+        state.folder = 'INBOX';
+        state.offset = 0;
+        state.pageToken = '';
+        state.selected = null;
+        updateComposeFrom();
+        renderReaderEmpty();
+        loadFolders().then(() => loadMessages()).catch((error) => setStatus(error.message, 'error'));
+      });
+
+      el('mail-refresh').addEventListener('click', () => {
+        state.offset = 0;
+        state.pageToken = '';
+        loadFolders().then(() => loadMessages()).catch((error) => setStatus(error.message, 'error'));
+      });
+
+      el('mail-search-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        runSearch(el('mail-search').value.trim()).catch((error) => setStatus(error.message, 'error'));
+      });
+
+      threadedBox.addEventListener('change', renderList);
+
+      moreButton.addEventListener('click', () => {
+        state.offset += PAGE;
+        loadMessages({ append: true }).catch((error) => setStatus(error.message, 'error'));
+      });
+
+      el('mail-compose-open').addEventListener('click', () => openCompose(null));
+      el('mail-compose-close').addEventListener('click', closeCompose);
+      el('mail-cc-toggle').addEventListener('click', () => el('mail-compose-cc').classList.toggle('hidden'));
+      el('mail-bcc-toggle').addEventListener('click', () => el('mail-compose-bcc').classList.toggle('hidden'));
+
+      fileInput.addEventListener('change', () => {
+        fileListEl.innerHTML = '';
+        for (const file of fileInput.files) {
+          const li = document.createElement('li');
+          li.textContent = file.name + ' · ' + formatBytes(file.size);
+          fileListEl.appendChild(li);
+        }
+      });
+
+      el('mail-compose-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const sendButton = el('mail-compose-send');
+        const composeStatus = el('mail-compose-status');
+        sendButton.disabled = true;
+        composeStatus.textContent = 'Sending…';
+        try {
+          const attachments = fileInput.files.length ? await filesToBase64(fileInput.files) : [];
+          const payload = {
+            account: state.account,
+            to: el('mail-compose-to').value,
+            cc: el('mail-compose-cc').value,
+            bcc: el('mail-compose-bcc').value,
+            subject: el('mail-compose-subject').value,
+            text: el('mail-compose-body').value,
+            attachments,
+          };
+          const data = await api('/api/admin/mail/send', { method: 'POST', body: JSON.stringify(payload) });
+          composeStatus.textContent = 'Sent to ' + (data.to || []).join(', ');
+          setTimeout(closeCompose, 1200);
+        } catch (error) {
+          composeStatus.textContent = error.message;
+        } finally {
+          sendButton.disabled = false;
+        }
+      });
+
+      el('mail-add-account').addEventListener('click', () => {
+        el('mail-acc-status').textContent = '';
+        accountModal.classList.remove('hidden');
+        accountModal.classList.add('grid');
+        el('mail-acc-email').focus();
+      });
+      el('mail-account-close').addEventListener('click', () => {
+        accountModal.classList.add('hidden');
+        accountModal.classList.remove('grid');
+      });
+      el('mail-acc-preset').addEventListener('change', (event) => applyPreset(event.target.value));
+
+      el('mail-account-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const saveButton = el('mail-acc-save');
+        const accStatus = el('mail-acc-status');
+        saveButton.disabled = true;
+        accStatus.textContent = 'Checking IMAP and SMTP sign-in…';
+        try {
+          const payload = {
+            label: el('mail-acc-label').value || el('mail-acc-email').value,
+            email: el('mail-acc-email').value,
+            username: el('mail-acc-user').value || el('mail-acc-email').value,
+            password: el('mail-acc-pass').value,
+            imapHost: el('mail-acc-imap-host').value,
+            imapPort: Number(el('mail-acc-imap-port').value),
+            imapSecure: el('mail-acc-imap-secure').checked,
+            smtpHost: el('mail-acc-smtp-host').value,
+            smtpPort: Number(el('mail-acc-smtp-port').value),
+            smtpSecure: el('mail-acc-smtp-secure').checked,
+          };
+          const data = await api('/api/admin/mail/accounts', { method: 'POST', body: JSON.stringify(payload) });
+          accStatus.textContent = 'Account added.';
+          el('mail-acc-pass').value = '';
+          state.account = data.account.id;
+          await loadAccounts();
+          accountSelect.value = state.account;
+          updateComposeFrom();
+          await loadFolders();
+          await loadMessages();
+          setTimeout(() => {
+            accountModal.classList.add('hidden');
+            accountModal.classList.remove('grid');
+          }, 700);
+        } catch (error) {
+          accStatus.textContent = error.message;
+        } finally {
+          saveButton.disabled = false;
+        }
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeCompose();
+        accountModal.classList.add('hidden');
+        accountModal.classList.remove('grid');
+      });
+
+      if (!token) {
+        setStatus('Sign in as the owner to use mail.', 'error');
+        return;
+      }
+
+      loadAccounts()
+        .then(() => (state.account ? loadFolders().then(() => loadMessages()) : null))
+        .catch((error) => setStatus(error.message, 'error'));
+    })();
+  </script>
+</Layout>

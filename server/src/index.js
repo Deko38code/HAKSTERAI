@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const { Readable } = require('node:stream');
 const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
+const { buildCustomerChatDirective } = require('./customer-mode');
 const { publicAgentRoster } = require('./agent/agent-roster');
 const { loadMcpServers, getMcpTools, callMcpTool, isMcpTool, mcpStatus, shutdownMcp, setLogFn: mcpSetLogFn } = require('./agent/mcp');
 const stuckMonitor = require('./agent/stuckMonitor');
@@ -2006,6 +2007,35 @@ function getClientContextString(sessionId) {
   } catch (_) { return ''; }
 }
 
+// Customer-safe slice of a client context: OS and device only. Deliberately
+// excludes IP, fingerprints and session internals so a customer prompt never
+// carries infrastructure detail it should not see.
+function getCustomerClientContext(sessionId) {
+  if (!sessionId) return {};
+  try {
+    const db = getDb();
+    const cc = db.prepare(`SELECT os_name, os_version, device_type, device_model
+      FROM client_contexts WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1`).get(sessionId);
+    if (!cc) return {};
+    return {
+      osName: cc.os_name || '',
+      osVersion: cc.os_version || '',
+      deviceType: cc.device_type || '',
+      deviceModel: cc.device_model || '',
+    };
+  } catch (_) { return {}; }
+}
+function customerDirectiveFor(user, sessionId, opts = {}) {
+  if (!user || isOwnerUser(user)) return '';
+  return buildCustomerChatDirective({
+    user,
+    client: getCustomerClientContext(sessionId),
+    webUsesRemaining: Math.max(0, FREE_WEB_RESEARCH_LIMIT - getFreeWebResearchUses(user)),
+    webLimit: FREE_WEB_RESEARCH_LIMIT,
+    toolAccess: opts.toolAccess !== false,
+  });
+}
+
 app.get('/api/client-context/:sessionId', (req, res) => {
   const db = getDb();
   const ctx = db.prepare(`SELECT * FROM client_contexts WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1`).get(req.params.sessionId);
@@ -2412,12 +2442,15 @@ app.post('/api/chat', requireSignedIn, async (req, res) => {
     return res.status(402).json({ error: 'Free usage limit reached', ...usageCheck });
   }
 
-  // Inject client device context into system prompt
-  const clientCtxStr = getClientContextString(sessionId);
+  // Inject client device context into system prompt. Customer accounts get the
+  // customer directive (OS + name only) instead of the operator context, which
+  // carries IP addresses and server-facing file instructions.
+  const customerDirective = customerDirectiveFor(user, sessionId, { toolAccess: false });
+  const clientCtxStr = customerDirective ? '' : getClientContextString(sessionId);
   const deviceAwareness = clientCtxStr
     ? '\nYou are aware of the user\'s browser and device via CLIENT DEVICE CONTEXT. Tailor your responses accordingly (mobile vs desktop, touch vs mouse, screen size). When you write files via write_file, the user gets a download button automatically.\n'
     : '';
-  const effectiveSystem = (system ? system + '\n\n' : '') + clientCtxStr + deviceAwareness;
+  const effectiveSystem = (system ? system + '\n\n' : '') + customerDirective + clientCtxStr + deviceAwareness;
 
   try {
     const result = await chat({ provider, model, messages, system: effectiveSystem || undefined, unrestricted });
@@ -2478,12 +2511,15 @@ app.post('/api/chat/stream', requireSignedIn, async (req, res) => {
   res.flushHeaders();
   mirrorSSEToAgentSubscribers(res, { sessionId });
 
-  // Inject client device context into system prompt
-  const clientCtxStr = getClientContextString(sessionId);
+  // Inject client device context into system prompt. Customer accounts get the
+  // customer directive (OS + name only) instead of the operator context, which
+  // carries IP addresses and server-facing file instructions.
+  const customerDirective = customerDirectiveFor(user, sessionId, { toolAccess: false });
+  const clientCtxStr = customerDirective ? '' : getClientContextString(sessionId);
   const deviceAwareness = clientCtxStr
     ? '\nYou are aware of the user\'s browser and device via CLIENT DEVICE CONTEXT. Tailor your responses accordingly (mobile vs desktop, touch vs mouse, screen size). When you write files via write_file, the user gets a download button automatically.\n'
     : '';
-  const effectiveSystem = (system ? system + '\n\n' : '') + clientCtxStr + deviceAwareness;
+  const effectiveSystem = (system ? system + '\n\n' : '') + customerDirective + clientCtxStr + deviceAwareness;
 
   try {
     let fullContent = '';
@@ -2495,12 +2531,14 @@ app.post('/api/chat/stream', requireSignedIn, async (req, res) => {
         fullContent += event.content;
         res.write(`data: ${JSON.stringify({ type: 'delta', content: event.content })}\n\n`);
       } else if (event.type === 'thinking_start') {
-        res.write(`data: ${JSON.stringify({ type: 'thinking_start' })}\n\n`);
+        // Customer chats do not stream reasoning: it is chatty and can quote the
+        // internal directive back at the user.
+        if (!customerDirective) res.write(`data: ${JSON.stringify({ type: 'thinking_start' })}\n\n`);
       } else if (event.type === 'thinking') {
         fullThinking += event.content;
-        res.write(`data: ${JSON.stringify({ type: 'thinking', content: event.content })}\n\n`);
+        if (!customerDirective) res.write(`data: ${JSON.stringify({ type: 'thinking', content: event.content })}\n\n`);
       } else if (event.type === 'thinking_end') {
-        res.write(`data: ${JSON.stringify({ type: 'thinking_end' })}\n\n`);
+        if (!customerDirective) res.write(`data: ${JSON.stringify({ type: 'thinking_end' })}\n\n`);
       } else if (event.type === 'done') {
         finalMeta = event;
       }
@@ -3371,7 +3409,11 @@ ${dirListing}
   // ── Build dynamic system prompt with AGENTS.md + autolearn injection ──
   const agentCwd = cwd || process.cwd();
   const contextTags = (lastUserMsg?.content || '').split(/\s+/).filter(w => w.length > 3).slice(0, 10);
-  const dynamicPrompt = fastMode
+  // Non-owner accounts get the customer directive instead of the operator
+  // prompt: same tools list (web/memory/image) but no shell or editing claim,
+  // no machine paths, no operator steering.
+  const customerDirective = customerDirectiveFor(user, sessionId);
+  const dynamicPrompt = customerDirective ? customerDirective : fastMode
     ? [
         'You are haksterAI in fast Chat tab agent mode.',
         'This interface is branded haksterAI; the underlying model engine is whatever is currently configured (claude-cli, ollama, etc.). Be honest about model identity if asked. HaksterAI is the interface name, not the model name.',
@@ -3393,8 +3435,8 @@ ${dirListing}
   // NOTE: project inventory is already injected by buildAgentSystemPrompt(); do not duplicate it here.
   const systemContent = dynamicPrompt
     + (clientSystemContent ? '\n\n=== CLIENT DIRECTIVE ===\n' + clientSystemContent : '')
-    + '\n\n' + machineContext
-    + (memoryContext ? '\n\n' + memoryContext : '');
+    + (customerDirective ? '' : '\n\n' + machineContext)
+    + (!customerDirective && memoryContext ? '\n\n' + memoryContext : '');
 
   const agentMessages = [
     { role: 'system', content: systemContent },
@@ -3402,15 +3444,20 @@ ${dirListing}
   ];
 
   // ── Inject persistent task state so the agent never loses the thread ──
-  if (taskStateSummary) agentMessages[0].content += taskStateSummary;
+  // Operator task state is shared server-side context; never expose it to a
+  // customer chat.
+  if (taskStateSummary && !customerDirective) agentMessages[0].content += taskStateSummary;
 
   // ── Full-auto directive: instruct model to act autonomously without asking ──
-  if (effectiveApprovalMode === 'full-auto') {
+  // Customers have no shell or editing tools, so the "call a tool immediately,
+  // never reply with text only" instruction would only produce denials.
+  if (effectiveApprovalMode === 'full-auto' && !customerDirective) {
     agentMessages[0].content += `\n\n=== AUTONOMOUS MODE (FULL-AUTO) ===\nYou are running in full-auto mode. No human approval is required for any action.\n- Do NOT ask the user for confirmation before running tools, commands, or making changes.\n- Do NOT ask "should I..." or "would you like me to..." — just DO it.\n- Immediately start executing: inspect files, run commands, make edits, verify results.\n- Keep looping through tools until the task is fully complete.\n- Only stop when the task is done or you hit a real blocker (missing credentials, unreachable service, etc.).\n- Never wait for user input mid-task. Act, verify, iterate.\n- For the first user message, immediately start working — do not greet, ask what to do, or say "let me check". CALL A TOOL immediately (list_dir, read_file, exec_shell, etc.).\n- EVERY response MUST include at least one tool call. NEVER respond with only text. If you want to inspect something, call a tool — do not narrate.\n- If the user's request is vague, make a reasonable assumption about what they want and start working. Do not ask for clarification.`;
   }
 
-  // When "thinking aloud" is enabled for non-Anthropic providers, ask the model to expose reasoning.
-  if (thinking && !isAnthropicAgentProvider) {
+  // When "thinking aloud" is enabled for non-Anthropic providers, ask the model to expose
+  // reasoning. Customers never get this: their reply must be the answer itself, not narration.
+  if (thinking && !isAnthropicAgentProvider && !customerDirective) {
     agentMessages[0].content += `\n\nThink out loud: show your reasoning/chain-of-thought wrapped in <thinking>…</thinking> tags before your final answer when it helps the user follow your work.`;
   }
 
@@ -3809,7 +3856,7 @@ ${dirListing}
         // Reasoning / thinking content (OpenAI-compatible models like GLM-5.1/5.2)
         // GLM-5.2 streams reasoning as delta.reasoning (not reasoning_content or thinking)
         const thinkingContent = delta.reasoning_content || delta.thinking || delta.reasoning;
-        if (thinkingContent) {
+        if (thinkingContent && !customerDirective) {
           if (!thinkingActive) {
             thinkingActive = true;
             res.write(`data: ${JSON.stringify({ type: 'thinking_start' })}\n\n`);
@@ -4923,7 +4970,13 @@ app.post('/api/generate', requireSignedIn, async (req, res) => {
   const webResearchHint = canUseWebResearch
     ? ` web_search, firecrawl_scrape, hakster_scrape.${firecrawlHint} Use web tools for current docs and reference pages.`
     : ' Web research tools are unavailable on this free account after its 10 included uses.';
-  const BUILD_SYSTEM = APP_BUILDER_SYSTEM + '\n\n' + AGENT_SYSTEM_PROMPT + machineCtxText + '\n\nYou have tools available: read_file, write_file, edit_file, list_dir, exec_shell, browser_navigate, browser_snapshot, browser_screenshot, generate_image,' + webResearchHint + ' Use the available tools to inspect the workspace, generate images, run shell commands (build/test), and write files directly. After using tools, still output the complete app as structured artifacts in the format above.';
+  // Customer accounts build from the artifact format only: they never get the
+  // operator tool list or this machine's paths, and their tool calls are
+  // limited to web research and image generation.
+  const generateCustomerDirective = customerDirectiveFor(user, sessionId);
+  const BUILD_SYSTEM = generateCustomerDirective
+    ? APP_BUILDER_SYSTEM + '\n\n' + generateCustomerDirective + '\n\nFor build requests, use web research for current docs, then output the complete app as structured artifacts in the format above. You cannot run shell commands or edit server files in this chat — never claim you did.'
+    : APP_BUILDER_SYSTEM + '\n\n' + AGENT_SYSTEM_PROMPT + machineCtxText + '\n\nYou have tools available: read_file, write_file, edit_file, list_dir, exec_shell, browser_navigate, browser_snapshot, browser_screenshot, generate_image,' + webResearchHint + ' Use the available tools to inspect the workspace, generate images, run shell commands (build/test), and write files directly. After using tools, still output the complete app as structured artifacts in the format above.';
 
   const messages = [
     { role: 'system', content: BUILD_SYSTEM },
@@ -5030,7 +5083,7 @@ app.post('/api/generate', requireSignedIn, async (req, res) => {
         // Reasoning / thinking content (OpenAI-compatible models like GLM-5.1/5.2)
         // GLM-5.2 streams reasoning as delta.reasoning (not reasoning_content or thinking)
         const thinkingContent = delta.reasoning_content || delta.thinking || delta.reasoning;
-        if (thinkingContent) {
+        if (thinkingContent && !generateCustomerDirective) {
           if (!thinkingActive) {
             thinkingActive = true;
             res.write(`data: ${JSON.stringify({ type: 'thinking_start' })}\n\n`);
@@ -6695,10 +6748,54 @@ app.get('/api/admin/gmail/status', requireOwner, (req, res) => {
   }
 });
 
-app.post('/api/admin/gmail/connect', requireOwner, (req, res) => {
+// ── Google redirect-URI preflight ─────────────────────────────────────────
+// Google validates redirect_uri only after the owner has already left the site, so a missing
+// Cloud Console entry strands them on a bare "redirect_uri_mismatch" page with no way back.
+// Probe first and name the exact fix. 'unknown' never blocks the flow — only a confirmed
+// mismatch does, so a Google hiccup or a slow network cannot lock the owner out of connect.
+let gmailRedirectProbe = { uri: '', state: 'unknown', at: 0 };
+async function probeGmailRedirectUri(redirectUri) {
+  if (!redirectUri) return 'unknown';
+  if (gmailRedirectProbe.uri === redirectUri && Date.now() - gmailRedirectProbe.at < 10 * 60 * 1000) return gmailRedirectProbe.state;
+  let state = 'unknown';
+  try {
+    const probe = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: GMAIL_MONITOR_SCOPES.join(' '),
+      state: 'haksterai-redirect-preflight',
+    });
+    const response = await fetch(`https://accounts.google.com/o/oauth2/v2/auth?${probe}`, { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+    const text = `${response.url} ${await response.text()}`;
+    if (/redirect_uri_mismatch/.test(text)) state = 'mismatch';
+    else if (/invalid_client|unauthorized_client|deleted_client/.test(text)) state = 'client';
+    else state = 'ok';
+  } catch { state = 'unknown'; }
+  gmailRedirectProbe = { uri: redirectUri, state, at: Date.now() };
+  return state;
+}
+
+app.post('/api/admin/gmail/connect', requireOwner, async (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.status(503).json({ error: 'Google OAuth is not configured on the server' });
   const redirectUri = gmailMonitorRedirectUri();
   if (!redirectUri) return res.status(503).json({ error: 'Set GMAIL_MONITOR_REDIRECT_URI to https://haksterai.com/api/admin/gmail/callback and register that exact URI in Google Cloud' });
+  const preflight = await probeGmailRedirectUri(redirectUri);
+  if (preflight === 'mismatch') {
+    return res.status(409).json({
+      error: `Google rejected the callback ${redirectUri} (redirect_uri_mismatch). Fix it once in Google Cloud Console: APIs & Services > Credentials > the OAuth 2.0 client ${GOOGLE_CLIENT_ID} > Authorized redirect URIs > add ${redirectUri} > Save. Wait about a minute, then press Connect Gmail again.`,
+      code: 'redirect_uri_mismatch',
+      redirectUri,
+      clientId: GOOGLE_CLIENT_ID,
+    });
+  }
+  if (preflight === 'client') {
+    return res.status(409).json({
+      error: `Google does not recognise OAuth client ${GOOGLE_CLIENT_ID}. Recreate the OAuth client in Google Cloud Console and put the new client id and secret in server/.env, then press Connect Gmail again.`,
+      code: 'invalid_client',
+      clientId: GOOGLE_CLIENT_ID,
+    });
+  }
   const now = Date.now();
   for (const [key, item] of gmailMonitorOAuthStates) if (item.expiresAt < now) gmailMonitorOAuthStates.delete(key);
   if (gmailMonitorOAuthStates.size >= 128) return res.status(429).json({ error: 'Too many pending Google authorization requests. Try again shortly.' });
@@ -6861,6 +6958,19 @@ app.post('/api/admin/gmail/disconnect', requireOwner, async (req, res) => {
     res.status(503).json({ error: 'Google revoked Gmail access, but HaksterAI could not update its saved connection status.' });
   }
 });
+
+// ── Owner-only mail client (multi-account: Gmail OAuth + IMAP/SMTP) ──
+try {
+  require('./mail')({
+    app,
+    requireOwner,
+    readGmailConnection: readGmailMonitorConnection,
+    googleClientId: GOOGLE_CLIENT_ID,
+    googleClientSecret: GOOGLE_CLIENT_SECRET,
+  });
+} catch (mailClientError) {
+  console.error('[mail] Mail client failed to initialise (other routes unaffected):', mailClientError.message);
+}
 
 app.get('/api/auth/me', (req, res) => {
   const user = getUserByApiKey(req);
@@ -7654,10 +7764,30 @@ app.get(['/chat', '/chat/'], (req, res) => {
 const distPath = path.join(__dirname, '../../dist');
 // Serve the standalone HakTerm UI under its admin path. Public API requests
 // require an owner API key; the HTML bootstrap obtains it from the signed-in app.
+// Owner gate for HakTerm. Typing /hakterm no longer opens the terminal: GET /hakterm and
+// /hakterm/ return a small gate page that verifies the browser's owner key against
+// /api/auth/me, then pulls the real page body from the requireOwner endpoint below.
+// Static art stays public; every API request still goes through requireOwner.
+const HAKTERM_GATE = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex,nofollow"><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><title>HakTerm — haksterAi</title><style>html,body{height:100%;margin:0;background:#0a0a0f;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}.box{background:#111118;border:1px solid #7c3aed;border-radius:16px;padding:32px 28px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 40px #7c3aed33}.t{font-weight:800;letter-spacing:1px;font-size:1.05rem;margin-bottom:6px}.s{color:#94a3b8;font-size:.8rem;line-height:1.5;margin-bottom:18px;word-break:break-word}a{display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border-radius:9px;padding:10px 16px}a[hidden]{display:none}</style></head><body><div id="gate"><div class="box"><div class="t">HAKTERM</div><div class="s" id="msg">Verifying owner session…</div><a id="signin" hidden href="/?signin=1&redirect=%2Fhakterm%2F">Sign in as owner</a></div></div><script>(async () => {const msg=document.getElementById('msg');const signin=document.getElementById('signin');const fail=t=>{msg.textContent=t;signin.hidden=false;};const key=(()=>{try{return localStorage.getItem('hakster_google_token')||localStorage.getItem('hakster_api_key')||'';}catch{return '';}})();if(!key){fail('Sign in with the owner account to open HakTerm.');return;}try{const meRes=await fetch('/api/auth/me',{headers:{'x-api-key':key},cache:'no-store'});const me=meRes.ok?await meRes.json():null;if(!me||!me.user||!me.user.is_owner){fail('HakTerm is owner-only. Sign in with the owner account.');return;}const pageRes=await fetch('/api/hakterm/page',{headers:{'x-api-key':key},cache:'no-store'});if(!pageRes.ok){fail('Owner session could not open HakTerm ('+pageRes.status+').');return;}const html=await pageRes.text();document.open();document.write(html);document.close();}catch(e){fail('HakTerm could not load: '+((e&&e.message)||'network error'));}})();</script></body></html>`;
+
+app.get('/api/hakterm/page', requireOwner, async (req, res) => {
+  try {
+    const upstream = await fetch('http://127.0.0.1:8100/', { signal: AbortSignal.timeout(15000) });
+    if (!upstream.ok) return res.status(502).json({ error: 'HakTerm is temporarily unavailable' });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    return res.send(await upstream.text());
+  } catch (error) {
+    console.error('[hakterm-proxy] owner page load failed:', error.message);
+    return res.status(502).json({ error: 'HakTerm is temporarily unavailable' });
+  }
+});
+
 app.use('/hakterm', (req, res, next) => {
   const upstreamPath = req.originalUrl.replace(/^\/hakterm/, '') || '/';
-  const publicAsset = ['GET', 'HEAD'].includes(req.method) &&
-    (req.path === '/' || req.path === '/index.html' || req.path === '/assets/hakterm-hacker-bg.png');
+  const isHtmlShell = ['GET', 'HEAD'].includes(req.method) && (req.path === '/' || req.path === '/index.html');
+  const publicAsset = ['GET', 'HEAD'].includes(req.method) && /^\/assets\/[A-Za-z0-9._-]+$/.test(req.path);
   const forward = async () => {
     try {
       const upstream = await fetch(`http://127.0.0.1:8100${upstreamPath}`, {
@@ -7676,6 +7806,14 @@ app.use('/hakterm', (req, res, next) => {
       res.status(502).json({ error: 'HakTerm is temporarily unavailable' });
     }
   };
+  if (isHtmlShell) {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    if (req.method === 'HEAD') return res.end();
+    return res.send(HAKTERM_GATE);
+  }
   if (publicAsset) return forward();
   return requireOwner(req, res, forward);
 });
@@ -7689,6 +7827,7 @@ const ADMIN_PAGES = {
   users: 'admin/users/index.html',
   telegram: 'admin/telegram/index.html',
   email: 'admin/email/index.html',
+  mail: 'admin/mail/index.html',
   skills: 'admin/skills/index.html',
   vault: 'admin/vault/index.html',
 };
