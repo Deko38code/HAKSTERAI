@@ -76,6 +76,11 @@ const haksterBuildId = new Date().toISOString();
                 <span class="min-w-0 flex-1"><span class="block text-sm font-extrabold tracking-wide">HakTerm :8099</span><span class="block text-[9px] font-medium uppercase tracking-[0.14em] text-[#8fffc0]">Agent terminal</span></span>
                 <span class="rounded-md border border-[#00ff88]/45 bg-[#00ff88]/10 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[#a5ffca]">OPEN ↗</span>
               </a>
+              <a href="/hakterm/?brain=claude" title="Open HakTerm on the Claude CLI — same DeepSeek route the owner already runs" class="group my-1 flex items-center gap-2 rounded-xl border border-[#f0b46a]/70 bg-gradient-to-r from-[#2a1c0c] via-[#24170a] to-[#1d1408] px-3 py-2.5 text-[#ffdca8] shadow-[0_0_14px_rgba(240,180,106,0.22)] transition-all hover:-translate-y-0.5 hover:border-[#ffd7a1] hover:shadow-[0_0_22px_rgba(240,180,106,0.4)]">
+                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#f0b46a]/60 bg-[#f0b46a]/15 text-base text-[#ffd7a1]">🧠</span>
+                <span class="min-w-0 flex-1"><span class="block text-sm font-extrabold tracking-wide">Claude CLI</span><span class="block text-[9px] font-medium uppercase tracking-[0.14em] text-[#e7b77c]">DeepSeek route · HakTerm</span></span>
+                <span class="rounded-md border border-[#f0b46a]/45 bg-[#f0b46a]/10 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[#ffd7a1]">OPEN ↗</span>
+              </a>
               <a href="/commands" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🎛️ Command Center</a>
             </div>
           </div>
@@ -147,6 +152,11 @@ const haksterBuildId = new Date().toISOString();
               <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#00ff88]/60 bg-[#00ff88]/20 text-lg text-[#24ff91]">⚡</span>
               <span class="flex-1">HakTerm :8099 <span class="ml-1 text-[10px] font-medium uppercase tracking-wider text-[#8fffc0]">Agent terminal</span></span>
               <span class="text-xs text-[#75ffbd]">↗</span>
+            </a>
+            <a href="/hakterm/?brain=claude" title="Open HakTerm on the Claude CLI — same DeepSeek route the owner already runs" class="flex items-center gap-3 rounded-xl border border-[#f0b46a]/70 bg-gradient-to-r from-[#2a1c0c] via-[#24170a] to-[#1d1408] px-3 py-2.5 text-sm font-bold text-[#ffdca8] shadow-[0_0_14px_rgba(240,180,106,0.22)]">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#f0b46a]/60 bg-[#f0b46a]/15 text-lg text-[#ffd7a1]">🧠</span>
+              <span class="flex-1">Claude CLI <span class="ml-1 text-[10px] font-medium uppercase tracking-wider text-[#e7b77c]">DeepSeek · HakTerm</span></span>
+              <span class="text-xs text-[#ffd7a1]">↗</span>
             </a>
             <a href="/commands" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🎛️ Command Center</a>
           </div>
@@ -555,6 +565,11 @@ const haksterBuildId = new Date().toISOString();
       const adminPinDots = [...document.querySelectorAll('[data-admin-pin-dot]')];
       const ADMIN_GATE_PIN_KEY = 'hakster_admin_pin';
       const ADMIN_GATE_SESSION_KEY = 'hakster_admin_pin_session';
+      // A page that bounced here for its PIN leaves the path it wants back. HakTerm sets
+      // this too, and it doubles as "ask for a fresh PIN even if this tab is unlocked".
+      const ADMIN_GATE_RETURN_KEY = 'hakster_admin_return';
+      // One-shot permit HakTerm consumes on entry, so every open costs a fresh PIN.
+      const ADMIN_GATE_HAKTERM_PASS_KEY = 'hakster_hakterm_pass';
       let adminGatePin = '';
       let adminGatePendingPin = '';
       let adminGateMode = 'unlock';
@@ -577,7 +592,11 @@ const haksterBuildId = new Date().toISOString();
           if (onSuccess) adminGateOnSuccess = onSuccess;
           return;
         }
-        if (sessionStorage.getItem(ADMIN_GATE_SESSION_KEY) === '1') return onSuccess();
+        // A page that bounced here for its PIN (HakTerm) wants a new PIN entry, not the
+        // tab's stored unlock, so it must see the pad even when this tab is unlocked.
+        let wantsFreshUnlock = false;
+        try { wantsFreshUnlock = !!sessionStorage.getItem(ADMIN_GATE_RETURN_KEY); } catch {}
+        if (!wantsFreshUnlock && sessionStorage.getItem(ADMIN_GATE_SESSION_KEY) === '1') return onSuccess();
         // A page with its own PIN pad owns the lock until it is unlocked.
         if (document.querySelector('[data-page-admin-pin="true"]')) return;
         adminGateOnSuccess = onSuccess;
@@ -622,6 +641,17 @@ const haksterBuildId = new Date().toISOString();
         closeAdminPinGate();
         callback?.();
         window.dispatchEvent(new Event('hakster:admin-unlocked'));
+        // A page that bounced here just for its PIN leaves the path it wanted back.
+        // Hand control to it now that the tab is unlocked; same-origin paths only.
+        let pendingReturn = '';
+        try { pendingReturn = sessionStorage.getItem(ADMIN_GATE_RETURN_KEY) || ''; sessionStorage.removeItem(ADMIN_GATE_RETURN_KEY); } catch {}
+        if (pendingReturn.startsWith('/') && !pendingReturn.startsWith('//')) {
+          // HakTerm gets a one-shot permit: it opens once, and the next open asks again.
+          if (pendingReturn.startsWith('/hakterm')) {
+            try { sessionStorage.setItem(ADMIN_GATE_HAKTERM_PASS_KEY, '1'); } catch {}
+          }
+          window.location.assign(pendingReturn);
+        }
       }
       window.addEventListener('hakster:signout', () => {
         sessionStorage.removeItem(ADMIN_GATE_SESSION_KEY);
@@ -649,6 +679,7 @@ const haksterBuildId = new Date().toISOString();
         else if (event.key === 'Escape') {
           if (adminPath) {
             document.documentElement.dataset.adminPage = 'locked';
+            try { sessionStorage.removeItem(ADMIN_GATE_RETURN_KEY); } catch {}
             window.location.replace('/');
           } else closeAdminPinGate();
         }

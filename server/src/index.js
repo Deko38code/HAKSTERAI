@@ -240,8 +240,9 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:4321,http://
 const FS_ROOT = process.env.FS_ROOT || process.cwd();
 
 // ── Usage limits ─────────────────────────────────────────────────
-const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED !== 'false'; // default: ON — free users get 10 AI inputs
-const FREE_USAGE_LIMIT = 10;
+const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED !== 'false'; // default: ON — free users get 5 regular AI calls (plus 5 web lookups,
+// metered separately by FREE_WEB_RESEARCH_LIMIT below)
+const FREE_USAGE_LIMIT = 5;
 const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
 const REFERRAL_REWARD_TOKENS = parseInt(process.env.REFERRAL_REWARD_TOKENS || '10000', 10);
 const REFERRAL_SIGNUP_TOKENS = parseInt(process.env.REFERRAL_SIGNUP_TOKENS || '2500', 10);
@@ -335,8 +336,8 @@ const PRICING_CATALOG = [
     id: 'free',
     name: 'HaksterAI Free',
     stripeProductName: 'HaksterAI Free',
-    description: 'Free users get 10 AI inputs across chat, agents, scripts, and generation, then must upgrade.',
-    features: ['10 free AI inputs across chat, agents, scripts, and generation', 'Upgrade required after free limit', 'Local Ollama support', 'Basic chat and terminal tools'],
+    description: 'Free users get 5 AI calls and 5 web lookups across chat, agents, scripts, and generation, then must upgrade.',
+    features: ['5 free AI calls + 5 free web lookups', 'Upgrade required after the free allowance', 'Local Ollama support', 'Basic chat and terminal tools'],
     prices: [
       {
         id: 'free',
@@ -915,11 +916,13 @@ function requireSignedIn(req, res, next) {
 }
 
 // ── User-safe tools — signed-in non-owners cannot run commands or touch the ──
-// filesystem. Free users receive ten total web research calls; Pro and owners
-// have unrestricted access to the configured web research providers.
+// filesystem. A free account gets 5 regular AI calls (FREE_USAGE_LIMIT, metered
+// by reserveUsage) plus 5 web research calls (FREE_WEB_RESEARCH_LIMIT, metered
+// here). Pro, enterprise and owner accounts are not call-capped by either
+// counter — a paid plan is what meters the account, not a call count.
 const WEB_RESEARCH_TOOL_NAMES = new Set(['web_search', 'firecrawl_scrape', 'hakster_scrape']);
 const USER_SAFE_TOOL_NAMES = new Set([...WEB_RESEARCH_TOOL_NAMES, 'recall_memory', 'generate_image']);
-const FREE_WEB_RESEARCH_LIMIT = 10;
+const FREE_WEB_RESEARCH_LIMIT = 5;
 function isUnlimitedWebResearchUser(user) {
   return isOwnerUser(user) || ['pro', 'enterprise'].includes(String(user?.plan || '').toLowerCase());
 }
@@ -2027,11 +2030,18 @@ function getCustomerClientContext(sessionId) {
 }
 function customerDirectiveFor(user, sessionId, opts = {}) {
   if (!user || isOwnerUser(user)) return '';
+  // Free accounts: 5 regular AI calls (usage_count) + 5 web lookups (own table).
+  // Any paid plan passes null so the directive says "no free-call cap" instead
+  // of inventing a number.
+  const isFreePlan = String(user.plan || 'free').toLowerCase() === 'free';
+  const unlimitedWeb = isUnlimitedWebResearchUser(user);
   return buildCustomerChatDirective({
     user,
     client: getCustomerClientContext(sessionId),
-    webUsesRemaining: Math.max(0, FREE_WEB_RESEARCH_LIMIT - getFreeWebResearchUses(user)),
-    webLimit: FREE_WEB_RESEARCH_LIMIT,
+    webUsesRemaining: unlimitedWeb ? null : Math.max(0, FREE_WEB_RESEARCH_LIMIT - getFreeWebResearchUses(user)),
+    webLimit: unlimitedWeb ? null : FREE_WEB_RESEARCH_LIMIT,
+    callsRemaining: isFreePlan ? Math.max(0, FREE_USAGE_LIMIT - (Number(user.usage_count) || 0)) : null,
+    callLimit: isFreePlan ? FREE_USAGE_LIMIT : null,
     toolAccess: opts.toolAccess !== false,
   });
 }
@@ -3484,7 +3494,7 @@ ${dirListing}
   const factualLookupQuery = getFactualLookupQuery();
   if (factualLookupQuery && (isUnlimitedWebResearchUser(user) || getFreeWebResearchUses(user) < FREE_WEB_RESEARCH_LIMIT)) {
     try {
-      if (!isUnlimitedWebResearchUser(user) && !claimFreeWebResearchUse(user).allowed) throw new Error('Free web research limit reached (10 uses).');
+      if (!isUnlimitedWebResearchUser(user) && !claimFreeWebResearchUse(user).allowed) throw new Error(`Free web research limit reached (${FREE_WEB_RESEARCH_LIMIT} uses).`);
       res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_name: 'web_search', tool_args: { query: factualLookupQuery, count: 5 } })}\n\n`);
       const lookupResult = await executeAgentTool('web_search', { query: factualLookupQuery, count: 5 }, workDir, provider, agentModel, null, null, effectiveApprovalMode);
       res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_name: 'web_search', tool_result: String(lookupResult).slice(0, 1200) })}\n\n`);
@@ -3947,12 +3957,14 @@ ${dirListing}
         // ── Full-auto nudge: if model replies with text only, push it to act ──
         // Extended: nudge on ANY turn where the model talks but doesn't act (not just first 3).
         // This fixes "let me finish sorry" loops where hp-1000 apologizes instead of using tools.
-        if (effectiveApprovalMode === 'full-auto' && toolCalls.length === 0 && assistantContent.trim().length > 0 && turn < maxTurns - 2) {
+        // Customer chats have no shell/file tools, so nudging them to "call list_dir,
+        // exec_shell, write_file" only produced apology loops and repeated answers.
+        if (effectiveApprovalMode === 'full-auto' && !customerDirective && toolCalls.length === 0 && assistantContent.trim().length > 0 && turn < maxTurns - 2) {
           // Count how many times we've nudged already to avoid infinite apologizing
           const nudgeCount = agentMessages.filter(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('You responded with text only')).length;
           if (nudgeCount < 5) {
             agentMessages.push({ role: 'user', content: 'You responded with text only and did not use any tools. Stop apologizing and DO the work now. Call list_dir, read_file, exec_shell, write_file, or whatever tool is appropriate. Do not explain — execute. The task is NOT done until you have used tools to complete it.' });
-            res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\\n\\n`);
+            res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\n\n`);
             continue;
           }
         }
@@ -4231,7 +4243,7 @@ ${dirListing}
           }
           if (WEB_RESEARCH_TOOL_NAMES.has(toolName) && !isUnlimitedWebResearchUser(user)) {
             const webUse = claimFreeWebResearchUse(user);
-            if (!webUse.allowed) return { tc, result: '⛔ Free web research limit reached (10 uses). Upgrade to Pro for unlimited web research.', toolName, toolArgs };
+            if (!webUse.allowed) return { tc, result: `⛔ Free web research limit reached (${FREE_WEB_RESEARCH_LIMIT} uses). Upgrade to Pro for unlimited web research.`, toolName, toolArgs };
           }
           const result2 = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, undefined, allowedCommands, effectiveApprovalMode);
           try { const _db = getDb(); _db.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae) {}
@@ -4421,7 +4433,7 @@ ${dirListing}
           result = `⛔ Tool "${toolName}" is not permitted for this account. Web lookup, image generation, and memory recall only.`;
           try { const _db2 = getDb(); _db2.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call_denied', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae2) {}
         } else if (WEB_RESEARCH_TOOL_NAMES.has(toolName) && !isUnlimitedWebResearchUser(user) && !(claimFreeWebResearchUse(user).allowed)) {
-          result = '⛔ Free web research limit reached (10 uses). Upgrade to Pro for unlimited web research.';
+          result = `⛔ Free web research limit reached (${FREE_WEB_RESEARCH_LIMIT} uses). Upgrade to Pro for unlimited web research.`;
           try { const _db2 = getDb(); _db2.prepare('INSERT INTO user_activity (user_id, action, session_id, metadata) VALUES (?, ?, ?, ?)').run(user?.id || null, 'tool_call_denied', sessionId, JSON.stringify({ tool: toolName, args_summary: JSON.stringify(toolArgs).slice(0, 500) })); } catch(_ae2) {}
         } else {
           result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, allowedCommands, effectiveApprovalMode);
@@ -4969,7 +4981,7 @@ app.post('/api/generate', requireSignedIn, async (req, res) => {
   const canUseWebResearch = isUnlimitedWebResearchUser(user) || getFreeWebResearchUses(user) < FREE_WEB_RESEARCH_LIMIT;
   const webResearchHint = canUseWebResearch
     ? ` web_search, firecrawl_scrape, hakster_scrape.${firecrawlHint} Use web tools for current docs and reference pages.`
-    : ' Web research tools are unavailable on this free account after its 10 included uses.';
+    : ` Web research tools are unavailable on this free account after its ${FREE_WEB_RESEARCH_LIMIT} included uses.`;
   // Customer accounts build from the artifact format only: they never get the
   // operator tool list or this machine's paths, and their tool calls are
   // limited to web research and image generation.
@@ -5285,7 +5297,7 @@ app.post('/api/generate', requireSignedIn, async (req, res) => {
 
         let result;
         if (WEB_RESEARCH_TOOL_NAMES.has(toolName) && !isUnlimitedWebResearchUser(user) && !claimFreeWebResearchUse(user).allowed) {
-          result = '⛔ Free web research limit reached (10 uses). Upgrade to Pro for unlimited web research.';
+          result = `⛔ Free web research limit reached (${FREE_WEB_RESEARCH_LIMIT} uses). Upgrade to Pro for unlimited web research.`;
         } else {
           result = await executeAgentTool(toolName, toolArgs, workDir, provider, agentModel, onToolStream, undefined, approvalMode);
         }
@@ -7768,7 +7780,13 @@ const distPath = path.join(__dirname, '../../dist');
 // /hakterm/ return a small gate page that verifies the browser's owner key against
 // /api/auth/me, then pulls the real page body from the requireOwner endpoint below.
 // Static art stays public; every API request still goes through requireOwner.
-const HAKTERM_GATE = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex,nofollow"><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><title>HakTerm — haksterAi</title><style>html,body{height:100%;margin:0;background:#0a0a0f;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}.box{background:#111118;border:1px solid #7c3aed;border-radius:16px;padding:32px 28px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 40px #7c3aed33}.t{font-weight:800;letter-spacing:1px;font-size:1.05rem;margin-bottom:6px}.s{color:#94a3b8;font-size:.8rem;line-height:1.5;margin-bottom:18px;word-break:break-word}a{display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border-radius:9px;padding:10px 16px}a[hidden]{display:none}</style></head><body><div id="gate"><div class="box"><div class="t">HAKTERM</div><div class="s" id="msg">Verifying owner session…</div><a id="signin" hidden href="/?signin=1&redirect=%2Fhakterm%2F">Sign in as owner</a></div></div><script>(async () => {const msg=document.getElementById('msg');const signin=document.getElementById('signin');const fail=t=>{msg.textContent=t;signin.hidden=false;};const key=(()=>{try{return localStorage.getItem('hakster_google_token')||localStorage.getItem('hakster_api_key')||'';}catch{return '';}})();if(!key){fail('Sign in with the owner account to open HakTerm.');return;}try{const meRes=await fetch('/api/auth/me',{headers:{'x-api-key':key},cache:'no-store'});const me=meRes.ok?await meRes.json():null;if(!me||!me.user||!me.user.is_owner){fail('HakTerm is owner-only. Sign in with the owner account.');return;}const pageRes=await fetch('/api/hakterm/page',{headers:{'x-api-key':key},cache:'no-store'});if(!pageRes.ok){fail('Owner session could not open HakTerm ('+pageRes.status+').');return;}const html=await pageRes.text();document.open();document.write(html);document.close();}catch(e){fail('HakTerm could not load: '+((e&&e.message)||'network error'));}})();</script></body></html>`;
+// Rocket Loader (Cloudflare) rewrites every script the edge serves to a hashed
+// non-JS type and injects a deferred loader. A page that is injected with
+// document.write is never processed by that loader, so it paints with all of its
+// JavaScript dead: typing shows, Enter and every button do nothing. Both gates
+// undo the rewrite (and drop the injected loader tag) before writing the page in,
+// so the real page boots exactly as it does when served directly.
+const HAKTERM_GATE = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex,nofollow"><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><title>HakTerm — haksterAi</title><style>html,body{height:100%;margin:0;background:#0a0a0f;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}.box{background:#111118;border:1px solid #7c3aed;border-radius:16px;padding:32px 28px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 40px #7c3aed33}.t{font-weight:800;letter-spacing:1px;font-size:1.05rem;margin-bottom:6px}.s{color:#94a3b8;font-size:.8rem;line-height:1.5;margin-bottom:18px;word-break:break-word}a{display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border-radius:9px;padding:10px 16px}a[hidden]{display:none}</style></head><body><div id="gate"><div class="box"><div class="t">HAKTERM</div><div class="s" id="msg">Verifying owner session…</div><a id="signin" hidden href="/?signin=1&redirect=%2Fhakterm%2F">Sign in as owner</a></div></div><script data-cfasync="false">(async () => {const msg=document.getElementById('msg');const signin=document.getElementById('signin');const fail=t=>{msg.textContent=t;signin.hidden=false;};const key=(()=>{try{return localStorage.getItem('hakster_google_token')||localStorage.getItem('hakster_api_key')||'';}catch{return '';}})();if(!key){fail('Sign in with the owner account to open HakTerm.');return;}try{const meRes=await fetch('/api/auth/me',{headers:{'x-api-key':key},cache:'no-store'});const me=meRes.ok?await meRes.json():null;if(!me||!me.user||!me.user.is_owner){fail('HakTerm is owner-only. Sign in with the owner account.');return;}const pageRes=await fetch('/api/hakterm/page',{headers:{'x-api-key':key},cache:'no-store'});if(!pageRes.ok){fail('Owner session could not open HakTerm ('+pageRes.status+').');return;}const html=await pageRes.text();const unRocket=s=>s.replace(/type="[A-Za-z0-9_-]+-text\\/javascript"/g,'type="text/javascript"').replace(/type="[A-Za-z0-9_-]+-module"/g,'type="module"').replace(/<script[^>]*rocket-loader[^>]*>[\\s\\S]*?<\\/script>/g,'');document.open();document.write(unRocket(html));document.close();setTimeout(()=>{const left=document.querySelectorAll('script[type$="-text/javascript"],script[type$="-module"]').length;if(!left&&window.__haktermBooted)return;const d=document.createElement('div');d.setAttribute('style','position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483647;background:#3b0d12;color:#fecdd3;border:1px solid #f43f5e;border-radius:10px;padding:12px 14px;font:600 13px/1.5 ui-monospace,monospace');d.textContent='HakTerm loaded but its page scripts did not finish starting. Reload once; if it repeats, the gate transform needs updating. ('+left+' rewritten script tag(s) left)';document.body.appendChild(d);},6000);}catch(e){fail('HakTerm could not load: '+((e&&e.message)||'network error'));}})();</script></body></html>`;
 
 app.get('/api/hakterm/page', requireOwner, async (req, res) => {
   try {
@@ -7790,19 +7808,42 @@ app.use('/hakterm', (req, res, next) => {
   const publicAsset = ['GET', 'HEAD'].includes(req.method) && /^\/assets\/[A-Za-z0-9._-]+$/.test(req.path);
   const forward = async () => {
     try {
+      const hasBody = !['GET', 'HEAD'].includes(req.method);
       const upstream = await fetch(`http://127.0.0.1:8100${upstreamPath}`, {
         method: req.method,
-        headers: { 'content-type': req.get('content-type') || 'application/json' },
-        body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body ?? {}),
+        // A fresh upstream socket per request: a pooled keep-alive socket the
+        // local HakTerm server has already closed makes undici fail the POST
+        // ("fetch failed") instead of retrying it the way it retries GETs.
+        headers: { 'content-type': req.get('content-type') || 'application/json', connection: 'close' },
+        body: hasBody ? JSON.stringify(req.body ?? {}) : undefined,
+        signal: hasBody ? AbortSignal.timeout(15 * 60 * 1000) : AbortSignal.timeout(60000),
       });
       res.status(upstream.status);
       upstream.headers.forEach((value, key) => {
         if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) res.setHeader(key, value);
       });
+      console.log(`[hakterm-proxy] ${req.method} ${upstreamPath} -> ${upstream.status} ${upstream.headers.get('content-type') || ''}`);
+      // Server-sent events must never be compressed (zlib holds small chunks
+      // until the stream ends, so the terminal's panels stay empty) and must
+      // not sit in Cloudflare's buffer.
+      const upstreamType = String(upstream.headers.get('content-type') || '');
+      if (/text\/event-stream/i.test(upstreamType)) {
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.removeHeader('Content-Length');
+        res.flushHeaders?.();
+      }
       if (req.method === 'HEAD' || !upstream.body) return res.end();
-      Readable.fromWeb(upstream.body).pipe(res);
+      const body = Readable.fromWeb(upstream.body);
+      body.on('error', (error) => {
+        console.error(`[hakterm-proxy] ${req.method} ${upstreamPath} stream failed:`, error?.message || error);
+        res.destroy();
+      });
+      body.pipe(res);
     } catch (error) {
-      console.error('[hakterm-proxy] local HakTerm request failed:', error.message);
+      const cause = error?.cause?.message || error?.cause?.code || '';
+      console.error(`[hakterm-proxy] ${req.method} ${upstreamPath} local HakTerm request failed:`, error.message, cause ? '| cause: ' + cause : '');
+      if (res.headersSent) return res.destroy();
       res.status(502).json({ error: 'HakTerm is temporarily unavailable' });
     }
   };
@@ -7847,7 +7888,7 @@ app.use('/admin', (req, res, next) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-  res.send(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="haksterAi admin."><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><title>Admin — haksterAi</title><style>html,body{height:100%;margin:0;background:#0a0a0f;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}.box{background:#111118;border:1px solid #7c3aed;border-radius:16px;padding:32px 28px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 40px #7c3aed33}.t{font-weight:800;letter-spacing:1px;font-size:1.05rem;margin-bottom:6px}.s{color:#94a3b8;font-size:.8rem;line-height:1.5;margin-bottom:18px;word-break:break-word}a{display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border-radius:9px;padding:10px 16px}a[hidden]{display:none}</style></head><body><div id="gate"><div class="box"><div class="t">HAKSTER ADMIN</div><div class="s" id="msg">Verifying owner session…</div><a id="signin" hidden href="/?signin=1&redirect=${encodeURIComponent('/admin/' + page + '/')}">Sign in as owner</a></div></div><script>(async () => {const page=${JSON.stringify(page)};const msg=document.getElementById('msg');const signin=document.getElementById('signin');const fail=t=>{msg.textContent=t;signin.hidden=false;};const key=(()=>{try{return localStorage.getItem('hakster_google_token')||localStorage.getItem('hakster_api_key')||'';}catch{return '';}})();if(!key){fail('Sign in with the owner account to open admin.');return;}try{const meRes=await fetch('/api/auth/me',{headers:{'x-api-key':key},cache:'no-store'});const me=meRes.ok?await meRes.json():null;if(!me||!me.user||!me.user.is_owner){fail('This area is owner-only. Sign in with the owner account.');return;}const pageRes=await fetch('/api/admin/page/'+encodeURIComponent(page),{headers:{'x-api-key':key},cache:'no-store'});if(!pageRes.ok){fail('Owner session could not open this page ('+pageRes.status+').');return;}const html=await pageRes.text();document.open();document.write(html);document.close();}catch(e){fail('Admin could not load: '+((e&&e.message)||'network error'));}})();</script></body></html>`);
+  res.send(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="haksterAi admin."><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><title>Admin — haksterAi</title><style>html,body{height:100%;margin:0;background:#0a0a0f;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}.box{background:#111118;border:1px solid #7c3aed;border-radius:16px;padding:32px 28px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 40px #7c3aed33}.t{font-weight:800;letter-spacing:1px;font-size:1.05rem;margin-bottom:6px}.s{color:#94a3b8;font-size:.8rem;line-height:1.5;margin-bottom:18px;word-break:break-word}a{display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border-radius:9px;padding:10px 16px}a[hidden]{display:none}</style></head><body><div id="gate"><div class="box"><div class="t">HAKSTER ADMIN</div><div class="s" id="msg">Verifying owner session…</div><a id="signin" hidden href="/?signin=1&redirect=${encodeURIComponent('/admin/' + page + '/')}">Sign in as owner</a></div></div><script data-cfasync="false">(async () => {const page=${JSON.stringify(page)};const msg=document.getElementById('msg');const signin=document.getElementById('signin');const fail=t=>{msg.textContent=t;signin.hidden=false;};const key=(()=>{try{return localStorage.getItem('hakster_google_token')||localStorage.getItem('hakster_api_key')||'';}catch{return '';}})();if(!key){fail('Sign in with the owner account to open admin.');return;}try{const meRes=await fetch('/api/auth/me',{headers:{'x-api-key':key},cache:'no-store'});const me=meRes.ok?await meRes.json():null;if(!me||!me.user||!me.user.is_owner){fail('This area is owner-only. Sign in with the owner account.');return;}const pageRes=await fetch('/api/admin/page/'+encodeURIComponent(page),{headers:{'x-api-key':key},cache:'no-store'});if(!pageRes.ok){fail('Owner session could not open this page ('+pageRes.status+').');return;}const html=await pageRes.text();const unRocket=s=>s.replace(/type="[A-Za-z0-9_-]+-text\\/javascript"/g,'type="text/javascript"').replace(/type="[A-Za-z0-9_-]+-module"/g,'type="module"').replace(/<script[^>]*rocket-loader[^>]*>[\\s\\S]*?<\\/script>/g,'');document.open();document.write(unRocket(html));document.close();setTimeout(()=>{const left=document.querySelectorAll('script[type$="-text/javascript"],script[type$="-module"]').length;if(!left)return;const d=document.createElement('div');d.setAttribute('style','position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483647;background:#3b0d12;color:#fecdd3;border:1px solid #f43f5e;border-radius:10px;padding:12px 14px;font:600 13px/1.5 ui-monospace,monospace');d.textContent='This admin page loaded but its scripts are still rewritten by a CDN proxy. Reload once; if it repeats, the gate transform needs updating. ('+left+' rewritten script tag(s) left)';document.body.appendChild(d);},6000);}catch(e){fail('Admin could not load: '+((e&&e.message)||'network error'));}})();</script></body></html>`);
 });
 
 // ── Media Studio — sandboxed media-only terminal agent ─────────────

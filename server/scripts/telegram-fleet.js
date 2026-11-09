@@ -24,7 +24,7 @@ try { require(path.join(ROOT, 'node_modules', 'dotenv')).config({ path: path.joi
 
 const DATA_DIR = path.join(ROOT, '..', 'data');
 const MANIFEST = path.join(DATA_DIR, 'telegram-subagents.json');
-const ROLE_NAMES = { 1: 'command', 2: 'coder', 3: 'recon', 4: 'debugger', 5: 'uptime', 6: 'health' };
+const ROLE_NAMES = { 1: 'command', 2: 'coder', 3: 'recon', 4: 'debugger', 5: 'uptime', 6: 'health', 7: 'security', 8: 'domains' };
 
 function call(method, token, payload) {
   return new Promise((resolve) => {
@@ -116,6 +116,7 @@ async function add() {
   console.log(`manifest: ${path.relative(ROOT, MANIFEST)}`);
   if (slot) console.log(`next step for the owner: add TELEGRAM_BOT_TOKEN_${slot}=<token> to server/.env, then restart hakster`);
   const isSecurity = /security|audit|soc/i.test(`${name} ${job}`);
+  const isDomain = /domain|dns|registrar/i.test(`${name} ${job}`);
   const commands = isSecurity
     ? [
       { command: 'security', description: 'Security posture summary' },
@@ -126,19 +127,35 @@ async function add() {
       { command: 'users', description: 'Root and sudo accounts' },
       { command: 'help', description: 'Read-only security checks' },
     ]
-    : [
-      { command: 'market', description: 'Open the HaksterAI marketplace' },
-      { command: 'plans', description: 'See membership and site prices' },
-      { command: 'start', description: 'Start the bot' },
-    ];
+    : isDomain
+      ? [
+        { command: 'check', description: 'Check if a domain is registered' },
+        { command: 'find', description: 'Short name ideas for a keyword' },
+        { command: 'tlds', description: 'Suffixes this desk quotes' },
+        { command: 'market', description: 'Open the HaksterAI marketplace' },
+        { command: 'waitlist', description: 'Get told when the marketplace opens' },
+        { command: 'help', description: 'Domain desk commands' },
+      ]
+      : [
+        { command: 'market', description: 'Open the HaksterAI marketplace' },
+        { command: 'plans', description: 'See membership and site prices' },
+        { command: 'start', description: 'Start the bot' },
+      ];
   await call('setMyCommands', token, { commands })
-    .then((r) => console.log(`setMyCommands (${isSecurity ? 'security' : 'marketplace'}):`, r.ok ? 'OK' : `FAIL ${r.error}`));
+    .then((r) => console.log(`setMyCommands (${isSecurity ? 'security' : isDomain ? 'domains' : 'marketplace'}):`, r.ok ? 'OK' : `FAIL ${r.error}`));
 }
 
 function hint() {
   const name = (arg('--hint') || 'marketplace').trim();
   const suggested = name.replace(/[^a-z0-9_]/gi, '').toLowerCase() || 'hakster';
   const isSecurity = /security|audit|soc/i.test(name);
+  const isDomain = /domain|dns|registrar/i.test(name);
+  const firstCommand = isSecurity ? '/security' : isDomain ? '/check example.com' : '/market';
+  const botFatherCommands = isSecurity
+    ? 'Optional BotFather settings: /setcommands (security, ports, ssh, fw, updates, users, help)'
+    : isDomain
+      ? 'Optional BotFather settings: /setcommands (check, find, tlds, market, waitlist, help)'
+      : 'Optional BotFather settings: /setcommands (market, plans, start), /setmenubutton → https://haksterai.com/marketplace/';
   console.log([
     'BotFather has no public API for creating bots — the key has to come from your Telegram app:',
     '  1. Open @BotFather → /newbot',
@@ -146,11 +163,9 @@ function hint() {
     `  3. Username: ${suggested}_bot (add numbers if taken)`,
     '  4. Copy the token BotFather sends and give it to the agent only to verify — do not paste it in chat.',
     '  5. The agent records the sub-agent and gives you the exact TELEGRAM_BOT_TOKEN_N line for server/.env.',
-    `  6. After the .env line is added: pm2 restart hakster --update-env, then ${isSecurity ? '/security' : '/market'} in the new bot.`,
+    `  6. After the .env line is added: pm2 restart hakster --update-env, then ${firstCommand} in the new bot.`,
     '',
-    isSecurity
-      ? 'Optional BotFather settings: /setcommands (security, ports, ssh, fw, updates, users, help)'
-      : 'Optional BotFather settings: /setcommands (market, plans, start), /setmenubutton → https://haksterai.com/marketplace/',
+    botFatherCommands,
     'Mini app registration: /newapp → name, description, photo, then set the web app URL.',
   ].join('\n'));
 }

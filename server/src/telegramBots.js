@@ -14,6 +14,7 @@ const readline = require('readline');
 const { chat, firecrawlScrape } = require('./providers');
 const { getDb } = require('./db');
 const { handleSecurityCommand, securityDigest } = require('./telegramSecurityBot');
+const { handleDomainCommand } = require('./telegramDomainBot');
 let _autolearn = null, _memoryEngine = null, _smartRouter = null;
 try { _autolearn = require('./agent/autolearn'); } catch (_) {}
 try { _memoryEngine = require('./agent/memory-engine'); } catch (_) {}
@@ -21,6 +22,34 @@ try { _smartRouter = require('./agent/smart-router'); _smartRouter.init(); } cat
 
 const ENV_ROOT = path.join(__dirname, '..');
 const SERVER_PORT = parseInt(process.env.PORT || '3579', 10);
+
+// Miniforge owns apps and the Create Builds pipeline. Its internal builder API
+// is loopback-only, so the fleet reaches it directly on the local listener.
+const MINIFORGE_INTERNAL = process.env.MINIFORGE_INTERNAL_URL || 'http://127.0.0.1:5555';
+
+// The snapshot route returns a real headless screenshot; post it before the
+// text summary so the build report shows the actual rendered app.
+async function sendSnapPhoto(bot, chatId, snap, caption) {
+  if (!snap || !snap.ok || !snap.screenshot || !snap.screenshot.base64) return false;
+  try {
+    await bot.sendPhoto(chatId, Buffer.from(snap.screenshot.base64, 'base64'), { caption: String(caption || '').slice(0, 1000) });
+    return true;
+  } catch (e) {
+    console.error('[telegramBots] snapshot photo failed:', e.message);
+    return false;
+  }
+}
+async function miniforgeBuilder(action, payload) {
+  const res = await fetch(`${MINIFORGE_INTERNAL}/api/internal/builder/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+    signal: AbortSignal.timeout(320000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Miniforge returned ${res.status}`);
+  return data;
+}
 
 function loadHaksterConfig() {
   try {
@@ -101,6 +130,12 @@ function runAgent(prompt, sessionId) {
 
   return new Promise((resolve, reject) => {
     const contentParts = [];
+    // The agent loop streams every turn's text, including narration before a
+    // tool call. Telegram users saw that as the same answer repeated 3-4 times
+    // with "I used web_search" notes glued on. Keep only the current turn's
+    // text and drop it each time a tool boundary is crossed, so what gets sent
+    // is the final answer.
+    let turnParts = [];
     let reason = null;
 
     const req = http.request({
@@ -128,7 +163,8 @@ function runAgent(prompt, sessionId) {
         if (!json) return;
         try {
           const data = JSON.parse(json);
-          if (data.type === 'delta' && data.content) contentParts.push(data.content);
+          if (data.type === 'delta' && data.content) { contentParts.push(data.content); turnParts.push(data.content); }
+          if (data.type === 'tool_call_start' || data.type === 'auto_nudge' || data.type === 'refusal_blocked' || data.type === 'loop_nudge') turnParts = [];
           if (data.type === 'error') reason = data.error || data.message || 'agent error';
           // loop_detected: use whatever content was collected so far instead of rejecting
           if (data.type === 'loop_detected') {
@@ -138,7 +174,10 @@ function runAgent(prompt, sessionId) {
       });
       rl.on('close', () => {
         if (reason) return reject(new Error(reason));
-        resolve(contentParts.join(''));
+        // turnParts holds only the text after the last tool call; fall back to
+        // the full stream if the run ended mid-tool (loop detected, error).
+        const answer = turnParts.join('').trim() || contentParts.join('');
+        resolve(answer);
       });
       res.on('error', reject);
     });
@@ -232,6 +271,7 @@ const ROLES = {
   TELEGRAM_BOT_TOKEN_5: { name: 'uptime watchdog', job: 'uptime monitor',              username: null, bot: null, chatIds: new Set() },
   TELEGRAM_BOT_TOKEN_6: { name: 'system health',   job: 'system health reporter',       username: null, bot: null, chatIds: new Set() },
   TELEGRAM_BOT_TOKEN_7: { name: 'security',        job: 'read-only security posture + audit', username: null, bot: null, chatIds: new Set() },
+  TELEGRAM_BOT_TOKEN_8: { name: 'domains',         job: 'marketplace domain desk (registry checks + name ideas)', username: null, bot: null, chatIds: new Set() },
 };
 
 const CHAT_IDS_FILE = path.join(ENV_ROOT, 'data', 'telegram_chat_ids.json');
@@ -294,6 +334,12 @@ function splitMessage(text, limit = 4000) {
 async function sendToRole(roleKey, text, options = {}) {
   const role = ROLES[roleKey];
   if (!role || !role.bot) return false;
+  // Lazily hydrate chat ids from disk. Tool handlers and scripts that call a
+  // sendToRole wrapper before initBots() used to see an empty chat set and get
+  // a silent `false` back — the alert vanished with no error anywhere.
+  if (role.chatIds.size === 0) {
+    try { loadChatIds(); } catch {}
+  }
   const ids = Array.from(role.chatIds);
   if (!ids.length) {
     // Rate-limit: only log once per 10 min per bot to avoid flooding error log
@@ -395,6 +441,9 @@ function initBots() {
     let _poll409Count = 0;
     let _poll409Dead = false;
     let _pollNetErrCount = 0;
+    let _pollOtherErrCount = 0;
+    let _pollOtherErrLoggedAt = 0;
+    let _pollOtherErrBucket = '';
     bot.on('polling_error', (error) => {
       const msg = error?.message || String(error);
       if (msg.includes('409') || msg.includes('terminated by other')) {
@@ -435,7 +484,18 @@ function initBots() {
         bot.stopPolling().catch(() => {});
         _poll409Dead = true;
       } else {
-        console.error(`[telegram] ${ROLES[key].name} polling error:`, msg);
+        // Transient edge errors (502/504/429) and anything unexpected: log at
+        // most once per 5 minutes per bot with a running count, or immediately
+        // when the error type changes. A Telegram-side incident used to write
+        // every occurrence and grew the PM2 error log to 195 MB.
+        _pollOtherErrCount++;
+        const bucket = msg.replace(/\d+/g, '#').slice(0, 80);
+        const now = Date.now();
+        if (bucket !== _pollOtherErrBucket || now - _pollOtherErrLoggedAt > 300000) {
+          _pollOtherErrBucket = bucket;
+          _pollOtherErrLoggedAt = now;
+          console.error(`[telegram] ${ROLES[key].name} polling error (${_pollOtherErrCount}x): ${msg}`);
+        }
       }
     });
 
@@ -470,6 +530,7 @@ function initBots() {
     TELEGRAM_BOT_TOKEN_4: '🐞 debugger bot online — scans crashed services + error logs every 15m',
     TELEGRAM_BOT_TOKEN_5: '🛡 uptime watchdog online — uptime checks every 15m',
     TELEGRAM_BOT_TOKEN_6: '🏥 system health bot online — health report every 30m',
+    TELEGRAM_BOT_TOKEN_8: '🌐 domain desk online — /check <name> for registry data, /find <keyword> for short name ideas',
   };
   setTimeout(() => {
     for (const [key, msg] of Object.entries(JOBS)) {
@@ -535,15 +596,79 @@ async function handleMessage(roleKey, msg) {
     }
   }
 
+  // ── Role 8: marketplace domain desk (registry checks only, buys nothing) ──
+  // /market is handled above so it keeps opening the mini app; everything else here.
+  if (roleKey === 'TELEGRAM_BOT_TOKEN_8') {
+    const reply = await handleDomainCommand(text, { chatId });
+    if (reply) return bot.sendMessage(chatId, reply);
+    return bot.sendMessage(chatId, 'Send /help for the domain desk (/check, /find, /tlds, /market, /waitlist).');
+  }
+
   // ── Role 1: haksterAi command bot ──
   if (roleKey === 'TELEGRAM_BOT_TOKEN_1') {
     if (/^\/(?:subscribe|pay|plans)\b/i.test(text)) {
       return sendPlanPicker(bot, chatId);
     }
+    // ── Create Builds from Telegram: build → image → OMP snapshot ──
+    const buildMatch = text.match(/^\/build\s+([\s\S]+)$/i);
+    if (buildMatch) {
+      const prompt = buildMatch[1].trim();
+      await bot.sendChatAction(chatId, 'typing');
+      const status = await bot.sendMessage(chatId, `⚡ Building "${prompt}"…\nReal builder → saved app → image → OMP snapshot.`);
+      try {
+        const built = await miniforgeBuilder('build', { prompt });
+        await bot.editMessageText(
+          `✅ App built: ${built.name}\n${built.url}\nSource: ${Number(built.bytes || 0).toLocaleString()} bytes`,
+          { chat_id: chatId, message_id: status.message_id }
+        ).catch(() => {});
+        try {
+          const img = await miniforgeBuilder('image', { slug: built.slug, prompt });
+          if (img.image) await bot.sendPhoto(chatId, Buffer.from(img.image, 'base64'), { caption: `🎨 ${built.name} · ${img.provider || 'image'}` });
+          else await bot.sendMessage(chatId, `🎨 Image unavailable: ${img.error || 'no image returned'}`);
+        } catch (e) { await bot.sendMessage(chatId, `🎨 Image failed: ${e.message}`); }
+        try {
+          const snap = await miniforgeBuilder('snap', { slug: built.slug });
+          await sendSnapPhoto(bot, chatId, snap, `📸 ${snap.title || built.name}`);
+          await safeSendMarkdown(bot, chatId, `📸 *Snapshot*
+${(snap.summary || 'completed').slice(0, 3500)}`);
+        } catch (e) { await bot.sendMessage(chatId, `📸 Snapshot failed: ${e.message}`); }
+      } catch (e) {
+        await bot.editMessageText(`❌ Build failed: ${e.message}`, { chat_id: chatId, message_id: status.message_id }).catch(() => {});
+      }
+      return;
+    }
+
+    // /image <app-slug> [prompt] — generate artwork for a built app
+    const imageMatch = text.match(/^\/image\s+(\S+)(?:\s+([\s\S]+))?$/i);
+    if (imageMatch) {
+      const slug = imageMatch[1];
+      const prompt = (imageMatch[2] || '').trim() || `App artwork for ${slug}`;
+      await bot.sendChatAction(chatId, 'upload_photo');
+      try {
+        const img = await miniforgeBuilder('image', { slug, prompt });
+        if (img.image) await bot.sendPhoto(chatId, Buffer.from(img.image, 'base64'), { caption: `🎨 ${slug} · ${img.provider || 'image'}` });
+        else await bot.sendMessage(chatId, `🎨 Image unavailable: ${img.error || 'no image returned'}`);
+      } catch (e) { await bot.sendMessage(chatId, `🎨 Image failed: ${e.message}`); }
+      return;
+    }
+
+    // /snap <app-slug> — OMP snapshot of a built app
+    const snapMatch = text.match(/^\/snap\s+(\S+)$/i);
+    if (snapMatch) {
+      await bot.sendChatAction(chatId, 'typing');
+      try {
+        const snap = await miniforgeBuilder('snap', { slug: snapMatch[1] });
+        await sendSnapPhoto(bot, chatId, snap, `📸 ${snap.title || snapMatch[1]}`);
+        await safeSendMarkdown(bot, chatId, `📸 *Snapshot · ${snapMatch[1]}*
+${(snap.summary || 'completed').slice(0, 3500)}`);
+      } catch (e) { await bot.sendMessage(chatId, `📸 Snapshot failed: ${e.message}`); }
+      return;
+    }
+
     const match = text.match(/^\/(?:ask|hakster)\s+([\s\S]+)$/i);
     if (!match) {
       return bot.sendMessage(chatId,
-        '⚡ *haksterAI Command Bot*\n\nUsage:\n`/ask <prompt>` — ask the agent\n`/subscribe` — pick a plan and pay\n`/status` — server status',
+        '⚡ *haksterAI Command Bot*\n\nUsage:\n`/build <prompt>` — build an app, then image + live snapshot\n`/image <app-slug> [prompt]` — generate app artwork\n`/snap <app-slug>` — live snapshot of a built app\n`/ask <prompt>` — ask the agent\n`/subscribe` — pick a plan and pay\n`/status` — server status',
         { parse_mode: 'Markdown' });
     }
     await bot.sendChatAction(chatId, 'typing');

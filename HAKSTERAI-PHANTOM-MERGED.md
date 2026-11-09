@@ -10443,3 +10443,228 @@ fleet is tested with the new check script whenever anything Telegram-related cha
 - Owner step remaining: BotFather `/newbot`, then `telegram-fleet.js --add --name security
   --job "read-only security posture" --token <token>`, add `TELEGRAM_BOT_TOKEN_7` to
   `server/.env`, restart, and confirm a real `/security` reply.
+
+## 2026-11-08 — HakTerm admin proxy: POST "fetch failed" + buffered SSE fixed
+
+- Symptom: in admin, HakTerm accepted typing (the user line rendered) but the turn never reached
+  the agent and no output panels filled. `hakster-error.log` showed repeated
+  `[hakterm-proxy] local HakTerm request failed: fetch failed` and a `BadRequestError: request
+  aborted` from body-parser.
+- Cause: the `/hakterm` proxy in `server/src/index.js` forwarded POSTs to
+  `http://127.0.0.1:8100` with a pooled keep-alive socket and no timeout, and it passed the
+  upstream `text/event-stream` through `express compression()` — `compressible('text/event-stream')`
+  is true, so zlib held small SSE chunks until the stream ended.
+- Fix (server/src/index.js, `/hakterm` forward): upstream requests now send `connection: close`
+  (fresh socket; undici does not retry POSTs on a stale pooled socket), POSTs carry a 15-minute
+  abort signal, `text/event-stream` responses set `Cache-Control: no-cache, no-transform` +
+  `X-Accel-Buffering: no`, drop `Content-Length`, and flush headers before piping. Errors now log
+  `error.cause` plus the method and path.
+- Also fixed (dsterm/index.html): the standalone loopback origin (`127.0.0.1:8100`) no longer
+  demands an owner key or calls `/api/auth/me` — the local HakTerm server does not implement that
+  route (404), so every local open bounced to the sign-in page. The loopback bind is that gate.
+- Verified after `pm2 restart hakster` (pid 53735): `https://haksterai.com/hakterm/` and `/`
+  return 200; direct `POST /api/run` through the same fetch shape returns a streamed
+  `{"content":…}` in ~5 s on the `claude` brain (`deepseek-v4.1-flash:cloud`); a headless browser
+  loads `127.0.0.1:8100/` and `/hakterm/` with no owner key and renders the reply. Backups:
+  `index.html.bak-standalone-gate-20261108T045026Z`,
+  `hakterm.mjs.bak-standalone-gate-20261108T045026Z`, this file's `.bak-20261108T…Z`.
+
+### 2026-11-08 — HakTerm/admin pages dead behind Cloudflare (Rocket Loader vs document.write)
+
+**Symptom:** `https://haksterai.com/hakterm/` (and the `/admin/*` gates) painted the full UI but
+was completely inert — typing showed, Enter only added a newline, every button did nothing.
+
+**Root cause (verified against the live edge, not guessed):** the zone runs Cloudflare Rocket
+Loader. Every HTML response is rewritten to `type="<24-hex>-text/javascript"` / `"<24-hex>-module"`
+with a deferred `rocket-loader.min.js` injected; the loader re-runs those scripts for normally
+parsed pages, but **never for HTML injected with `document.write`**. Both `HAKTERM_GATE` and the
+`/admin` gate fetch the real page and write it in with `document.open()/write()/close()`, so their
+scripts stayed dead. Local/loopback tests passed because there is no edge rewrite there — a
+previous note claiming a headless load of `/hakterm/` "renders the reply" was measuring the local
+standalone page, not this edge path.
+
+**Fix (app code only, no Cloudflare/tunnel/config change):** both gates in
+`server/src/index.js` now run an `unRocket()` pass over the fetched HTML before writing it —
+restore `type="text/javascript"` / `type="module"` and drop the injected `rocket-loader.min.js`
+tag. Both gate scripts and `dsterm/index.html`'s two scripts also carry `data-cfasync="false"` so
+the edge leaves them alone. Backups: `index.js.bak-unrocket-20261108T050702Z`,
+`dsterm/index.html.bak-unrocket-20261108T050702Z`.
+
+**Verified:** live gate now serves `<script data-cfasync="false">` with no rocket-loader injection.
+A reproduction that applies Cloudflare's exact rewrite to the injected page shows the pre-fix gate
+making **zero** `/api/*` calls from the page, and the fixed gate typing + Enter → `POST
+/hakterm/api/run` and clearing the composer. The `/admin/email` page injected through the same
+rewrite also boots (PIN pad visible, digits respond). `node --check` clean on `server/src/index.js`
+and on both extracted inline scripts; `hakster` restarted and healthy.
+
+## 2026-11-08 05:37Z — HakTerm layout on Mint: an auto-opened modal was covering the composer
+
+Deke reported, from the Mint box: "my layout is bad on mint in hakterm" / "cant see input bar and
+fullscreen dosnt show". Nothing was actually missing from the page. Two pieces of chrome were
+hiding the controls, and the flex chain was fine the whole time.
+
+**Cause 1 — the CLI Agents menu opened itself on every load.** `~/dsterm/index.html` called
+`openCliMenu("Bots")` at boot. `#cmd-palette` is `position:fixed; inset:0; z-index:10000` with a
+`rgba(0,0,0,.62)` backdrop and `backdrop-filter:blur(4px)`, so on every fresh load it covered the
+whole page — composer and header buttons included — and its `menuFilter.focus()` pulled the caret
+out of the composer. The page looked empty and dead even though it was fully loaded.
+
+**Cause 2 — the header is an invisible overlay on mouse-driven screens.** Under
+`@media (hover:hover) and (pointer:fine)`, `#wrap > header` becomes `position:absolute; opacity:0;
+min-height:8px` and only reveals on `:hover` / `:focus-within`, with a 72x4px cyan hairline as the
+only hint. On a real mouse the fullscreen / panels / theme buttons look absent.
+
+**Fix (application code only, `~/dsterm/index.html`):**
+- the boot call is gone; the modal now starts hidden (`cmdPalette.hidden = true`) and opens only
+  from the CLI Agents button, `/menu`, `/`, or the Controls tab.
+- the header gains an `.is-peek` state: revealed for 4s at boot, and whenever the pointer is in the
+  top 90px of the window, so its controls are discoverable without hunting the hairline.
+- backup: `~/dsterm/index.html.bak-climenu-20261108T053133Z` (sha256 of the file before the edit:
+  `aaf47e665a7189ceeb61d79bf58da8d768f806b62729a110b142b133b92a4f1e`). No config, no service
+  restart: `hakterm` serves `index.html` from disk on every request.
+
+**Verified** against the real page through the owner gate, in Mint's own Firefox (rv:157, driven by
+geckodriver on 10.0.0.210) at 1366x768, 1280x720 and 1024x700: `__haktermBooted` true, `#cmd-palette`
+hidden, focus in `#in`, `elementFromPoint` at the composer returns `in` and at the header control
+returns `fullscreen`, footer bottom == viewport height. Chromium with the pointer media block forced
+on agrees at 1216x600 / 1216x684 / 1366x620. Both inline scripts pass `node --check`.
+
+**Lesson:** a page that renders but "has no input bar" is usually a page with something on top of
+it. Headless Chromium reports `hover:none`, so it never sees the immersive-header class of bug;
+check the user's own CSS viewport (Deke's Mint sessions report ~1216x684 CSS px, DPR ~1.58 in
+`client_contexts`) and hit-test with `elementFromPoint` instead of trusting a screenshot.
+
+---
+
+## 2026-11-08 — Anomaly watch (site integrity, auth gates, listeners, tmux CLI origin)
+
+Built `server/scripts/anomaly-monitor.js`, running under pm2 as `anomaly-watch` (Dell, user ghost,
+cwd `/home/ghost/haksterAi`, 5-minute passes, Telegram role `TELEGRAM_BOT_TOKEN_5` = uptime,
+@deko38_bot). Verified 2026-11-08 07:59 UTC: pm2 status online, delivery proven (message ids
+12458 test, 12460 first pass).
+
+What a pass checks, and where the truth lives:
+
+- **sites** — `server/data/anomaly-watchlist.json` (auto-created, owner-editable). Probes
+  HTTPS for each hostname our tunnels serve, resolves DNS first, reads the TLS expiry, hashes the
+  body, and requires each site's `must` substrings in the page. Redirects to a host outside our
+  namespaces are treated as a hijack signal.
+- **gates** — admin/auth endpoints. A gate that answers 200 is only accepted when the body
+  carries one of its login markers (password / pin / login / owner). A 200 with no login screen
+  is reported as a possible auth bypass.
+- **ports** — `ss -ltnH` against a baseline captured on the first pass. A new listening socket is
+  reported (critical when bound to all interfaces) until it is deliberately approved. Baseline
+  is only ever rewritten by the first pass or by `--approve`; it is never quietly re-baselined.
+- **services** — pm2 apps listed in the watchlist must report `online`.
+- **cli / tmux** — `tmux list-panes -a` plus a full `/proc` walk finds our CLIs (hakster, claude,
+  codex, kiro, phantom, freebuff, aider, gemini, omp) running inside tmux panes. Each pane's
+  origin comes from `SSH_CONNECTION` on the pane process or its nearest ancestor. A pane with no
+  SSH_CONNECTION is local and allowed; anything outside `10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`, loopback is reported critical, and so is a pane whose start command runs a
+  script from an unauthorised origin.
+- **authlog** — `/var/log/auth.log` (readable; user ghost is in `adm`). Successful SSH logins from
+  outside the allowlist are critical; a failed-login burst (default 20 in 30 minutes) is a warn.
+
+Alert discipline: a finding alerts when it first appears, re-alerts only after `repeatHours`
+(default 6) while it persists, and sends one recovery line when it clears. State lives in
+`server/data/anomaly-state.json`. Modes: `--once`, `--dry-run`, `--status`, `--approve`, `--test`,
+`--interval <min>`, `--bot <env key>`.
+
+Two implementation facts worth remembering: tmux escapes control bytes in `-F` output, so any
+separator used with it must be printable text; and `tmux list-panes -a` reports the start command
+as the pane root, so a CLI launched without a shell appears as the pane PID itself, not as a child.
+
+First verified findings at install time (all real, none caused by the monitor): `phantomide.com`
+and `dash.phantomide.com` return no DNS records; `junkalotjunkremoval.com` resolves to Wix and
+serves a ConnectYourDomain error page instead of our tunnel; `rentmytrailer.haksterai.com` is
+routed by the tunnel but the app answers 404 for that host.
+
+---
+
+## 2026-11-08 — Free tier is 5 calls + 5 web lookups; bot chat answers use the web cleanly
+
+Owner request: "fix all bots in chat to have web tools to look for users, free only get 5 reg
+calls and 5 web, pro by tokens." Applied in application code only — no config, no `.env`.
+
+**Free tier (server/src/index.js).** `FREE_USAGE_LIMIT` 10 → 5 (regular AI calls, metered per
+account by `reserveUsage`) and `FREE_WEB_RESEARCH_LIMIT` 10 → 5 (web lookups, metered in
+`free_web_research_usage`). The limit messages now print the constant instead of the number 10.
+The free-plan entry in `PRICING_CATALOG` says "5 AI calls and 5 web lookups". Verified live after
+`pm2 restart hakster --update-env` by reading `GET /api/usage` per account: a free account returns
+`limit: 5, webResearchRemaining: 5`; the fleet account `agent-service@hakster.ai` (enterprise)
+returns `limit: -1, webResearchRemaining: -1`. Paid plans are not call-capped — they carry no
+free-call counter in the directive — but token metering of a paid balance is **not** implemented;
+`token_balance` is credited by referrals and never decremented by a chat.
+
+**Customer directive (server/src/customer-mode.js).** `DEFAULT_WEB_LIMIT` 5, new
+`DEFAULT_CALL_LIMIT` 5. `customerDirectiveFor()` passes `null` for a paid plan so the agent is told
+"no free-call cap" instead of inventing a number. Two new rules: never name internal tool handles
+or tell the user a tool is missing; answer once, never repeat a lookup or append meta-notes.
+
+**Why the bots looked broken (server/src/index.js).** The full-auto nudge fired for *every*
+text-only turn — including customer chats, which have no shell or file tools — and told the model
+to "call list_dir, read_file, exec_shell, write_file". On the Telegram fleet (which runs as the
+customer-mode account) that produced apology loops and answers like "those tools do not exist in
+this environment". The nudge is now skipped when a customer directive is in force. The same line
+also wrote `\\n\\n` inside its template literal, so the `auto_nudge` SSE frame never terminated;
+it is a real `\n\n` now.
+
+**Bots send one answer (server/src/telegramBots.js).** `runAgent()` pushed every `delta` into one
+buffer, so a bot reply was the narration of turn 1 + the final answer + notes from every turn,
+concatenated. It now keeps the current turn's text in `turnParts`, clears it on `tool_call_start`
+/ `auto_nudge` / `refusal_blocked` / `loop_nudge`, and resolves with that (falling back to the
+full stream if the run ends mid-tool). Verified two ways: a fake SSE endpoint proved narration
+before a tool call is dropped and the final answer kept; the live endpoint returned a single line,
+`1 EUR ≈ 1.1141 USD (Wise) — https://wise.com/us/currency-converter/eur-to-usd-rate`, where the
+same prompt before the fix produced the answer four times with tool commentary.
+
+**Fleet state at this change** (`node server/scripts/telegram-bot-check.js`): coder, recon,
+debugger, uptime, health authenticate; slot 1 `command` returns 401 Unauthorized (revoked token —
+owner-side `.env` change, not fixable from code); slot 7 `security` unset. Roles that chat through
+`runAgent` (1 `/ask`, 3 `/ask`, 4 general chat) all get the fix; slots 5–8 are command/report bots.
+
+**Site copy:** `src/pages/build.astro` limit banner and upgrade modal say 5 calls + 5 web lookups;
+rebuilt with `npx astro build` (15 pages) and the served bundle plus `/api/stripe/plans` show the
+new numbers.
+
+---
+
+## 2026-11-08 — Telegram "Create Builds" pipeline (verified)
+
+**What exists now.** Miniforge owns the build pipeline and exposes three loopback-only routes
+(`isLoopbackBuilderCaller`: 127.0.0.1 and no `x-forwarded-for`/`cf-connecting-ip`), all on
+`http://127.0.0.1:5555`:
+
+- `POST /api/internal/builder/build` — `{prompt, name?, ownerId?}` → streams a full HTML app from
+  Miniforge's own `callAI()` (Groq/SambaNova/Cerebras/DeepSeek/Mistral/OpenRouter/OpenAI/Anthropic/
+  Google waterfall), saves it via `saveBuiltApp()`, returns `{slug, name, url, previewUrl, bytes}`.
+  `streamBuilderHtml()` tries compact prompt first, then the full prompt, local then streaming.
+- `POST /api/internal/builder/image` — `{slug, prompt}` → proxies Miniforge's own
+  `/api/apps/:slug/image`; falls back Gemini → OpenAI → Pollinations.
+- `POST /api/internal/builder/snap` — `{slug, target?, includeImage?}` → headless Chromium capture
+  of the app's preview URL (`/api/apps/:slug?build_preview=1`), returns title, visible controls,
+  body text, and a JPEG `screenshot.base64` saved under `miniforge/data/snapshots/`.
+
+**Why the snap does not use the OMP agent.** The UI's "OMP Snap" button posts to
+`/api/agent/run` from the browser with the signed-in owner token, which is what grants
+`browser_navigate/browser_snapshot/browser_screenshot`. A loopback server-to-server call carries
+no account, so `getUserByApiKey()` returns null and `toolsForUser(null)` strips every browser
+tool — the old implementation got back a customer-mode apology instead of a snapshot. The
+replacement drives puppeteer directly (module resolved from
+`/home/ghost/haksterAi/node_modules/puppeteer`, Chromium from `/usr/bin/chromium`).
+
+**Telegram surfaces.** Fleet command bot (`TELEGRAM_BOT_TOKEN_1`): `/build <prompt>`,
+`/image <app-slug> [prompt]`, `/snap <app-slug>` in `server/src/telegramBots.js` via
+`miniforgeBuilder()` + `sendSnapPhoto()`. Miniforge's own gram-bot webhook
+(`/api/gram-bots/webhook/:slug`) has the same three commands and the same photo helper.
+
+**Verified 2026-11-08:** build returned `tg-builder-smoke-4583f5` (3,751 bytes); image returned
+200 with a 50,312-byte base64 JPEG (Pollinations); snap returned title "TG Builder Smoke", body
+"New Task · Add · No tasks yet.", 2 controls, 24,660-byte base64 JPEG in ~2.2 s. `node --check`
+passed on `miniforge/server.js` and `server/src/telegramBots.js`; both services restarted and
+answer 200.
+
+**Known gaps (not claimed working).** Miniforge's six gram bots have no registered webhook
+(`getWebhookInfo` → `url: (none)`), so their `/build`/`/image`/`/snap` receive nothing until a
+webhook URL is set — an owner action. The fleet bot path needs a real Telegram message from the
+owner to prove end-to-end delivery; the services are loaded and healthy.

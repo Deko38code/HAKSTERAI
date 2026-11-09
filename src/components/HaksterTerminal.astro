@@ -250,7 +250,13 @@ const title = ptyMode === 'crush' ? 'Crush' : 'TUI - haksterAI';
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ptyHost = location.port === '4321' ? location.hostname + ':3579' : location.host;
-    ws = new WebSocket(proto + '//' + ptyHost + '/pty?mode=' + encodeURIComponent(PTY_MODE));
+    // The /pty gate rejects tunnel connections that do not prove an owner, and a
+    // WebSocket handshake cannot carry the x-api-key header. Pass the same stored
+    // owner key as a query param (build.astro already does this for /ws/pty).
+    let ptyKey = '';
+    try { ptyKey = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch {}
+    const keyParam = ptyKey ? '&key=' + encodeURIComponent(ptyKey) : '';
+    ws = new WebSocket(proto + '//' + ptyHost + '/pty?mode=' + encodeURIComponent(PTY_MODE) + keyParam);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       scheduleFit();
