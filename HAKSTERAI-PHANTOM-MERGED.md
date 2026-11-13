@@ -7303,7 +7303,7 @@ NEVER use `pkill node` — kills ALL node processes including server.
 - Tested OK — sends login credentials after payment
 
 ### DB (Render PostgreSQL)
-- URL: postgresql://deke_needem_user:...@dpg-d6ue73f5gffc739lp0t0-a.oregon-postgres.render.com/deke_needem
+- URL: postgresql://deke_needem_user:<REDACTED>@dpg-d6ue73f5gffc739lp0t0-a.oregon-postgres.render.com/deke_needem
 - Tables: users, payments, analytics, token_purchases, token_usage_log, and many more
 - All tables exist and working
 
