@@ -10668,3 +10668,163 @@ answer 200.
 (`getWebhookInfo` → `url: (none)`), so their `/build`/`/image`/`/snap` receive nothing until a
 webhook URL is set — an owner action. The fleet bot path needs a real Telegram message from the
 owner to prove end-to-end delivery; the services are loaded and healthy.
+
+---
+
+## Security bot: web vulnerability scans + login/IP pattern learning — 2026-11-14
+
+**Status: built, syntax-checked, exercised directly, and loaded by the running service.**
+Telegram delivery from the scheduled reporter was exercised; the first attempt hit a transient
+`EFATAL: fetch failed` on the coder bot, which is why delivery now retries instead of going quiet.
+
+### New modules
+
+| File | Job |
+|---|---|
+| `server/src/webVulnScanner.js` | Read-only web scan of the two owner-authorized hosts |
+| `server/src/loginAudit.js` | Parses host auth log, records events, learns a baseline, flags deviations |
+
+Scope is fixed in code: `phantom` = phantomide.com, `hakster` = haksterai.com. No other host can be
+scanned through this module. Every check is GET/HEAD/OPTIONS/TLS against a public HTTPS endpoint —
+no exploitation, no POST bodies, no credential use, no brute force.
+
+### Commands (security bot, slot 7 — also accepted by every fleet bot until TOKEN_7 exists)
+
+`/scan` · `/scan phantom` · `/scan hakster` · `/scanlast` · `/logins` · `/ips` · `/baseline`
+(`/security /ports /ssh /fw /updates /users /help` unchanged.)
+
+### Schedule
+
+- Web scan: first pass ~2 min after boot, then every 6 hours (4x/day). Posts only when the finding
+  set differs from what was **delivered**, plus one daily heartbeat.
+- Login audit: first pass ~45 s after boot, then every 15 minutes. Posts only when an anomaly is
+  queued, plus one daily baseline digest.
+
+### Delivery chain
+
+`TELEGRAM_BOT_TOKEN_7` → `3` (recon) → `2` (coder). Slot 7 has no token yet; recon and debugger
+currently have **0 registered chats** (pruned as not `/start`ed), so the coder bot is what delivers
+today. `sendToRole()` now returns true only when at least one message actually sent — previously it
+returned true even if every send failed, which made fallbacks useless.
+
+### What the first real scan found (2026-11-14 05:23Z, verified)
+
+- phantomide.com — grade B: no HSTS, no CSP, no clickjacking protection, no nosniff, no
+  Referrer-Policy, `X-Powered-By: Express`, TLSv1.3, cert 72 days.
+- haksterai.com — grade B: no CSP, no clickjacking protection, HSTS present but `max-age=0`,
+  no Referrer-Policy, `X-Powered-By: Express`, TLSv1.3, cert 76 days.
+- No exposed sensitive paths, no CORS reflection, no TRACE, no stack traces on either host.
+
+### What the login audit learned (verified)
+
+494 events from `/var/log/auth.log` on the Dell; source IPs 10.0.0.210 and 10.0.0.251; accounts
+`ghost` and `oem`; busiest hours 12:00, 09:00, 13:00. First run flagged 135 failures from
+10.0.0.210 (the `oem` user on the LAN) and a failure-then-success from the same IP — the anomaly
+detector working as intended on real data.
+
+Parrot's auth data is **not readable** by `ghost694` (not in `adm`/`systemd-journal`), so the audit
+reports it as unavailable rather than skipping silently. Enabling it needs a group change — owner
+decision, not an agent edit.
+
+### Data files (gitignored, append-only history)
+
+`server/data/web-vuln-scans.jsonl`, `web-vuln-state.json`, `login-events.jsonl`,
+`login-baseline.json`, `login-anomalies.jsonl`, `login-pending-anomalies.json`.
+
+### Verified checks
+
+`node --check` on all four changed/new files; direct invocation of every command handler;
+`pm2 restart hakster`; `http://127.0.0.1:3579/api/health` → 200; fleet `getMe` unchanged
+(coder/recon/debugger/uptime/health OK, security not configured, command token 401).
+
+## 2026-11-14 — Login audit: owner-declared source IPs
+
+**Verified facts:**
+
+- `server/data/login-trusted-ips.json` holds IPs the owner declares as his own. Loaded by
+  `loadTrusted()` in `server/src/loginAudit.js` on every audit run; file is under `server/data/`
+  and is gitignored (kept out of the repo).
+- Current entries (owner-confirmed 2026-11-14): `10.0.0.210` = "owner LAN box (Dell/desktop)",
+  `10.0.0.251` = "owner laptop".
+- Grading with a trusted source IP:
+  - `new-ip` → `trusted-ip`, severity **info**, title "Login from a known owner device".
+  - `brute-force` → severity **medium**, title "Repeated login failures from an owner device",
+    detail notes a saved client is probably retrying a wrong username.
+  - `fail-then-success` → severity **low**.
+  - `root-login` stays **high** regardless of trust.
+  - Public/untrusted IPs keep the old grading: successful public login = high, ≥10 failures = high.
+- Managed without editing code:
+  `node server/src/loginAudit.js --trust <ip> "label"` ·
+  `--untrust <ip>` · `--trusted`.
+- Verified in isolation (temp copy, `10.9.9.9` trusted vs `203.0.113.9` public, synthetic
+  events): trusted batch graded `brute-force medium` + `fail-then-success low`; public batch
+  graded `brute-force high` + `fail-then-success high` + `root-login high`.
+- Existing anomaly history is **not rewritten**. The two high entries already in
+  `server/data/login-anomalies.jsonl` (both from 10.0.0.210 at 2026-11-14T05:26Z) stay as
+  written; only future evaluations use the trust list.
+- Observed baseline at the time of this change: 496 events, 2 source IPs, accounts `ghost`
+  (360 events) and `oem` (136), 136 failures all from 10.0.0.210. Parrot's journal is still
+  unreadable by `ghost694`.
+
+### 2026-11-14 — Correction: LAN identities
+
+Verified read-only after the entry above (`ip -4 addr`, `ssh parrot hostname -I`, `ip neigh`):
+
+- **Dell (this host) = `10.0.0.131`** on `wlp1s0`. It is NOT 10.0.0.210.
+- **Parrot = `10.0.0.251`** (confirmed by `hostname -I` over ssh).
+- **`10.0.0.210`** is a separate owner device, MAC `70:c9:4e:d4:d4:15` (Liteon Technology
+  OUI). Identity beyond the NIC vendor is unverified — do not state what the machine is.
+- Other LAN neighbours seen: `10.0.0.1` router (b8:5e:71:00:01:61), `10.0.0.171`
+  (4c:0b:be:19:93:6e).
+- The earlier labels in this file for `.210` ("Dell/desktop") and `.251` ("laptop") were wrong.
+  The trust JSON was relabelled and `10.0.0.131` added; brain history is preserved, not rewritten.
+- Trust list now: `10.0.0.131` owner Dell, `10.0.0.251` owner Parrot, `10.0.0.210` owner device.
+  Verified through the live handler: `/ips` marks all three ✅ and `/baseline` lists all three.
+
+## 2026-11-14 — Access guard: paid vs free vs unauthorized
+
+**New module:** `server/src/accessGuard.js` (no config touched, app-level only).
+
+- Tables (created additively on first use): `access_decisions` (audit, 90-day retention),
+  `ip_denials` (ip, reason, surface, until, created_by), `access_strikes` (rolling window).
+- State files (gitignored `server/data/`): `access-guard.json` (mode, thresholds, per-surface
+  routes), `owner-identities.json` (owner emails / IPs / user ids).
+- **Default is `observe`**: it records and reports, it does not block. Blocking needs both
+  `mode=enforce` and that surface's own `enforce` flag (`/enforce hakster`).
+- Route classes: `gated` = needs an account (a free account satisfies it), `paidOnly` = needs a
+  verified plan, `ownerOnly` = owner. **A free or trialing account is never auto-denied** —
+  free tier is the signup pipeline, not an intrusion.
+- Paid state comes from the `subscriptions` row the Stripe webhook writes
+  (`status` + `current_period_end` + 3-day grace). `users.plan` is only used when no
+  subscription row exists at all (manual/comped accounts).
+- `deny` is reserved for: banned/suspended accounts, an active denial, and an expired
+  subscription still claiming paid access. Repeated unauthorized probes strike an IP and
+  auto-deny it after 5 strikes in 30 minutes for 60 minutes.
+- **Exempt from automatic denial**: loopback, private LAN (10/8, 172.16/12, 192.168/16),
+  link-local, CGNAT, and every IP in `owner-identities.json` — the owner cannot lock himself out.
+  Manual `/deny` refuses private addresses for the same reason.
+- Real client IP: `CF-Connecting-IP` is trusted **only when the socket peer is loopback**
+  (where cloudflared connects). A LAN or public peer sending that header is ignored.
+- Mounted on `/api` in `server/src/index.js` right after the body parsers, in observe mode.
+  Recorded volume is controlled: all non-allow decisions, plus allows on gated routes only.
+
+**Telegram commands** (any fleet bot, not just slot 7):
+`/guard [hours]` · `/access <email>` · `/denials` · `/deny <ip> [min] [reason]` ·
+`/undeny <ip>` · `/whois <ip>` · `/enforce <surface>` · `/observe <surface>`.
+Digest: `startAccessReporter()` posts every 6 h (first at 5 min) only when the picture changed.
+
+**Verified 2026-11-14 (live):**
+- Decision matrix tested: owner always allowed; free user allowed on account routes *and*
+  challenged only on paidOnly routes when enforcing; anonymous challenged on account routes;
+  banned denied; other surfaces unaffected while their flag is off.
+- Strike escalation: 5 strikes → auto-denial created; LAN and loopback strikes exempt.
+- IP spoof test: LAN peer sending `CF-Connecting-IP` was identified by its real address.
+- Live: authenticated free account allowed (`account allowance`), anonymous `/api/chat`
+  challenged (401 from the pre-existing signed-in gate), `/api/health` 200, site 200.
+- Account inventory at the time: 7 users — 3 admin (admin@hakster.ai,
+  dekekenneth840@gmail.com, agent-service@hakster.ai), 4 free active users,
+  **0 subscriptions and 0 payments**, so no account is Stripe-verified-paid yet.
+
+**Not done yet:** PhantomIDE (`phantom` surface) and miniforge (`miniforge` surface) have
+route lists configured but no middleware mounted — they are not gated. Domain header
+hardening (CSP/HSTS/X-Frame-Options) is still just reported by the scanner, not applied.

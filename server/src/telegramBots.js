@@ -6,6 +6,7 @@
 
 const TelegramApi = require('node-telegram-bot-api');
 const TelegramBot = TelegramApi.TelegramBot || TelegramApi.default || TelegramApi;
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
@@ -14,7 +15,28 @@ const readline = require('readline');
 const { chat, firecrawlScrape } = require('./providers');
 const { getDb } = require('./db');
 const { handleSecurityCommand, securityDigest } = require('./telegramSecurityBot');
+const {
+  scanAll: webScanAll,
+  formatReport: webScanFormat,
+  persistScan: webScanPersist,
+  loadState: webScanState,
+  loadHistoryLast: webScanHistoryLast,
+  describeNewFindings: webScanNewFindings,
+  markReported: webScanMarkReported,
+} = require('./webVulnScanner');
+const accessGuard = require('./accessGuard');
+const {
+  collectDetailed: loginCollectDetailed,
+  updateBaseline: loginUpdateBaseline,
+  anomaliesText: loginAnomaliesText,
+  baselineText: loginBaselineText,
+  loadPending: loginPending,
+  clearPending: loginClearPending,
+} = require('./loginAudit');
 const { handleDomainCommand } = require('./telegramDomainBot');
+// Shared only in process memory with index.js; this lets Telegram-originated
+// billing requests reach the checkout route without exposing an API credential.
+const internalBillingToken = crypto.randomBytes(32).toString('hex');
 let _autolearn = null, _memoryEngine = null, _smartRouter = null;
 try { _autolearn = require('./agent/autolearn'); } catch (_) {}
 try { _memoryEngine = require('./agent/memory-engine'); } catch (_) {}
@@ -196,7 +218,10 @@ function apiJson(method, path, body) {
     const payload = body ? JSON.stringify(body) : null;
     const req = http.request({
       hostname: '127.0.0.1', port: SERVER_PORT, path, method,
-      headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
+      headers: {
+        ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
+        ...(path === '/api/stripe/telegram-checkout' ? { 'x-hakster-telegram-internal': internalBillingToken } : {}),
+      },
       timeout: 15000,
     }, res => {
       let d = ''; res.on('data', c => d += c); res.on('end', () => {
@@ -234,7 +259,7 @@ async function handleSubscribeCallback(bot, query) {
   const [, planId, priceId] = query.data.split(':');
   try {
     await bot.answerCallbackQuery(query.id, { text: 'Creating checkout…' });
-    const result = await apiJson('POST', '/api/stripe/checkout', {
+    const result = await apiJson('POST', '/api/stripe/telegram-checkout', {
       planId, priceId,
       telegramUser: { id: query.from.id, first_name: query.from.first_name, last_name: query.from.last_name, username: query.from.username },
     });
@@ -352,10 +377,12 @@ async function sendToRole(roleKey, text, options = {}) {
     return false;
   }
   const chunks = splitMessage(String(text || 'Empty message'));
+  let delivered = 0;
   for (const chatId of ids) {
     for (const chunk of chunks) {
       try {
         await role.bot.sendMessage(chatId, chunk, options);
+        delivered++;
       } catch (e) {
         const emsg = e?.message || String(e);
         // 400 "chat not found" / "forbidden" — the bot can't message a chat that
@@ -376,6 +403,7 @@ async function sendToRole(roleKey, text, options = {}) {
           try {
             const { parse_mode, ...plainOpts } = options;
             await role.bot.sendMessage(chatId, chunk, plainOpts);
+            delivered++;
           } catch (e2) {
             console.error(`[telegram:${role.name}] send failed to ${chatId}:`, (e2?.message || e2));
           }
@@ -385,7 +413,7 @@ async function sendToRole(roleKey, text, options = {}) {
       }
     }
   }
-  return true;
+  return delivered > 0;
 }
 
 function shellExec(command, timeout = 30000) {
@@ -517,6 +545,9 @@ function initBots() {
   startWatchdog();
   startHealthReporter();
   startSecurityReporter();
+  startWebScanReporter();
+  startLoginReporter();
+  startAccessReporter();
   startCoderReport();
   startReconReport();
   startDebuggerReport();
@@ -566,6 +597,18 @@ async function handleMessage(roleKey, msg) {
     }
   }
 
+  // ── Web vulnerability scan + login audit — reachable from ANY fleet bot, so the
+  //    checks work today even before the slot-7 security token exists. The security
+  //    bot owns them permanently once it is created.
+  if (/^\/(?:scan|scanall|scanlast|lastscan|logins|ips|baseline|guard|access|whois|deny|undeny|denials|enforce|observe)\b/i.test(text)) {
+    try {
+      const reply = await handleSecurityCommand(text);
+      if (reply) return await bot.sendMessage(chatId, reply);
+    } catch (e) {
+      return bot.sendMessage(chatId, `Security check failed: ${e.message}`);
+    }
+  }
+
   // ── Role 7: security posture bot (read-only checks, never changes the host) ──
   if (roleKey === 'TELEGRAM_BOT_TOKEN_7') {
     const reply = await handleSecurityCommand(text);
@@ -573,7 +616,7 @@ async function handleMessage(roleKey, msg) {
       try { return await bot.sendMessage(chatId, reply, { parse_mode: 'Markdown' }); }
       catch { return bot.sendMessage(chatId, reply); }
     }
-    return bot.sendMessage(chatId, 'Send /help for the read-only security checks (/security, /ports, /ssh, /fw, /updates, /users).');
+    return bot.sendMessage(chatId, 'Send /help for the read-only security checks (/security, /scan, /logins, /ips, /baseline, /ports, /ssh, /fw, /updates).');
   }
 
   // ── Marketplace mini app — any role bot opens it ──
@@ -1000,6 +1043,126 @@ function startHealthReporter() {
   }, HEALTH_MS);
 }
 
+// Deliver a scheduled security report. The slot-7 security bot owns this surface, but
+// its BotFather token may not exist yet, so fall through to recon then coder rather than
+// letting findings disappear. Returns the role name that delivered, or null.
+async function sendSecurityReport(text) {
+  for (const key of ['TELEGRAM_BOT_TOKEN_7', 'TELEGRAM_BOT_TOKEN_3', 'TELEGRAM_BOT_TOKEN_2']) {
+    try {
+      if (await sendToRole(key, text)) return ROLES[key] ? ROLES[key].name : key;
+    } catch (e) {
+      console.error(`[telegram:security] send via ${key} failed:`, e.message);
+    }
+  }
+  return null;
+}
+
+// Web vulnerability scan: 4x a day (every 6h). Posts when the finding set changes;
+// otherwise one quiet heartbeat a day so silence is known to mean "unchanged".
+function startWebScanReporter() {
+  const INTERVAL_MS = 6 * 60 * 60 * 1000;
+  const HEARTBEAT_MS = 24 * 60 * 60 * 1000;
+  let lastPostAt = 0;
+  const tick = async () => {
+    let prev = null;
+    try { prev = webScanState(); } catch {}
+    let res;
+    try {
+      res = await webScanAll();
+    } catch (e) {
+      console.error('[telegram:webscan] scan failed:', e.message);
+      return;
+    }
+    // Compare with the previous recorded run so the report marks what is actually new.
+    let newIds = new Set();
+    try {
+      const prevRun = webScanHistoryLast();
+      if (prevRun) newIds = new Set(webScanNewFindings(res, prevRun).map((f) => f.id));
+    } catch {}
+    try { webScanPersist(res); } catch (e) { console.error('[telegram:webscan] persist failed:', e.message); }
+    // Compare against what was actually DELIVERED (reportedSignature), not the last scan,
+    // so an undelivered change is retried next cycle instead of going quiet.
+    const changed = !prev || prev.reportedSignature !== res.signature;
+    const due = Date.now() - lastPostAt >= HEARTBEAT_MS;
+    if (!changed && !due) return;
+    const who = await sendSecurityReport(webScanFormat(res, { maxFindings: 8, newIds }));
+    if (who) {
+      lastPostAt = Date.now();
+      try { webScanMarkReported(res.signature); } catch {}
+      console.log(`[telegram:webscan] report sent via ${who} (${changed ? 'findings changed' : 'daily heartbeat'})`);
+    } else {
+      console.warn('[telegram:webscan] no bot could deliver the report — will retry next cycle');
+    }
+  };
+  setTimeout(tick, 120000);          // first scan ~2 min after boot
+  setInterval(tick, INTERVAL_MS);    // then 4x daily
+}
+
+// Login audit: every 15 minutes. Records new events, folds them into the learned
+// baseline, and posts only when something deviates from what the host normally sees.
+function startLoginReporter() {
+  const INTERVAL_MS = 15 * 60 * 1000;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  let lastDigestAt = 0;
+  const tick = async () => {
+    try {
+      const detailed = await loginCollectDetailed();
+      if (!detailed.events.length) return;
+      loginUpdateBaseline(detailed.events);           // queues any new anomalies for delivery
+      const anomalies = loginPending();
+      const due = Date.now() - lastDigestAt >= DAY_MS;
+      if (!anomalies.length && !due) return;
+      const text = anomalies.length ? loginAnomaliesText(anomalies, detailed) : loginBaselineText();
+      const who = await sendSecurityReport(text);
+      if (who) {
+        if (anomalies.length) loginClearPending();    // only now is it safe to forget them
+        if (due) lastDigestAt = Date.now();
+        console.log(`[telegram:login-audit] ${anomalies.length} anomaly(ies) sent via ${who}`);
+      } else {
+        console.warn('[telegram:login-audit] no bot could deliver — anomalies stay queued for retry');
+      }
+    } catch (e) {
+      console.error('[telegram:login-audit] failed:', e.message);
+    }
+  };
+  setTimeout(tick, 45000);           // first pass ~45s after boot
+  setInterval(tick, INTERVAL_MS);
+}
+
+// Access guard digest: every 6h. Posts when the picture changed in a way the owner
+// should see — new challenges/denials, an auto-denial, or an account losing access.
+// Silence means "same as last time", so the channel stays usable.
+function startAccessReporter() {
+  const INTERVAL_MS = 6 * 60 * 60 * 1000;
+  let lastSig = '';
+  const tick = async () => {
+    try {
+      const s = accessGuard.summary(6);
+      const phantom = await accessGuard.phantomGuardText(6);
+      // PhantomIDE runs its own guard on Parrot. It is observe-only, so it is only worth
+      // a message when something would actually be blocked or an IP denial is active.
+      const phantomHot = /deny=[1-9]|challenge=[1-9]|Active IP denials:/.test(phantom);
+      const sig = JSON.stringify({
+        d: s.denials.map((d) => d.ip + ':' + d.reason),
+        r: s.rows.map((r) => `${r.surface}/${r.action}:${r.n}`),
+        u: s.users.map((u) => `${u.email}/${u.action}:${u.n}`),
+        p: phantomHot ? phantom.replace(/\d+/g, '#').slice(0, 200) : '',
+      });
+      const hot = s.rows.some((r) => r.action === 'deny') || s.denials.length > 0 || phantomHot;
+      if (sig === lastSig) return;
+      if (!hot && !s.rows.length) { lastSig = sig; return; }
+      lastSig = sig;
+      const body = phantomHot ? `${accessGuard.summaryText(6)}\n\n${phantom}` : accessGuard.summaryText(6);
+      const who = await sendSecurityReport(body);
+      if (who) console.log(`[telegram:access] digest sent via ${who}`);
+    } catch (e) {
+      console.error('[telegram:access] digest failed:', e.message);
+    }
+  };
+  setTimeout(tick, 5 * 60 * 1000);
+  setInterval(tick, INTERVAL_MS);
+}
+
 // Security digest: every 12h, only when the posture signature changed.
 function startSecurityReporter() {
   const INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -1023,6 +1186,7 @@ function startSecurityReporter() {
 module.exports = {
   initBots,
   runAgent,
+  internalBillingToken,
   sendDeployStatus: (text) => sendToRole('TELEGRAM_BOT_TOKEN_2', `🚀 *Deploy*\n\n${text}`, { parse_mode: 'Markdown' }),
   sendHealthAlert: (text) => sendToRole('TELEGRAM_BOT_TOKEN_6', `⚠️ *Health Alert*\n\n${text}`, { parse_mode: 'Markdown' }),
   sendUptimeAlert: (text) => sendToRole('TELEGRAM_BOT_TOKEN_5', `🛡 *Uptime Alert*\n\n${text}`, { parse_mode: 'Markdown' }),

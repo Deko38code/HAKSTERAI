@@ -726,50 +726,70 @@ function planFromPriceId(priceId) {
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+  if (!STRIPE_WEBHOOK_SECRET) return res.status(503).json({ error: 'Stripe webhook signing secret is not configured' });
 
   let event;
-  if (STRIPE_WEBHOOK_SECRET) {
-    const sig = req.headers['stripe-signature'];
-    try {
-      event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-    } catch (err) {
-      console.error('[stripe] webhook signature verification failed:', err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-  } else {
-    // Dev mode — no signature verification
-    try { event = JSON.parse(req.body.toString()); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+  const sig = req.headers['stripe-signature'];
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('[stripe] webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   const db = getDb();
   (async () => {
     try {
       switch (event.type) {
-        case 'checkout.session.completed': {
+        case 'checkout.session.completed':
+        case 'checkout.session.async_payment_succeeded': {
           const session = event.data.object;
+          if (!['paid', 'no_payment_required'].includes(session.payment_status)) {
+            console.log(`[stripe] checkout session ${session.id} is not paid yet; waiting for async payment event`);
+            break;
+          }
           const customerId = session.customer;
           const subId = session.subscription;
           const userId = session.metadata?.userId;
-          if (userId) {
-            db.prepare('UPDATE users SET stripe_customer_id = ? WHERE id = ?').run(customerId, userId);
+          if (!userId || !subId) {
+            console.warn(`[stripe] paid checkout session ${session.id} is missing its user or subscription metadata`);
+            break;
           }
-          if (subId) {
-            const sub = await stripe.subscriptions.retrieve(subId);
-            const priceId = sub.items.data[0]?.price?.id;
-            const planId = planFromPriceId(priceId) || 'pro';
-            db.prepare("UPDATE subscriptions SET status = 'expired' WHERE user_id = ? AND status = 'active'").run(userId);
-            // 7 placeholders, so 7 values: provider_sub_id was missing and every
-            // checkout.session.completed threw "Too few parameter values", leaving
-            // paying customers on their old plan.
-            db.prepare(`INSERT INTO subscriptions (id, user_id, plan, billing_cycle, status, current_period_start, current_period_end, provider_sub_id, metadata) VALUES (?, ?, ?, 'monthly', 'active', ?, ?, ?, ?)`)
-              .run(subId, userId, planId, sub.current_period_start, sub.current_period_end, subId, JSON.stringify({ stripe_customer_id: customerId, price_id: priceId }));
-            db.prepare('UPDATE users SET plan = ?, updated_at = unixepoch() WHERE id = ?').run(planId, userId);
-            // Record payment
+          const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+          if (!user) throw new Error(`Paid checkout session ${session.id} references an unknown user`);
+
+          const sub = await stripe.subscriptions.retrieve(subId);
+          const priceId = sub.items.data[0]?.price?.id || session.metadata?.priceId;
+          const planId = planFromPriceId(priceId);
+          if (!planId) throw new Error(`Paid checkout session ${session.id} references an unrecognized Stripe price`);
+          const plan = PRICING_CATALOG.find(item => item.id === planId);
+          const price = plan?.prices.find(item => item.stripePriceId === priceId);
+          const billingCycle = price?.billingCycle || 'monthly';
+
+          // Stripe may redeliver an event. Upsert the subscription and key the
+          // initial payment by Checkout Session ID so retries never double-charge
+          // the local ledger or insert a second subscription row.
+          db.transaction(() => {
+            db.prepare('UPDATE users SET stripe_customer_id = ?, plan = ?, updated_at = unixepoch() WHERE id = ?')
+              .run(customerId, planId, userId);
+            const existing = db.prepare('SELECT id FROM subscriptions WHERE provider_sub_id = ?').get(subId);
+            if (existing) {
+              db.prepare(`UPDATE subscriptions SET plan = ?, billing_cycle = ?, status = 'active', current_period_start = ?, current_period_end = ?, metadata = ? WHERE provider_sub_id = ?`)
+                .run(planId, billingCycle, sub.current_period_start, sub.current_period_end,
+                  JSON.stringify({ stripe_customer_id: customerId, price_id: priceId }), subId);
+            } else {
+              db.prepare("UPDATE subscriptions SET status = 'expired' WHERE user_id = ? AND status = 'active'").run(userId);
+              db.prepare(`INSERT INTO subscriptions (id, user_id, plan, billing_cycle, status, current_period_start, current_period_end, provider_sub_id, metadata) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`)
+                .run(subId, userId, planId, billingCycle, sub.current_period_start, sub.current_period_end, subId,
+                  JSON.stringify({ stripe_customer_id: customerId, price_id: priceId }));
+            }
             const receiptId = 'rcpt_' + crypto.randomBytes(16).toString('hex');
-            db.prepare(`INSERT INTO payments (id, user_id, amount, currency, plan, billing_cycle, status, payment_method, provider_id, description) VALUES (?, ?, ?, 'usd', ?, 'monthly', 'completed', 'stripe', ?, 'Stripe checkout')`)
-              .run(receiptId, userId, session.amount_total || 0, planId, subId);
-          }
-          console.log(`[stripe] checkout.session.completed for user ${userId}, plan ${planFromPriceId(session.metadata?.priceId) || 'unknown'}`);
+            db.prepare(`INSERT INTO payments (id, user_id, amount, currency, plan, billing_cycle, status, payment_method, provider_id, description)
+              SELECT ?, ?, ?, ?, ?, ?, 'completed', 'stripe', ?, 'Stripe checkout'
+              WHERE NOT EXISTS (SELECT 1 FROM payments WHERE provider_id = ?)`)
+              .run(receiptId, userId, session.amount_total || 0, session.currency || 'usd', planId, billingCycle, session.id, session.id);
+          })();
+          console.log(`[stripe] paid checkout session ${session.id} applied for user ${userId}, plan ${planId}`);
           break;
         }
         case 'customer.subscription.updated': {
@@ -842,6 +862,53 @@ app.use((err, req, res, next) => {
   }
   return next(err);
 });
+
+// ── Security headers ──
+// Applied to every response before any route runs. The enforcing ones are all
+// safe-by-default; CSP starts in REPORT-ONLY so nothing can break, then gets
+// promoted once the violation log is clean.
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=(self)');
+  // Narrow CSP that is ENFORCED: it carries only the directives that cannot block a
+  // resource load (no default-src, no script-src). Kills clickjacking, <base> hijack
+  // and plugin/embed injection while every fetch stays exactly as it is today.
+  if (!res.getHeader('Content-Security-Policy')) {
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'; base-uri 'self'; object-src 'none'");
+  }
+  if (!res.getHeader('Content-Security-Policy') || !res.getHeader('Content-Security-Policy-Report-Only')) {
+    res.setHeader(
+      'Content-Security-Policy-Report-Only',
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https: wss:; frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'"
+    );
+  }
+  next();
+});
+
+// ── Access guard (records, does not block by default) ──
+// Every meaningful /api decision lands in access_decisions: who, from which IP, on
+// which surface, allowed or challenged, and why. It only returns 401/403 once a
+// surface is switched to enforce from Telegram (/enforce hakster). Free and
+// trialing accounts are never auto-denied; IP denials are app-level rows with an
+// expiry, and private/owner addresses are exempt.
+const accessGuard = require('./accessGuard');
+try {
+  const gs = accessGuard.loadSettings();
+  const hs = (gs.surfaces && gs.surfaces.hakster) || {};
+  app.use('/api', accessGuard.middleware({
+    surface: 'hakster',
+    gatedRoutes: hs.gatedRoutes || [],
+    paidOnlyRoutes: hs.paidOnlyRoutes || [],
+    ownerOnlyRoutes: hs.ownerOnlyRoutes || [],
+  }));
+  console.log(`[accessguard] mounted on /api — mode ${gs.mode}, hakster enforce ${hs.enforce ? 'ON' : 'off'}`);
+} catch (e) {
+  console.error('[accessguard] mount skipped:', e.message);
+}
 
 function isCerebrasValue(value) {
   return String(value || '').toLowerCase().includes('cerebras');
@@ -6488,10 +6555,10 @@ app.post('/api/stripe/checkout', async (req, res) => {
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      payment_method_types: ['card'],
-      customer: user.stripe_customer_id || undefined,
-      customer_email: user.email || undefined,
+      ...(user.stripe_customer_id ? { customer: user.stripe_customer_id } : {}),
+      ...(!user.stripe_customer_id && user.email ? { customer_email: user.email } : {}),
       line_items: [{ price: priceObj.stripePriceId, quantity: 1 }],
+      integration_identifier: `haksterai_web_${Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz'[crypto.randomInt(26)]).join('')}`,
       metadata: {
         userId: String(user.id),
         planId: plan.id,
@@ -6508,6 +6575,61 @@ app.post('/api/stripe/checkout', async (req, res) => {
   } catch (err) {
     console.error('[stripe] checkout error:', err.message);
     res.status(500).json({ error: 'Failed to create checkout session', details: err.message });
+  }
+});
+
+// Telegram callbacks arrive from Telegram's polling client, so they do not
+// carry a browser API key. Accept only the in-process bot's private token and
+// use the Telegram account ID to create or find that user's HaksterAI account.
+app.post('/api/stripe/telegram-checkout', async (req, res) => {
+  const expected = Buffer.from(telegramBots.internalBillingToken || '');
+  const provided = Buffer.from(String(req.headers['x-hakster-telegram-internal'] || ''));
+  if (!expected.length || expected.length !== provided.length || !crypto.timingSafeEqual(expected, provided)) {
+    return res.status(401).json({ error: 'Unauthorized Telegram checkout request' });
+  }
+
+  const stripe = getStripe();
+  if (!stripe) return res.status(503).json({ error: 'Stripe is not configured' });
+  const tgUser = req.body?.telegramUser;
+  if (!tgUser || !/^\d{1,20}$/.test(String(tgUser.id || ''))) {
+    return res.status(400).json({ error: 'Valid Telegram user data is required' });
+  }
+
+  const requestedPlanId = String(req.body?.planId || '');
+  const requestedPriceId = String(req.body?.priceId || '');
+  const plan = PRICING_CATALOG.find(item => item.id === requestedPlanId);
+  const price = plan?.prices.find(item => item.id === requestedPriceId || item.stripePriceId === requestedPriceId);
+  if (!plan || !price?.stripePriceId || price.amount <= 0) {
+    return res.status(400).json({ error: 'Selected paid plan is not available' });
+  }
+
+  try {
+    const { user } = findOrCreateTelegramUser(tgUser, req);
+    if (user.status !== 'active') return res.status(403).json({ error: 'This account is not active' });
+
+    const siteOrigin = String(process.env.PUBLIC_URL || 'https://haksterai.com').replace(/\/+$/, '');
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      ...(user.stripe_customer_id ? { customer: user.stripe_customer_id } : {}),
+      ...(!user.stripe_customer_id && user.email ? { customer_email: user.email } : {}),
+      line_items: [{ price: price.stripePriceId, quantity: 1 }],
+      integration_identifier: `haksterai_telegram_${Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz'[crypto.randomInt(26)]).join('')}`,
+      metadata: {
+        userId: String(user.id),
+        planId: plan.id,
+        priceId: price.stripePriceId,
+        telegramId: String(tgUser.id),
+        source: 'telegram',
+      },
+      subscription_data: { metadata: { userId: String(user.id), planId: plan.id } },
+      success_url: `${siteOrigin}/build?checkout=success&plan=${encodeURIComponent(plan.id)}`,
+      cancel_url: `${siteOrigin}/#pricing`,
+    });
+    console.log(`[stripe] Telegram checkout session created for user ${user.id}, plan ${plan.id}`);
+    return res.json({ ok: true, url: session.url, sessionId: session.id });
+  } catch (err) {
+    console.error('[stripe] Telegram checkout error:', err.message);
+    return res.status(500).json({ error: 'Failed to create Stripe checkout session' });
   }
 });
 

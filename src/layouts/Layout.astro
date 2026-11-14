@@ -23,6 +23,14 @@ const haksterBuildId = new Date().toISOString();
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
     <link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#00ff41" />
+    <meta name="application-name" content="HaksterAI" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="HaksterAI" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta property="og:image" content="/haksterai-logo.png" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -888,5 +896,12 @@ const haksterBuildId = new Date().toISOString();
         }
       });
     </script>
-  </body>
+    <script is:inline>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+      });
+    }
+  </script>
+</body>
 </html>
