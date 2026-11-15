@@ -10828,3 +10828,42 @@ Digest: `startAccessReporter()` posts every 6 h (first at 5 min) only when the p
 **Not done yet:** PhantomIDE (`phantom` surface) and miniforge (`miniforge` surface) have
 route lists configured but no middleware mounted — they are not gated. Domain header
 hardening (CSP/HSTS/X-Frame-Options) is still just reported by the scanner, not applied.
+
+## Miniforge public surface sign-in — 2026-11-15
+
+**Symptom:** signing in on haksterai.com then opening the bots page left the owner and every
+user signed out, bots missing, and client-side JSON/parse errors in the console.
+
+**Cause (verified):** `/miniforge/` serves `dist/miniforge/index.html`, which since 2026-11-15
+10:28 UTC is the Miniforge app itself rather than the iframe wrapper. The app decides whether
+to route its own API calls through the public proxy with
+`MINIFORGE_MOUNT = location.pathname.startsWith('/miniforge/app') ? '/miniforge' : ''`, so at
+`/miniforge/` the mount was `''` and every `/api/*` call (sign-in ticket exchange, bots list,
+app chat, memory, auth/me) hit the HaksterAI service root and got `404 {"error":"Not found"}`
+instead of reaching Miniforge on 127.0.0.1:5555 through the `/miniforge` proxy.
+
+**Fix:** mount detection is now `/^\/miniforge(\/|$)/`, and the offline service worker is only
+registered when the page is actually under `/miniforge/app` (its scope). Applied identically
+(md5-identical) to `/home/ghost/miniforge/public/index.html` (served at `/miniforge/app/`) and
+`/home/ghost/haksterAi/dist/miniforge/index.html` (served at `/miniforge/`). Backups:
+`*.bak-signin-mount-20261115T031432Z` in both directories. No service restart was needed —
+both paths serve the files per request.
+
+**Verified live after the change:**
+- Both `/miniforge/` and `/miniforge/app/` serve the patched mount line.
+- `/miniforge/api/apps` 200 (12,766 bots), `/api/categories` 200, `/api/stats` 200,
+  `/api/skills` 200, `/api/memory-clusters` 200, `/api/auth/me` 401 JSON (Miniforge).
+- `POST /miniforge/api/auth/hakster-google` → 400 `Valid HaksterAI sign-in ticket required`;
+  `POST /miniforge/api/auth/login` → 401 `Invalid credentials` (Miniforge, not hakster 404).
+- `GET /api/auth/google/redirect?returnTo=/miniforge/` → 302 to Google; decoded `state`
+  carries `returnTo:/miniforge/`, so the callback issues an SSO ticket back to the app.
+- `POST /api/auth/miniforge/exchange` (bogus ticket) → 401 JSON.
+
+**Not verified:** a full Google round-trip with a real account (requires interactive Google
+sign-in); the ticket exchange path was exercised only with invalid tickets.
+
+**Verified end-to-end — 2026-11-15:** the owner signed in on `haksterai.com/miniforge/` and
+confirmed it works (Google round-trip, returned signed in, bots usable). That closes the
+"not verified" gap in the entry above; the mount-detection fix is confirmed in real use for
+the owner account. Regular-user sign-in uses the same path (Google → callback → SSO ticket →
+`/miniforge/api/auth/hakster-google`), exercised at the endpoint level only.

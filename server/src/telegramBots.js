@@ -1167,19 +1167,23 @@ function startAccessReporter() {
 function startSecurityReporter() {
   const INTERVAL_MS = 12 * 60 * 60 * 1000;
   let _lastSig = '';
-  setInterval(async () => {
-    const role = ROLES.TELEGRAM_BOT_TOKEN_7;
-    if (!role || !role.bot || role.chatIds.size === 0) return;
+  const tick = async () => {
     try {
       const report = await securityDigest();
       const sig = report.replace(/\d+/g, '#').slice(0, 400);
       if (sig === _lastSig) return;             // same posture — stay quiet
       _lastSig = sig;
-      await sendToRole('TELEGRAM_BOT_TOKEN_7', report, { parse_mode: 'Markdown' });
+      // Slot-7 owns this surface, but its BotFather token may not exist yet.
+      // Fall through security -> recon -> coder so posture findings never vanish.
+      const who = await sendSecurityReport(`🔒 *Security Posture*\n\n${report}`);
+      if (who) console.log(`[telegram:security] digest sent via ${who}`);
+      else console.error('[telegram:security] digest not delivered — no fleet bot had a usable chat');
     } catch (e) {
       console.error('[telegram:security] digest failed:', e.message);
     }
-  }, INTERVAL_MS);
+  };
+  setTimeout(tick, 5 * 60 * 1000);
+  setInterval(tick, INTERVAL_MS);
 }
 
 // Public push helpers used by index.js or other modules

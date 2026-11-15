@@ -117,6 +117,7 @@ async function initWebMcp() {
 }
 const { saveMemory, getMemory, searchMemories, listMemories, deleteMemory, getMemoryContext, getMemoryStats, compactMemories, CATEGORIES: MEMORY_CATEGORIES } = require('./memory');
 const { runSecurityAudit, startSecurityScanner, getSecurityNotifications, acknowledgeSecurityNotification, acknowledgeAllSecurityNotifications, SEVERITY: SECURITY_SEVERITY } = require('./security');
+const { runExposureScan, startGitExposureWatcher } = require('./gitExposure');
 const compression = require('compression');
 let Stripe = null;
 try { Stripe = require('stripe'); } catch (e) { console.log('[stripe] module not available'); }
@@ -8596,6 +8597,14 @@ function startServer(delay = 2000) {
     // Start background security scanner (5-min interval, notifies on persistent risks)
     startSecurityScanner(path.join(__dirname, '..'), CORS_ORIGINS, notifPush);
     console.log('  ✓ Security scanner started (5-min interval, persistent risk notifications)');
+
+    // Start the continuous git exposure watcher (6h interval, ~/bin/secret-scan.sh)
+    try {
+      startGitExposureWatcher(notifPush);
+      console.log('  ✓ Git exposure watcher started (6h interval, reports changes to Telegram)');
+    } catch (e) {
+      console.warn('  ⚠ Git exposure watcher failed to start:', e.message);
+    }
 
     // Start Telegram bot fleet
     telegramBots.initBots();
