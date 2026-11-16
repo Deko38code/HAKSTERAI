@@ -10867,3 +10867,1003 @@ confirmed it works (Google round-trip, returned signed in, bots usable). That cl
 "not verified" gap in the entry above; the mount-detection fix is confirmed in real use for
 the owner account. Regular-user sign-in uses the same path (Google → callback → SSO ticket →
 `/miniforge/api/auth/hakster-google`), exercised at the endpoint level only.
+
+## 2026-11-16 — Fleet commit ids are verified, and a permanent git commit ledger
+
+**Problem this closes:** a coder-bot report sent on 2026-11-16 05:20 (msg 1026) carried a
+commit id typed from memory, and it was wrong. A permanent Telegram message had a false id.
+
+**`server/scripts/telegram-report.js` (verified 2026-11-16 05:37):**
+- Any hash-shaped token in the report body (7–40 hex chars, at least one a–f, not preceded by
+  `#`, not part of a longer hex run) is checked with `git cat-file -e <sha>^{commit}` against
+  the target repo(s) **before** sending. An id that does not resolve → the report is refused
+  with exit code 3 and the offending token printed; nothing is sent.
+- `--git <repoPath>` (repeatable) appends a verified block read straight from git: absolute
+  repo, `HEAD <short> <subject>`, optional recent log, and the dirty path count.
+- `--git-log N` widens the appended log. `--no-hash-check` overrides the guard deliberately.
+- `--dry-run` now prints the composed message body, so a report can be checked before sending.
+- Pure-digit runs are deliberately exempt (timestamps, message ids, ports) so health reports
+  do not trip the guard. Consequence: an all-digit short hash is not checked.
+- Repo for verification defaults to the working directory's repo when `--git` is omitted.
+
+**`server/scripts/git-commit-ledger.js` (new, verified 2026-11-16 05:38):**
+- Append-only ledger at `server/data/git-commit-ledger.jsonl` (that dir is gitignored). One
+  JSON line per commit: repo, full sha, short sha, author name, author email, author date,
+  commit date, subject, refs, files/insertions/deletions, recorded_at.
+- Tracked repos by default: `/home/ghost`, `/home/ghost/haksterAi`,
+  `/home/ghost/cine-vault-live`. `--repos a,b` overrides. `rent-my-trailer` is **not** its own
+  repo — it lives inside `/home/ghost` and is recorded there.
+- Modes: `--sync` (record, default 50 per repo backfill, idempotent by repo+sha), `--report`
+  (send only un-reported commits through the coder bot, tracked by `reported_through` in
+  `server/data/git-commit-ledger-state.json`), `--sync --report`, `--list` with
+  `--repo/--since/--limit/--json`, `--watch --interval N`, `--install-hooks`.
+- `--install-hooks` writes `.git/hooks/post-commit` (mode 0755, marked
+  `# managed by git-commit-ledger.js`) into each tracked repo. The hook appends exactly one
+  line and ends in `|| true`, so it can never block or slow a commit. A post-commit hook this
+  script did not write is **left untouched** and reported as skipped.
+- Reports name the author but never the email; the ledger keeps the email locally.
+- Verified: `--install-hooks` self-test passed on all three repos, and the commit that added
+  these scripts (`2e3df2b` in haksterAi) was recorded by the hook itself with no manual sync.
+
+**Not done:** no pm2 daemon was added — nothing was started or restarted for this change, and
+`server/.env` was not touched. Continuous Telegram reporting needs either a scheduled
+`--sync --report` or a `--watch` process; the ledger itself is already always-on via hooks.
+
+**Correction (2026-11-16 05:27, owner instruction):** there is **no daemon and no `--watch`
+mode**. A polling job previously thrashed this box, so `--watch`/`--interval` were removed from
+`git-commit-ledger.js` and both flags now exit 2 with an explanatory message. Commits are
+recorded by the one-shot `post-commit` hook (~50 ms, ~50 MB peak RSS per commit, measured over
+10 runs); Telegram reporting is on demand via `--report`. Nothing was added to pm2, nothing was
+started, and no existing process or service was touched.
+
+## 2026-11-16 — Passkey sign-in (Windows Hello / Touch ID) for haksterai.com
+
+**What exists now.** `server/src/passkey.js` (installed from `index.js` just above the Google
+auth routes) adds WebAuthn sign-in. Same two endpoints serve both a synced passkey (Google
+Password Manager, iCloud Keychain) and a device authenticator such as **Windows Hello** or
+Touch ID, because a platform authenticator is just WebAuthn with
+`authenticatorAttachment: 'platform'`.
+
+Routes (all under `/api/auth/passkey/`):
+- `GET status` — public; reports `rpID` and, when a key is supplied, that account's passkeys.
+- `POST register/options` — signed-in only (`x-api-key` / Bearer). `{platform:true}` requests
+  the this-device authenticator (the Windows Hello button).
+- `POST register/verify` — verifies the attestation, stores the credential.
+- `POST login/options` — public; optional `username` narrows `allowCredentials`, otherwise the
+  OS offers the user's discoverable passkeys.
+- `POST login/verify` — verifies the assertion and returns the same `{apiKey, user, redirect}`
+  payload the Google callback hands the frontend, so existing session storage is reused.
+- `GET list`, `POST remove` — the signed-in user's own credentials.
+
+**Storage.** Table `passkey_credentials` (created with `CREATE TABLE IF NOT EXISTS` on first
+use): id, user_id → users(id), credential_id UNIQUE, public_key BLOB, counter, transports,
+device_type, backed_up, label, created_at, last_used_at. Public key only; the private key never
+leaves the authenticator. `counter` is updated from each assertion so clones are detected.
+Deleting a row is the user removing their own credential and cannot lock anyone out — Google
+sign-in and API keys remain.
+
+**Security details.** RP ID and origin come from the request and are checked against
+`haksterai.com`, `www.haksterai.com`, `localhost`, `127.0.0.1`; anything else gets 400.
+Challenges live in memory for 5 minutes, are single-use (deleted on presentation, even when
+verification fails), and the map is capped at 2,000 entries. Login refuses non-active accounts.
+No owner config or `.env` value is involved — no RP ID, secret or certificate was added.
+
+**Frontend.** `src/pages/passkey.astro` (built to `/passkey/`) has "Sign in with a passkey" and
+"🪟 Windows Hello / Touch ID" buttons, and — when signed in — add-this-device / add-another-device
+plus a list of the account's passkeys with a Remove action. `Layout.astro` gained a nav
+`🔑 Passkey` CTA next to the sign-in block; it hides itself for signed-in users. `terminal.astro`
+does not use `Layout`, so its header is unchanged.
+
+**Dependency.** `@simplewebauthn/server@14.1.0` added to `server/package.json` +
+`server/package-lock.json`. No frontend bundler dependency: the page uses `navigator.credentials`
+directly. Native modules (better-sqlite3, node-pty) verified still loading after the install.
+
+**Verified (2026-11-16 05:35).** An isolated harness on a COPY of `data/hakster.db`
+(`/tmp/passkey-test/`) with a software ES256 authenticator passed 14/14: valid attestation
+stored with a 77-byte public key, login returns `apiKey` + user, registration and login
+challenges are single-use, a forged signature is rejected (401), the sign counter advances, the
+list masks credential ids, and an off-allowlist host is refused (400). Also checked: the built
+page serves `https://haksterai.com/passkey/` with HTTP 200 and the Windows Hello button present.
+
+**Not yet live:** the API routes are not loaded until the `hakster` service is restarted — a
+restart during this change would have dropped any active CLI/chat stream, so it was left to the
+owner. The static page is already served; the endpoints return 404 until that restart. No
+service was restarted, no config touched, no process killed, and Google sign-in was verified
+still answering 200.
+
+---
+
+## Pricing / billing audit — 2026-11-16 (HaksterAI Lite + two billing bugs)
+
+**Verified live state.** A capped paid tier was added and two billing defects were fixed. All
+numbers below were read back from the running service and the Stripe API in live mode.
+
+**HaksterAI Lite — $3.00 USD/month.** Stripe product `prod_VdT47G4Sula1hi`, price
+`price_1UcC82A0UrVsJMzeA3czYM9b` (active, recurring month). Catalog entry `lite` in
+`server/src/index.js` with `stripeProductName: 'HaksterAI Lite'` (the refresh path matches
+products by name) and the price ID as the fallback default, so no `.env` change was needed.
+Entitlement: 30 AI calls (`LITE_USAGE_LIMIT`) + 10 web lookups (`LITE_WEB_RESEARCH_LIMIT`) per
+UTC calendar month, then blocked with an upgrade nudge. `GET /api/stripe/plans` returns it and
+`POST /api/stripe/checkout` with that price ID created a real `cs_live_...` session (HTTP 200).
+
+**Bug 1 — no paid signup could ever be upgraded.** `users.plan` carried
+`CHECK(plan IN ('free','pro','enterprise'))` from the original schema. Every tier added since
+(`starter`, `starter_plus`, `pro`) made the Stripe webhook's `UPDATE users SET plan = ?` throw, so
+payment succeeded at Stripe and the account stayed on `free`. Fixed in `server/src/db.js`: the
+source DDL is widened and a one-time rebuild migration recreates the table only while the stale
+constraint is present. It backs up via `VACUUM INTO data/backups/hakster.db.plan-migration.*`,
+preserves all 20 columns and all 9 explicit indexes, and verifies row count plus
+`PRAGMA foreign_key_check` before committing. Verified: 7/7 rows preserved, integrity ok, `lite`
+and `starter_plus` now writable, `bogus` still rejected.
+
+**Bug 2 — the usage window never rolled over.** `usage_reset_at` is `INTEGER NOT NULL DEFAULT 0`,
+so `COALESCE(usage_reset_at, ?)` returned the stored `0` and never wrote the new timestamp. The
+reset branch `if (resetAt && now > resetAt)` could therefore never fire, capping every free
+account at 5 calls permanently instead of per window. Fixed with
+`COALESCE(NULLIF(usage_reset_at, 0), ?)`. Verified in an isolated in-memory harness: lite blocks
+at call 31, rolls to 1/30 after the month boundary, free still caps at 5, starter stays unlimited.
+
+**Audit fix — dashboard prices were visible but unbuyable.** `refreshPricesFromStripe()` merges
+every active price of a catalog product into what `/api/stripe/plans` serves, but
+`planFromPriceId()` and `/api/stripe/checkout` only walked the static `PRICING_CATALOG`, so a
+price created in the Stripe dashboard rendered a buy button that returned 400. Both now consult
+the refreshed catalog first. Also: `customer.subscription.updated` resets the metered counters
+only when the plan actually changes (it fires for card updates and cancel-at-period-end toggles,
+which would otherwise clear a capped plan's quota), and the catalog's fallback amounts were
+aligned to the real Stripe prices (Pro 29.99/299.99, Enterprise 99.99/999.99) so a box without
+the `PRICE_*_CENTS` env overrides advertises what is actually charged.
+
+**Known discrepancy, not changed.** `AGENTS.md` states free accounts get ten web-research uses;
+the code enforces `FREE_WEB_RESEARCH_LIMIT = 5`. Left as-is pending the owner's decision.
+
+**Not built.** Embedded Stripe Checkout (`ui_mode: 'embedded'`) and an agent-driven payment flow
+were requested/discussed but not implemented. Both checkout routes are still `mode:
+'subscription'` and redirect to hosted Stripe Checkout. No `.env`, no config and no tunnel was
+touched.
+
+## Telegram sign-in wired into site auth + sliding marketplace plan cards (2026-11-16)
+
+**Why.** The owner reported that he is signed in on haksterai.com but the first bot (bot 1,
+`TELEGRAM_BOT_TOKEN_1`) reported him as not signed in, and that the marketplace's payment cards
+should open and slide smoothly.
+
+**Root cause.** The marketplace mini app (`public/marketplace/index.html` == `dist/marketplace/
+index.html`) only read `Telegram.WebApp.initDataUnsafe.user` for a greeting. It never called
+`/api/auth/telegram/webapp`, never stored an apiKey, and never called `/api/auth/me`, so anything
+opened from a bot was anonymous. Separately, `users.telegram_id` identifies a Telegram account,
+and the owner's site account (dekekenneth840@gmail.com) had `telegram_id: null`, so a bot-side
+sign-in would have created a second, free account instead of resolving to the owner.
+
+**What changed (verified against the running service, pm2 id 3, port 3579).**
+1. `POST /api/auth/telegram/link` (`server/src/index.js`) — requires `{ initData }` plus
+   `x-api-key`. Verifies the Telegram signature with the existing `verifyTelegramWebAppData`
+   (tokens 1..6), then sets `users.telegram_id` on the signed-in account. Returns 409 if the
+   Telegram id already belongs to another account or the account is linked to another Telegram
+   id; idempotent on repeat calls. Live: 400 without `initData`, 401 with a bad signature.
+2. `findOrCreateTelegramUser` now resolves the configured owner chat
+   (`telegramSiteKeys.isOwnerChat`, i.e. `TELEGRAM_OWNER_CHAT`) to the owner's existing site
+   account (`telegramSiteKeys.ownerUser()`, lookup by `OWNER_EMAIL`) before any new user is
+   created. A foreign Telegram id already stored on the owner record is never reassigned.
+3. `src/layouts/Layout.astro` auth gate — a new `telegramAuth()` step runs before the redirect.
+   It reads `Telegram.WebApp.initData`, falling back to the `#tgWebAppData=` hash fragment. With
+   no local key it POSTs `/api/auth/telegram/webapp`, stores the returned apiKey under BOTH
+   `hakster_google_token` and `hakster_api_key` (the two names the site reads), then reloads.
+   With a local key it calls `/api/auth/telegram/link` once (guarded by `hakster_tg_linked_at`).
+   While that sign-in is in flight the gate no longer bounces to `/?signin=1`.
+4. Marketplace mini app — real sign-in (`webapp` → apiKey → `/api/auth/me` → identity line such
+   as "Owner · @user · enterprise plan"), link-instead-of-duplicate when already signed in, and
+   plan cards that slide open (`grid-template-rows: 0fr → 1fr`, chevron rotation, respects
+   `prefers-reduced-motion`). Each card now shows live prices/features and POSTs
+   `/api/stripe/checkout` with `returnTo: '/marketplace/'` — no invented prices.
+5. Dashboard (`src/pages/dashboard.astro`) — owner-only "🧠 Skills & Brain" tab beside "👤 Users"
+   (`data-owner-only="true"`, opens `/admin/skills` in the same popup). `/admin/skills` itself was
+   already owner-gated server-side by `ADMIN_PAGES` + `requireOwner`.
+
+**Verification.** `astro build` completed (17 pages); `dist/` backed up to
+`dist.bak.pre-tg-auth-20261116T021657Z.tgz` first. `/marketplace/` 200, `/api/stripe/plans` 200,
+`/api/auth/me` 401 anonymous, `link` 400/401 as above. Headless Chromium (390×844): five plan
+cards render, first opens to 283.75px, the rest are 0px; clicking the second animates its body to
+264.25px with the chevron rotated 180°, and it shows "Start for $5.99 →" for the intro offer.
+`node --check` clean on `server/src/index.js` and the page's inline script. No `.env`, config,
+tunnel, or process outside the requested `pm2 restart hakster` was touched.
+
+---
+
+## 2026-11-16 — Telegram fleet: per-chat entitlements, per-account builds, usage sync
+
+Verified against the running Dell services after `pm2 restart hakster` and `pm2 restart miniforge`
+(both online; https://haksterai.com/ 200, 127.0.0.1:5555 200).
+
+**New module** `server/src/telegramEntitlements.js`: resolves a Telegram chat to its own HaksterAI
+account (`users.telegram_id`), reads that account's live allowance from `/api/usage`, and returns
+`{allowed, plan, apiKey, remaining, webRemaining}`. Paid plans are unmetered; free/lite use the same
+counters the website enforces (free 5 calls / 5 lookups, lite 30 / 10 per UTC month). Owner chat
+(`TELEGRAM_OWNER_CHAT`) is never gated. `sendUpgradePrompt` sends one honest refusal plus the real
+Stripe plan picker; `noteRefusal` appends to `data/telegram-entitlements.jsonl` and alerts the owner
+at most once per chat per UTC day (`telegram_entitlement_alerts` table). Read-only: the module never
+writes usage counters.
+
+**`server/src/telegramBots.js`**: `runAgent(prompt, sessionId, allowFast, apiKey)` now sends
+`x-api-key` for the chat's own account instead of always using the shared `HAKSTER_API_KEY`, so
+`/api/agent/run` meters that account, applies customer-mode tool limits and writes the
+`user_token_usage` ledger (the credit monitor's source). `gateChatSurface()` runs before every agent
+chat (`/ask` on roles 1 and 3, role-4 general chat); a 402 from the endpoint is converted to the same
+upgrade prompt by `replyAgentError()`. Verified: one temp free account run returned 200, moved
+`usage_count` 0→1, wrote 1 ledger row, and `/api/usage` then reported `remaining 4 / limit 5`.
+
+**`server/src/telegramBuilds.js`**: `/build` passes the chat account's `haksterApiKey` to Miniforge
+and reports "Saved in your My Apps list"; a 402/429 shows the allowance is used up plus the plan
+picker, 401 explains the one-time Google sign-in needed to link the account. `miniforgeBuilder` in
+`telegramBots.js` now attaches `status`/`quota` to its errors so those cases are distinguishable.
+
+**`miniforge/server.js`**: `/api/internal/builder/build` resolves `haksterApiKey` through the existing
+`/api/auth/hakster-google` SSO bridge, uses that Miniforge account as `created_by`, and checks +
+consumes the same daily build allowance as `/api/build/stream` (`checkQuota` → `consumeQuotaCredit`
+→ `incrementDailyUsage`). Verified: bogus key 401, non-key 400, exhausted free account 402 with
+`{used:10,limit:10,remaining:0}`, and a real build under a temp account returned
+`savedOwnerId` equal to that account with the app present in the `/api/user/apps` query. All test
+accounts/rows created for verification were removed afterwards; no config, tunnel, or unrelated
+process was touched.
+
+## 2026-11-16 — Dell server status strip on the owner dashboard (haksterai.com)
+
+Junkalot's owner console on Parrot has a four-card live status row fed by
+`/api/admin/site-status`. haksterai.com now has the same shape on its owner dashboard, reporting
+the **Dell** — the box that always serves haksterai.com — never Parrot and never a guessed host.
+
+- **New owner-only endpoint:** `GET /api/admin/server-status` in `server/src/index.js`
+  (registered just above `/api/dashboard`, guarded by `requireOwner`). Response:
+  `checkedAt`, `host{hostname,platform,arch,cpus,loadavg,upSec}`, `serverUptimeSec` (process),
+  `mem{totalBytes,freeBytes,usedBytes,usedPct}` (os.totalmem/freemem), `swap{...}` parsed from
+  `/proc/meminfo` (SwapTotal/SwapFree), `disk{...}` from `fs.statfsSync('/')`, and
+  `site{url,online,status,ms,viaCloudflare,ray}` from a live `HEAD https://haksterai.com/`
+  with `redirect:'manual'` and a 6s abort, so a stale route/hijack reads "Not answering"
+  instead of a false green. Read-only: it starts/stops/reconfigures nothing.
+- **UI:** `src/pages/dashboard.astro` gained a `#server-section` strip above Top Stats — four
+  themed cards (Server — Dell, Public site, Cloudflare, Disk & swap) with a live dot,
+  memory bar, disk bar, and `loadServerStatus()` refreshing every 30s via `liveFetch` +
+  `authHeaders()`. 401/403 leaves the strip at "owner sign-in required"; failures grey the
+  live dot rather than showing stale data as live.
+- **Verified 2026-11-16:** `node --check` on the server and on the extracted built inline JS;
+  `npm run build` → 17 pages; `pm2 restart hakster`; localhost `GET /dashboard/` 200 with the
+  strip; unauthenticated `/api/admin/server-status` returns 401 `{error:"Sign in required"}`
+  both on 127.0.0.1:3579 and https://haksterai.com; public `/dashboard/` 200 with markup;
+  https://haksterai.com/ HEAD 200 in ~250ms with `cf-ray` header (Cloudflare carrying).
+  Data path exercised live: host `ghost-Inspiron-7348`, 4 CPUs, load reported, mem ~49%,
+  swap ~6% used (parked), root disk 65% used / 159 GB free.
+
+## 2026-11-16 (later) — Dell Auto Agent: read-only security + IP audit under the server panel
+
+The owner dashboard's Dell server strip now has an Auto Agent panel under it that runs **real**
+security checks and an IP audit automatically — on server startup and every time the panel is
+opened — and records logins durably. Everything is read-only; it changes nothing.
+
+- **Module:** `server/src/autoAgent.js` (new). Checks: listening ports (`ss -ltnp`), SSH/logins
+  (Dell auth log via `loginAudit.collectLocalDell`, now exported), firewall (`ufw status`,
+  reports "not readable without root" instead of failing), pending updates (`apt list
+  --upgradable`), accounts (`/etc/passwd` uid-0, `getent group sudo`, sshd `PermitRootLogin`),
+  and the app's own `runSecurityAudit`. Its `.env`-secret findings are reported separately and
+  never drive state (secrets are supposed to live in `.env`): actionability = critical/high/
+  medium/low excluding `Secret in .env file`.
+- **IP audit:** window = 24h over Dell auth events: failures, successes, invalid-user attempts,
+  unique IPs, public vs private, top offender IPs with users + last seen, web request IPs from
+  `access_logs`, active app denials via `accessGuard.listDenials()`, baseline + pending
+  anomalies. Every value comes from a real source; nothing inferred or geolocated.
+- **Always logged:** each run calls `loginAudit.updateBaseline(events)`, which appends fresh
+  events (timestamp, kind, user, IP, line hash) to `server/data/login-events.jsonl`
+  (append-only, deduped by hash — startup + panel opens cannot double-log). Run history is kept
+  in `server/data/auto-agent-history.json` (last 50).
+- **Triggers:** `startAutoAgent()` (called in the `server.listen` callback, ~8s after boot);
+  `POST /api/admin/autoagent/run {trigger:'panel'}` on panel open (60s throttle, returns
+  `reused:true` inside the window); `{trigger:'manual'}` from the Run now button (`force`).
+  `GET /api/admin/autoagent` returns last run + history. Both owner-only (`requireOwner`).
+- **UI:** `src/pages/dashboard.astro` `#autoagent-section` — state pill, six check chips, IP
+  audit stats (failed / logins / invalid users / unique IPs / web IPs / blocked), top-source-IP
+  table with public-vs-LAN scope, anomaly line, and the log path footer.
+- **Verified 2026-11-16:** `node --check` on all three changed server files and on the extracted
+  built inline JS; astro build 17 pages; `pm2 restart hakster` logged
+  `✓ Auto agent (security + IP audit) ran on startup: warn in 1858ms`; history file shows the
+  startup run with live values (24 listening ports, 46 SSH failures / 97 logins in 24h, 3 unique
+  IPs, 0 public failures, 0 blocked, app audit 0 critical/0 high/11 medium/1 low + 29 .env keys
+  expected); `login-events.jsonl` at 784 lines with ts/kind/user/ip; throttle verified
+  (second panel call `reused:true`, nextRunInMs 59999); `/api/admin/autoagent` and .../run return
+  401 unauthenticated on 127.0.0.1:3579 and https://haksterai.com; public `/dashboard/` 200 with
+  the panel markup. Observed (not changed): LAN host 10.0.0.210 (Mint) is generating repeated
+  `invalid user oem` SSH failures — 45 in the 24h window.
+
+## 2026-11-16 — Passkeys on phones and every device type (not fingerprint-only)
+
+Request: "need passkey to work with phones etc not fingerprint if scanner available". The old
+flow only really worked on a desktop with a platform authenticator, and it broke on
+`www.haksterai.com`.
+
+- **`server/src/passkey.js`**
+  - `rpFromRequest()` now returns `{ rpID, origin, origins }`. rpID stays the registrable domain
+    (`haksterai.com`), the origin is whatever host the browser actually used, and `origins`
+    carries apex + `www` + the local dev origin. Both verifications use
+    `expectedOrigin: pending.origins || pending.origin`, so a passkey created on the apex can be
+    used from `www` and vice versa. Off-list hosts still return 400.
+  - Registration maps the new `mode` body field to `preferredAuthenticatorType`:
+    `this-device`/`platform` → `localDevice` (Hello, Touch ID/Face ID, phone unlock),
+    `phone`/`remote` → `remoteDevice` (hybrid QR hand-off), `security-key` → `securityKey`,
+    anything else / absent → undefined so the browser offers everything. `timeout` is 120000ms
+    (a 60s window kills phone QR hand-offs). `residentKey` and `userVerification` both stay
+    `preferred` — the device picks face, fingerprint, iris or PIN.
+  - Login/options accepts an optional `username` (narrows `allowCredentials` for older
+    non-discoverable keys), keeps an empty list otherwise so the OS offers every synced passkey
+    and the cross-device QR, sets `timeout: 120000`, and stores `origins` on the pending
+    challenge.
+  - `/api/auth/passkey/status` `platformHint` is now
+    `face, fingerprint, PIN or a security key`.
+- **`src/pages/passkey.astro`**
+  - Copy rewritten: face / fingerprint / iris / PIN, Windows Hello, Touch ID / Face ID, or a
+    security key; states plainly that a fingerprint is never required.
+  - Optional "Email or username" field (`#signin-email`, `autocomplete="username webauthn"`).
+    `#btn-signin` signs in with no username (discoverable passkeys + "use a phone" QR);
+    `#btn-signin-account` narrows to the typed account.
+  - Removed the invalid `publicKey.authenticatorSelection` that the old code set on
+    `navigator.credentials.get()` — that option does not exist on an assertion and was ignored.
+  - Four add buttons: `#btn-add-device` (this-device), `#btn-add-phone`, `#btn-add-key`
+    (security key), `#btn-add-any` (browser chooses). Each posts its `mode`, and labels are
+    derived from the real device (Face ID / Touch ID / Windows Hello / Phone unlock / Security key).
+- **Verified 2026-11-16:** `node --check server/src/passkey.js`; astro build 17 pages; both
+  built inline scripts extracted and `node --check`ed; a direct library harness confirmed the
+  option shapes (`localDevice` → hints `["client-device"]` + attachment `platform`,
+  `remoteDevice` → `["hybrid"]` + `cross-platform`, `securityKey` → `["security-key"]`,
+  undefined → no hints, login options with 0 allowCredentials). After `pm2 restart hakster`:
+  startup log `✓ Auto agent (security + IP audit) ran on startup: warn in 2572ms`;
+  `https://haksterai.com/api/auth/passkey/status` → 200
+  `{rpID:"haksterai.com","platformHint":"face, fingerprint, PIN or a security key"}`;
+  `https://www.haksterai.com/api/auth/passkey/status` → 200 with the same rpID;
+  `POST /api/auth/passkey/login/options` → 200 `{rpId:"haksterai.com",allowCredentials:[],
+  timeout:120000,userVerification:"preferred"}` for both empty and unknown-username bodies;
+  `POST /api/auth/passkey/register/options` unauthenticated → 401
+  `sign in first, then add a passkey`; `https://haksterai.com/passkey/` → 200 (36211 bytes)
+  containing `signin-email`, `btn-signin-account`, `btn-add-phone`, `btn-add-key`,
+  `btn-add-any` and the new copy. Not verified: an actual credential ceremony, which needs a
+  human device — no passkey was created or removed during this check.
+
+## 2026-11-16 — Visible scrollbars wherever a scroll is needed
+
+Request: "i need scrollbar in my admin tab … a bar in the servers page usage payments under the
+tab and in my secret admin tab only i see", then "wherever bars are needed to scroll", "do audit".
+
+- **Root cause found by audit:** nothing was clipping content (no `overflow:hidden` + `max-height`
+  pairs on any live page, no `html/body { overflow:hidden }`), so the page and its lists did scroll
+   — they just drew *no visible bar*. Chrome/Chromium on Linux uses overlay scrollbars: they stay
+  invisible until you hover the edge, and while overlay mode is on the browser ignores
+  `::-webkit-scrollbar` styling entirely. That is why the quick-nav tab row and the long
+  server/usage/payments panels looked like they had nothing beyond the edge.
+- **`src/styles/global.css`** (appended, originals kept): `html` gets
+  `scrollbar-width: thin; scrollbar-color: #7c3aed #14141d; scrollbar-gutter: stable`; every
+  element gets `scrollbar-width: thin; scrollbar-color: #4c1d95 #14141d` plus
+  `*::-webkit-scrollbar` track/thumb/corner rules (10px, rounded, purple thumb on #14141d).
+  Firefox draws real bars from these. Class-based rules (xterm, mail) still win on specificity,
+  so nothing that already drew its own bar changed.
+- **`public/js/hakster-scrollbars.js`** (new, 8.8KB, no dependencies): closes the overlay-scrollbar
+  gap. It measures every `overflow: auto|scroll` box and the page itself, and injects a slim
+  fixed-position bar with a draggable thumb **only when the browser is not already reserving
+  layout space for a native bar** — so a browser with real bars does not get a double bar. Skips
+  `.xterm` (xterm draws its own), boxes under 40×24px, under 24px of overflow, and hides a bar when
+  its box is scrolled off screen. Re-measures on resize, on scroll (rAF-throttled) and on DOM
+  mutations (debounced 250ms). It never wraps or moves page content.
+- **Wiring:** `<script is:inline src="/js/hakster-scrollbars.js" defer>` in
+  `src/layouts/Layout.astro` (all Astro pages) and the same tag before `</body>` in BOTH
+  `public/marketplace/index.html` and `dist/marketplace/index.html` (kept byte-identical).
+  The dashboard quick-nav strip also carries `data-scroll-hint="x"` so its horizontal bar is the
+  brighter #7c3aed variant and its off-screen tabs are discoverable.
+- **Verified 2026-11-16:** `node --check` on the new script (and on the copy fetched back from the
+  live site); astro build 17 pages; no page had a clipping risk in the audit; headless Chromium
+  against the built output measured a 10×800 page bar with a 231px thumb that moved to top 347
+  after scrolling, a 320×10 horizontal bar under a synthetic tab strip, an inner list bar correctly
+  hidden when its box was off screen, and one page bar on `/marketplace/`;
+  `https://haksterai.com/js/hakster-scrollbars.js` → 200 (8,817 B, text/javascript) and
+  `script-tag=1` on `/`, `/build/`, `/dashboard/`, `/marketplace/`, `/plans/`.
+  Not verified: the exact rendering on Deke's own display (overlay behaviour is a browser setting),
+  which he can confirm by looking at the dashboard's tab row.
+
+## 2026-11-16 — Update-ready widget kept, and now every user gets it
+
+Request: "its the widget that shows up top i like that so keep that and each user should have
+that if updates are available to get me".
+
+- **Widget kept unchanged** in `src/layouts/Layout.astro` (aside `#haksterai-update-toast`,
+  buttons `#haksterai-update-now` / `#haksterai-update-later`). "Update" clears the snooze key
+  and calls `location.reload()`; "Later" snoozes for 30 minutes via
+  `haksterai-update-later-until`. No config, no service restart.
+- **New `GET /api/version`** in `server/src/index.js` (public, before `/api/health`): returns
+  `{ build, checkedAt }` read from the `<meta name="haksterai-build">` that Astro stamps into
+  `dist/index.html`, cached 30s, `cache-control: no-store`. This is the deployed build id and
+  nothing else — a few hundred bytes instead of a whole page.
+- **Layout check rewritten** to poll `/api/version` first and fall back to re-fetching the
+  current page and reading its build meta (older server / endpoint unavailable). It runs for
+  every visitor and signed-in user — owner and customers alike — 15s after load, every 120s,
+  and now immediately on `visibilitychange` back to the tab. Deferral (`Later`) still respected.
+- **Verified 2026-11-16:** `node --check server/src/index.js`; astro build 17 pages; all four
+  built inline scripts `node --check`ed; `GET /api/version` → 200 on localhost:3579 and
+  `https://haksterai.com` returning the live build id `2026-11-16T05:25:31.345Z`, matching
+  `data-hakster-build` on the live page, and 200 with no auth (it must work for customers).
+  Headless Chromium against the built pages, served with an artificially old page build id and
+  a live `/api/version`: on a public, unauthenticated page the toast went from hidden to
+  visible after the check with text "HaksterAI update ready / A newer version is available. /
+  Update / Later"; "Later" hid it and set `haksterai-update-later-until`; with the deferral set,
+  clicking "Update" cleared the key and reloaded to the same page. Not verified: a real
+  multi-device deploy cycle (the test simulated an older cached page against the live endpoint).
+
+## 2026-11-16T05:40Z — Update-button crash path closed, site-wide auto-resume, live firewall card
+
+Verified on the running Dell (ghost-Inspiron-7348), build `2026-11-16T05:34:32.884Z`.
+
+**1. Update no longer reloads into a restarting server.** The toast's Update handler in
+`src/layouts/Layout.astro` now calls `window.haksterServerHealthy()` (`/api/version`, 6s abort)
+first. Healthy → reload. Not healthy → hands off to `window.haksterUpdateWhenReady()`, which keeps
+the page alive, shows "Updating — waiting for the server…", retries every 2s and reloads the moment
+the server answers. Verified live: real `pm2 restart hakster` under an open live page + real Update
+click → banner "Updating — waiting for the server…", button "Waiting…", then "Back online — loading
+the new version…", navigation at +8.9s. No dead page, no crash.
+
+**2. `public/js/hakster-resume.js` (new, ~5.5 KB, no deps), loaded in `Layout.astro` for every
+user.** 20s background `/api/version` probe (2s while down) plus visibilitychange/online/pageshow.
+On failure: "Server is restarting — reconnecting…" banner. On recovery without a pending update:
+"Back online after Ns." and a `hakster:server-back` DOM event; with a pending update it reloads.
+Skips work while the tab is hidden; no private data stored.
+
+**3. Firewall check in `server/src/autoAgent.js` rewritten read-only.** The old check ran
+`ufw status`, hit "You need to be root", and reported "not readable without root — unchanged".
+Root-only commands cannot work from the pm2 user, so the check now reads world-readable sources:
+`/etc/ufw/ufw.conf` (`ENABLED=`), `systemctl is-active|is-enabled ufw|nftables|firewalld`,
+`/proc/modules` (are netfilter tables actually loaded), `ss -ltnH` (all-interface listeners), and
+`/etc/ufw/user.rules` only when readable for a rule count. **Live finding:** ufw unit is
+`active (exited)`/`enabled` but `ENABLED=no`; `/proc/modules` has zero `nf_tables|iptable_|nft_|xt_`
+modules; 13 sockets listen on all interfaces (22, 3579, 5599, 8081, 8111, 8112, 8213-8215, 8888,
+9999, 11434 Ollama). Card state: `warn`, detail
+"ufw is OFF (ENABLED=no in /etc/ufw/ufw.conf) · no netfilter rules loaded · 13 port(s) on all
+interfaces — enabling needs owner approval". The checks are read-only; enabling the firewall is an
+owner decision (and over SSH needs `ufw allow 22/tcp` before `ufw enable`).
+
+**4. Two-box failover request (Mint as backup, auto-switch after 20s) is NOT implemented and is
+blocked on facts + owner approval.** `~/mint-backup` is a 4.4 GB disk mirror (`etc/`, `home/` from
+the old Mint image, March–October 2026), not a running server: it contains no
+`server/src/index.js`, no dist, no pid. No host on the LAN answers on 3579; 10.0.0.210 and
+10.0.0.251 answer on 80/22 only and are not haksterai. Public routing is the Dell's own
+`haksterai-dell-tunnel`. Automatic 20s failover therefore needs (a) Mint actually running the app,
+(b) a second tunnel on Mint, and (c) a switch in front of both — Cloudflare Load Balancer, a
+health-checked failover record, or a Worker proxy. Those are tunnel/DNS/config changes and stay
+frozen until Deke approves that exact route and box.
+
+## 2026-11-16 05:49 UTC — Dashboard usage cost at 1¢/request (records only)
+
+**Verified against the running service.** Live build `2026-11-16T05:48:17.263Z` served at
+`https://haksterai.com/dashboard/` (`/api/version` returned the same id).
+
+- **Cost on the usage cards, owner rule:** cost is now `requests × $0.01`, computed in the browser
+  in `src/pages/dashboard.astro` (`COST_PER_REQUEST = 0.01`, `rateCost()`, `money()`), and rendered
+  under each meter: `#usage-day-cost`, `#usage-week-cost`, `#usage-month-cost` →
+  `"$0.12 at 1c/request · records only"`. The token line carries the same rate (`· $0.12 @1c/req`),
+  and the accounts table shows `costText(a.monthRequests)` in the `Tokens · cost (32d)` column.
+- **Never wired to burns:** the figure is display math from the request count. It does not read or
+  write token balances, credits, call caps, `reserveUsage()`, Stripe, or any billing path. Provider-
+  reported cost from the request ledger is shown *separately* in the hover detail
+  (`provider-reported: $0.0021`) and is only printed at ≥ $0.0001 so it never shows a fake `$0.00`.
+- **Hover detail** on each meter: label, requests, tokens, card cost at `$0.01/request (records
+  only)`, provider-reported cost when present, `now:` UTC stamp, and the window reset with an
+  `in 59m` / `in 10d 9h` countdown.
+- **Runtime check (headless Chromium, `/usr/bin/chromium`, project puppeteer, owner-stubbed APIs):**
+  `renderUsage()` with 12 / 81 / 305 requests produced `$0.12`, `$0.81`, `$3.05`; the accounts row
+  showed `$1.00` for 100 requests; the 30-day bar tooltip showed `$0.10` for 10 requests; zero page
+  errors. Card helpers re-verified on the live page: `hkRenderFeed` keyed in-place reuse
+  (`u1,u2,u3 → u2,u3,u1,u4`, nodes reused, text updated to `user2!`, 4 rows kept on an empty tick),
+  `hkCachePill` → `cache cleared`, `hkSetTable` kept the last real rows instead of blanking,
+  `hkSetTip` + shared `#hk-tip` tooltip visible on hover, `hkCacheFacts` HIT/age detection, and both
+  `#recent-users-list-jump` / `#activity-log-list-jump` autoscroll buttons present.
+- **Auth-gate note for future browser tests:** `/dashboard/` bounces anonymous sessions to Google.
+  A headless check must set `localStorage.hakster_google_token` on the origin first and stub
+  `/api/auth/me` **and** `/api/auth/authorize-page?page=dashboard` (401 there redirects to `/`).
+- **Update flow confirmed working by the owner** after the resume helper + toast timestamp work
+  (`#haksterai-update-detail`, `/api/version/seen` logging, `/js/hakster-resume.js`).
+- Server left healthy: `hakster` online, restarts 12, unstable restarts 0; load 10.68 / RAM 3.3 Gi
+  used of 7.7 Gi / swap 1.8 Gi used of 9 Gi at 14:30 local (05:30 UTC).
+
+## 2026-11-16 05:58 UTC — Live Codex + DeepSeek security agents, plan cards, admin device codes
+
+**Verified against the running service.** Live build `2026-11-16T05:57:34.948Z` at
+`https://haksterai.com/dashboard/`; `hakster` online with no startup errors.
+
+### Infrastructure Security Agents (new)
+- `server/src/securityAgents.js` — two agents review the same read-only sweep:
+  **codex** (`codex-cli`, rides the local Codex Pro auth) and **deepseek**
+  (`deepseek-v4.1-flash:cloud` via the DeepSeek lane). Each returns a rundown with
+  `VERDICT / WHAT I CHECKED / RISKS (P0–P3) / EVIDENCE / ACTIONS NEEDING OWNER APPROVAL`.
+- Both agents receive a live **platform map**: pm2 process table, mounted Express routes
+  (`app._router.stack`), the Command Center registry (`command-center/commands.json` +
+  `user-commands.json`), PhantomIDE peer sync state (`/api/peer/status` — phantomide.com on
+  Parrot ↔ this Dell box), the Telegram fleet (roles, how many have tokens, sub-agents,
+  `server/scripts/telegram-*` helpers) and the `~/.agents` roster. No secret values are read.
+- Cadence: every **6 hours**, at **startup** (90s delay), and on demand. Throttled to one run
+  per 10 minutes. Rundowns are pushed to the **Telegram recon bot** (`sendReconResult`).
+- Endpoints (owner-only): `GET /api/admin/security-agents`, `POST /api/admin/security-agents/run`
+  (optional `{agent:'codex'|'deepseek'}`; `force: true`, notifies the fleet). Unauthenticated
+  calls return 401 (verified live).
+- Dashboard: "🛡 Infrastructure Security Agents" panel under all cards — per-agent status dot,
+  resolved model, latency, UTC run time, the full rundown, sweep check chips, live/stale cache
+  pill, and "Run sweep now". Cards keep their last real rundown on a failed poll.
+- **Real run (2026-11-16 05:55 UTC):** sweep `warn` in 1.3s — ports pass, SSH info, firewall
+  warn, updates pass, accounts pass, app audit warn. Codex 11.5s / DeepSeek 15.1s, both ok.
+  Both flagged: **host firewall is off with 13 listening ports**, **peer sync disconnected**
+  (`http://localhost:4000` unreachable from the Dell), and **two Telegram roles without a token**.
+- Reasoning lanes can return an empty answer when the token budget is spent thinking: DeepSeek
+  gets 2400 tokens and one doubled-budget retry, and an empty rundown is reported as an error
+  instead of being shown as success.
+
+### Dashboard: customers by plan + payments tiles
+- New "Customers by plan" cards inside the usage section, aggregated from the same accounts rows
+  (`#usage-plan-cards`, `#usage-plans-total`): one card per plan with customer count, capped /
+  at-limit, month requests and tokens. Verified with a fixture in headless Chromium:
+  owner 1, pro 1, lite 2 (1 at limit), free 1 → "5 customers · 4 plans".
+- Payments & new customers is now four big digital KPI tiles (26px tabular mono, glow, gradient
+  surfaces) instead of inline text; same ids (`bill-total`, `bill-30d`, `bill-count`, `bill-signups`)
+  plus a `#billing-cache` pill.
+
+### Passkeys: scoped, and admin enrollment needs the phone
+- Audit: credentials are bound per account (`user_id`), and `register/options|verify`,
+  `list` and `remove` all resolve the signed-in user — no cross-account path.
+- Hardened `login/verify`: when the prompt named an account, the passkey that answers must belong
+  to that same user (`pending.userId` vs `row.user_id`), so a credential from another account can
+  never sign in while the UI says otherwise.
+- **Admin/owner device enrollment now requires a Telegram code.** `register/options` for an
+  owner/admin/enterprise account issues a 6-digit code (memory-only, 10 min, 3 tries), sends it
+  with `telegramBots.sendSecurityCode` (health bot), and returns `requiresApproval: true` — never
+  the code. `register/verify` fails closed (403) without a valid code, checked before the
+  challenge is consumed. `POST /api/auth/passkey/register/approval` issues a fresh code.
+  UI: `/passkey` asks for the code and sends it as `approvalCode`.
+
+---
+
+## 2026-11-16 — Stripe webhook finished end-to-end + live dashboard cards
+
+Verified against the running service (build `2026-11-16T06:06:27.063Z`, commit `1ad49e8`, pm2 `hakster` online, https://haksterai.com 200).
+
+**Payment path (`server/src/index.js`)**
+- Fixed a real bug in `checkout.session.completed`: `receiptId` was declared inside the
+  `db.transaction(() => …)` callback and read after it, so the first delivery of every paid
+  session wrote the ledger, then threw `ReferenceError` — the owner payment alert and the
+  durable `data/purchase-log.jsonl` entry never ran, and Stripe received a 500 and retried.
+  The id is now declared in the handler scope (verified by lexical inspection; the branch
+  itself needs a real Stripe subscription to exercise).
+- `customer.subscription.deleted` no longer downgrades an upgraded customer: it only sets
+  `plan = 'free'` when no other subscription for that user is still active/trialing/past_due.
+  An upgrade cancels the old subscription, and Stripe sends its `deleted` event after the new
+  checkout already switched the plan — that event used to undo the upgrade.
+- `invoice.payment_succeeded` restores the paid plan if a stale event left the account on
+  `free` while it is still being billed.
+- Permanent webhook failures (unknown `metadata.userId`, paid guest session with no email,
+  unrecognized Stripe price) are marked `permanent` and answered `200 {acknowledged:true}`
+  with a coder-bot alert, instead of a 500 that Stripe retries for ~3 days.
+- `customer.subscription.updated` / `deleted` fall back to `subscription.metadata.userId` when
+  the Stripe customer link is missing.
+- A buyer with a linked Telegram account is told on that chat when their plan activates.
+- New table `stripe_webhook_events` (row id `event_id:outcome`, so a redelivery updates its
+  row) records every delivery outcome; owner-only `GET /api/admin/stripe-webhook-log` serves
+  it with `secondsAgo`. Unauthenticated request returns 401.
+
+**Dashboard (`src/pages/dashboard.astro`)**
+- New "Stripe webhook log" card: first column is `«Xs ago» · HH:MM:SS UTC` ("since last
+  update"), plus event, outcome, user, plan, amount, detail.
+- Update card always renders with `source checked HH:MM:SS UTC · Xm Ys ago · release <date
+  UTC>`; the age advances live. `/api/crush-update` now returns `checkedAt`.
+- Every card refreshes on a **1-second** beat through `window.hkLiveEvery` (single-flight per
+  card, pauses while the tab is hidden, staggered start offsets). Measured 13.7 requests/sec
+  from one open dashboard; per-endpoint latency 3–451 ms, so no request stacks.
+
+**Verified live**
+- Signed webhook tests against the running server: 9/9 — plan flip on `subscription.updated`,
+  old-sub delete keeps the upgraded plan, last-sub delete downgrades, paid invoice restores
+  plan and writes the ledger, redelivered invoice writes no second row, `payment_failed` marks
+  past_due without changing the plan, forged signature rejected (400), owner log API shows
+  every outcome with `secondsAgo`, test rows cleaned up.
+- Dashboard (headless Chromium, real page, owner auth stubbed at the network edge): card
+  renders, rows carry ages, update stamp advances over 2.5 s, 1s beat confirmed.
+
+**Pending / not claimed**
+- `checkout.session.completed` still needs one real Stripe payment to be exercised end-to-end
+  (it calls `stripe.subscriptions.retrieve`, which cannot be faked). The scope fix is verified
+  by inspection, not by a live purchase.
+- Guest → account handoff (`POST /api/stripe/claim`) is unchanged and still single-use.
+
+---
+
+## 2026-11-16 (later) — Free-account IP guard, real CPU/RAM sensors, Stripe CLI wired to owner + agents
+
+Verified against the running service (pm2 `hakster` restarted 2026-11-16T06:18:33Z, `/api/version` 200, startup sweep `2026-11-16T06:18:48Z` includes the new `stripe` check).
+
+**IP signup guard — `server/src/ipSignupGuard.js` (new)**
+- Rule: one **free** account per public IP. A network that already has a **paid** account
+  (`lite`, `starter`, `starter_plus`, `pro`, `enterprise`) is exempt, and the paid checkout path
+  is never gated. The owner can hard-block or explicitly allow an IP; a hard block denies free
+  signups **and** free logins on that IP, paid accounts keep working. Newest owner action per IP
+  wins, so an `allow` supersedes an earlier `block`.
+- Real client IP behind the Cloudflare tunnel: the socket peer is loopback for every request, so
+  `clientIp()` reads `cf-connecting-ip`, then the first public `x-forwarded-for` entry, and only
+  when the direct peer is itself private. Private/loopback/CGNAT addresses are recorded as
+  "unidentified" and are **never** blockable — otherwise one NATed household would lock the site.
+- Its own tables only: `ip_guard_actions` (block/allow with optional TTL) and `ip_guard_events`.
+  It reads `users.last_login_ip` / `plan`; it never writes, rewrites or deletes a user row.
+- Wired into: the Google OAuth callback (new-account branch → `ip_free_limit` / `ip_blocked`
+  redirect), `POST /api/auth/google` (429 + `ip_guard:true`), and Telegram account creation
+  (`findOrCreateTelegramUser`; both checkout call sites pass `paidPath:true`). Existing-user
+  logins only respect a hard block. Blocked attempts alert the recon bot, throttled to one alert
+  per IP per 10 minutes.
+- Owner endpoints `GET/POST /api/admin/ip-guard`; dashboard "IP Audit" card now carries the
+  guard panel (limit, multi-account IPs, blocks, refusals, recent events, block/allow form).
+- Tested: 17/17 assertions PASS (fresh IP ok, second free refused, paid checkout exempt, paid IP
+  allows more, owner block denies free signup+login, paid account bypasses block, owner allow
+  overrides block, loopback never gated, `clientIp` header rules, users table untouched).
+  Endpoints: 401 unauthenticated, owner response `freeLimit:1`.
+- Known state at deploy: every stored `last_login_ip` was `127.0.0.1`/`::ffff:127.0.0.1` because
+  the tunnel hid real peers; new signups now record the real public IP, so the one-free-per-IP
+  rule starts biting on fresh traffic — earlier accounts are not retroactively refused.
+
+**Real CPU/RAM sensor applets — `server/src/systemSensors.js` (new) + dashboard**
+- `cpuSnapshot()` = `/proc/stat` deltas (busy/idle/iowait), `memorySnapshot()` = `/proc/meminfo`
+  (used %, swap), `sensorSnapshot()` = `sensors -j` (lm-sensors `dell_smm`: CPU temp, SODIMM/RAM
+  temp, ambient, fan RPM), 4 s cache. `/api/admin/server-status` now returns `cpu` and
+  `hardware.mem` / `hardware.sensors`; a missing sensor returns null instead of a guess.
+- Dashboard "Dell Server" card gained five applet tiles (CPU %, RAM %, CPU temp, RAM temp, fan
+  RPM), updated on the 1 s beat. Verified in headless Chromium against the real page: CPU 89 %,
+  load 4.86/3.68/4.37, iowait 0 %, RAM 43 % (3.3 GB / 7.7 GB, swap 16 %), CPU 78 °C, RAM 44 °C,
+  fan 4,241 RPM; 11/11 checks PASS. Screenshot `/tmp/hakster-newpanels.png`.
+
+**Stripe CLI bridge — `server/src/stripeCli.js` (new)**
+- The installed CLI (`/home/ghost/.stripe/bin/stripe` 1.55.11) is authenticated per call with
+  `STRIPE_API_KEY` from the server env, never via `stripe login`, so nothing is written to the
+  CLI config and no key leaves the server. All output is scrubbed of `sk_/rk_/pk_` and `whsec_`.
+- Read-only allowlist only (`products/prices/customers/subscriptions/invoices/charges/
+  payment_links/coupons/events/payment_intents/plans list|retrieve`, `balance retrieve`,
+  `webhook_endpoints list`) with an allowed-flag set. `products create`, `prices create`,
+  `customers delete`, `exec` are refused — verified in testing.
+- Price tools for "easy price change / add-on / fix": `createPriceForPlan()` (new recurring price
+  on the plan's existing Stripe product, optional archive of the previous prices) and
+  `archivePrice()`. Both go through the Stripe SDK, are owner-only, require `confirm:true`, and
+  invalidate the 5-minute price cache so the site's catalog re-reads Stripe. Every action is
+  logged to `stripe_cli_actions`.
+- Owner endpoints `GET /api/admin/stripe-cli` (status + catalog + recent actions, `?refresh=1`
+  forces a price refresh), `POST /api/admin/stripe-cli/run`, `.../price`, `.../archive`.
+  Dashboard gained the "Stripe CLI" card (status chip, six read-only console buttons, plan/price/
+  interval form, archive field, action log), all on the 1 s beat. Headless check: state
+  "live · stripe version 1.55.11", 5 plan options, real JSON returned by the products button.
+- Agent access: `stripe_cli` tool added to `AGENT_TOOLS`/`executeAgentTool` in
+  `server/src/providers.js` (read-only console, argv validated by the same allowlist). Because
+  customer mode is an allowlist, customers are denied it automatically.
+- Agent sweep: `checkStripe()` in `server/src/autoAgent.js` joins ports/ssh/firewall/updates/
+  accounts/code, so the Infrastructure Security Agents and the 6-hour digest report CLI presence,
+  mode and probe latency. Verified in the running server's startup sweep:
+  `stripe version 1.55.11 · live mode · probe 836ms · read-only allowlist` (pass).
+
+**Pending / not claimed**
+- The live Stripe **price create/archive** path was code-verified and refusal-tested but not
+  exercised against the live account (creating a real price would momentarily expose a wrong
+  live price). It needs one owner-authorized price change to be proven end-to-end.
+- `checkout.session.completed` still needs one real Stripe payment (unchanged from the entry
+  above). The IP guard's paid-IP exemption is unit-tested, not observed with a real payment.
+
+## 2026-11-16 — Owner console: agent asks, Parrot sensors, anomaly detector, click audit, 3-site update log (Dell, haksterai.com)
+
+Verified on the running service (pm2 `hakster` id 3, port 3579, commit `2b7cacf`).
+
+- `server/src/securityAgents.js` — `askQuestion({ agentId, question, by })` lets the owner
+  type a question under the Codex (`codex-cli`, `gpt-6-luna`) or DeepSeek card. It reuses a
+  sweep younger than 10 minutes, otherwise runs one, answers through that agent's own provider,
+  and stores the Q/A in `server/data/security-agent-asks.json` (last 40). Guards: 3–700 chars,
+  one in-flight question per agent, 3s gap. `getState()` now returns `asks`.
+- `server/src/peerSensors.js` — Parrot readings over the owner SSH alias `parrot`
+  (10.0.0.251, user ghost694): one bounded read-only command (`/proc/stat`, `free -b`,
+  `/proc/loadavg`, `sensors -j`, `hostname`), 5s cache, single-flight, 9s timeout. Returns
+  `ok:false` with the SSH error when Parrot is unreachable — never Dell numbers.
+- `server/src/anomalyAgent.js` — 15-minute samples of load, CPU busy %, RAM %, swap %,
+  listening ports, pm2-not-online, SSH failures 24h and IP-guard blocks 24h; learned mean/sd
+  over a 96-sample (24h) window; 3σ with a per-metric floor spread, plus a hard rule for a pm2
+  process that should be online; patterns remembered by `metric:direction` with count and
+  first/last seen; the Codex lane explains only when something is flagged. Files:
+  `server/data/anomaly-{samples,patterns,state}.json`. Startup sample 120s after boot, then
+  every 15 min.
+- `server/src/index.js` — owner POST audit: every `POST /api/admin/*` writes one
+  `user_activity` row (`action='admin_click'`) with endpoint, status, duration, actor and an
+  `aborted` flag, recorded on `finish` **or** `close` so a tab closed mid-request is still
+  logged. New owner routes: `POST /api/admin/security-agents/ask`, `GET /api/admin/peer-sensors`,
+  `GET /api/admin/anomaly`, `POST /api/admin/anomaly/run`, `GET /api/admin/update-log`.
+- `server/src/updateLog.js` — one schema across three sites (`site`, `box`, `at` UTC,
+  `atLocal`, `action`, `build`, `from`, `path`, `actor`, `userAgent`). haksterai is read from
+  `server/data/update-seen.jsonl`; junkalot and phantomide are read read-only from Parrot with a
+  single bounded `wc`/`tail`, 15s cache. A missing file reports `absent`; an unreachable box
+  reports `unreachable`. Nothing is written on either box.
+- `src/pages/dashboard.astro` — ask bars under both agent cards (outside the per-second
+  re-rendered bodies) with a live Q/A feed; a "🦜 Parrot Server" card (CPU, RAM, CPU temp, fan,
+  battery) labelled `parrot 10.0.0.251 · not this Dell` that blanks every tile when Parrot is
+  unreachable; a "🧠 Anomaly Detector" card with Scan now; and a "🔄 Update Log · 3 sites" card
+  showing full date+time UTC per entry with site/box labels. The Activity Log rows for
+  `admin_click` now show endpoint · status · ms (and "closed early" when aborted).
+
+Checks run against https://haksterai.com with the owner stubbed at the edge:
+- `server/scripts/parrot-anomaly-check.js` → ALL PASS (Parrot live: cpu 22%, ram 76.4%,
+  66°C, fan 2,124 RPM, batt 36.4°C; anomaly scan writes the state file; click audited).
+- `server/scripts/admin-click-audit-check.js` → ALL PASS: a click whose tab closes at 2.5s
+  still writes `{"ms":2650,"actor":"dekekenneth840@gmail.com","aborted":true}`.
+- `server/scripts/update-log-check.js` → ALL PASS (16 haksterai entries, junkalot and
+  phantomide reported `absent` until their own logs exist).
+- `server/scripts/security-ask-check.js` → deepseek and codex answered from the real sweep.
+
+Host rule (Deke, 2026-11-16): Parrot is a Linux box (Parrot Security 7.4, kernel
+7.0.13+parrot7-amd64, 10.0.0.251) and is never the Dell (`ghost-Inspiron-7348`). Readings,
+patches and reports are labelled with their box; an unreachable box shows nothing.
+
+### 2026-11-16 — correction (same day): Parrot sensor card removed from this admin
+
+Deke: "you put parrot server info in my haksterai admin". Verified after the fix (commit
+`db96e5d`): the 🦜 Parrot Server section, its 5s poller and `GET /api/admin/peer-sensors` are
+gone from haksterai.com — the route answers 404, the page has no `parrot-section`, and the
+dashboard harness asserts both (`server/scripts/parrot-anomaly-check.js` → ALL PASS).
+`server/src/peerSensors.js` stays on disk unused. The Update Log card keeps the three-site
+sync but renders rows and chips by site name only (no Parrot box label).
+
+## 2026-11-16 — fleet ops feed, dashboard bot card, carrier-style hosting lock
+
+Owner: "all logs go to haksterai.com dash from junkalot and phantomide dash ... no data is displayed
+about bots ever on junkalot admin ... need wired back to admin haksterai.com phantomide" and "we
+always lock server like phone carrier does sim til clients payed off fully add lock to admin
+haksterai.com with junkalots card with cloudflare server lock by us always with out breaking".
+
+- `server/src/fleetLog.js` (new): one feed for bots, build guards and agents. Records every
+  Telegram delivery from `sendToRole` (role name + first line only — never a chat id or token) into
+  this box's append-only `data/fleet-log.jsonl`, and reads the other two sites: junkalot over its
+  sanitized `https://junkalot.co/api/fleet-log`, phantomide over the owner SSH alias (its
+  `data/ops-log.jsonl`, else the real page `data/update-log.jsonl`). A 90-second unref'd pulse
+  refreshes it and leaves the merged `data/fleet-snapshot.json` on
+  `/home/ghost694/junkalot/data` and `/home/ghost694/phantomide/data` with an atomic temp+rename.
+  A source that cannot be read reports `unreachable`/`absent`; nothing is inferred.
+- `GET /api/admin/fleet-log` (owner) returns the merged feed and source states; `POST` records one
+  agent event. Both read-only with respect to services, config, tunnels and DNS.
+- `server/src/hostingLock.js` (new): carrier-style SIM lock for a client's server. The state is
+  derived from the real payoff ledger — it reads `/api/internal/payoff-summary` on junkalot with the
+  existing bridge key (server-side only, never logged) — and persists a merged register at
+  `server/data/hosting-locks.json`. Locked while the balance is open; Cloudflare is the declared
+  edge, arming needs an owner-supplied `CLOUDFLARE_API_TOKEN` and an explicit owner action, and
+  without one it stays STAGED and says so. The lock never stops a service, tunnel or DNS record and
+  the site keeps serving. `GET /api/admin/hosting-locks` reads it; `POST /api/admin/hosting-locks/arm`
+  arms/disarms only when a token is configured (otherwise HTTP 409 with the reason).
+- `src/pages/dashboard.astro` → `dist/dashboard/index.html`: the Junkalot card now carries a live
+  "Bots & agents · fleet ops" list (12 newest rows, source states, snapshot write status) and a
+  "Hosting lock · junkalot.co" block (lock state, paid/remaining totals, months left, estimated
+  payoff month, Cloudflare edge state, Arm button). Rebuilt with `npm run build`.
+- Junkalot (`/home/ghost694/junkalot`, both copies): `src/lib/ops-activity.ts` and
+  `src/app/api/fleet-log/route.ts` (new), plus a "Bots & agents" section on `/admin/updates` reading
+  the guard records, `data/ops-log.jsonl` and the hub snapshot.
+- PhantomIDE (`/home/ghost694/phantom-server.js`, both `phantom-ide.html` copies): the owner
+  update-log route now also returns `fleet` from `data/fleet-snapshot.json`, and the admin panel
+  renders a "FLEET · BOTS & AGENTS" block. Backups `*.bak.fleet.20261116T132832Z`.
+
+**Verified:** `node --check` clean on every changed server file; `tsc --noEmit` clean in junkalot;
+junkalot build `ZbbPAY_gNkGTdBHchNs_0` staged and auto-applied by its guard (public
+`/api/version` reports phase `done`); `https://junkalot.co/api/fleet-log` returns guard + fleet rows;
+the hub merged 18 rows with sources `haksterai ok · junkalot ok · phantomide ok` and wrote both
+snapshots. Lock reads the real ledger: total $15,375.99, paid $2,000, remaining $13,126.99, 53
+months at $249/month, estimated payoff May 2031 — state `locked · edge staged`.
+
+**Pending:** the hakster process needs its next restart to load the pulse in `fleetLog.js`; PhantomIDE
+needs `pm2 restart phantom` for the fleet field in its update-log route. Neither restart was taken by
+an agent.
+
+### 2026-11-16 — phantom restart verified
+
+`pm2 restart phantom` on parrot (owner said "restart"). Verified: phantom online pid 1259764, `/api/status` 200,
+`/api/admin/update-log` returns `fleet` — 32 events, sources `haksterai ok (27) · junkalot ok (4) · phantomide ok (1)`,
+snapshot 13:39:10Z — and `https://phantomide.com/` HTTP 200 (2.19 MB). Both `phantom-ide.html` copies carry the
+`fleetBoard` render. Post-restart health: Parrot load 2.39, available RAM 1.37 Gi, swap 9.4/16.2 Gi parked (si/so 12 / 0 KB/s).
+The Cloudflare edge lock remains staged — no owner token configured; nothing stopped or changed at the edge.
+
+## 2026-11-16 — bot data is owner-only: SSH fleet reads, gated dashboard, Mr Ed lesson rows
+
+Owner: "all bot data goes to my admin haksterai and phantom client only gets mr ed ai coach";
+"all lesson logs back to our servers that run junkalot"; "her badges etc all log back to
+haksterai.com phantomide.com".
+
+- `server/src/fleetLog.js`: Junkalot rows are read over the owner SSH alias instead of the site's
+  HTTP feed — `data/auto-apply.json`, `data/apply-update.json`, `data/latest-build.json`,
+  `data/ops-log.jsonl`, `data/coach-lessons.jsonl`. Each block header is emitted with
+  `printf '\n@@%s\n'` so a file that does not end in a newline cannot swallow the next header.
+  `coach-lessons.jsonl` is read for lesson turns only; badge rows come from the mirrored ops row,
+  so each badge appears once. The pulse still leaves `data/fleet-snapshot.json` on both Parrot apps.
+- `server/src/index.js`: `dashboard` is now in `ADMIN_PAGES`; `GET /dashboard` and
+  `/dashboard/index.html` redirect 302 to `/admin/dashboard/`, whose gate page pulls the real body
+  from requireOwner `/api/admin/page/dashboard`. The previously public static shell (which named
+  bots, agents, Stripe and the hosting lock) is no longer served to visitors.
+- `server/src/passkey.js`: a non-owner passkey login now redirects to `/build` instead of the
+  owner dashboard. Owner/admin/enterprise still go to `/terminal`.
+- hakster applied these itself while idle (restart counter 43). Cloudflare edge lock remains
+  STAGED on the owner's instruction ("we will do cloudflare edge lock later remind me"): no token
+  is configured and no rule has been applied.
+
+**Verified:** `node --check` clean on `fleetLog.js`, `index.js`, `passkey.js`; hub merge reports
+`haksterai ok · junkalot ok · phantomide ok` with Mr Ed lesson/badge rows present; snapshots written
+to both Parrot sites; `http://127.0.0.1:3579/dashboard` → 302 `/admin/dashboard/`, page body 401,
+`https://haksterai.com/dashboard` → 302; `/api/admin/fleet-log` and `/api/admin/hosting-locks`
+return 401 anonymously; `https://junkalot.co/api/fleet-log` returns 403; PhantomIDE's
+`/api/admin/update-log` returns 403 publicly and 200 with `fleet` on loopback.
+
+---
+
+## 2026-11-16 · Hosting licence, lockout card and owner contract record
+
+**Asked:** the client admin lock after the due-date grace, the pay button that returns access, the
+live total due on the lockout card in the big display type, the records kept in the owner's admin
+(never on Junkalot's site), a proper written licence/contract with the lien-sale rules, a right to
+refuse service, and support mail to the owner.
+
+**Changed (Dell, additive, backups first):**
+
+- `server/src/hostingLock.js` — the client record now carries the gate Junkalot computes
+  (`state`, `totalDue`, `overdueTotal`, `overdueMonths`, `unpaidMonths`, `dueAt`, `graceEndsAt`,
+  `lienSaleAt`, `lienCureDeadlineAt`, `lienNoticeRecorded`, `lienCureDays`, `lienMonths`,
+  `monthlyRate`, `licenceVersion`, `note`, `totalsKnown`) plus `gateStale` when the ledger could not
+  be read, and a top-level `licenceRule` block (grace 7 days, lien notice 30 days after grace or 3
+  unpaid months, monthly $249, "the public site keeps serving"). Backup
+  `hostingLock.js.bak-licence-card.20261116T*`.
+- `server/src/index.js` — `ADMIN_PAGES` gains `license: 'admin/license/index.html'`, and a new
+  owner-only document route `GET /api/admin/license/document` (`requireOwner`) serves
+  `docs/haksterai-hosting-licence.md` with `no-store` + `noindex`, 404 if missing. Backup
+  `index.js.bak-licence-page.20261116T*`.
+- `src/pages/dashboard.astro` — the hosting-lock card gains the licence block: big `#licence-total`,
+  `#licence-overdue`, `#licence-state`, a trimmed due/grace/lien list and a link to
+  `/admin/license/`. `renderLicence()` prints "—" for every figure when the gate is missing or
+  `totalsKnown` is false, so an unread ledger never shows a made-up number.
+- `src/pages/admin/license.astro` (new) — the owner's contract record: live cards, contents list,
+  18 sections plus Schedule A (scope), Schedule B (fees) and the fine print, with "Download client
+  copy" and "Print / save PDF". Nothing here is published on the client's public site.
+- `docs/haksterai-hosting-licence.md` (new, v2 after a review pass by a subagent) — definitions
+  (build total $15,375.99 USD, monthly $249.00, grace 7 days), grace/lock rules, lien sale state
+  defined as retention of title with an explicit no-security-interest clause and 30-day cure
+  deadline, payments/receipts/chargebacks/interest, acceleration, licence and IP assignment on
+  payment in full, platform ownership clause (junkalot.co remains part of HaksterAI
+  (haksterai.com) / PhantomIDE (phantomide.com) until paid in full or the lien sale state applies),
+  service standard, client responsibilities, data and AI, fee changes on 30 days' notice, term and
+  refunds, **right to refuse any service**, liability, Western Australia governing law and
+  mediation, acceptance and general.
+
+**Verified:** `node --check` clean on both server files; Junkalot build
+`593BDLbIgQqPSAoSUhUnk` staged, applied and answering with `/api/version` phase `done`; the live read
+through `hostingLock.getState(true)` returns `state: not-started`, `totalsKnown: true`,
+`totalDue: 0`, `dueAt` 2027-01-01, lien notice 2027-02-07, cure 2027-03-09 with `gateStale: false`;
+`/api/admin/license/document` and `/api/admin/hosting-locks` return 401 anonymously (route present,
+owner-gated); `/admin/license/` returns 200; `dist/` was rebuilt and both the dashboard licence hooks
+and the `#sched` contents anchor are present in the built pages.
+
+**Still open:** the Cloudflare edge lock is staged only — no token, no rule, nothing armed. No config
+was edited and no process was killed, stopped or restarted by hand; hakster applied its own code while
+idle.
+
+---
+
+## 2026-11-16 · Licence revision 2, client portfolio and audit IDs
+
+**Asked in the same stretch:** "use chat gpt or bots to help with my contract licence" (an outside
+review of the legal text), "lean sale rules binding contract months etc deadline", "leagal etc",
+"support emails mine", "make my licence page look nice neat", "and in admin always no clutter",
+"and this goes with my buisness plan etc", "and proprietary software always", "we always keep
+portfollio per client starting with junkalot for our records and ids for audit report", "and any
+other app site we build gets one", "and if any plans get sold comes with our portfollio if site or
+app is built via phantomide haksterai.com", "and state we never delete clients data", "unless
+aksed", "via email etc", "keep matchng our theme remember", "and add page # on bottom footer easy
+nav", "make sure this show in haksterai.com license section".
+
+**Contract — `docs/haksterai-hosting-licence.md` revision 2** (backup
+`haksterai-hosting-licence.md.bak-legal-review.20261116T143341Z`). A senior reviewer pass produced
+twelve findings; all twelve were applied:
+- lien sale state redefined as the provider's right to resell **its own** design and code, with
+  explicit "not a retention of title, security interest, charge or mortgage"; sale now requires
+  30 days' notice, removal of the client's brand/content (copies preserved, never deleted), a
+  30-day marketing period, surplus accounting within 14 days and a 6-month lapse.
+- "the public site keeps serving" no longer contradicted: refusal/suspension for non-payment is
+  handled only by the admin lock; termination keeps the site served 30 days.
+- the locked admin still lets the client view and export its own bookings, invoices, content and
+  customer data; the lock disables editing, publishing and settings only.
+- due date is 08:00 UTC (4:00 pm AWST) on the 1st, mid-month activation starts the next month.
+- the lien notice is actually sent (by email, or manually if automation fails) and the state begins
+  on the notice date; a chargeback reopens the month with a fresh grace.
+- acceleration now falls on the cure deadline; no acceleration or lock while a payment is being
+  processed, a dispute is open, or the notice was not sent; an unreadable ledger never locks.
+- refusal split into intake (any lawful reason before payment) and for cause, with a refund of any
+  excess over work performed and a licence to the delivered build.
+- payment in full delivers a deployable copy within 30 days; the care plan is month to month.
+- **proprietary software always** (8.7): licensed for this site, never sold, released as source,
+  resold or redistributed; only the custom build is assigned on payment in full.
+- **portfolio record** (8.8): every build delivered through HaksterAI or PhantomIDE gets a client
+  ID, audit ID and record IDs; **never delete client data** (11): deleted only when the client asks
+  by email to support@haksterai.com, after an export.
+- mutual indemnity, breach notification, GST/ABN, survival list includes 5 and 10, acceptance by
+  signature or email, material sections need written agreement, invoice precedence qualified.
+- Schedule B gained software basis, portfolio record, client data and sale/lapse rows; Schedule C
+  maps every plan stage to the contract term that delivers it; the fine print now states the
+  never-delete rule.
+
+**Admin record — new `server/src/clientPortfolio.js`** (owner-only): mints stable `CLI-0001` /
+`AUD-2026-0001` IDs and record IDs (`LIC-…`, `BLD-…`, `INV-…`) into
+`server/data/client-portfolio.json`, appends audit rows to `server/data/client-audit.jsonl`, and
+stamps each licence text with its SHA-256. Every client present in the hosting records is minted an
+entry automatically, so "any other app site we build gets one". Routes
+`GET /api/admin/client-portfolio` and `GET /api/admin/client-portfolio/audit` (markdown attachment),
+page `/admin/portfolio/` in the house theme, linked from the dashboard's licence card. `ADMIN_PAGES`
+gained `license` and `portfolio`, both served through the owner gate.
+
+**Licence page** (`src/pages/admin/license.astro`, backup `.bak-legal-review.20261116T143341Z`):
+sections regenerated from the contract text so the page and document cannot drift; new fixed
+bottom pager with page numbers 1–18 plus Schedules; keeps the existing cards, TOC, download and
+print actions.
+
+**Verified:** `node --check` clean on `index.js` and `clientPortfolio.js`; `npm run build` clean
+(19 pages); `/admin/license/` and `/admin/portfolio/` return the owner gate 200 and
+`/api/admin/page/license`, `/api/admin/page/portfolio`, `/api/admin/client-portfolio`,
+`/api/admin/client-portfolio/audit` and `/api/admin/license/document` all return 401 anonymously on
+`https://haksterai.com`; the portfolio read returns `CLI-0001 · AUD-2026-0001 · Junk-A-Lot ·
+junkalot.co`, balance $13,126.99, licence text hash recorded; the licence page renders live figures
+($0.00 due, not started, due 2027-01-01, lien notice 2027-02-07, balance $13,126.99, payoff May
+2031) and the bottom pager.
+
+
+---
+
+## 2026-11-16 · Licence polish, owner-only admin gate and sign-in repair
+
+**Correction to the entry above:** the due time is **00:00 UTC (8:00 am AWST)** on the first day of
+each month, not 08:00 UTC. The contract text, Schedule B and the generated licence page were
+corrected to 00:00 UTC to match what `payoff-gate.ts` actually computes; the code was not changed.
+
+**Asked in this stretch:** "yes have him toch it all up", "and use omp snap to save templates after
+hes done", "each thumbnail with pg #", then "fix the double signin error bug after admin pinpad",
+"need smooth all flow sgnin", "pinpad code should verify owners sssion me", "keep getting watchdog
+error on logoin", "admin is owner gated", "always", "with my emails only", "no baody else welcome
+past that point unless verified".
+
+**Licence polish (done):** an outside reviewer's full rewrite was merged into
+`docs/haksterai-hosting-licence.md` on top of revision 2, then three corrections applied — the
+00:00 UTC due time, the grace period restated as "the 7 days after the due date, ending at 00:00 UTC
+on the eighth day", and new definitions for *Outstanding balance* and *Launch*. §4.2 now says
+"until 00:00 UTC on the eighth day" and §9 defines Launch as the later of first serving and
+acceptance. Owner rules survived the merge: §8.7 proprietary software always, §8.8 portfolio record
+with client ID / audit ID / record IDs, §11 never deletes client data unless asked by email to
+support@haksterai.com, §8.6 junkalot.co stays platform-owned until paid in full or lien sale.
+`src/pages/admin/license.astro` was regenerated from the merged markdown: 18 numbered sections plus
+`id="sched"`, the fixed bottom pager (1–18 + Schedules), and the closing note. Parity was checked
+structurally (headings, clause numbers, table rows, money amounts, owner-rule keywords) and the page
+was screenshot-verified after `npm run build`.
+
+**Root causes of the "double sign-in":** four separate defects, all fixed in app code.
+1. Every signed-in check looked only at `hakster_google_token`. Checkout and pasted keys write
+   `hakster_api_key`, so a signed-in user was treated as anonymous and asked to sign in again.
+   Fixed in `Layout.astro` (`.requires-auth`), `users.astro`, `telegram.astro`, `vault.astro`,
+   `dashboard.astro`, `terminal.astro`, `hakterm.astro` and `hack.astro` — all now try both keys.
+2. The admin PIN pad judged only the local PIN. Both pad pages now call `/api/auth/me` after a
+   correct PIN (`ownerSessionState()` / `revealAdminIfOwner()`), drop a 401'd key, and distinguish
+   `ok` / `notowner` / `offline` / `signin`.
+3. The `/admin` middleware gate re-verified on every page write and did not fall back to the second
+   key. It now loops candidate keys, removes the ones that 401, stamps
+   `hakster_owner_verified_at` in sessionStorage on success, and only writes the page after an
+   owner-verified `/api/auth/me`.
+4. Failures sent users to `/` or `/miniforge/` with no return path, and any network error logged
+   them out. Definitive auth failures now go to `/?signin=1&redirect=<path>`; transient errors keep
+   the page. `Layout.astro` also skips the 5-minute idle logout while the PIN gate is open.
+
+Verified: `npm run build` (19 pages), inline-script `node --check` sweep over 9 built pages (0
+failures), and the extracted gate script replayed in node against five scenarios — no key → sign-in
+message; dead Google key → that key removed and one sign-in with return path; dead Google key plus a
+valid API key → page written and only the dead key removed; signed in but not owner → owner-only
+message; server unreachable → connection message, no forced sign-out. `https://haksterai.com`
+returns the gate HTML anonymously on every admin path and `/dashboard/` 302s. hakster applied the
+`server/src/index.js` edit itself in an idle window, so no manual restart was needed.
+
+**Watchdog noise (fixed):** `runUptimeCheck()` in `server/src/telegramBots.js` declared a service
+down on a single refused connection during a restart, and `startWatchdog()` re-sent the identical
+report every 15 minutes. It now retries three times (2 s apart), marks "(restarted during check)",
+and only sends when the report signature changes or 6 hours have passed.
+
+**Still open:** the Cloudflare edge lock is staged only — no token, no rule, nothing armed. The
+OMP snapshot template captures ("use omp snap… each thumbnail with pg #") are not done. No config was
+edited and no process was killed, stopped or restarted by hand.

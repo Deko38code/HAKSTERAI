@@ -48,7 +48,8 @@ export default function App({ version = '0.1.0' }) {
   const [adsOn, setAdsOn] = useState(true);
   const [dockExpanded, setDockExpanded] = useState(false);
   const [draft, setDraft] = useState('');
-  const [model, setModel] = useState(process.env.HAKSTER_MODEL || 'glm-5.2:cloud');
+  // Start on the owner's DeepSeek config; a GLM env tag is the old default and falls through.
+  const [model, setModel] = useState(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : 'deepseek-v4.1-flash:cloud');
   const [modelIdx, setModelIdx] = useState(0);
 
   const [status, setStatus] = useState(null);

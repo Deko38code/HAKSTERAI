@@ -436,6 +436,7 @@ function sourceStatusText(detailed) {
 module.exports = {
   collectAll,
   collectDetailed,
+  collectLocalDell,
   updateBaseline,
   loadBaseline,
   recentLoginsText,

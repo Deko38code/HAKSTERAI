@@ -122,7 +122,7 @@ function initSchema(db) {
       referred_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
       token_balance INTEGER NOT NULL DEFAULT 0,
       role          TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user','guest')),
-      plan          TEXT NOT NULL DEFAULT 'free' CHECK(plan IN ('free','pro','enterprise')),
+      plan          TEXT NOT NULL DEFAULT 'free' CHECK(plan IN ('free','lite','starter','starter_plus','pro','enterprise')),
       status        TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','banned')),
       password_hash TEXT,
       created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -277,6 +277,7 @@ function initSchema(db) {
       model         TEXT,
       input_tokens  INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
+      cost          REAL NOT NULL DEFAULT 0,   -- recorded provider cost for this call
       tool_calls    INTEGER NOT NULL DEFAULT 0,
       fast_mode     INTEGER NOT NULL DEFAULT 0,
       created_at    INTEGER NOT NULL DEFAULT (unixepoch())
@@ -396,6 +397,83 @@ function initSchema(db) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by)").run();
   } catch (e) { /* table may not exist yet */ }
 
+  // ── Migrate users.plan CHECK ──
+  // The original schema only allowed ('free','pro','enterprise'). Every paid
+  // tier added since ('starter', 'starter_plus') and now 'lite' would make the
+  // Stripe webhook's `UPDATE users SET plan = ?` throw on the CHECK constraint,
+  // so a paying customer could never actually be upgraded. SQLite cannot drop a
+  // CHECK in place, so rebuild the table with the same columns and a wider
+  // constraint. Additive: every row, column and index is preserved, and it only
+  // runs while the stale constraint is still present.
+  try {
+    const usersDdl = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || '';
+    const stalePlanCheck = /CHECK\s*\(\s*plan\s+IN\s*\(\s*'free'\s*,\s*'pro'\s*,\s*'enterprise'\s*\)\s*\)/i.test(usersDdl);
+    if (stalePlanCheck) {
+      const cols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+      const before = db.prepare('SELECT COUNT(*) c FROM users').get().c;
+
+      const backupsDir = path.join(path.dirname(DB_PATH), 'backups');
+      try { fs.mkdirSync(backupsDir, { recursive: true }); } catch (_) {}
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, 'Z');
+      const backupPath = path.join(backupsDir, `hakster.db.plan-migration.${stamp}`);
+      db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+      console.log(`  [migration] users.plan: backup written to ${backupPath}`);
+
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.transaction(() => {
+          db.exec(`CREATE TABLE users_rebuild (
+            id            TEXT PRIMARY KEY,
+            username      TEXT UNIQUE NOT NULL,
+            email         TEXT,
+            api_key       TEXT UNIQUE NOT NULL,
+            google_id     TEXT UNIQUE,
+            referral_code TEXT UNIQUE,
+            referred_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+            token_balance INTEGER NOT NULL DEFAULT 0,
+            role          TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user','guest')),
+            plan          TEXT NOT NULL DEFAULT 'free' CHECK(plan IN ('free','lite','starter','starter_plus','pro','enterprise')),
+            status        TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','banned')),
+            password_hash TEXT,
+            created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+            last_login_at INTEGER,
+            last_login_ip TEXT,
+            usage_count   INTEGER NOT NULL DEFAULT 0,
+            usage_reset_at INTEGER NOT NULL DEFAULT 0,
+            telegram_id   TEXT,
+            stripe_customer_id TEXT
+          )`);
+          db.exec(`INSERT INTO users_rebuild (${cols.join(',')}) SELECT ${cols.join(',')} FROM users`);
+          db.exec('DROP TABLE users');
+          db.exec('ALTER TABLE users_rebuild RENAME TO users');
+          for (const sql of [
+            'CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key)',
+            'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
+            'CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)',
+            'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
+            'CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)',
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram_id_unique ON users(telegram_id) WHERE telegram_id IS NOT NULL',
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code_unique ON users(referral_code) WHERE referral_code IS NOT NULL',
+            'CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)',
+            'CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by)',
+          ]) db.exec(sql);
+        })();
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+
+      const after = db.prepare('SELECT COUNT(*) c FROM users').get().c;
+      const fkErrors = db.prepare('PRAGMA foreign_key_check').all();
+      if (after !== before || fkErrors.length) {
+        throw new Error(`users.plan rebuild verification failed (rows ${before}->${after}, fk errors ${fkErrors.length})`);
+      }
+      console.log(`  [migration] users.plan widened to free/lite/starter/starter_plus/pro/enterprise (${after} rows preserved)`);
+    }
+  } catch (e) {
+    console.error('  [migration] users.plan rebuild failed:', e.message);
+  }
+
   // ── Migrate sessions: add user_id column ──
   try {
     const sessCols = db.prepare("PRAGMA table_info(sessions)").all().map(c => c.name);
@@ -412,6 +490,17 @@ function initSchema(db) {
       console.log('  [migration] Added metadata column to sessions');
     }
     db.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)").run();
+  } catch (e) { /* table may not exist yet */ }
+
+  // ── Migrate user_token_usage: record the cost of each call ──
+  // Per-customer token and cost totals are read straight from this ledger, so a
+  // call's price has to be stored next to its token counts.
+  try {
+    const utuCols = db.prepare('PRAGMA table_info(user_token_usage)').all().map((c) => c.name);
+    if (utuCols.length && !utuCols.includes('cost')) {
+      db.prepare('ALTER TABLE user_token_usage ADD COLUMN cost REAL NOT NULL DEFAULT 0').run();
+      console.log('  [migration] Added cost column to user_token_usage');
+    }
   } catch (e) { /* table may not exist yet */ }
 
   // ── Migrate client_contexts: add enhanced detection columns ──

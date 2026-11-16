@@ -187,6 +187,58 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
         #crush-sidebar.mobile-open { transform: translateX(0); width: 260px; min-width: 260px; }
       }
     </style>
+    <!-- 2026-11-17 (owner): "the hakterm should be set already" / "yes add it" —
+         HakTerm opens only through a fresh admin PIN. The Admin menu grants a
+         one-shot 'hakster_hakterm_pass'; with none, a signed-in owner is sent to the
+         site's PIN pad with the destination parked in hakster_admin_return, which
+         grants the permit and sends the browser back here. Non-owner accounts are
+         left to the page's own gate. -->
+    <script is:inline data-cfasync="false">
+      (function () {
+        var PASS = 'hakster_hakterm_pass';
+        var RETURN = 'hakster_admin_return';
+        var GUARD = 'hakster_hakterm_pin_guard';
+        var pass = null;
+        try { pass = sessionStorage.getItem(PASS); } catch (e) { return; } // storage blocked: the server gate still guards this page
+        if (pass === '1') {
+          try { sessionStorage.removeItem(PASS); sessionStorage.removeItem(GUARD); } catch (e) {}
+          return;
+        }
+        var token = null;
+        try { token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'); } catch (e) { return; }
+        if (!token) return; // signed out: the page's own sign-in gate handles them
+        var bounce = function () {
+          var now = Date.now(), last = 0;
+          try { last = Number(sessionStorage.getItem(GUARD)) || 0; } catch (e) {}
+          if (now - last < 15000) {
+            // Came straight back without a permit: say so instead of bouncing forever.
+            document.addEventListener('DOMContentLoaded', function () {
+              var box = document.createElement('div');
+              box.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;background:#0a0a0f;color:#e2e8f0;display:flex;align-items:center;justify-content:center;padding:24px;font:600 14px/1.6 ui-monospace,monospace;text-align:center');
+              box.textContent = 'HakTerm needs a fresh PIN and the admin pad did not return one. Reload, or open it from the admin menu.';
+              (document.body || document.documentElement).appendChild(box);
+            });
+            return;
+          }
+          try {
+            sessionStorage.setItem(GUARD, String(now));
+            sessionStorage.setItem(RETURN, window.location.pathname + window.location.search);
+          } catch (e) {}
+          window.location.replace('/?pin=1');
+        };
+        // Owners only: a client or enterprise account must never be parked on a pad it
+        // cannot pass — the page's own gate sends those to /build.
+        var apiBase = window.location.port === '4321' ? 'http://localhost:3579' : '';
+        fetch(apiBase + '/api/auth/me', { headers: { 'x-api-key': token }, cache: 'no-store' })
+          .then(function (res) {
+            if (!res.ok) return; // dead key or blip: leave it to the page's own gate
+            return res.json().then(function (data) {
+              if (data && data.user && data.user.is_owner) bounce();
+            });
+          })
+          .catch(function () {});
+      })();
+    </script>
   </head>
   <body>
     <div id="terminal-root">
@@ -410,25 +462,31 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
           // Bad payload - drop it rather than looping
           window.history.replaceState({}, '', '/terminal');
         }
-        if (!localStorage.getItem('hakster_google_token')) window.location.href = '/';
+        if (!(localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'))) window.location.href = '/?signin=1&redirect=' + encodeURIComponent(window.location.pathname);
       })();
 
       // ── Owner gate: Terminal is owner-emails-only ────────────────
       setTimeout(function() {
-        const token = localStorage.getItem('hakster_google_token');
+        const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
         if (!token) return; // anonymous users redirected above already
         const apiBase = window.location.port === '4321' ? 'http://localhost:3579' : '';
         fetch(apiBase + '/api/auth/me', { headers: { 'x-api-key': token } })
           .then(async (res) => {
-            if (!res.ok) { window.location.href = '/'; return; }
+            // A dead key gets one sign-in and comes straight back here; a server blip
+            // leaves the page alone instead of bouncing an owner to the landing page.
+            if (res.status === 401) {
+              window.location.href = '/?signin=1&redirect=' + encodeURIComponent(window.location.pathname);
+              return;
+            }
+            if (!res.ok) return;
             const data = await res.json().catch(() => null);
             if (!data?.user?.is_owner) window.location.replace('/build');
           })
-          .catch(() => { window.location.href = '/'; });
+          .catch(() => {});
       }, 1500);
 
       // Auth headers for /api/dashboard (it requires x-api-key)
-      function authHeaders() { const t = localStorage.getItem('hakster_google_token'); return t ? { 'x-api-key': t } : {}; }
+      function authHeaders() { const t = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'); return t ? { 'x-api-key': t } : {}; }
 
       // ── Sidebar toggle ──────────────────────────────────────────
       const sidebar = document.getElementById('term-sidebar');

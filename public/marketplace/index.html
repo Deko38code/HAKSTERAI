@@ -76,6 +76,49 @@
   footer { margin-top: 28px; color: var(--muted); font-size: 11.5px; text-align: center; line-height: 1.7; }
   footer a { color: var(--muted); }
   ul.features { margin: 0 0 12px; padding-left: 18px; color: var(--muted); font-size: 13px; }
+
+  /* Plan / payment cards: tap a card and its payment panel slides open.
+     grid-template-rows 0fr -> 1fr animates to the content's real height without
+     measuring it, so it stays smooth on long feature lists. */
+  .plan-card { padding: 0; overflow: hidden; }
+  .plan-head {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 16px; border: 0; background: none; color: inherit;
+    font: inherit; text-align: left; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .plan-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .plan-head .titles { flex: 1 1 auto; min-width: 0; }
+  .plan-head h3 { margin: 0 0 2px; font-size: 15.5px; }
+  .plan-head .sum { display: block; color: var(--muted); font-size: 12.5px; }
+  .chev {
+    flex: 0 0 auto; width: 24px; height: 24px; border-radius: 999px;
+    border: 1px solid var(--border); display: grid; place-items: center;
+    font-size: 11px; color: var(--muted);
+    transition: transform .3s cubic-bezier(.22,.61,.36,1), border-color .3s, color .3s;
+  }
+  .plan-card.open .chev { transform: rotate(180deg); border-color: var(--accent); color: var(--accent); }
+  .plan-body {
+    display: grid; grid-template-rows: 0fr; opacity: 0;
+    transition: grid-template-rows .36s cubic-bezier(.22,.61,.36,1), opacity .26s ease;
+  }
+  .plan-card.open .plan-body { grid-template-rows: 1fr; opacity: 1; }
+  .plan-inner { overflow: hidden; min-height: 0; padding: 0 16px; }
+  .plan-card.open .plan-inner { padding-bottom: 16px; }
+  .plan-card .cta-stack { display: grid; gap: 8px; }
+  .plan-note { color: var(--muted); font-size: 12px; margin: 8px 0 0; min-height: 1em; }
+  @media (prefers-reduced-motion: reduce) {
+    .plan-body, .chev { transition: none; }
+  }
+  /* Visible scrollbars (same rule set as the site's global.css) — the page, the
+     listings grid and every expanding plan body get a real bar on both axes. */
+  html { scrollbar-width: thin; scrollbar-color: var(--accent, #7c3aed) #14141d; scrollbar-gutter: stable; }
+  * { scrollbar-width: thin; scrollbar-color: #4c1d95 #14141d; }
+  html::-webkit-scrollbar, *::-webkit-scrollbar { width: 10px; height: 10px; }
+  html::-webkit-scrollbar-track, *::-webkit-scrollbar-track { background: #14141d; }
+  html::-webkit-scrollbar-thumb, *::-webkit-scrollbar-thumb { background: #4c1d95; border: 2px solid #14141d; border-radius: 999px; }
+  html::-webkit-scrollbar-thumb:hover, *::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+  html::-webkit-scrollbar-corner, *::-webkit-scrollbar-corner { background: #14141d; }
 </style>
 </head>
 <body>
@@ -109,6 +152,14 @@
   <p class="meta">Builds are confirmed by the owner before work starts. Availability and the final quote are confirmed on request — nothing is charged by this page.</p>
 </section>
 
+<h2>Offers on Telegram</h2>
+<section class="card" id="upsell-card" hidden>
+  <h3>Get marketplace offers in Telegram</h3>
+  <p class="desc">Opt in once and the HaksterAI bot may send you new catalog builds and plan offers. Reply /stop any time and they stop.</p>
+  <a class="btn ghost" id="upsell-btn" href="https://t.me/Haksteraibot?start=upsell_yes" target="_blank" rel="noopener">Opt in on Telegram →</a>
+  <p class="meta" id="upsell-note">Nothing is sent to a chat that has not opted in.</p>
+</section>
+
 <h2>Site market</h2>
 <section id="market">
   <div class="card"><p class="skeleton">Loading live listings…</p></div>
@@ -137,13 +188,92 @@
       if (tg.setHeaderColor) tg.setHeaderColor('#0a0b12');
       if (tg.setBackgroundColor) tg.setBackgroundColor('#0a0b12');
     } catch (e) { /* standalone browser */ }
-    try {
-      var u = tg.initDataUnsafe && tg.initDataUnsafe.user;
-      if (u && (u.first_name || u.username)) {
-        document.getElementById('greeting').textContent = 'Welcome, ' + (u.first_name || u.username) + ' — plans and sites below.';
-      }
-    } catch (e) { /* ignore */ }
   }
+
+  // ── Sign-in: the bot this mini app is opened from IS the sign-in ─────────
+  // Telegram signs initData for this chat. The server verifies it and hands
+  // back the same apiKey every other HaksterAI page reads, so the bot, the
+  // marketplace and the site all resolve to one account. If this browser is
+  // already signed in on haksterai.com, the Telegram account is linked to that
+  // same user instead of creating a second one. Nothing is claimed until
+  // /api/auth/me answers with the real account.
+  var KEY_TOKEN = 'hakster_google_token';
+  var KEY_API = 'hakster_api_key';
+  var sessionKey = '';
+
+  function readKey() {
+    try { return localStorage.getItem(KEY_TOKEN) || localStorage.getItem(KEY_API) || ''; } catch (e) { return ''; }
+  }
+  function storeKey(key, user) {
+    try {
+      localStorage.setItem(KEY_TOKEN, key);
+      localStorage.setItem(KEY_API, key);
+      localStorage.removeItem('hakster_signed_out_at');
+      if (user) localStorage.setItem('hakster_user_data', JSON.stringify(user));
+    } catch (e) { /* private browsing: session still works for this page */ }
+    sessionKey = key;
+  }
+  function telegramInitData() {
+    try { if (tg && tg.initData) return tg.initData; } catch (e) {}
+    // Fallback for the first paint: Telegram appends the signed payload to the hash.
+    var m = /(?:^#|&)tgWebAppData=([^&]+)/.exec(window.location.hash || '');
+    if (!m) return '';
+    try { return decodeURIComponent(m[1]); } catch (e) { return ''; }
+  }
+  function postJson(url, body, extraHeaders) {
+    return fetch(url, {
+      method: 'POST',
+      headers: Object.assign({ 'content-type': 'application/json', accept: 'application/json' }, extraHeaders || {}),
+      body: JSON.stringify(body)
+    });
+  }
+  function setGreeting(text) {
+    var el = document.getElementById('greeting');
+    if (el) el.textContent = text;
+  }
+
+  function whoAmI(key) {
+    return fetch('/api/auth/me', { headers: { 'x-api-key': key, accept: 'application/json' }, cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var u = d && d.user;
+        if (!u) { setGreeting('Session expired — reopen this from the bot'); return null; }
+        var who = u.username ? '@' + u.username : (u.email || 'your account');
+        setGreeting((u.is_owner ? 'Owner · ' : 'Signed in as ') + who + (u.plan ? ' · ' + u.plan + ' plan' : ''));
+        return u;
+      })
+      .catch(function () { setGreeting('Could not confirm the account — live prices still load below'); return null; });
+  }
+
+  function signIn() {
+    var data = telegramInitData();
+    var existing = readKey();
+
+    if (existing) {
+      sessionKey = existing;
+      if (!data) return whoAmI(existing);
+      // Link this chat to the account already signed in on the site (owner case).
+      return postJson('/api/auth/telegram/link', { initData: data }, { 'x-api-key': existing })
+        .then(function (r) { if (r.ok) { try { localStorage.setItem('hakster_tg_linked_at', String(Date.now())); } catch (e) {} } return whoAmI(existing); })
+        .catch(function () { return whoAmI(existing); });
+    }
+
+    if (!data) {
+      setGreeting('Not signed in — open this from the HaksterAI bot');
+      return Promise.resolve(null);
+    }
+
+    return postJson('/api/auth/telegram/webapp', { initData: data })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.apiKey) { setGreeting('This bot session could not be verified — reopen from the bot'); return null; }
+        storeKey(d.apiKey, d.user);
+        return whoAmI(d.apiKey);
+      })
+      .catch(function () { setGreeting('Sign-in could not be checked — check the connection'); return null; });
+  }
+
+  var accountReady = signIn();
 
   function open(url) {
     if (!url) return;
@@ -182,79 +312,222 @@
 
   var planBox = document.getElementById('plans');
 
+  // Start a real Stripe checkout for one price. The signed-in key travels with
+  // it so the purchase lands on the same account; a signed-out tap still goes to
+  // Stripe, which collects the email and the paid webhook creates the account.
+  function startPlanCheckout(plan, price, btn, note) {
+    if (!price.priceId) {
+      note.textContent = 'This price has no checkout configured yet — open the plans page.';
+      open('https://haksterai.com/plans');
+      return;
+    }
+    var original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Opening secure checkout…';
+    note.textContent = '';
+    postJson('/api/stripe/checkout', { priceId: price.priceId, planId: plan.id, returnTo: '/marketplace/' },
+      sessionKey ? { 'x-api-key': sessionKey } : {})
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d || {} }; }); })
+      .then(function (out) {
+        btn.disabled = false;
+        btn.textContent = original;
+        if (out.ok && out.data.url) { open(out.data.url); return; }
+        note.textContent = out.data.error || 'Checkout could not start — try again.';
+      })
+      .catch(function () {
+        btn.disabled = false;
+        btn.textContent = original;
+        note.textContent = 'Network error — try again.';
+      });
+  }
+
+  // One plan card. Tapping the header slides the payment panel open; the panel
+  // holds the real prices, features and Subscribe buttons.
+  function planCard(plan, prices, openByDefault) {
+    var card = document.createElement('div');
+    card.className = 'card plan-card' + (openByDefault ? ' open' : '');
+
+    var head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'plan-head';
+    head.setAttribute('aria-expanded', openByDefault ? 'true' : 'false');
+
+    var titles = document.createElement('span');
+    titles.className = 'titles';
+    var h = document.createElement('h3');
+    h.textContent = plan.name || plan.id;
+    titles.appendChild(h);
+    var sum = document.createElement('span');
+    sum.className = 'sum';
+    sum.textContent = prices.length
+      ? prices.map(function (p) { return money(p.amount, p.currency) + cycleLabel(p.billingCycle); }).join('  ·  ')
+      : 'Priced per project';
+    titles.appendChild(sum);
+    head.appendChild(titles);
+
+    var chev = document.createElement('span');
+    chev.className = 'chev';
+    chev.setAttribute('aria-hidden', 'true');
+    chev.textContent = '▼';
+    head.appendChild(chev);
+
+    var body = document.createElement('div');
+    body.className = 'plan-body';
+    var inner = document.createElement('div');
+    inner.className = 'plan-inner';
+    body.appendChild(inner);
+
+    if (plan.description) {
+      var d = document.createElement('p');
+      d.className = 'desc';
+      d.textContent = plan.description;
+      inner.appendChild(d);
+    }
+
+    var row = document.createElement('div');
+    row.className = 'price-row';
+    function pricePill(amount, currency, text) {
+      var el = document.createElement('span');
+      el.className = 'pill';
+      var strong = document.createElement('strong');
+      strong.textContent = money(amount, currency);
+      el.appendChild(strong);
+      el.appendChild(document.createTextNode(text));
+      return el;
+    }
+    prices.forEach(function (p) {
+      if (p.introAmount) row.appendChild(pricePill(p.introAmount, p.currency, ' first month'));
+      row.appendChild(pricePill(p.amount, p.currency, p.name ? ' ' + p.name : cycleLabel(p.billingCycle)));
+    });
+    inner.appendChild(row);
+
+    if (Array.isArray(plan.features) && plan.features.length) {
+      var ul = document.createElement('ul');
+      ul.className = 'features';
+      plan.features.slice(0, 12).forEach(function (f) {
+        if (!f) return;
+        var li = document.createElement('li');
+        li.textContent = String(f);
+        ul.appendChild(li);
+      });
+      inner.appendChild(ul);
+    }
+
+    var note = document.createElement('p');
+    note.className = 'plan-note';
+    note.setAttribute('role', 'status');
+
+    if (prices.length) {
+      var stack = document.createElement('div');
+      stack.className = 'cta-stack';
+      prices.forEach(function (p) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn';
+        btn.textContent = p.introAmount
+          ? 'Start for ' + money(p.introAmount, p.currency) + ' →'
+          : 'Subscribe ' + money(p.amount, p.currency) + cycleLabel(p.billingCycle) + ' →';
+        btn.addEventListener('click', function () { startPlanCheckout(plan, p, btn, note); });
+        stack.appendChild(btn);
+      });
+      inner.appendChild(stack);
+      note.textContent = 'Secure checkout on Stripe. Cancel any time from the billing portal.';
+    } else {
+      var talk = document.createElement('a');
+      talk.className = 'btn ghost';
+      talk.href = 'https://haksterai.com/plans';
+      talk.target = '_blank';
+      talk.rel = 'noopener';
+      talk.textContent = 'Talk to us →';
+      inner.appendChild(talk);
+    }
+    inner.appendChild(note);
+
+    head.addEventListener('click', function () {
+      var isOpen = card.classList.toggle('open');
+      head.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    });
+
+    card.appendChild(head);
+    card.appendChild(body);
+    return card;
+  }
+
   function renderPlans(plans) {
     planBox.textContent = '';
     var shown = 0;
     plans.forEach(function (plan) {
-      var prices = (plan.prices || []).filter(function (p) { return p && p.amount; });
+      var prices = (plan.prices || []).filter(function (p) { return p && (p.amount || p.introAmount); });
       if (!prices.length && plan.id === 'free') return; // free tier is described on the site, not sold here
       shown++;
-      var card = document.createElement('div');
-      card.className = 'card';
-      var h = document.createElement('h3');
-      h.textContent = plan.name || plan.id;
-      card.appendChild(h);
-      if (plan.description) {
-        var d = document.createElement('p');
-        d.className = 'desc';
-        d.textContent = plan.description;
-        card.appendChild(d);
-      }
-      var row = document.createElement('div');
-      row.className = 'price-row';
-      if (!prices.length) {
-        var np = document.createElement('span');
-        np.className = 'pill';
-        np.textContent = 'Contact us for pricing';
-        row.appendChild(np);
-      }
-      prices.forEach(function (p) {
-        var pill = document.createElement('span');
-        pill.className = 'pill';
-        var strong = document.createElement('strong');
-        strong.textContent = money(p.amount, p.currency);
-        pill.appendChild(strong);
-        pill.appendChild(document.createTextNode((p.name ? ' ' + p.name : '') + cycleLabel(p.billingCycle)));
-        row.appendChild(pill);
-      });
-      card.appendChild(row);
-      var cta = document.createElement('a');
-      cta.className = 'btn';
-      cta.href = 'https://haksterai.com/plans';
-      cta.target = '_blank';
-      cta.rel = 'noopener';
-      cta.textContent = prices.length ? 'Choose ' + (plan.name || plan.id) + ' →' : 'Talk to us →';
-      card.appendChild(cta);
-      planBox.appendChild(card);
+      planBox.appendChild(planCard(plan, prices, shown === 1));
     });
     if (!shown) {
       planBox.innerHTML = '<div class="card"><p class="error">No paid plans are configured right now.</p></div>';
     }
   }
 
-  fetch('/api/stripe/plans', { headers: { accept: 'application/json' } })
+  // Prices are public; the account is only needed to see who is signed in and to
+  // attach the purchase. Load both together so the page never shows one without
+  // the other.
+  Promise.all([
+    accountReady.catch(function () { return null; }),
+    fetch('/api/stripe/plans', { headers: { accept: 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (data) {
+        var plans = (data && data.plans) || [];
+        if (!plans.length) throw new Error('empty catalog');
+        return plans;
+      })
+  ]).then(function (out) {
+    renderPlans(out[1]);
+  }).catch(function (err) {
+    planBox.innerHTML = '<div class="card"><p class="error">Live prices could not be loaded (' +
+      String(err.message || 'network').replace(/[<>&]/g, '') +
+      '). <a href="https://haksterai.com/plans" target="_blank" rel="noopener">Open the plans page</a>.</p></div>';
+  });
+
+
+  // Catalog builds come from the owner-managed marketplace API. The static list is
+  // the fallback used only when that API cannot be reached.
+  var CATALOG_FALLBACK = ['TapLocal', 'BookBloom', 'CartDash', 'MenuMingle', 'EventNest',
+                          'GearGlow', 'HomeSpark', 'StayScout', 'CreatorKit', 'ClassPop'];
+  var list = document.getElementById('catalog-list');
+
+  function renderCatalog(items) {
+    list.textContent = '';
+    var shown = (items || []).filter(function (i) { return i && (i.name || i.slug); });
+    if (!shown.length) {
+      CATALOG_FALLBACK.forEach(function (name) {
+        var li = document.createElement('li');
+        li.textContent = name;
+        list.appendChild(li);
+      });
+      return;
+    }
+    shown.forEach(function (item) {
+      var li = document.createElement('li');
+      li.textContent = item.name + (item.priceCents ? ' — ' + money(item.priceCents, 'usd') : ' — confirmed on request');
+      list.appendChild(li);
+    });
+  }
+
+  function renderUpsell(info) {
+    if (!info || !info.deepLink) return;
+    var card = document.getElementById('upsell-card');
+    var btn = document.getElementById('upsell-btn');
+    btn.href = info.deepLink;
+    btn.textContent = 'Opt in via @' + info.bot + ' →';
+    card.hidden = false;
+  }
+
+  fetch('/api/marketplace/catalog', { headers: { accept: 'application/json' } })
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function (data) {
-      var plans = (data && data.plans) || [];
-      if (!plans.length) throw new Error('empty catalog');
-      renderPlans(plans);
+      renderCatalog((data && data.items) || []);
+      renderUpsell(data && data.upsell);
     })
-    .catch(function (err) {
-      planBox.innerHTML = '<div class="card"><p class="error">Live prices could not be loaded (' +
-        String(err.message || 'network').replace(/[<>&]/g, '') +
-        '). <a href="https://haksterai.com/plans" target="_blank" rel="noopener">Open the plans page</a>.</p></div>';
-    });
-
-  // Catalog builds (names come from the maintained TopReels starter roster).
-  var CATALOG = ['TapLocal', 'BookBloom', 'CartDash', 'MenuMingle', 'EventNest',
-                 'GearGlow', 'HomeSpark', 'StayScout', 'CreatorKit', 'ClassPop'];
-  var list = document.getElementById('catalog-list');
-  list.textContent = '';
-  CATALOG.forEach(function (name) {
-    var li = document.createElement('li');
-    li.textContent = name;
-    list.appendChild(li);
-  });
+    .catch(function () { renderCatalog([]); });
 
   // TopReels / RMT site market — live when the API allows this origin.
   var marketBox = document.getElementById('market');
@@ -324,5 +597,6 @@
     });
 })();
 </script>
+<script src="/js/hakster-scrollbars.js" defer></script>
 </body>
 </html>

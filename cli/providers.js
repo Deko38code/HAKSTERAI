@@ -133,7 +133,16 @@ const PROVIDER_ENDPOINTS = {
 
 // Providers that need no API key (local servers or keyless free tier)
 const NO_KEY_PROVIDERS = new Set(['ollama', 'pollinations', 'lmstudio', 'jan']);
-const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || process.env.DEFAULT_MODEL || 'glm-5.2:cloud';
+// Ollama default: the owner's Claude DeepSeek config (owner, 2026-11-16), not a
+// GLM default. The resolver keeps an explicit non-GLM OLLAMA_MODEL /
+// DEFAULT_MODEL / HAKSTER_MODEL and skips GLM tags.
+const DEFAULT_OLLAMA_MODEL = (() => {
+  try {
+    return require('../server/src/modelDefaults').resolveStartupModel('').model;
+  } catch (_) {
+    return process.env.OLLAMA_MODEL || process.env.DEFAULT_MODEL || 'deepseek-v4.1-flash:cloud';
+  }
+})();
 
 // Providers whose keys must match a known prefix
 const INVALID_KEY_PATTERNS = {

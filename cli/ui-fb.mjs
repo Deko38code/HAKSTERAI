@@ -530,6 +530,7 @@ var require_catalog = __commonJS({
       { id: "DeepSeek V4 Pro", vendor: "DeepSeek", replacedBy: "GLM 5.3 Flash", note: "Retired from the catalog; GLM 5.3 Flash replaces it as the deep-reasoning pick." }
     ];
     var CONTEXT_BY_MODEL = {
+      "deepseek-v4.1-flash:cloud": 1048576,
       "glm-5.2:cloud": 128e3,
       "thudm/glm-5.2:cloud": 128e3,
       "thudm/glm-5.1:cloud-ctx": 128e3,
@@ -552,6 +553,7 @@ var require_catalog = __commonJS({
       if (m.includes("claude")) return 2e5;
       if (m.includes("gpt-oss") || m.includes("120b")) return 131072;
       if (m.includes("glm")) return 128e3;
+      if (m.includes("deepseek-v4.1-flash")) return 1048576;
       const hit = REFERENCE_CATALOG.find((c) => c.id.toLowerCase() === m);
       if (hit && hit.context) return hit.context;
       const env = parseInt(process.env.HAKSTER_CONTEXT_MAX || "", 10);
@@ -1653,7 +1655,7 @@ function App({ version = "0.1.0" }) {
   const [adsOn, setAdsOn] = useState5(true);
   const [dockExpanded, setDockExpanded] = useState5(false);
   const [draft, setDraft] = useState5("");
-  const [model, setModel] = useState5(process.env.HAKSTER_MODEL || "glm-5.2:cloud");
+  const [model, setModel] = useState5(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : "deepseek-v4.1-flash:cloud");
   const [modelIdx, setModelIdx] = useState5(0);
   const [status, setStatus] = useState5(null);
   const [statusErr, setStatusErr] = useState5(null);

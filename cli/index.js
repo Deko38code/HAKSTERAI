@@ -162,7 +162,17 @@ function getDangerPassword() {
 // ── Default AI provider + model (config first, env override, sensible fallback) ──
 const _cfgDefaults = (() => { try { return loadConfig(); } catch { return {}; } })();
 const DEFAULT_AI_PROVIDER = process.env.HAKSTER_PROVIDER || process.env.DEFAULT_PROVIDER || _cfgDefaults.provider || 'ollama';
-const DEFAULT_MODEL = process.env.HAKSTER_MODEL || _cfgDefaults.model || 'gpt-oss:120b-cloud';
+// Start on the owner's Claude DeepSeek config (Ollama "claude" integration),
+// not a GLM default — owner, 2026-11-16. HAKSTER_MODEL still wins; /model still
+// switches at runtime.
+const DEFAULT_MODEL = (() => {
+  try {
+    return require('../server/src/modelDefaults').resolveStartupModel(_cfgDefaults.model || '').model;
+  } catch (_) {
+    const envModel = process.env.HAKSTER_MODEL || process.env.OLLAMA_MODEL || process.env.DEFAULT_MODEL || '';
+    return /^glm/i.test(envModel) ? 'deepseek-v4.1-flash:cloud' : (envModel || _cfgDefaults.model || 'deepseek-v4.1-flash:cloud');
+  }
+})();
 
 // ── HTTP helper (preserved with timeoutMs support) ───────────────────────
 // The server's 2026-10-08 platform-wide auth sweep 401s every /api/* request

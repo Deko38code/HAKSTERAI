@@ -94,6 +94,7 @@ const RETIRED = [
 /* This harness's own context windows, used for the token bar and the
  * compaction threshold. Unrelated to the tier column above. */
 const CONTEXT_BY_MODEL = {
+  'deepseek-v4.1-flash:cloud': 1048576, // owner's Claude DeepSeek config (1 MiB override)
   'glm-5.2:cloud': 128000,
   'thudm/glm-5.2:cloud': 128000,
   'thudm/glm-5.1:cloud-ctx': 128000,
@@ -123,6 +124,8 @@ function contextMaxFor(model) {
   if (m.includes('claude')) return 200000;
   if (m.includes('gpt-oss') || m.includes('120b')) return 131072;
   if (m.includes('glm')) return 128000;
+  if (m.includes('deepseek-v4.1-flash')) return 1048576; // owner's Claude DeepSeek config
+  if (m.includes('deepseek')) return 131072;
   // The reference catalog states a window for a few models by display name.
   const hit = REFERENCE_CATALOG.find((c) => c.id.toLowerCase() === m);
   if (hit && hit.context) return hit.context;

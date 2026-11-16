@@ -13,6 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",
+    "@simplewebauthn/server": "^14.1.0",
     "archiver": "^8.0.0",
     "better-sqlite3": "^13.0.3",
     "compression": "^1.8.1",

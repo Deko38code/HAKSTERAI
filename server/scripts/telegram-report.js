@@ -8,6 +8,17 @@
 //   echo "dirty tree: 3 files" | node server/scripts/telegram-report.js --role coder
 //   node server/scripts/telegram-report.js --list
 //
+//   # commit ids come from git, never from the text you type:
+//   node server/scripts/telegram-report.js --role coder --git /home/ghost --git-log 3 \
+//     --text "baseline committed, tree clean"
+//
+// Hash guard: any hash-shaped token in the body is checked with
+// `git cat-file -e <sha>^{commit}` before anything is sent. A token that does
+// not resolve is refused (exit 3) rather than shipped to a permanent report —
+// this is what stops a guessed commit id from ever reaching Telegram again.
+// --no-hash-check bypasses it; --git <repo> both appends the verified HEAD and
+// tells the guard which repo to resolve ids against.
+//
 // Why this exists: server/src/telegramBots.js only sends through live bot
 // objects created by initBots(). A standalone script that required that module
 // without initializing polling got an empty chat set and a silent `false`, so
@@ -20,6 +31,7 @@
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 try { require(path.join(ROOT, 'node_modules', 'dotenv')).config({ path: path.join(ROOT, '.env') }); } catch {}
@@ -38,7 +50,10 @@ const ROLES = {
 };
 
 function parseArgs(argv) {
-  const out = { role: 'health', text: null, file: null, stdin: false, list: false, dryRun: false };
+  const out = {
+    role: 'health', text: null, file: null, stdin: false, list: false, dryRun: false,
+    gitRepos: [], gitLog: 1, noHashCheck: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--role') out.role = String(argv[++i] || '').toLowerCase();
@@ -47,9 +62,78 @@ function parseArgs(argv) {
     else if (a === '--stdin') out.stdin = true;
     else if (a === '--list') out.list = true;
     else if (a === '--dry-run') out.dryRun = true;
+    else if (a === '--git') out.gitRepos.push(argv[++i] || '.');
+    else if (a === '--git-log') out.gitLog = Math.max(1, parseInt(argv[++i], 10) || 1);
+    else if (a === '--no-hash-check') out.noHashCheck = true;
     else if (a === '--help' || a === '-h') out.help = true;
   }
   return out;
+}
+
+// ── git helpers: every commit id in a report is read from git or refused ──
+
+function gitRun(repoPath, gitArgs) {
+  return execFileSync('git', ['-C', repoPath, ...gitArgs], {
+    encoding: 'utf8',
+    timeout: 15000,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+}
+
+function resolveRepo(repoPath) {
+  try {
+    const top = gitRun(path.resolve(repoPath || '.'), ['rev-parse', '--show-toplevel']).trim();
+    return top || null;
+  } catch {
+    return null;
+  }
+}
+
+function gitBlock(repos, logCount) {
+  const lines = [];
+  for (const repoPath of repos) {
+    const repo = resolveRepo(repoPath);
+    if (!repo) {
+      lines.push(`repo: ${path.resolve(repoPath)} — NOT a git repo, ids unverified`);
+      continue;
+    }
+    lines.push(`repo: ${repo}`);
+    lines.push(`HEAD: ${gitRun(repo, ['log', '-1', '--format=%h %s']).trim()}`);
+    if (logCount > 1) {
+      const log = gitRun(repo, ['log', `-${logCount}`, '--format=%h %s']).trim().split('\n');
+      for (const l of log.slice(1)) if (l) lines.push(`  ${l}`);
+    }
+    const dirty = gitRun(repo, ['status', '--porcelain']).split('\n').filter(Boolean).length;
+    lines.push(`dirty: ${dirty} path(s)`);
+  }
+  return lines.join('\n');
+}
+
+// Short-hash shaped: 7-40 hex chars, not part of a longer run, not a #colour.
+const HASH_RE = /(?<![0-9a-fA-F#])[0-9a-f]{7,40}(?![0-9a-fA-F])/g;
+
+function hashLikeTokens(text) {
+  const seen = new Set();
+  for (const m of String(text).matchAll(HASH_RE)) {
+    // Pure-digit runs are timestamps, message ids, byte counts and ports, not
+    // commit abbreviations. Requiring one a-f keeps real ids checked and stops
+    // every number in a health report from tripping the guard.
+    if (!/[a-f]/.test(m[0])) continue;
+    seen.add(m[0]);
+  }
+  return [...seen];
+}
+
+function commitResolves(repos, sha) {
+  for (const repoPath of repos) {
+    const repo = resolveRepo(repoPath);
+    if (!repo) continue;
+    try {
+      gitRun(repo, ['cat-file', '-e', `${sha}^{commit}`]);
+      return true;
+    } catch { /* not in this repo, try the next */ }
+  }
+  return false;
 }
 
 function loadChatIds() {
@@ -119,6 +203,7 @@ async function main() {
 
   if (args.help) {
     console.log('usage: telegram-report.js --role <health|uptime|coder|recon|debugger|command|security> [--text "..."] [--file path] [--stdin] [--dry-run]');
+    console.log('       [--git <repoPath>]... [--git-log N] [--no-hash-check]');
     console.log('       telegram-report.js --list');
     return 0;
   }
@@ -152,16 +237,39 @@ async function main() {
   }
 
   const body = readBody(args).trim();
-  if (!body) {
-    console.error('nothing to send (use --text, --file, or pipe stdin)');
+  if (!body && !args.gitRepos.length) {
+    console.error('nothing to send (use --text, --file, --stdin, or --git <repo>)');
     return 2;
   }
 
-  const text = `${role.label}\n\n${body}`;
+  // Which repos a hash-shaped token must resolve in. Without --git this is the
+  // working directory's repo, so an unadorned report is still guarded.
+  const repos = args.gitRepos.length ? args.gitRepos : ['.'];
+
+  if (!args.noHashCheck) {
+    const unresolved = hashLikeTokens(body).filter(t => !commitResolves(repos, t));
+    if (unresolved.length) {
+      console.error(`${args.role}: REFUSED — commit-id-shaped token(s) not found in ${repos.map(r => path.resolve(r)).join(', ')}:`);
+      for (const t of unresolved) console.error(`  ${t}`);
+      console.error('send the real id, add --git <repo> for the repo that owns it, or --no-hash-check to override');
+      return 3;
+    }
+  }
+
+  let composed = body;
+  if (args.gitRepos.length) {
+    const block = gitBlock(args.gitRepos, args.gitLog);
+    if (block) composed = composed ? `${composed}\n\n── git (read from the repo) ──\n${block}` : `── git (read from the repo) ──\n${block}`;
+  }
+
+  const text = `${role.label}\n\n${composed}`;
   const chunks = splitMessage(text);
 
   if (args.dryRun) {
     console.log(`[dry-run] ${args.role}: ${chunks.length} chunk(s), ${text.length} chars, ${ids.length} chat(s)`);
+    console.log('--- report body ---');
+    console.log(text);
+    console.log('--- end ---');
     return 0;
   }
 

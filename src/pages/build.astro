@@ -4038,9 +4038,18 @@ import Layout from '../layouts/Layout.astro';
         const data = await res.json();
         const el = document.getElementById('sidebar-account-usage');
         if (!el) return;
+        // Measured tokens and cost for this account (requests ↔ sessions.user_id),
+        // the same wiring HakTerm's sidebar shows. Falls back to the older estimate
+        // total only when this account has no measured rows yet.
+        const wired = (data.tokenWiring && data.tokenWiring.allTime) || {};
+        const usedTokens = Number(wired.totalTokens || 0) || Number(data.tokenUsage?.totalTokens || 0);
+        const usedCost = Number(wired.cost || 0);
+        const tokenLabel = `${usedTokens.toLocaleString()} tokens` + (usedCost > 0 ? ` · $${usedCost < 0.01 ? usedCost.toFixed(6) : usedCost.toFixed(4)}` : '');
+        el.title = usedTokens
+          ? `${wired.calls || 0} measured calls · ${wired.agentCalls || 0} agent loops${usedCost > 0 ? ` · $${usedCost.toFixed(6)}` : ''}`
+          : '';
         if (data.remaining === -1) {
-          const usedTokens = data.tokenUsage?.totalTokens || 0;
-          el.textContent = `✦ Unlimited · ${usedTokens.toLocaleString()} used`;
+          el.textContent = `✦ Unlimited · ${tokenLabel}`;
           el.style.color = '#a855f7';
         } else if (data.limitEnabled) {
           el.textContent = `${data.remaining}/${data.limit} free uses left`;
@@ -4066,16 +4075,8 @@ import Layout from '../layouts/Layout.astro';
             <div style="font-size:28px;font-weight:bold;color:#a855f7;margin-bottom:8px;">Upgrade to Pro</div>
             <div style="font-size:14px;color:#94a3b8;">You've used all 5 free AI calls and 5 free web lookups. Pick a plan to keep going.</div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:12px;">
-            <button data-plan="pro" data-price="pro_monthly" style="background:#7c3aed;color:white;border:none;border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-              <span>Pro — $29.99/mo</span><span style="font-size:12px;opacity:0.8;">Unlimited</span>
-            </button>
-            <button data-plan="pro" data-price="starter_monthly" style="background:#0891b2;color:white;border:none;border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-              <span>Starter — $9.99/mo</span><span style="font-size:12px;opacity:0.8;">Unlimited</span>
-            </button>
-            <button data-plan="enterprise" data-price="enterprise_monthly" style="background:#111118;color:#fbbf24;border:1px solid rgba(251,191,36,0.35);border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-              <span>Enterprise — $99.99/mo</span><span style="font-size:12px;opacity:0.8;">Team</span>
-            </button>
+          <div id="upgrade-modal-plans" style="display:flex;flex-direction:column;gap:12px;">
+            <div style="font-size:13px;color:#94a3b8;">Loading plans...</div>
           </div>
           <div id="upgrade-modal-error" style="color:#ef4444;font-size:13px;text-align:center;margin-top:12px;min-height:18px;"></div>
           <button id="upgrade-modal-close" style="width:100%;margin-top:16px;background:none;border:none;color:#64748b;font-size:13px;cursor:pointer;">Maybe later</button>
@@ -4088,45 +4089,66 @@ import Layout from '../layouts/Layout.astro';
       closeBtn.addEventListener('click', () => overlay.remove());
       overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
-      overlay.querySelectorAll('button[data-plan]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const token = getStoredAuthToken();
-          if (!token) {
-            overlay.remove();
-            window.location.href = '/?signin=1&redirect=/build';
-            return;
-          }
-          const planId = btn.dataset.plan;
-          const priceCatalogId = btn.dataset.price;
-          errorEl.textContent = 'Redirecting to Stripe...';
-          errorEl.style.color = '#a855f7';
-          try {
-            // Fetch pricing to get the stripePriceId
-            const priceRes = await fetch(`${API}/api/pricing`);
-            const catalog = await priceRes.json();
-            let stripePriceId = null;
-            for (const plan of catalog.plans) {
-              if (plan.id === planId) {
-                for (const price of plan.prices) {
-                  if (price.id === priceCatalogId) { stripePriceId = price.stripePriceId; break; }
-                }
-              }
-            }
-            if (!stripePriceId) { errorEl.textContent = 'Plan not configured yet. Check back soon.'; errorEl.style.color = '#ef4444'; return; }
-            const res = await fetch(`${API}/api/stripe/checkout`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-api-key': token },
-              body: JSON.stringify({ priceId: stripePriceId, planId }),
+      // Plans come from the live catalog, so a new Stripe price shows up here
+      // without editing this page. Nothing is hardcoded except formatting.
+      const planWrap = overlay.querySelector('#upgrade-modal-plans');
+      const moneyLabel = (cents) => '$' + (cents / 100).toFixed(2).replace(/\.00$/, '');
+
+      async function startCheckout(stripePriceId, planId, btn) {
+        const token = getStoredAuthToken();
+        if (!token) {
+          overlay.remove();
+          window.location.href = '/?signin=1&redirect=/build';
+          return;
+        }
+        if (btn) btn.disabled = true;
+        errorEl.textContent = 'Redirecting to Stripe...';
+        errorEl.style.color = '#a855f7';
+        try {
+          const res = await fetch(`${API}/api/stripe/checkout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': token },
+            body: JSON.stringify({ priceId: stripePriceId, planId }),
+          });
+          const data = await res.json();
+          if (data.url) window.location.href = data.url;
+          else { errorEl.textContent = data.error || 'Checkout failed'; errorEl.style.color = '#ef4444'; if (btn) btn.disabled = false; }
+        } catch (e) {
+          errorEl.textContent = 'Network error — try again';
+          errorEl.style.color = '#ef4444';
+          if (btn) btn.disabled = false;
+        }
+      }
+
+      (async () => {
+        try {
+          const priceRes = await fetch(`${API}/api/pricing`);
+          const catalog = await priceRes.json();
+          const paidPlans = (catalog.plans || []).filter((p) => p.id !== 'free');
+          planWrap.textContent = '';
+          let shown = 0;
+          paidPlans.forEach((plan) => {
+            (plan.prices || []).forEach((price) => {
+              if (!price.stripePriceId || !price.amount) return;
+              const btn = document.createElement('button');
+              btn.style.cssText = 'background:#7c3aed;color:white;border:none;border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;text-align:left;gap:12px;';
+              const label = document.createElement('span');
+              label.textContent = `${String(plan.name || plan.id).replace('HaksterAI ', '')} — ${moneyLabel(price.amount)}/${price.billingCycle === 'yearly' ? 'yr' : 'mo'}`;
+              btn.appendChild(label);
+              const note = document.createElement('span');
+              note.style.cssText = 'font-size:12px;opacity:0.8;white-space:nowrap;';
+              note.textContent = price.introLabel || (price.billingCycle === 'yearly' ? 'Yearly' : 'Monthly');
+              btn.appendChild(note);
+              btn.addEventListener('click', () => startCheckout(price.stripePriceId, plan.id, btn));
+              planWrap.appendChild(btn);
+              shown++;
             });
-            const data = await res.json();
-            if (data.url) window.location.href = data.url;
-            else { errorEl.textContent = data.error || 'Checkout failed'; errorEl.style.color = '#ef4444'; }
-          } catch (e) {
-            errorEl.textContent = 'Network error — try again';
-            errorEl.style.color = '#ef4444';
-          }
-        });
-      });
+          });
+          if (!shown) planWrap.innerHTML = '<div style="font-size:13px;color:#ef4444;">No paid plans are configured right now.</div>';
+        } catch (e) {
+          planWrap.innerHTML = '<div style="font-size:13px;color:#ef4444;">Plans could not be loaded. Try again in a moment.</div>';
+        }
+      })();
     }
 
     async function loadReferralCard() {

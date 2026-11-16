@@ -34,6 +34,13 @@ const {
   clearPending: loginClearPending,
 } = require('./loginAudit');
 const { handleDomainCommand } = require('./telegramDomainBot');
+const siteKeys = require('./telegramSiteKeys');
+const marketplace = require('./telegramMarketplace');
+const builds = require('./telegramBuilds');
+const entitlements = require('./telegramEntitlements');
+const botFactory = require('./telegramBotFather');
+const guestGate = require('./telegramGuestGate');
+const notifySms = require('./notifySms');
 // Shared only in process memory with index.js; this lets Telegram-originated
 // billing requests reach the checkout route without exposing an API credential.
 const internalBillingToken = crypto.randomBytes(32).toString('hex');
@@ -69,7 +76,15 @@ async function miniforgeBuilder(action, payload) {
     signal: AbortSignal.timeout(320000),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Miniforge returned ${res.status}`);
+  if (!res.ok) {
+    // Keep the HTTP status and the quota snapshot on the error so the build desk
+    // can tell "allowance used up" (402/429 → upgrade prompt) apart from a real
+    // builder failure, instead of matching on message text.
+    const err = new Error(data.error || `Miniforge returned ${res.status}`);
+    err.status = res.status;
+    err.quota = data.quota || null;
+    throw err;
+  }
   return data;
 }
 
@@ -116,9 +131,59 @@ function persistAssistantTurn(sessionId, content) {
   }
 }
 
-function runAgent(prompt, sessionId) {
+// ── Fast lane ────────────────────────────────────────────────────────
+// A short conversational message does not need the full agent loop: going
+// through /api/agent/run costs ~4s of round overhead before the model answers
+// at all (measured: 4,430ms for "Say OK"). Measured lane latency on this box:
+// deepseek 340ms, ollama 1,533ms, hackbot 1,266ms (currently 500s). So plain
+// chat goes straight at the fastest lane and only falls back to the loop when
+// the message actually needs tools, or when the fast call fails.
+const BOT_FAST_PROVIDER = process.env.BOT_FAST_PROVIDER || 'deepseek';
+const BOT_FAST_MODEL = process.env.BOT_FAST_MODEL || 'deepseek-v4.1-flash:cloud';
+const TOOLISH = /\b(build|deploy|scan|install|patch|fix|run|execute|test|search|look ?up|research|open|create|write|edit|delete|remove|backup|restore|restart|start|stop|pm2|sql|database|git|commit|push|file|folder|path|code|script|error|log|debug|trace|config|api|webhook|domain|dns|stripe|email|telegram|bot|agent|memory|skill|screenshot|crawl|scrape)\b/i;
+function isQuickChat(prompt) {
+  const text = String(prompt || '').trim();
+  if (!text || text.length > 280) return false;
+  if (/https?:\/\/|www\./i.test(text)) return false;
+  if (/[`$]|```|\n/.test(text)) return false; // code blocks, shell, multi-line tasks
+  if (TOOLISH.test(text)) return false;
+  return true;
+}
+function persistUserTurnLocal(sessionId, content) {
+  try {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    db.prepare('INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(require('crypto').randomBytes(12).toString('hex'), sessionId, 'user', content, now);
+    db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
+  } catch (e) {
+    console.error('[telegram] user turn persist failed:', e.message);
+  }
+}
+
+// apiKey: the chat's own HaksterAI account key. /api/agent/run meters usage,
+// applies customer-mode tool limits and writes the token ledger against that
+// account, so Telegram usage lands on the same credit monitor as the website.
+// Falls back to the shared fleet key only when a caller intentionally omits one.
+function runAgent(prompt, sessionId, allowFast = true, apiKey = null) {
   const cfg = loadHaksterConfig();
   const history = loadSessionHistory(sessionId);
+
+  if (allowFast && isQuickChat(prompt)) {
+    return chat({ provider: BOT_FAST_PROVIDER, model: BOT_FAST_MODEL, messages: [...history, { role: 'user', content: prompt }] })
+      .then((res) => {
+        const text = String(res?.content || '').trim();
+        if (!text) throw new Error('fast lane returned an empty answer');
+        persistUserTurnLocal(sessionId, prompt);
+        persistAssistantTurn(sessionId, text);
+        console.log(`[telegram] fast lane answered in ${res?.latency || '?'}ms via ${res?.provider || BOT_FAST_PROVIDER}`);
+        return text;
+      })
+      .catch((err) => {
+        console.warn('[telegram] fast lane unavailable, using the agent loop:', err.message);
+        return runAgent(prompt, sessionId, false, apiKey);
+      });
+  }
 
   // Smart router: pick cheapest model for this task
   let model = cfg.model || process.env.DEFAULT_MODEL || 'hp-1000:latest';
@@ -130,7 +195,10 @@ function runAgent(prompt, sessionId) {
       // Free cloud: Groq, Cerebras, SambaNova, etc via Phantom
       provider = backend.model;  // 'groq', 'cerebras', 'sambanova', etc.
     } else if (backend.tier === 'T2_MINIFORGE') {
-      provider = 'hackbot';
+      // Was 'hackbot'; that lane is the local proxy chain and costs ~45s. Route the
+      // mid tier to the unmetered DeepSeek lane instead (measured ~1.6s).
+      provider = 'deepseek';
+      model = process.env.BOT_FAST_MODEL || 'deepseek-v4.1-flash:cloud';
     } else if (backend.tier === 'T3_GLM_CLOUD' || backend.tier === 'T8_CLOUD_ALIAS') {
       provider = 'ollama';  // GLM cloud proxies through Ollama
     } else if (backend.tier === 'T7_LOCAL') {
@@ -168,7 +236,7 @@ function runAgent(prompt, sessionId) {
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
-        ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}),
+        ...((apiKey || process.env.HAKSTER_API_KEY) ? { 'x-api-key': apiKey || process.env.HAKSTER_API_KEY } : {}),
       },
       timeout: 5 * 60 * 1000,
     }, (res) => {
@@ -251,6 +319,44 @@ async function sendPlanPicker(bot, chatId) {
   }
 }
 
+// ── Per-chat entitlement gate ───────────────────────────────────────
+// Every paid surface in the fleet (agent chat, web tools, app builds) draws on
+// the chat's own HaksterAI account, so Telegram usage, per-plan limits and the
+// usage/credit monitor all match the website. Owner chat is never gated.
+// Returns the entitlement when the chat may proceed; otherwise sends the
+// upgrade prompt (paywall + real Stripe plan picker) and returns null.
+async function gateChatSurface(bot, chatId, surface) {
+  let ent;
+  try {
+    ent = await entitlements.chatEntitlement(chatId);
+  } catch (e) {
+    console.error('[telegram] entitlement check failed:', e.message);
+    ent = { allowed: false, isOwner: false, plan: 'unknown', reason: 'account not active', apiKey: '', user: null, limit: 0, remaining: 0 };
+  }
+  if (ent.allowed) return ent;
+  entitlements.noteRefusal({ chatId, ent, surface });
+  await entitlements.sendUpgradePrompt({ bot, chatId, ent, sendPlanPicker });
+  return null;
+}
+
+// A 402 from /api/agent/run means the account's own allowance ran out between
+// the pre-check and the call. Same answer as the pre-check: upgrade, not a raw
+// HTTP error in the chat.
+async function replyAgentError(bot, chatId, error) {
+  const message = String((error && error.message) || error || 'unknown error');
+  if (/returned 402|usage limit reached/i.test(message)) {
+    const ent = await entitlements.chatEntitlement(chatId).catch(() => null);
+    // Only treat it as an allowance refusal if the account still reads as capped;
+    // a 402 that raced with a reset/upgrade falls through to the real error.
+    if (ent && !ent.allowed) {
+      entitlements.noteRefusal({ chatId, ent, surface: 'agent-402' });
+      await entitlements.sendUpgradePrompt({ bot, chatId, ent, sendPlanPicker });
+      return;
+    }
+  }
+  await bot.sendMessage(chatId, `❌ Agent error: ${message}`);
+}
+
 // Handles the "sub:<planId>:<priceId>" button tap — creates a real Stripe
 // checkout session (same dynamic price_data flow as the website) tied to this
 // Telegram user's account, and sends back a Pay button with the real URL.
@@ -270,6 +376,35 @@ async function handleSubscribeCallback(bot, query) {
   } catch (e) {
     await bot.sendMessage(chatId, `❌ Checkout error: ${e.message}`);
   }
+}
+
+// Send a plain confirmation to any Telegram chat through the fleet (coder bot
+// first). Used by the Stripe webhook to tell a buyer their purchase landed.
+async function notifyTelegramChat(chatId, text) {
+  // Owner-facing DMs also reach the phone as a text when the SMS mirror is on.
+  // Buyer/customer chats are left alone: only the owner's own chat mirrors.
+  let ownerChat = false;
+  try { ownerChat = require('./telegramSiteKeys').isOwnerChat(chatId); } catch (_) {}
+  const mirror = () => { if (ownerChat) { try { require('./notifySms').mirrorOwner(text).catch(() => {}); } catch (_) {} } };
+  const bot = (ROLES.TELEGRAM_BOT_TOKEN_2 && ROLES.TELEGRAM_BOT_TOKEN_2.bot)
+    || Object.values(ROLES).map(r => r.bot).find(Boolean);
+  if (!bot) { mirror(); return { ok: false, error: 'no live bot' }; }
+  try {
+    const sent = await bot.sendMessage(String(chatId), String(text).slice(0, 3800), { disable_web_page_preview: true });
+    mirror();
+    return { ok: true, messageId: sent?.message_id || null };
+  } catch (e) {
+    mirror();
+    return { ok: false, error: e.message };
+  }
+}
+
+// Send one alert to a role's chats and mirror it to the owner's phone by SMS.
+// The SMS copy is best-effort and deduped, so one event never texts twice.
+function alertToRole(roleKey, text, options = {}) {
+  const delivery = sendToRole(roleKey, text, options);
+  try { require('./notifySms').mirrorOwner(text).catch(() => {}); } catch (_) {}
+  return delivery;
 }
 
 async function safeSendMarkdown(bot, chatId, text) {
@@ -413,6 +548,23 @@ async function sendToRole(roleKey, text, options = {}) {
       }
     }
   }
+  // One row per delivery, on the shared fleet feed. Scrubbed: no chat id and
+  // no token ever reaches the log — only the role, what it was, and how many
+  // messages the API accepted.
+  try {
+    if (delivered > 0) {
+      const { record: recordFleet } = require('./fleetLog');
+      const firstLine = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean)[0] || '';
+      recordFleet({
+        agent: 'telegram · ' + role.name,
+        kind: 'telegram',
+        action: 'report delivered',
+        detail: delivered + ' message(s) accepted by the Telegram API · ' + firstLine,
+      });
+    }
+  } catch (_) {
+    // A missing log must never break a delivery.
+  }
   return delivered > 0;
 }
 
@@ -446,6 +598,7 @@ function initBots() {
       },
     });
     ROLES[key].bot = bot;
+    guestGate.attach(bot);
 
     // Clear any existing webhook before starting polling — prevents 409
     bot.deleteWebHook().then(() => {
@@ -546,6 +699,24 @@ function initBots() {
   startHealthReporter();
   startSecurityReporter();
   startWebScanReporter();
+  // ── Marketplace automation ──────────────────────────────────────────
+  // One loop owns queued builds, published-site health, and consent-only
+  // offers. It reports through whichever bot actually delivers (coder first).
+  try {
+    const autoBot = (ROLES.TELEGRAM_BOT_TOKEN_2 && ROLES.TELEGRAM_BOT_TOKEN_2.bot)
+      || Object.values(ROLES).map(r => r.bot).find(Boolean);
+    if (autoBot) {
+      marketplace.startAutomation({
+        send: (chatId, text, opts) => autoBot.sendMessage(String(chatId), text,
+          opts || { disable_web_page_preview: true }),
+      });
+    } else {
+      console.warn('[telegram] no live bot — marketplace automation not started');
+    }
+  } catch (e) {
+    console.error('[telegram] marketplace automation failed to start:', e.message);
+  }
+
   startLoginReporter();
   startAccessReporter();
   startCoderReport();
@@ -594,6 +765,90 @@ async function handleMessage(roleKey, msg) {
       return bot.sendMessage(chatId, `❌ RMT verification failed: ${j.error || "HTTP " + r.status} — regenerate the link in Settings and try again.`);
     } catch (e) {
       return bot.sendMessage(chatId, `❌ RMT verification unreachable (rmt server down?): ${e.message}`);
+    }
+  }
+
+  // ── SMS mirror (EZ Texting v1): /sms on|off|test|status, owner-only ──
+  if (/^\/sms\b/i.test(text)) {
+    try {
+      const handled = await notifySms.handleSmsCommand({ text, chatId, bot });
+      if (handled) return;
+    } catch (e) {
+      return bot.sendMessage(chatId, `SMS command failed: ${e.message}`);
+    }
+  }
+
+  // ── Guest gate: allow/deny/kick by Telegram account id, owner-only ──
+  if (/^\/(?:allow|deny|kick|allowlist|requests|gate)\b/i.test(text)) {
+    try {
+      const handled = await guestGate.handleGateCommand({ text, chatId, bot });
+      if (handled) return;
+    } catch (e) {
+      return bot.sendMessage(chatId, `Gate command failed: ${e.message}`);
+    }
+  }
+
+  // ── Bot factory (our BotFather): create/manage fleet bots in chat ──
+  if (/^\/(?:newbot|addbot|bots|botinfo|setcommands|setmenu|factory)\b/i.test(text)) {
+    try {
+      const handled = await botFactory.handleBotFactoryCommand({ text, chatId, bot, msg });
+      if (handled) return;
+    } catch (e) {
+      return bot.sendMessage(chatId, `Bot factory error: ${e.message}`);
+    }
+  }
+
+  // ── Build desk + payments — reachable from ANY live fleet bot ──
+  // /build is included with a paid plan; /market buy <slug> charges the item's
+  // own owner-set price. Every attempt is logged to data/build-log.jsonl.
+  if (/^\/(?:build|image|snap|subscribe|pay|plans)\b/i.test(text)) {
+    try {
+      const handled = await builds.handleBuildCommand({
+        text, chatId, bot, msg,
+        miniforgeBuilder, sendSnapPhoto, sendPlanPicker,
+      });
+      if (handled) return;
+    } catch (e) {
+      return bot.sendMessage(chatId, `Build command failed: ${e.message}`);
+    }
+  }
+  if (/^\/(?:market\s+buy|buy\s+site)\b/i.test(text)) {
+    try {
+      const handled = await builds.handleMarketBuy({ text, chatId, bot, msg, apiJson });
+      if (handled) return;
+    } catch (e) {
+      return bot.sendMessage(chatId, `Purchase error: ${e.message}`);
+    }
+  }
+
+  // ── Marketplace consent: a chat only receives offers after it opts in ──
+  // Deep link https://t.me/<bot>?start=upsell_yes arrives as "/start upsell_yes".
+  if (/^\/?start\s+upsell_yes\b/i.test(text)) {
+    marketplace.recordConsent(chatId, 'bot-deeplink');
+    return bot.sendMessage(chatId, '✅ You are on the list for HaksterAI offers. Reply /stop any time to stop them.');
+  }
+  if (/^(\/stop|\/upsell_off|\/unsubscribe)\b/i.test(text)) {
+    marketplace.revokeConsent(chatId, 'user-stop');
+    return bot.sendMessage(chatId, '✅ Offers stopped. You will not get marketplace messages from this bot.');
+  }
+  if (/^\/(market|marketplace|upsell)\b/i.test(text)) {
+    try {
+      const handled = await marketplace.handleMarketplaceCommand({ text, chatId, bot, roleKey });
+      if (handled) return;
+    } catch (e) {
+      return bot.sendMessage(chatId, `Marketplace command failed: ${e.message}`);
+    }
+  }
+
+  // ── Owner self-service: site API keys + purchase ledger, from any fleet bot ──
+  // Owner-only (compares the chat against TELEGRAM_OWNER_CHAT inside the module);
+  // anything that is not one of these commands falls through untouched.
+  if (/^\/(?:key|keys|apikey|keyinfo|purchases|payments)\b/i.test(text)) {
+    try {
+      const handled = await siteKeys.handleSiteKeyCommand({ text, chatId, bot, roleKey });
+      if (handled) return;
+    } catch (e) {
+      return bot.sendMessage(chatId, `Key command failed: ${e.message}`);
     }
   }
 
@@ -647,67 +902,8 @@ async function handleMessage(roleKey, msg) {
     return bot.sendMessage(chatId, 'Send /help for the domain desk (/check, /find, /tlds, /market, /waitlist).');
   }
 
-  // ── Role 1: haksterAi command bot ──
+  // ── Role 1: haksterAi command bot (builds/plans are handled above, any bot) ──
   if (roleKey === 'TELEGRAM_BOT_TOKEN_1') {
-    if (/^\/(?:subscribe|pay|plans)\b/i.test(text)) {
-      return sendPlanPicker(bot, chatId);
-    }
-    // ── Create Builds from Telegram: build → image → OMP snapshot ──
-    const buildMatch = text.match(/^\/build\s+([\s\S]+)$/i);
-    if (buildMatch) {
-      const prompt = buildMatch[1].trim();
-      await bot.sendChatAction(chatId, 'typing');
-      const status = await bot.sendMessage(chatId, `⚡ Building "${prompt}"…\nReal builder → saved app → image → OMP snapshot.`);
-      try {
-        const built = await miniforgeBuilder('build', { prompt });
-        await bot.editMessageText(
-          `✅ App built: ${built.name}\n${built.url}\nSource: ${Number(built.bytes || 0).toLocaleString()} bytes`,
-          { chat_id: chatId, message_id: status.message_id }
-        ).catch(() => {});
-        try {
-          const img = await miniforgeBuilder('image', { slug: built.slug, prompt });
-          if (img.image) await bot.sendPhoto(chatId, Buffer.from(img.image, 'base64'), { caption: `🎨 ${built.name} · ${img.provider || 'image'}` });
-          else await bot.sendMessage(chatId, `🎨 Image unavailable: ${img.error || 'no image returned'}`);
-        } catch (e) { await bot.sendMessage(chatId, `🎨 Image failed: ${e.message}`); }
-        try {
-          const snap = await miniforgeBuilder('snap', { slug: built.slug });
-          await sendSnapPhoto(bot, chatId, snap, `📸 ${snap.title || built.name}`);
-          await safeSendMarkdown(bot, chatId, `📸 *Snapshot*
-${(snap.summary || 'completed').slice(0, 3500)}`);
-        } catch (e) { await bot.sendMessage(chatId, `📸 Snapshot failed: ${e.message}`); }
-      } catch (e) {
-        await bot.editMessageText(`❌ Build failed: ${e.message}`, { chat_id: chatId, message_id: status.message_id }).catch(() => {});
-      }
-      return;
-    }
-
-    // /image <app-slug> [prompt] — generate artwork for a built app
-    const imageMatch = text.match(/^\/image\s+(\S+)(?:\s+([\s\S]+))?$/i);
-    if (imageMatch) {
-      const slug = imageMatch[1];
-      const prompt = (imageMatch[2] || '').trim() || `App artwork for ${slug}`;
-      await bot.sendChatAction(chatId, 'upload_photo');
-      try {
-        const img = await miniforgeBuilder('image', { slug, prompt });
-        if (img.image) await bot.sendPhoto(chatId, Buffer.from(img.image, 'base64'), { caption: `🎨 ${slug} · ${img.provider || 'image'}` });
-        else await bot.sendMessage(chatId, `🎨 Image unavailable: ${img.error || 'no image returned'}`);
-      } catch (e) { await bot.sendMessage(chatId, `🎨 Image failed: ${e.message}`); }
-      return;
-    }
-
-    // /snap <app-slug> — OMP snapshot of a built app
-    const snapMatch = text.match(/^\/snap\s+(\S+)$/i);
-    if (snapMatch) {
-      await bot.sendChatAction(chatId, 'typing');
-      try {
-        const snap = await miniforgeBuilder('snap', { slug: snapMatch[1] });
-        await sendSnapPhoto(bot, chatId, snap, `📸 ${snap.title || snapMatch[1]}`);
-        await safeSendMarkdown(bot, chatId, `📸 *Snapshot · ${snapMatch[1]}*
-${(snap.summary || 'completed').slice(0, 3500)}`);
-      } catch (e) { await bot.sendMessage(chatId, `📸 Snapshot failed: ${e.message}`); }
-      return;
-    }
-
     const match = text.match(/^\/(?:ask|hakster)\s+([\s\S]+)$/i);
     if (!match) {
       return bot.sendMessage(chatId,
@@ -716,18 +912,20 @@ ${(snap.summary || 'completed').slice(0, 3500)}`);
     }
     await bot.sendChatAction(chatId, 'typing');
     const prompt = match[1].trim();
+    const ent = await gateChatSurface(bot, chatId, 'agent-ask');
+    if (!ent) return;
     const typingInterval = setInterval(() => {
       try { bot.sendChatAction(chatId, 'typing'); } catch {}
     }, 4000);
     try {
       const sessionId = `telegram-${chatId}`;
-      const response = await runAgent(prompt, sessionId);
+      const response = await runAgent(prompt, sessionId, ent.isOwner, ent.apiKey);
       persistAssistantTurn(sessionId, response);
       clearInterval(typingInterval);
       await safeSendMarkdown(bot, chatId, response);
     } catch (e) {
       clearInterval(typingInterval);
-      await bot.sendMessage(chatId, `❌ Agent error: ${e.message}`);
+      await replyAgentError(bot, chatId, e);
     }
     return;
   }
@@ -744,17 +942,19 @@ ${(snap.summary || 'completed').slice(0, 3500)}`);
     // /ask → full agent loop with all MCP tools
     if (askMatch) {
       const prompt = askMatch[1].trim();
+      const ent = await gateChatSurface(bot, chatId, 'agent-recon');
+      if (!ent) return;
       await bot.sendChatAction(chatId, 'typing');
       const typingInterval = setInterval(() => { try { bot.sendChatAction(chatId, 'typing'); } catch {} }, 4000);
       try {
         const sessionId = `telegram-recon-${chatId}`;
-        const response = await runAgent(prompt, sessionId);
+        const response = await runAgent(prompt, sessionId, ent.isOwner, ent.apiKey);
         persistAssistantTurn(sessionId, response);
         clearInterval(typingInterval);
         await safeSendMarkdown(bot, chatId, response);
       } catch (e) {
         clearInterval(typingInterval);
-        await bot.sendMessage(chatId, `❌ Agent error: ${e.message}`);
+        await replyAgentError(bot, chatId, e);
       }
       return;
     }
@@ -777,18 +977,22 @@ ${(snap.summary || 'completed').slice(0, 3500)}`);
       fs.appendFileSync(file, `[${new Date().toISOString()}] ${entry}\n`);
       return bot.sendMessage(chatId, '✅ note saved.');
     }
-    // general chat → full haksterAi agent loop (MCP tools, 200 turns, no limits)
+    // general chat → full haksterAi agent loop for the chat's own account.
+    // The chat key means usage, tool limits and the token ledger all land on
+    // that account; an unlinked or exhausted chat gets the upgrade prompt.
+    const ent = await gateChatSurface(bot, chatId, 'agent-chat');
+    if (!ent) return;
     await bot.sendChatAction(chatId, 'typing');
     const typingInterval = setInterval(() => { try { bot.sendChatAction(chatId, 'typing'); } catch {} }, 4000);
     try {
       const sessionId = `telegram-debug-${chatId}`;
-      const response = await runAgent(text, sessionId);
+      const response = await runAgent(text, sessionId, ent.isOwner, ent.apiKey);
       persistAssistantTurn(sessionId, response);
       clearInterval(typingInterval);
       await safeSendMarkdown(bot, chatId, response);
     } catch (e) {
       clearInterval(typingInterval);
-      await bot.sendMessage(chatId, `❌ Agent error: ${e.message}`);
+      await replyAgentError(bot, chatId, e);
     }
     return;
   }
@@ -819,6 +1023,15 @@ ${(snap.summary || 'completed').slice(0, 3500)}`);
   }
 }
 
+async function probePort(port, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const net = require('net');
+    const socket = net.connect(port, '127.0.0.1', () => { socket.end(); resolve(true); });
+    socket.on('error', () => resolve(false));
+    socket.setTimeout(timeoutMs, () => { socket.destroy(); resolve(false); });
+  });
+}
+
 async function runUptimeCheck() {
   const ports = [
     { name: 'haksterAi', port: 3579 },
@@ -827,17 +1040,18 @@ async function runUptimeCheck() {
   ];
   const lines = [];
   for (const svc of ports) {
-    try {
-      await new Promise((resolve, reject) => {
-        const net = require('net');
-        const s = net.connect(svc.port, '127.0.0.1', () => { s.end(); resolve(); });
-        s.on('error', reject);
-        s.setTimeout(3000, () => { s.destroy(); reject(new Error('timeout')); });
-      });
-      lines.push(`✅ *${svc.name}* up on port ${svc.port}`);
-    } catch {
-      lines.push(`❌ *${svc.name}* down (port ${svc.port})`);
+    // A deploy or idle auto-apply restarts haksterAi, and the port refuses connections for a
+    // few seconds. Retry before calling a service down, so a restart stops being reported as
+    // a watchdog failure every 15 minutes.
+    let up = await probePort(svc.port);
+    let recovered = false;
+    for (let attempt = 0; !up && attempt < 3; attempt += 1) {
+      await new Promise((r) => setTimeout(r, 2000));
+      up = await probePort(svc.port);
+      if (up) recovered = true;
     }
+    if (up) lines.push(`✅ *${svc.name}* up on port ${svc.port}` + (recovered ? ' (restarted during check)' : ''));
+    else lines.push(`❌ *${svc.name}* down (port ${svc.port})`);
   }
   return lines.join('\n');
 }
@@ -1004,8 +1218,19 @@ function startDocsScraper() {
 function startWatchdog() {
   // 15 minutes
   const WATCHDOG_MS = 15 * 60 * 1000;
+  // Only report a change, plus one reminder every 6 hours while something is still down.
+  // Repeating the same "❌ down" line every quarter hour is noise, not monitoring.
+  let lastSignature = '';
+  let lastSentAt = 0;
+  const REMIND_MS = 6 * 60 * 60 * 1000;
   setInterval(async () => {
     const report = await runUptimeCheck();
+    const signature = report.replace(/\(restarted during check\)/g, '');
+    const changed = signature !== lastSignature;
+    const due = Date.now() - lastSentAt >= REMIND_MS;
+    if (!changed && !due) return;
+    lastSignature = signature;
+    lastSentAt = Date.now();
     await sendToRole('TELEGRAM_BOT_TOKEN_5', `🛡 *15-min watchdog*\n\n${report}`, { parse_mode: 'Markdown' });
   }, WATCHDOG_MS);
 }
@@ -1035,11 +1260,11 @@ function startHealthReporter() {
     if (sig === _lastAlert) return;            // same state as last sweep — stay quiet
     _lastAlert = sig;
     if (!issues.length) {
-      await sendToRole('TELEGRAM_BOT_TOKEN_6', `✅ *System health OK* — temp/RAM/load within thresholds. (next ping only on a breach)`, { parse_mode: 'Markdown' });
+      await alertToRole('TELEGRAM_BOT_TOKEN_6', `✅ *System health OK* — temp/RAM/load within thresholds. (next ping only on a breach)`, { parse_mode: 'Markdown' });
       return;
     }
     const report = await runSystemHealth();
-    await sendToRole('TELEGRAM_BOT_TOKEN_6', `⚠️ *Health Alert*: ${issues.join(', ')}\n\n${report}`, { parse_mode: 'Markdown' });
+    await alertToRole('TELEGRAM_BOT_TOKEN_6', `⚠️ *Health Alert*: ${issues.join(', ')}\n\n${report}`, { parse_mode: 'Markdown' });
   }, HEALTH_MS);
 }
 
@@ -1049,7 +1274,7 @@ function startHealthReporter() {
 async function sendSecurityReport(text) {
   for (const key of ['TELEGRAM_BOT_TOKEN_7', 'TELEGRAM_BOT_TOKEN_3', 'TELEGRAM_BOT_TOKEN_2']) {
     try {
-      if (await sendToRole(key, text)) return ROLES[key] ? ROLES[key].name : key;
+      if (await alertToRole(key, text)) return ROLES[key] ? ROLES[key].name : key;
     } catch (e) {
       console.error(`[telegram:security] send via ${key} failed:`, e.message);
     }
@@ -1191,9 +1416,16 @@ module.exports = {
   initBots,
   runAgent,
   internalBillingToken,
-  sendDeployStatus: (text) => sendToRole('TELEGRAM_BOT_TOKEN_2', `🚀 *Deploy*\n\n${text}`, { parse_mode: 'Markdown' }),
-  sendHealthAlert: (text) => sendToRole('TELEGRAM_BOT_TOKEN_6', `⚠️ *Health Alert*\n\n${text}`, { parse_mode: 'Markdown' }),
-  sendUptimeAlert: (text) => sendToRole('TELEGRAM_BOT_TOKEN_5', `🛡 *Uptime Alert*\n\n${text}`, { parse_mode: 'Markdown' }),
-  sendReconResult: (target, text) => sendToRole('TELEGRAM_BOT_TOKEN_3', `🔍 *Recon: ${target}*\n\n\`\`\`\n${text}\n\`\`\``, { parse_mode: 'Markdown' }),
+  notifyTelegramChat,
+  sendDeployStatus: (text) => alertToRole('TELEGRAM_BOT_TOKEN_2', `🚀 *Deploy*\n\n${text}`, { parse_mode: 'Markdown' }),
+  sendHealthAlert: (text) => alertToRole('TELEGRAM_BOT_TOKEN_6', `⚠️ *Health Alert*\n\n${text}`, { parse_mode: 'Markdown' }),
+  sendUptimeAlert: (text) => alertToRole('TELEGRAM_BOT_TOKEN_5', `🛡 *Uptime Alert*\n\n${text}`, { parse_mode: 'Markdown' }),
+  // Every confirmed payment is reported here. Money events must never be silent:
+  // the owner reads this chat to reconcile Stripe against the local ledger.
+  sendPaymentAlert: (text) => alertToRole('TELEGRAM_BOT_TOKEN_2', `💰 *Payment received*\n\n${text}`, { parse_mode: 'Markdown' }),
+  sendReconResult: (target, text) => alertToRole('TELEGRAM_BOT_TOKEN_3', `🔍 *Recon: ${target}*\n\n\`\`\`\n${text}\n\`\`\``, { parse_mode: 'Markdown' }),
+  // Admin device enrollment: the passkey approval code goes to Deke's phone and
+  // is never returned to the browser that asked for it.
+  sendSecurityCode: (text) => alertToRole('TELEGRAM_BOT_TOKEN_6', `🔐 *Device verification*\n\n${text}`, { parse_mode: 'Markdown' }),
   ROLES,
 };

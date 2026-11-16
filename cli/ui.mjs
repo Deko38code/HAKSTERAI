@@ -14,6 +14,7 @@ var SERVER_URL = process.env.HAKSTER_URL || "ws://localhost:3579/ws";
 var API_URL = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var API_AUTH_HEADERS = process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {};
 var MODEL_CONTEXT = {
+  "deepseek-v4.1-flash:cloud": 1048576,
   "glm-5.2:cloud": 128e3,
   "thudm/glm-5.2:cloud": 128e3,
   "thudm/glm-5.1:cloud-ctx": 128e3,
@@ -34,6 +35,7 @@ function getContextMax(model) {
   if (model.includes("claude")) return 2e5;
   if (model.includes("gpt-oss") || model.includes("120b")) return 131072;
   if (model.includes("glm")) return 128e3;
+  if (model.includes("deepseek-v4.1-flash")) return 1048576;
   return parseInt(process.env.HAKSTER_CONTEXT_MAX || "128000", 10) || 128e3;
 }
 function estimateContextChars(msgs) {
@@ -52,7 +54,7 @@ var HaksterAgent = class extends EventEmitter {
   constructor() {
     super();
     this.ws = null;
-    this.model = process.env.HAKSTER_MODEL || "glm-5.2:cloud";
+    this.model = process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : "deepseek-v4.1-flash:cloud";
     this.sessionId = null;
     this.connected = false;
     this.lowToken = process.env.HAKSTER_LOW_TOKEN === "1" || process.env.HAKSTER_LOW_TOKEN === "true";

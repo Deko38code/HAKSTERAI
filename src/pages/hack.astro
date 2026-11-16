@@ -664,29 +664,36 @@ import HaksterTerminal from '../components/HaksterTerminal.astro';
     <script>
       // ── Auth gate: redirect to landing if not signed in ─────────
       (function() {
-        const token = localStorage.getItem('hakster_google_token');
+        const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
         const authParam = new URLSearchParams(window.location.search).get('google_auth');
         if (!token && !authParam) {
-          window.location.href = '/';
+          // Sign in once and come back to this page instead of landing on the homepage.
+          window.location.href = '/?signin=1&redirect=' + encodeURIComponent(window.location.pathname);
         }
       })();
 
       // ── Owner gate: Hack Lab is owner-emails-only ────────────────
       setTimeout(function() {
-        const token = localStorage.getItem('hakster_google_token');
+        const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
         if (!token) return; // anonymous users redirected above already
         const apiBase = window.location.port === '4321' ? 'http://localhost:3579' : '';
         fetch(apiBase + '/api/auth/me', { headers: { 'x-api-key': token } })
           .then(async (res) => {
-            if (!res.ok) { window.location.href = '/'; return; }
+            // A dead key gets one sign-in and comes straight back here; a server blip
+            // leaves the page alone instead of bouncing an owner to the landing page.
+            if (res.status === 401) {
+              window.location.href = '/?signin=1&redirect=' + encodeURIComponent(window.location.pathname);
+              return;
+            }
+            if (!res.ok) return;
             const data = await res.json().catch(() => null);
             if (!data?.user?.is_owner) window.location.replace('/build');
           })
-          .catch(() => { window.location.href = '/'; });
+          .catch(() => {});
       }, 1500);
 
       // Auth headers for /api/dashboard (it requires x-api-key)
-      function authHeaders() { const t = localStorage.getItem('hakster_google_token'); return t ? { 'x-api-key': t } : {}; }
+      function authHeaders() { const t = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'); return t ? { 'x-api-key': t } : {}; }
 
       // ── Sidebar toggle ──────────────────────────────────────────
       const sidebar = document.getElementById('term-sidebar');

@@ -116,6 +116,44 @@ import Layout from '../../layouts/Layout.astro';
       document.getElementById('admin-content').style.display = '';
       loadSessions();
     }
+
+    // A correct PIN is the local lock only. The server still has to see an owner session
+    // before this page opens, so a stale key cannot unlock it and then fail on the first
+    // data call (which looked like being asked to sign in twice).
+    async function ownerSessionState() {
+      const keys = [];
+      try {
+        const google = localStorage.getItem('hakster_google_token');
+        const apiKey = localStorage.getItem('hakster_api_key');
+        if (google) keys.push(['hakster_google_token', google]);
+        if (apiKey && apiKey !== google) keys.push(['hakster_api_key', apiKey]);
+      } catch {}
+      for (const pair of keys) {
+        let res;
+        try { res = await fetch('/api/auth/me', { headers: { 'x-api-key': pair[1] }, cache: 'no-store' }); }
+        catch { return 'offline'; }
+        if (res.status === 401) { try { if (localStorage.getItem(pair[0]) === pair[1]) localStorage.removeItem(pair[0]); } catch {} continue; }
+        if (!res.ok) return 'offline';
+        const data = await res.json().catch(() => null);
+        return data?.user?.is_owner ? 'ok' : 'notowner';
+      }
+      return 'signin';
+    }
+    let ownerCheckInFlight = false;
+    async function revealAdminIfOwner() {
+      if (ownerCheckInFlight) return;
+      ownerCheckInFlight = true;
+      const err = document.getElementById('pin-error');
+      setSub('VERIFYING OWNER SESSION…');
+      const state = await ownerSessionState();
+      ownerCheckInFlight = false;
+      setSub(pinMode === 'setup_new' ? 'SET YOUR 6-DIGIT PIN' : 'ENTER PIN TO ACCESS');
+      if (state === 'ok') { revealAdmin(); return; }
+      if (state === 'notowner') { if (err) err.textContent = '✕ That account is not the owner account.'; return; }
+      if (state === 'offline') { if (err) err.textContent = '✕ Could not reach the server. Try again.'; return; }
+      if (err) err.textContent = '✕ Owner session expired. Signing you in again…';
+      setTimeout(() => { window.location.replace('/?signin=1&redirect=' + encodeURIComponent(window.location.pathname)); }, 900);
+    }
     function lockAdmin() {
       sessionStorage.removeItem(PIN_SESSION_KEY);
       pinEntry = '';
@@ -169,7 +207,7 @@ import Layout from '../../layouts/Layout.astro';
           sessionStorage.setItem(PIN_SESSION_KEY, '1');
           pinMode = 'unlock';
           pinEntry = ''; updateDots();
-          revealAdmin();
+          revealAdminIfOwner();
         } else {
           if (err) err.textContent = '✕ PINs did not match. Try again.';
           pinMode = pinMode === 'setup_confirm' ? 'setup_new' : 'change_new';
@@ -188,7 +226,7 @@ import Layout from '../../layouts/Layout.astro';
       } else {
         if (pinEntry === correctPin) {
           sessionStorage.setItem(PIN_SESSION_KEY, '1');
-          revealAdmin();
+          revealAdminIfOwner();
         } else {
           if (err) err.textContent = '✕ Wrong PIN. Try again.';
           pinEntry = ''; updateDots();
@@ -217,7 +255,7 @@ import Layout from '../../layouts/Layout.astro';
     // ── Telegram message center ──────────────────────────────────────
     const API = location.port === '4321' ? 'http://localhost:3579' : '';
     function authHeaders() {
-      const token = localStorage.getItem('hakster_google_token');
+      const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
       return token ? { 'x-api-key': token } : {};
     }
 

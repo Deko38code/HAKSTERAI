@@ -26,7 +26,7 @@ import Layout from '../../layouts/Layout.astro';
   </main>
   <script>
     const apiBase = window.location.port === '4321' ? 'http://localhost:3579' : '';
-    const token = localStorage.getItem('hakster_google_token') || '';
+    const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || '';
     const authBadge = document.getElementById('vault-auth-status')!;
     const createButton = document.getElementById('vault-create-backup') as HTMLButtonElement;
     const unlockButton = document.getElementById('vault-unlock') as HTMLButtonElement;

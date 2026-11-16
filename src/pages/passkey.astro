@@ -1,0 +1,352 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Passkey sign-in — HaksterAI">
+  <div class="min-h-screen pt-[72px] pb-16 bg-[#0a0a0f] text-[#e2e8f0] px-4">
+    <div class="mx-auto max-w-2xl">
+
+      <nav class="flex items-center gap-2 text-xs text-[#64748b] mb-6">
+        <a href="/" class="hover:text-[#7c3aed] transition-colors">🏠 Home</a>
+        <span>›</span>
+        <span class="text-[#7c3aed] font-medium">🔑 Passkeys</span>
+      </nav>
+
+      <h1 class="text-2xl sm:text-3xl font-bold mb-2">Sign in without a password</h1>
+      <p class="text-sm text-[#94a3b8] mb-8">
+        A passkey uses whatever unlock your device already has —
+        <strong class="text-[#e2e8f0]">face, fingerprint, iris or PIN</strong> on a phone or laptop,
+        <strong class="text-[#e2e8f0]">Windows Hello</strong> or <strong class="text-[#e2e8f0]">Touch ID / Face ID</strong> on a
+        computer, or a <strong class="text-[#e2e8f0]">security key</strong> for the ones that have no scanner at all.
+        Fingerprint is never required: a phone with only a PIN works, and a passkey saved in Google
+        Password Manager or iCloud Keychain signs you in on any device you own. Nothing secret ever
+        leaves your device, and Google sign-in keeps working alongside it.
+      </p>
+
+      <div id="msg" class="hidden mb-6 rounded-xl border px-4 py-3 text-sm"></div>
+
+      <!-- Sign in -->
+      <section class="rounded-2xl border border-[#1e1e2e] bg-[#111118] p-5 sm:p-6 mb-5">
+        <h2 class="text-lg font-semibold mb-1">Sign in</h2>
+        <p class="text-xs text-[#64748b] mb-4">
+          The button asks your device for whatever it can do — face, fingerprint, PIN, or a phone you
+          hold up to scan the QR. Pick the account first if you use an older security key.
+        </p>
+        <label for="signin-email" class="block text-[11px] uppercase tracking-wide text-[#64748b] mb-1.5">Email or username <span class="normal-case tracking-normal">(optional)</span></label>
+        <input
+          id="signin-email"
+          type="text"
+          inputmode="email"
+          autocomplete="username webauthn"
+          placeholder="you@example.com"
+          class="w-full mb-4 rounded-lg border border-[#1e1e2e] bg-[#0f0f16] px-3 py-2.5 text-sm text-[#e2e8f0] placeholder-[#475569] focus:border-[#7c3aed]/60 focus:outline-none"
+        />
+        <div class="flex flex-col sm:flex-row gap-3">
+          <button id="btn-signin" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white hover:bg-[#6d28d9] transition-colors disabled:opacity-50">
+            🔑 Sign in with a passkey
+          </button>
+          <button id="btn-signin-account" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-4 py-3 text-sm font-semibold text-[#c084fc] hover:bg-[#7c3aed]/20 transition-colors disabled:opacity-50">
+            👤 Use this account's passkeys
+          </button>
+        </div>
+        <p class="mt-3 text-[11px] text-[#64748b]">
+          On a computer with no scanner, the first button also offers
+          <strong class="text-[#94a3b8]">“use a phone”</strong> — scan the QR with your phone and confirm
+          with that phone's face, fingerprint or PIN. No passkey yet?
+          <a href="/api/auth/google/redirect" class="text-[#a855f7] hover:underline">Sign in with Google</a>
+          first, then add one below.
+        </p>
+      </section>
+
+      <!-- Manage, only when signed in -->
+      <section id="manage" class="hidden rounded-2xl border border-[#1e1e2e] bg-[#111118] p-5 sm:p-6">
+        <h2 class="text-lg font-semibold mb-1">Add a passkey</h2>
+        <p class="text-xs text-[#64748b] mb-4">
+          Signed in as <span id="who" class="text-[#e2e8f0] font-medium"></span>. Add one per device you
+          sign in from — the next sign-in is one tap, one look, or one PIN.
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+          <button id="btn-add-device" class="inline-flex items-center justify-center gap-2 rounded-lg bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white hover:bg-[#6d28d9] transition-colors disabled:opacity-50">
+            💻 This device (face / fingerprint / PIN)
+          </button>
+          <button id="btn-add-phone" class="inline-flex items-center justify-center gap-2 rounded-lg border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-4 py-3 text-sm font-semibold text-[#c084fc] hover:bg-[#7c3aed]/20 transition-colors disabled:opacity-50">
+            📱 My phone or tablet
+          </button>
+          <button id="btn-add-key" class="inline-flex items-center justify-center gap-2 rounded-lg border border-[#1e1e2e] bg-[#0f0f16] px-4 py-3 text-sm font-semibold text-[#cbd5e1] hover:border-[#7c3aed]/40 transition-colors disabled:opacity-50">
+            🔐 Security key (USB / NFC)
+          </button>
+          <button id="btn-add-any" class="inline-flex items-center justify-center gap-2 rounded-lg border border-[#1e1e2e] bg-[#0f0f16] px-4 py-3 text-sm font-semibold text-[#cbd5e1] hover:border-[#7c3aed]/40 transition-colors disabled:opacity-50">
+            ✨ Let the browser choose
+          </button>
+        </div>
+        <p class="mb-5 text-[11px] text-[#64748b]">
+          “Let the browser choose” is the safe default: it offers a passkey stored on this device, a
+          synced passkey from Google Password Manager or iCloud Keychain, a phone over QR, or a security
+          key — whichever the device supports. Nothing here requires a fingerprint.
+        </p>
+        <h3 class="text-sm font-semibold mb-2 text-[#94a3b8]">Passkeys on this account</h3>
+        <ul id="cred-list" class="space-y-2 text-sm"></ul>
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const API = window.location.port === '4321' ? 'http://localhost:3579' : '';
+      const msgEl = document.getElementById('msg');
+      const manage = document.getElementById('manage');
+      const credList = document.getElementById('cred-list');
+
+      const token = () => localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || '';
+
+      function show(kind, text) {
+        if (!msgEl) return;
+        msgEl.className = 'mb-6 rounded-xl border px-4 py-3 text-sm ' + (
+          kind === 'error' ? 'border-[#ef4444]/40 bg-[#ef4444]/10 text-[#fca5a5]'
+          : kind === 'ok' ? 'border-[#22c55e]/40 bg-[#22c55e]/10 text-[#86efac]'
+          : 'border-[#7c3aed]/40 bg-[#7c3aed]/10 text-[#c084fc]'
+        );
+        msgEl.textContent = text;
+        msgEl.classList.remove('hidden');
+      }
+      function hideMsg() { msgEl?.classList.add('hidden'); }
+
+      const b64uToBuf = (s) => {
+        const pad = s.replace(/-/g, '+').replace(/_/g, '/');
+        const bin = atob(pad + '='.repeat((4 - pad.length % 4) % 4));
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out.buffer;
+      };
+      const bufToB64u = (buf) => {
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      };
+
+      async function post(path, body, withAuth) {
+        const headers = { 'content-type': 'application/json' };
+        if (withAuth) headers['x-api-key'] = token();
+        const res = await fetch(API + path, { method: 'POST', headers, body: JSON.stringify(body || {}) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('request failed (' + res.status + ')'));
+        return data;
+      }
+
+      function explain(err) {
+        const name = err && err.name;
+        if (name === 'NotAllowedError') return 'Cancelled, or that took too long — try again.';
+        if (name === 'InvalidStateError') return 'This device already has a passkey for this account.';
+        if (name === 'SecurityError') return 'This browser will not allow passkeys on this address. Use the https://haksterai.com address.';
+        if (name === 'NotSupportedError' || !window.PublicKeyCredential) return 'This browser or device cannot use passkeys.';
+        return (err && err.message) || 'Something went wrong.';
+      }
+
+      if (!window.PublicKeyCredential) {
+        show('error', 'This browser cannot use passkeys. Try Chrome, Edge, Safari or Firefox on a recent version.');
+      }
+
+      // ── sign in ────────────────────────────────────────────────
+      // allowCredentials is empty unless the user typed an account, which is
+      // what makes desktop browsers offer the cross-device "use a phone" QR and
+      // every synced/discoverable passkey. userVerification stays 'preferred' on
+      // the server, so the device itself decides face vs fingerprint vs PIN.
+      const signinEmail = document.getElementById('signin-email');
+      const signinButtons = () => [document.getElementById('btn-signin'), document.getElementById('btn-signin-account')];
+
+      async function signIn(withAccount) {
+        hideMsg();
+        const username = withAccount ? String(signinEmail?.value || '').trim() : '';
+        if (withAccount && !username) {
+          show('error', 'Type the email or username for that account first.');
+          if (signinEmail) signinEmail.focus();
+          return;
+        }
+        const btns = signinButtons();
+        btns.forEach(b => b && (b.disabled = true));
+        try {
+          const options = await post('/api/auth/passkey/login/options', username ? { username } : {});
+          const publicKey = {
+            ...options,
+            challenge: b64uToBuf(options.challenge),
+            allowCredentials: (options.allowCredentials || []).map(c => ({ ...c, id: b64uToBuf(c.id) })),
+          };
+          // No authenticatorSelection here: navigator.credentials.get() has no
+          // concept of "platform only", and passing one is ignored. The browser
+          // shows every authenticator it has, including a phone over QR.
+          const cred = await navigator.credentials.get({ publicKey });
+          const response = {
+            id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
+            clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {},
+            response: {
+              clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+              authenticatorData: bufToB64u(cred.response.authenticatorData),
+              signature: bufToB64u(cred.response.signature),
+              userHandle: cred.response.userHandle ? bufToB64u(cred.response.userHandle) : null,
+            },
+          };
+          const result = await post('/api/auth/passkey/login/verify', { response });
+          localStorage.setItem('hakster_google_token', result.apiKey);
+          localStorage.setItem('hakster_api_key', result.apiKey);
+          localStorage.setItem('hakster_google_user', JSON.stringify(result.user || {}));
+          localStorage.setItem('hakster_user_data', JSON.stringify({
+            id: result.user?.id || '', name: result.user?.username || '', email: result.user?.email || '', picture: '',
+          }));
+          localStorage.setItem('hakster_last_activity', String(Date.now()));
+          show('ok', 'Signed in. Taking you to your terminal…');
+          window.location.href = result.redirect || '/terminal';
+        } catch (err) {
+          show('error', explain(err));
+        } finally {
+          btns.forEach(b => b && (b.disabled = false));
+        }
+      }
+
+      document.getElementById('btn-signin')?.addEventListener('click', () => signIn(false));
+      document.getElementById('btn-signin-account')?.addEventListener('click', () => signIn(true));
+
+      // ── add a passkey to the signed-in account ─────────────────
+      // mode tells the server which authenticator to steer toward:
+      //   any → no preference (browser offers everything)
+      //   this-device → platform authenticator (Hello / Touch ID / phone unlock)
+      //   phone → cross-device hybrid (QR hand-off)
+      //   security-key → roaming USB/NFC key
+      function deviceLabel(mode) {
+        const ua = navigator.userAgent;
+        if (mode === 'phone') return 'Phone or tablet';
+        if (mode === 'security-key') return 'Security key';
+        if (mode === 'this-device') {
+          if (/iPhone|iPad/i.test(ua)) return 'Face ID / Touch ID';
+          if (/Macintosh/i.test(ua)) return 'Touch ID';
+          if (/Windows/i.test(ua)) return 'Windows Hello';
+          if (/Android/i.test(ua)) return 'Phone unlock';
+          return 'This device';
+        }
+        return 'Passkey';
+      }
+
+      const addButtons = () => [
+        document.getElementById('btn-add-device'),
+        document.getElementById('btn-add-phone'),
+        document.getElementById('btn-add-key'),
+        document.getElementById('btn-add-any'),
+      ];
+
+      async function addPasskey(mode, platform) {
+        hideMsg();
+        if (!token()) { show('error', 'Sign in with Google first, then add a passkey.'); return; }
+        const btns = addButtons();
+        btns.forEach(b => b && (b.disabled = true));
+        try {
+          const options = await post('/api/auth/passkey/register/options', { mode, platform: !!platform }, true);
+          // Admin/owner accounts enroll a new device only with the code sent to
+          // Deke's phone over Telegram. No code → nothing is stored.
+          let approvalCode = '';
+          if (options.requiresApproval) {
+            const typed = window.prompt(options.approvalHint || 'Enter the 6-digit code sent to your Telegram');
+            approvalCode = String(typed || '').trim();
+            if (!/^\d{6}$/.test(approvalCode)) {
+              show('error', 'Admin device enrollment needs the 6-digit Telegram code. Nothing was added.');
+              return;
+            }
+          }
+          const publicKey = {
+            ...options,
+            challenge: b64uToBuf(options.challenge),
+            user: { ...options.user, id: b64uToBuf(options.user.id) },
+            excludeCredentials: (options.excludeCredentials || []).map(c => ({ ...c, id: b64uToBuf(c.id) })),
+          };
+          const cred = await navigator.credentials.create({ publicKey });
+          await post('/api/auth/passkey/register/verify', {
+            label: deviceLabel(mode),
+            approvalCode,
+            response: {
+              id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
+              clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {},
+              response: {
+                clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+                attestationObject: bufToB64u(cred.response.attestationObject),
+                transports: cred.response.getTransports ? cred.response.getTransports() : [],
+              },
+            },
+          }, true);
+          show('ok', 'Passkey added. You can sign in with it on that device next time.');
+          await loadManaged();
+        } catch (err) {
+          show('error', explain(err));
+        } finally {
+          btns.forEach(b => b && (b.disabled = false));
+        }
+      }
+
+      document.getElementById('btn-add-device')?.addEventListener('click', () => addPasskey('this-device', true));
+      document.getElementById('btn-add-phone')?.addEventListener('click', () => addPasskey('phone', false));
+      document.getElementById('btn-add-key')?.addEventListener('click', () => addPasskey('security-key', false));
+      document.getElementById('btn-add-any')?.addEventListener('click', () => addPasskey('any', false));
+
+      // ── list + remove ──────────────────────────────────────────
+      function renderCreds(credentials) {
+        if (!credList) return;
+        credList.innerHTML = '';
+        if (!credentials.length) {
+          const li = document.createElement('li');
+          li.className = 'text-xs text-[#64748b]';
+          li.textContent = 'No passkeys yet on this account.';
+          credList.appendChild(li);
+          return;
+        }
+        for (const c of credentials) {
+          const li = document.createElement('li');
+          li.className = 'flex items-center justify-between gap-3 rounded-lg border border-[#1e1e2e] bg-[#0f0f16] px-3 py-2';
+          const left = document.createElement('div');
+          left.className = 'min-w-0';
+          const name = document.createElement('div');
+          name.className = 'text-sm text-[#e2e8f0] truncate';
+          name.textContent = c.label || 'Passkey';
+          const meta = document.createElement('div');
+          meta.className = 'text-[11px] text-[#64748b]';
+          const added = c.created_at ? new Date(c.created_at * 1000).toLocaleDateString() : '';
+          const used = c.last_used_at ? new Date(c.last_used_at * 1000).toLocaleDateString() : 'never used';
+          meta.textContent = [added && ('added ' + added), 'last used ' + used].filter(Boolean).join(' · ');
+          left.append(name, meta);
+          const btn = document.createElement('button');
+          btn.className = 'shrink-0 rounded-md border border-[#ef4444]/30 bg-[#ef4444]/10 px-2.5 py-1 text-[11px] font-semibold text-[#ef4444] hover:bg-[#ef4444]/20 transition';
+          btn.textContent = 'Remove';
+          btn.addEventListener('click', async () => {
+            if (!confirm('Remove "' + (c.label || 'this passkey') + '"? Google sign-in still works.')) return;
+            try {
+              await post('/api/auth/passkey/remove', { id: c.id }, true);
+              show('ok', 'Passkey removed.');
+              await loadManaged();
+            } catch (err) { show('error', explain(err)); }
+          });
+          li.append(left, btn);
+          credList.appendChild(li);
+        }
+      }
+
+      async function loadManaged() {
+        const t = token();
+        if (!t) { manage?.classList.add('hidden'); return; }
+        try {
+          const res = await fetch(API + '/api/auth/passkey/list', { headers: { 'x-api-key': t } });
+          if (!res.ok) { manage?.classList.add('hidden'); return; }
+          const data = await res.json().catch(() => ({ credentials: [] }));
+          manage?.classList.remove('hidden');
+          const whoEl = document.getElementById('who');
+          if (whoEl) {
+            const u = localStorage.getItem('hakster_google_user');
+            let name = '';
+            try { name = JSON.parse(u || '{}').username || JSON.parse(u || '{}').email || ''; } catch {}
+            whoEl.textContent = name || 'your account';
+          }
+          renderCreds(data.credentials || []);
+        } catch { manage?.classList.add('hidden'); }
+      }
+
+      loadManaged();
+    })();
+  </script>
+</Layout>

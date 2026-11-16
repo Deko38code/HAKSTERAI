@@ -12,8 +12,16 @@ const {
 } = Astro.props;
 
 const showGlobalFullscreen = !['/build', '/build/'].includes(Astro.url.pathname);
-const ownerAdminPage = Astro.url.pathname.replace(/\/+$/, '').startsWith('/admin');
-const haksterBuildId = new Date().toISOString();
+// 2026-11-17 (owner): "make sure haksterai pinpad is prompting on admin tab".
+// The dashboard is an owner-only admin surface (it is served through ADMIN_PAGES
+// and linked from the Admin menu), so it gets the same PIN pad as /admin/* does
+// instead of opening straight through.
+const ownerAdminPath = Astro.url.pathname.replace(/\/+$/, '');
+const ownerAdminPage = ownerAdminPath.startsWith('/admin') || ownerAdminPath === '/dashboard';
+// ONE build id for the whole build, injected by astro.config.mjs. Calling
+// new Date() here would stamp each page milliseconds apart, which made the
+// update toast fire falsely the moment a deploy landed.
+const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_BUILD_ID__ : new Date().toISOString();
 ---
 
 <!doctype html>
@@ -77,6 +85,7 @@ const haksterBuildId = new Date().toISOString();
               <a href="/admin/email" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">📧 Email Monitor</a>
               <a href="/admin/mail" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">📬 Mail</a>
               <a href="/admin/skills" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🧠 Skills & Brain</a>
+              <a href="/miniforge/app/?view=admin" title="Owner only — bot skills, memory clusters and gram-bot sync" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🛡️ Bots Admin</a>
               <a href="/hack" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">⚡ Hack Lab</a>
               <a href="/terminal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">⌨️ Terminal</a>
               <a href="/hakterm/" title="Open HakTerm" class="hakterm-admin-link group my-1 flex items-center gap-2 rounded-xl border border-[#00ff88]/80 bg-gradient-to-r from-[#064527] via-[#075333] to-[#064b3d] px-3 py-2.5 text-[#baffd6] shadow-[0_0_16px_rgba(0,255,100,0.28)] transition-all hover:-translate-y-0.5 hover:border-[#b5ffd2] hover:shadow-[0_0_25px_rgba(0,255,100,0.48)]">
@@ -108,6 +117,9 @@ const haksterBuildId = new Date().toISOString();
               <span>🔐</span> Sign In
             </a>
           </div>
+          <a id="nav-passkey-btn" href="/passkey" class="inline-flex items-center gap-1.5 rounded-lg border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-3 py-2 text-sm font-semibold text-[#c084fc] hover:bg-[#7c3aed]/20 transition-colors" title="Sign in with a passkey — Windows Hello, Touch ID or your phone">
+            <span>🔑</span> Passkey
+          </a>
           <a
             href="https://github.com"
             target="_blank"
@@ -154,6 +166,7 @@ const haksterBuildId = new Date().toISOString();
             <a href="/admin/email" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">📧 Email Monitor</a>
             <a href="/admin/mail" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">📬 Mail</a>
             <a href="/admin/skills" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🧠 Skills & Brain</a>
+            <a href="/miniforge/app/?view=admin" title="Owner only — bot skills, memory clusters and gram-bot sync" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🛡️ Bots Admin</a>
             <a href="/hack" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">⚡ Hack Lab</a>
             <a href="/terminal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">⌨️ Terminal</a>
             <a href="/hakterm/" title="Open HakTerm" class="hakterm-admin-link flex items-center gap-3 rounded-xl border border-[#00ff88]/80 bg-gradient-to-r from-[#064527] via-[#075333] to-[#064b3d] px-3 py-2.5 text-sm font-bold text-[#baffd6] shadow-[0_0_16px_rgba(0,255,100,0.28)]">
@@ -262,10 +275,10 @@ const haksterBuildId = new Date().toISOString();
       <div style="display:flex;gap:8px"><button id="haksterai-problem-copy" type="button" style="border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:9px;padding:7px 11px;cursor:pointer">Copy</button><button id="haksterai-problem-popout" type="button" style="border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:9px;padding:7px 11px;cursor:pointer">Pop out</button></div>
     </aside>
     <aside id="haksterai-update-toast" role="status" aria-live="polite" hidden style="position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:1999;width:min(560px,calc(100vw - 28px));border:1px solid rgba(124,58,237,.55);border-radius:14px;background:#111118;color:#e2e8f0;box-shadow:0 12px 42px rgba(0,0,0,.5);padding:12px 14px;font:14px/1.45 system-ui,sans-serif">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:190px"><strong style="color:#c4b5fd">HaksterAI update ready</strong><br /><span style="color:#94a3b8;font-size:12px">A newer version is available.</span></span><button id="haksterai-update-now" type="button" style="border:0;background:#7c3aed;color:white;border-radius:9px;padding:8px 12px;font-weight:700;cursor:pointer">Update</button><button id="haksterai-update-later" type="button" style="border:1px solid #334155;background:#1e293b;color:#cbd5e1;border-radius:9px;padding:8px 12px;cursor:pointer">Later</button></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:190px"><strong style="color:#c4b5fd">HaksterAI update ready</strong><br /><span id="haksterai-update-detail" style="color:#94a3b8;font-size:12px">A newer version is available.</span></span><button id="haksterai-update-now" type="button" style="border:0;background:#7c3aed;color:white;border-radius:9px;padding:8px 12px;font-weight:700;cursor:pointer">Update</button><button id="haksterai-update-later" type="button" style="border:1px solid #334155;background:#1e293b;color:#cbd5e1;border-radius:9px;padding:8px 12px;cursor:pointer">Later</button></div>
     </aside>
 
-    <script is:inline>
+    <script is:inline data-cfasync="false">
       (() => {
         const problem = document.getElementById('haksterai-problem-toast');
         const message = document.getElementById('haksterai-problem-message');
@@ -295,48 +308,226 @@ const haksterBuildId = new Date().toISOString();
         });
 
         const update = document.getElementById('haksterai-update-toast');
+        const updateDetail = document.getElementById('haksterai-update-detail');
         const currentBuild = document.documentElement.dataset.haksterBuild || '';
         const laterKey = 'haksterai-update-later-until';
+        // How old the new build is, in plain words, from its build timestamp.
+        const ago = (iso) => {
+          const t = Date.parse(iso || '');
+          if (!Number.isFinite(t)) return '';
+          const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+          if (secs < 60) return secs + 's ago';
+          if (secs < 3600) return Math.round(secs / 60) + 'm ago';
+          if (secs < 86400) return Math.round(secs / 3600) + 'h ago';
+          return Math.round(secs / 86400) + 'd ago';
+        };
+        // Every update the widget surfaces is stamped and written to the server's
+        // update log, so we can always see when each build went out and who saw it.
+        const logUpdateSeen = (build, from) => {
+          try {
+            fetch('/api/version/seen', {
+              method: 'POST',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ build, from, path: location.pathname, at: new Date().toISOString() }),
+              keepalive: true,
+            }).catch(() => {});
+          } catch {}
+        };
+        // Runs for every signed-in user (owner and customers), every two minutes
+        // while the tab is visible. Primary check: the tiny /api/version endpoint,
+        // which reports the build id actually deployed. Fallback: re-fetch this
+        // page and read its own build meta, for older servers without the endpoint.
+        const remoteBuildId = async () => {
+          try {
+            const res = await fetch('/api/version?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' });
+            if (res.ok) {
+              const data = await res.json();
+              if (data && data.build) return String(data.build);
+            }
+          } catch { /* fall through to the page check */ }
+          const url = new URL(location.pathname, location.origin);
+          url.searchParams.set('_hakster_version_check', String(Date.now()));
+          const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', headers: { 'x-hakster-version-check': '1' } });
+          if (!response.ok) return '';
+          const html = await response.text();
+          const match = html.match(/<meta\s+name=["']haksterai-build["']\s+content=["']([^"']+)/i);
+          return match ? match[1] : '';
+        };
+        let announcedBuild = '';
         const checkUpdate = async () => {
           if (!currentBuild || document.visibilityState !== 'visible') return;
           try {
-            const url = new URL(location.pathname, location.origin);
-            url.searchParams.set('_hakster_version_check', String(Date.now()));
-            const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', headers: { 'x-hakster-version-check': '1' } });
-            if (!response.ok) return;
-            const html = await response.text();
-            const match = html.match(/<meta\s+name=["']haksterai-build["']\s+content=["']([^"']+)/i);
-            if (!match || match[1] === currentBuild) return;
+            const latest = await remoteBuildId();
+            if (!latest || latest === currentBuild) return;
             const deferredUntil = Number(localStorage.getItem(laterKey) || 0);
-            if (Date.now() >= deferredUntil && update) update.hidden = false;
+            if (updateDetail) {
+              const built = Number.isFinite(Date.parse(latest)) ? new Date(latest).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : latest;
+              updateDetail.textContent = 'New build ' + built + (ago(latest) ? ' · ' + ago(latest) : '') + '.';
+            }
+            if (Date.now() >= deferredUntil && update) {
+              update.hidden = false;
+              armAutoApply();
+            }
+            if (announcedBuild !== latest) {
+              announcedBuild = latest;
+              logUpdateSeen(latest, currentBuild);
+            }
           } catch { /* Offline checks are quiet; retry on the next interval. */ }
         };
-        document.getElementById('haksterai-update-now')?.addEventListener('click', () => {
+        // Update never reloads blind. A blind reload can land in the half-second a
+        // deploy restarts the server, which shows a dead page instead of the site.
+        // So: ask the server first, and if it is restarting, keep this page alive
+        // and let hakster-resume.js reload the moment it answers again.
+        const updateNow = document.getElementById('haksterai-update-now');
+        const applyUpdate = async () => {
+          cancelAutoApply();
           localStorage.removeItem(laterKey);
-          location.reload();
-        });
+          if (updateNow?.dataset.busy) return;
+          if (updateNow) {
+            updateNow.dataset.busy = '1';
+            updateNow.textContent = 'Updating…';
+            updateNow.style.opacity = '0.8';
+          }
+          let ok = false;
+          try { ok = typeof window.haksterServerHealthy === 'function' ? await window.haksterServerHealthy() : true; } catch { ok = false; }
+          if (ok) { location.reload(); return; }
+          // Server is mid-restart: hand off to the resume helper, which retries and
+          // reloads automatically when the new build is serving.
+          if (typeof window.haksterUpdateWhenReady === 'function') {
+            window.haksterUpdateWhenReady();
+            if (updateNow) updateNow.textContent = 'Waiting…';
+            return;
+          }
+          window.setTimeout(() => location.reload(), 4000);
+        };
+        updateNow?.addEventListener('click', applyUpdate);
+
+        // 2026-11-16 (owner): if the banner is shown and neither Update nor Later
+        // is clicked within a minute, apply it automatically — deploys should
+        // land on their own. Same safe path as the button; the countdown is
+        // visible in the banner's detail line so it is never a surprise.
+        const AUTO_APPLY_MS = 60000;
+        let autoApplyTimer = 0;
+        let autoApplyTick = 0;
+        function cancelAutoApply() {
+          if (autoApplyTimer) { clearTimeout(autoApplyTimer); autoApplyTimer = 0; }
+          if (autoApplyTick) { clearInterval(autoApplyTick); autoApplyTick = 0; }
+        }
+        function armAutoApply() {
+          if (autoApplyTimer || !update || update.hidden) return;
+          const until = Date.now() + AUTO_APPLY_MS;
+          const paint = () => {
+            if (!updateDetail) return;
+            // Strip a previous countdown before re-rendering, so a later check that
+            // rewrites the detail line cannot leave a stale number behind.
+            const base = (updateDetail.textContent || '').replace(/\s*·\s*applies automatically in \d+s$/, '');
+            const secs = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+            updateDetail.textContent = base + ' · applies automatically in ' + secs + 's';
+          };
+          paint();
+          autoApplyTick = window.setInterval(paint, 1000);
+          autoApplyTimer = window.setTimeout(() => { applyUpdate(); }, AUTO_APPLY_MS);
+        }
         document.getElementById('haksterai-update-later')?.addEventListener('click', () => {
+          // "Later" is a deliberate choice, so it cancels the one-minute auto-apply
+          // and defers the banner for 30 minutes.
+          cancelAutoApply();
           localStorage.setItem(laterKey, String(Date.now() + 30 * 60 * 1000));
           if (update) update.hidden = true;
         });
         window.setTimeout(checkUpdate, 15000);
         window.setInterval(checkUpdate, 120000);
+        // Coming back to the tab counts as a fresh moment to check — no waiting
+        // for the next two-minute tick.
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') checkUpdate();
+        });
       })();
     </script>
 
-    <script is:inline src="/js/session-timeout.js"></script>
+    <script is:inline data-cfasync="false" src="/js/session-timeout.js"></script>
+
+    <!-- Always-visible scrollbars. Firefox already draws real bars from the rules in
+         global.css; Chrome/Chromium on Linux uses overlay scrollbars that ignore
+         scrollbar styling, so this fills in a real bar on the page, the dashboard
+         tab strip, tables, logs and every other scrollable box. Layout-safe. -->
+    <script is:inline data-cfasync="false" src="/js/hakster-scrollbars.js" defer></script>
+
+    <!-- Smooth updates + auto-resume for every user. If the server restarts or
+         hiccups while a tab is open, the tab shows a small "reconnecting" line and
+         picks itself back up on the same page instead of going dead; the Update
+         button reloads only once the server is confirmed answering. -->
+    <script is:inline data-cfasync="false" src="/js/hakster-resume.js" defer></script>
 
     <!-- Global JS: mobile menu + scroll shadow + smooth scroll + user badge + logout -->
     <script>
       // ── Auth gate: redirect to landing if not signed in ─────────
       (function() {
         const path = window.location.pathname;
+
+        // ── Telegram: the bot's own sign-in counts as a site sign-in ──
+        // Opened from a HaksterAI bot, Telegram signs the request (initData,
+        // also carried in the URL hash). Trade it for the same apiKey every
+        // page here reads, then reload so the gate below runs with a real
+        // session. If this browser is already signed in, link the Telegram
+        // account to that same user instead of creating a second account —
+        // that is the owner case, where the site account predates the bot.
+        const telegramSignInPending = (function telegramAuth() {
+          let initData = '';
+          try {
+            const tg = window.Telegram && window.Telegram.WebApp;
+            initData = (tg && tg.initData) || '';
+          } catch (_) {}
+          if (!initData) {
+            const m = /(?:^#|&)tgWebAppData=([^&]+)/.exec(window.location.hash || '');
+            if (m) { try { initData = decodeURIComponent(m[1]); } catch (_) {} }
+          }
+          if (!initData) return false;
+          const existing = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
+          if (existing) {
+            if (localStorage.getItem('hakster_tg_linked_at')) return false;
+            fetch('/api/auth/telegram/link', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': existing },
+              body: JSON.stringify({ initData })
+            }).then((res) => { if (res.ok) localStorage.setItem('hakster_tg_linked_at', String(Date.now())); }).catch(() => {});
+            return false;
+          }
+          fetch('/api/auth/telegram/webapp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ initData })
+          })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (!data || !data.apiKey) throw new Error('no api key');
+              localStorage.setItem('hakster_google_token', data.apiKey);
+              localStorage.setItem('hakster_api_key', data.apiKey);
+              localStorage.removeItem('hakster_signed_out_at');
+              if (data.user) localStorage.setItem('hakster_user_data', JSON.stringify(data.user));
+              window.location.reload();
+            })
+            .catch(() => {
+              window.location.replace(`/?signin=1&redirect=${encodeURIComponent(path)}`);
+            });
+          return true;
+        })();
+
         if (path === '/') return;
         // /admin pages stay visually concealed until the server verifies the owner.
         if (path === '/admin' || path.startsWith('/admin/')) return;
+        // Public surfaces: pricing and passkey sign-in have to work while signed
+        // out. Pricing is advertised to visitors who have no account yet, and the
+        // passkey page is how a passwordless account signs back in.
+        if (['/plans', '/plans/', '/passkey', '/passkey/'].includes(path)) return;
         const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
         const authParam = new URLSearchParams(window.location.search).get('google_auth');
         if (!token && !authParam) {
+          // A Telegram sign-in started above is still resolving — let it finish
+          // instead of bouncing to the landing page's sign-in prompt.
+          if (telegramSignInPending) return;
           const returnTo = path === '/miniforge/' || path === '/miniforge' ? '/miniforge/' : path;
           window.location.replace(`/?signin=1&redirect=${encodeURIComponent(returnTo)}`);
           return;
@@ -375,7 +566,10 @@ const haksterBuildId = new Date().toISOString();
         const API = window.location.port === '4321' ? 'http://localhost:3579' : '';
         document.querySelectorAll('.requires-auth').forEach((link) => {
           link.addEventListener('click', (e) => {
-            const token = localStorage.getItem('hakster_google_token');
+            // Either key name is a real session: Google/passkey/Telegram sign-in writes
+            // hakster_google_token, checkout and pasted keys write hakster_api_key. Checking
+            // only one of them asked signed-in users to sign in a second time.
+            const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
             if (token) return;
             e.preventDefault();
             const href = link.getAttribute('href');
@@ -391,6 +585,9 @@ const haksterBuildId = new Date().toISOString();
       const SESSION_IDLE_MS = 5 * 60 * 1000;
       const ACTIVITY_KEY = 'hakster_last_activity';
       const REMEMBER_KEY = 'hakster_remembered_user';
+      // The admin PIN pad counts as the user being present: typing a PIN is activity, and
+      // the idle clock must not sign an owner out while the pad is on screen.
+      let bumpHaksterActivity = () => {};
 
       function isSignedIn() {
         return !!(localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'));
@@ -445,6 +642,8 @@ const haksterBuildId = new Date().toISOString();
         let lastWrite = 0;
         const enforceIdleTimeout = () => {
           if (!isSignedIn()) return;
+          const gate = document.getElementById('admin-pin-gate');
+          if (gate && gate.getAttribute('aria-hidden') === 'false') return;
           const sharedLastActivity = Number(localStorage.getItem(ACTIVITY_KEY)) || 0;
           const lastActivity = Math.max(localLastActivity, sharedLastActivity);
           if (lastActivity && Date.now() - lastActivity >= SESSION_IDLE_MS) globalLogout();
@@ -462,6 +661,7 @@ const haksterBuildId = new Date().toISOString();
         };
         ['click', 'keydown', 'mousemove', 'scroll', 'touchstart']
           .forEach(ev => window.addEventListener(ev, bump, { passive: true }));
+        bumpHaksterActivity = bump;
         document.addEventListener('visibilitychange', () => {
           if (document.visibilityState === 'visible') enforceIdleTimeout();
         });
@@ -471,7 +671,7 @@ const haksterBuildId = new Date().toISOString();
 
       // ── Show user badge + logout buttons if signed in ───────────
       (function() {
-        const token = localStorage.getItem('hakster_google_token');
+        const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
         const userData = localStorage.getItem('hakster_user_data');
         const googleUserData = localStorage.getItem('hakster_google_user');
         if (!token) return;
@@ -523,6 +723,8 @@ const haksterBuildId = new Date().toISOString();
         const mobileSection = document.getElementById('mobile-user-section');
         renderUserBadge(user);
         if (navSignin) navSignin.classList.add('hidden');
+        // Signed-in users manage passkeys at /passkey; the nav CTA is for signing in.
+        document.getElementById('nav-passkey-btn')?.classList.add('hidden');
         if (mobileLogout) mobileLogout.classList.remove('hidden');
 
         fetch('/api/auth/me', { headers: { 'x-api-key': token } })
@@ -610,6 +812,7 @@ const haksterBuildId = new Date().toISOString();
         adminGateOnSuccess = onSuccess;
         adminGatePin = '';
         adminGatePendingPin = '';
+        try { bumpHaksterActivity(); } catch {}
         adminGateMode = localStorage.getItem(ADMIN_GATE_PIN_KEY) ? 'unlock' : 'setup_new';
         adminPinSubtitle.textContent = adminGateMode === 'setup_new' ? 'SET YOUR 6-DIGIT PIN' : 'ENTER PIN TO ACCESS ADMIN';
         adminPinError.textContent = '';
@@ -617,7 +820,70 @@ const haksterBuildId = new Date().toISOString();
         adminPinGate?.setAttribute('aria-hidden', 'false');
       }
       window.openHaksterAdminPinGate = openAdminPinGate;
-      function submitAdminGatePin() {
+      // 2026-11-17 (owner): "the hakterm should be set already" — "the pin".
+      // HakTerm opens only through a fresh PIN entry, every time. The link parks
+      // its destination in ADMIN_GATE_RETURN_KEY, which is what makes
+      // openAdminPinGate ignore this tab's stored unlock and show the pad; a
+      // correct PIN then sets the one-shot HakTerm permit and goes straight
+      // there. A page with its own pin pad (users/telegram) already holds the
+      // lock, so there the link just navigates.
+      document.querySelectorAll('#admin-tools-menu a[href^="/hakterm"], #mobile-admin-tools-menu a[href^="/hakterm"]').forEach((link) => {
+        link.addEventListener('click', (event) => {
+          if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
+          closeAdminTools();
+          closeMobileAdminTools();
+          if (document.querySelector('[data-page-admin-pin="true"]')) return;
+          event.preventDefault();
+          try { sessionStorage.setItem(ADMIN_GATE_RETURN_KEY, link.getAttribute('href') || '/hakterm/'); } catch {}
+          openAdminPinGate();
+        });
+      });
+      // ── Owner-session check for the PIN pad ─────────────────────
+      // A correct PIN is a local lock only. The server must still say this browser holds an
+      // owner session, so the pad verifies /api/auth/me itself. Without this, a PIN typed
+      // after the key expired unlocked the page and the first data call then said "sign in",
+      // which read as being asked to sign in twice.
+      const ADMIN_GATE_VERIFIED_KEY = 'hakster_owner_verified_at';
+      function adminGateApiBase() { return window.location.port === '4321' ? 'http://localhost:3579' : ''; }
+      async function adminOwnerSession() {
+        const candidates = [];
+        try {
+          const google = localStorage.getItem('hakster_google_token');
+          const apiKey = localStorage.getItem('hakster_api_key');
+          if (google) candidates.push(['hakster_google_token', google]);
+          if (apiKey && apiKey !== google) candidates.push(['hakster_api_key', apiKey]);
+        } catch {}
+        if (!candidates.length) return { ok: false, reason: 'signin' };
+        let offline = false;
+        for (const [name, key] of candidates) {
+          let response;
+          try {
+            response = await fetch(adminGateApiBase() + '/api/auth/me', { headers: { 'x-api-key': key }, cache: 'no-store' });
+          } catch {
+            offline = true;
+            continue;
+          }
+          if (response.status === 401) {
+            // This stored key is dead — drop just that one so the next sign-in starts clean.
+            try { if (localStorage.getItem(name) === key) localStorage.removeItem(name); } catch {}
+            continue;
+          }
+          if (!response.ok) return { ok: false, reason: 'offline' };
+          const data = await response.json().catch(() => null);
+          if (!data?.user) return { ok: false, reason: 'expired' };
+          if (!data.user.is_owner) return { ok: false, reason: 'notowner' };
+          try { sessionStorage.setItem(ADMIN_GATE_VERIFIED_KEY, String(Date.now())); } catch {}
+          return { ok: true };
+        }
+        return { ok: false, reason: offline ? 'offline' : 'signin' };
+      }
+      function adminGateSendToSignIn() {
+        const back = window.location.pathname + window.location.search;
+        window.location.assign('/?signin=1&redirect=' + encodeURIComponent(back));
+      }
+      let adminGateVerifying = false;
+      async function submitAdminGatePin() {
+        if (adminGateVerifying) return;
         if (adminGatePin.length !== 6) return;
         if (adminGateMode === 'setup_new') {
           adminGatePendingPin = adminGatePin;
@@ -643,6 +909,31 @@ const haksterBuildId = new Date().toISOString();
           paintAdminGatePin();
           return;
         }
+        // PIN is correct — now confirm the owner session before unlocking anything.
+        const subtitleBefore = adminPinSubtitle.textContent || '';
+        adminGateVerifying = true;
+        adminPinError.textContent = '';
+        adminPinSubtitle.textContent = 'VERIFYING OWNER SESSION…';
+        const session = await adminOwnerSession();
+        adminGateVerifying = false;
+        if (!session.ok) {
+          adminGatePin = '';
+          paintAdminGatePin();
+          if (session.reason === 'notowner') {
+            adminPinSubtitle.textContent = subtitleBefore;
+            adminPinError.textContent = 'That account is not the owner account. Sign in as the owner.';
+            return;
+          }
+          if (session.reason === 'offline') {
+            adminPinSubtitle.textContent = subtitleBefore;
+            adminPinError.textContent = 'Could not reach the server. Check the connection and try again.';
+            return;
+          }
+          adminPinSubtitle.textContent = 'SIGN-IN REQUIRED';
+          adminPinError.textContent = 'The owner session expired. Taking you to sign in…';
+          window.setTimeout(adminGateSendToSignIn, 900);
+          return;
+        }
         sessionStorage.setItem(ADMIN_GATE_SESSION_KEY, '1');
         const callback = adminGateOnSuccess;
         adminGateOnSuccess = null;
@@ -655,7 +946,8 @@ const haksterBuildId = new Date().toISOString();
         try { pendingReturn = sessionStorage.getItem(ADMIN_GATE_RETURN_KEY) || ''; sessionStorage.removeItem(ADMIN_GATE_RETURN_KEY); } catch {}
         if (pendingReturn.startsWith('/') && !pendingReturn.startsWith('//')) {
           // HakTerm gets a one-shot permit: it opens once, and the next open asks again.
-          if (pendingReturn.startsWith('/hakterm')) {
+          // Both /hakterm/ and /terminal serve the terminal, so both get the permit.
+          if (pendingReturn.startsWith('/hakterm') || pendingReturn === '/terminal' || pendingReturn.startsWith('/terminal?')) {
             try { sessionStorage.setItem(ADMIN_GATE_HAKTERM_PASS_KEY, '1'); } catch {}
           }
           window.location.assign(pendingReturn);
@@ -678,7 +970,12 @@ const haksterBuildId = new Date().toISOString();
       adminPinGate?.querySelectorAll('[data-admin-pin-key]').forEach((button) => {
         button.addEventListener('click', () => pressAdminGatePin(button.getAttribute('data-admin-pin-key') || ''));
       });
-      adminPinGate?.querySelector('[data-admin-pin-close]')?.addEventListener('click', closeAdminPinGate);
+      // Cancelling the pad also drops a pending destination, so a cancelled
+      // HakTerm open does not leave every later admin click asking for a fresh PIN.
+      adminPinGate?.querySelector('[data-admin-pin-close]')?.addEventListener('click', () => {
+        try { sessionStorage.removeItem(ADMIN_GATE_RETURN_KEY); } catch {}
+        closeAdminPinGate();
+      });
       document.addEventListener('keydown', (event) => {
         if (adminPinGate?.getAttribute('aria-hidden') === 'true') return;
         if (/^\d$/.test(event.key)) { event.preventDefault(); pressAdminGatePin(event.key); }
@@ -689,13 +986,19 @@ const haksterBuildId = new Date().toISOString();
             document.documentElement.dataset.adminPage = 'locked';
             try { sessionStorage.removeItem(ADMIN_GATE_RETURN_KEY); } catch {}
             window.location.replace('/');
-          } else closeAdminPinGate();
+          } else {
+            try { sessionStorage.removeItem(ADMIN_GATE_RETURN_KEY); } catch {}
+            closeAdminPinGate();
+          }
         }
       });
 
       // Verify account ownership before rendering any admin page. The PIN is a
       // second, local lock only; admin data endpoints enforce owner access too.
-      const adminPath = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/');
+      // The same set the layout marks data-admin-page for: /admin/* and the dashboard,
+      // so an admin tab opened directly always asks for the PIN first.
+      const adminPathNorm = window.location.pathname.replace(/\/+$/, '');
+      const adminPath = adminPathNorm === '/admin' || adminPathNorm.startsWith('/admin/') || adminPathNorm === '/dashboard';
       if (adminPath) {
         const adminRoot = document.documentElement;
         const apiBase = window.location.port === '4321' ? 'http://localhost:3579' : '';
@@ -710,12 +1013,27 @@ const haksterBuildId = new Date().toISOString();
           try {
             const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || '';
             if (!token) throw new Error('Sign in required.');
-            const response = await fetch(apiBase + '/api/auth/me', {
-              headers: { 'x-api-key': token },
-              cache: 'no-store',
-            });
-            const data = response.ok ? await response.json() : null;
-            if (!data?.user?.is_owner) throw new Error('Owner access required.');
+            // The server gate page that delivered this document already verified the owner a
+            // moment ago. Trust that for a short window so the pad opens instantly instead of
+            // racing a second identical check; the 60-second re-check below still runs.
+            let recentlyVerified = false;
+            try {
+              recentlyVerified = Date.now() - Number(sessionStorage.getItem(ADMIN_GATE_VERIFIED_KEY) || 0) < 90000;
+            } catch {}
+            let response = null;
+            if (!recentlyVerified || adminRoot.dataset.adminPage === 'ready') {
+              response = await fetch(apiBase + '/api/auth/me', {
+                headers: { 'x-api-key': token },
+                cache: 'no-store',
+              });
+            }
+            if (response) {
+              const data = response.ok ? await response.json().catch(() => null) : null;
+              if (response.status === 401) throw new Error('auth-401');
+              if (!response.ok) return; // server-side blip: keep the page, do not sign anyone out
+              if (!data?.user?.is_owner) throw new Error('auth-notowner');
+              try { sessionStorage.setItem(ADMIN_GATE_VERIFIED_KEY, String(Date.now())); } catch {}
+            }
             if (adminRoot.dataset.adminPage === 'ready') return;
             // Some admin pages ship their own branded PIN pad. Only one pad may be live,
             // otherwise the second appears right after the first unlocks and both pads
@@ -728,10 +1046,20 @@ const haksterBuildId = new Date().toISOString();
             window.openHaksterAdminPinGate?.(() => {
               adminRoot.dataset.adminPage = 'ready';
             });
-          } catch {
+          } catch (error) {
+            const reason = String((error && error.message) || '');
+            // A dropped request is not a sign-out. Keep the page as it is and let the next
+            // check decide, so a tunnel or network blip no longer bounces an owner to sign in.
+            if (!/^auth-/.test(reason) && !/Sign in required/.test(reason)) return;
             lockAdminPage();
             sessionStorage.removeItem(ADMIN_GATE_SESSION_KEY);
-            window.location.replace(localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') ? '/miniforge/' : '/');
+            const stillSignedIn = !!(localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'));
+            if (reason === 'auth-401' || reason === 'Sign in required.') {
+              // The stored key is dead: ask for one sign-in and come straight back here.
+              window.location.replace('/?signin=1&redirect=' + encodeURIComponent(window.location.pathname + window.location.search));
+              return;
+            }
+            window.location.replace(stillSignedIn ? '/miniforge/' : '/');
           } finally {
             adminCheckInFlight = false;
           }
@@ -751,6 +1079,13 @@ const haksterBuildId = new Date().toISOString();
           lockAdminPage();
           window.location.replace('/');
         });
+      }
+      // 2026-11-17 (owner): "yes add it" — HakTerm bounces here with ?pin=1 to get
+      // the PIN pad on a direct open. The destination travels in
+      // ADMIN_GATE_RETURN_KEY, so a correct PIN sends the browser back there with
+      // the one-shot HakTerm permit. Admin pages already open their own pad.
+      if (!adminPath && new URLSearchParams(window.location.search).get('pin') === '1') {
+        window.openHaksterAdminPinGate?.(() => {});
       }
       function toggleAdminMenu(menu, button) {
         const open = menu?.classList.contains('hidden');
@@ -896,7 +1231,7 @@ const haksterBuildId = new Date().toISOString();
         }
       });
     </script>
-    <script is:inline>
+    <script is:inline data-cfasync="false">
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});

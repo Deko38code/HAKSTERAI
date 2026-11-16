@@ -5,10 +5,10 @@
 - Email: dekekenneth840@gmail.com
 - Identity: pentester under haksterAi
 ## Client Machine (auto-detected)
-- OS: Windows 10/11
-- Browser: Edge 156.0.0.0
+- OS: Linux
+- Browser: Firefox 160.0
 - Device: desktop
-- IP: 2601:205:4a7d:28ae:1175:e0ea:343b:6439
+- IP: 2601:205:4a7d:28ae:a32e:273a:e3f4:12d0
 ## Server Machine
 - OS: Linux (Ubuntu, AMD A12-9720P, 4 cores, ~7GB RAM)
 - Working directory: /home/ghost/haksterAi
