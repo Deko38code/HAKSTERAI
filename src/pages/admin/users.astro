@@ -81,6 +81,25 @@ import Layout from '../../layouts/Layout.astro';
         </div>
       </div>
 
+      <section class="mb-6 rounded-xl border border-[#1e1e2e] bg-[#111118] p-4 sm:p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div><h2 class="text-lg font-semibold">Account risk monitor</h2><p class="mt-1 text-xs text-[#64748b]">Heuristic score, not a probability. Signals are review leads; shared networks and automation can be legitimate.</p></div>
+          <button id="risk-refresh" class="rounded-lg border border-[#7c3aed]/30 bg-[#7c3aed]/20 px-3 py-2 text-xs font-medium text-[#c4b5fd]">↻ Refresh signals</button>
+        </div>
+        <div id="risk-summary" class="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div class="text-xs text-[#64748b]">Loading account signals…</div></div>
+        <div class="mb-4 flex flex-wrap gap-2 text-[11px] text-[#94a3b8]">
+          <span class="rounded border border-[#1e1e2e] px-2 py-1">Observed: shared IP/device, activity bursts, repeated normalized prompts, webdriver/bot, VM and headless-browser indicators</span>
+          <span class="rounded border border-[#1e1e2e] px-2 py-1">Unavailable here: VPN/proxy reputation, location, incognito, devtools, installed software</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[900px] text-left text-xs">
+            <thead class="text-[10px] uppercase text-[#64748b]"><tr><th class="px-3 py-2">Risk</th><th class="px-3 py-2">Account</th><th class="px-3 py-2">Signals</th><th class="px-3 py-2">Latest device</th><th class="px-3 py-2">Review / actions</th></tr></thead>
+            <tbody id="risk-body" class="divide-y divide-[#1e1e2e]"><tr><td colspan="5" class="px-3 py-5 text-center text-[#64748b]">Loading risk signals…</td></tr></tbody>
+          </table>
+        </div>
+        <p id="risk-error" class="mt-3 hidden text-xs text-[#ef4444]"></p>
+      </section>
+
       <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-sm text-left">
@@ -276,6 +295,7 @@ import Layout from '../../layouts/Layout.astro';
     const API = location.port === '4321' ? 'http://localhost:3579' : '';
     let allUsers = [];
     let logsByUser = {};
+    let riskUsers = [];
 
     function formatDate(ts) {
       if (!ts) return '—';
@@ -350,6 +370,64 @@ import Layout from '../../layouts/Layout.astro';
       document.getElementById('users-count').textContent = `${users.length} user${users.length === 1 ? '' : 's'}`;
     }
 
+    function renderRisk(data) {
+      riskUsers = data.users || [];
+      const summary = data.summary || {};
+      const cards = [
+        ['Accounts', summary.total || 0, '#94a3b8'],
+        ['Flagged for review', summary.flagged || 0, '#fbbf24'],
+        ['High signal score', summary.high || 0, '#fb7185'],
+        ['Suspended', summary.suspended || 0, '#c4b5fd'],
+      ];
+      document.getElementById('risk-summary').innerHTML = cards.map(([label, value, color]) =>
+        `<div class="rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] p-3"><div class="text-xl font-bold" style="color:${color}">${escapeHtml(value)}</div><div class="mt-1 text-[10px] uppercase tracking-wide text-[#64748b]">${escapeHtml(label)}</div></div>`
+      ).join('');
+      const tbody = document.getElementById('risk-body');
+      const visible = riskUsers.filter(u => u.signals?.length || u.review || u.status === 'suspended');
+      if (!visible.length) { tbody.innerHTML = '<tr><td colspan="5" class="px-3 py-5 text-center text-[#64748b]">No account risk signals found.</td></tr>'; return; }
+      tbody.innerHTML = visible.map(u => {
+        const color = u.severity === 'high' ? '#fb7185' : u.severity === 'medium' ? '#fbbf24' : u.severity === 'low' ? '#60a5fa' : '#64748b';
+        const signals = (u.signals || []).map(s => `<div class="mb-1 text-[#cbd5e1]"><span style="color:${s.severity === 'high' ? '#fb7185' : '#fbbf24'}">●</span> ${escapeHtml(s.label)}${s.value && ['shared_ip'].includes(s.type) ? ` <span class="font-mono text-[#64748b]">${escapeHtml(s.value)}</span>` : ''}</div>`).join('') || '<span class="text-[#64748b]">No detector signals</span>';
+        const d = u.device || {};
+        const device = [d.device_name, d.os_name && `${d.os_name} ${d.os_version || ''}`, d.browser && `${d.browser} ${d.browser_version || ''}`, d.timezone].filter(Boolean).map(escapeHtml).join('<br>') || 'No device details';
+        const review = u.review ? `${u.review.state === 'verification_requested' ? 'Verification requested' : 'Reviewed'}${u.review.note ? ` · ${escapeHtml(u.review.note)}` : ''}` : 'No review state';
+        const isAdmin = u.role === 'admin';
+        const buttons = isAdmin ? '<span class="text-[#64748b]">Admin account</span>' : `<div class="flex flex-wrap gap-1">
+          <button data-risk-action="request_verification" data-user-id="${escapeHtml(u.id)}" class="rounded border border-[#fbbf24]/30 px-2 py-1 text-[#fbbf24]">Flag for verification</button>
+          <button data-risk-action="mark_reviewed" data-user-id="${escapeHtml(u.id)}" class="rounded border border-[#64748b]/30 px-2 py-1 text-[#94a3b8]">Mark reviewed</button>
+          ${u.status === 'suspended' ? `<button data-risk-action="reactivate" data-user-id="${escapeHtml(u.id)}" class="rounded border border-[#00ff88]/30 px-2 py-1 text-[#00ff88]">Reactivate</button>` : u.status === 'banned' ? '<span class="text-[#fb7185]">Banned</span>' : `<button data-risk-action="suspend" data-user-id="${escapeHtml(u.id)}" class="rounded border border-[#fb7185]/30 px-2 py-1 text-[#fb7185]">Suspend</button>`}
+        </div>`;
+        return `<tr class="align-top hover:bg-[#1e1e2e]/40"><td class="px-3 py-3"><div class="font-bold" style="color:${color}">${u.score}/100</div><div class="text-[10px] uppercase" style="color:${color}">${escapeHtml(u.severity)}</div></td><td class="px-3 py-3"><div class="font-medium">${escapeHtml(u.username)}</div><div class="text-[#64748b]">${escapeHtml(u.email || u.status)}</div></td><td class="max-w-[370px] px-3 py-3">${signals}</td><td class="px-3 py-3 text-[#94a3b8]">${device}</td><td class="min-w-[230px] px-3 py-3"><div class="mb-2 text-[#94a3b8]">${review}</div>${buttons}</td></tr>`;
+      }).join('');
+    }
+
+    async function loadRisk() {
+      const error = document.getElementById('risk-error');
+      error.classList.add('hidden');
+      try {
+        const res = await fetch(`${API}/api/admin/account-risk`, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) throw new Error(`Risk data unavailable (${res.status})`);
+        renderRisk(await res.json());
+      } catch (err) { error.textContent = err.message || 'Could not load account risk signals.'; error.classList.remove('hidden'); }
+    }
+
+    document.getElementById('risk-body')?.addEventListener('click', async event => {
+      const button = event.target.closest('[data-risk-action]');
+      if (!button) return;
+      const action = button.dataset.riskAction;
+      const note = action === 'request_verification' || action === 'suspend' ? (window.prompt('Optional review note:') || '') : '';
+      if (action === 'suspend' && !window.confirm('Suspend this account?')) return;
+      button.disabled = true;
+      try {
+        const res = await fetch(`${API}/api/admin/account-risk/${encodeURIComponent(button.dataset.userId)}/action`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ action, note }) });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.error || 'Action failed');
+        await loadRisk();
+        await load();
+      } catch (err) { window.alert(err.message || 'Could not update account.'); button.disabled = false; }
+    });
+    document.getElementById('risk-refresh')?.addEventListener('click', loadRisk);
+
     async function load() {
       try {
         const headers = authHeaders();
@@ -357,6 +435,7 @@ import Layout from '../../layouts/Layout.astro';
           fetch(`${API}/api/users`, { headers }),
           fetch(`${API}/api/access-logs?limit=1000`, { headers })
         ]);
+        loadRisk();
 
         if (!usersRes.ok || !logsRes.ok) {
           document.getElementById('users-body').innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-[#ef4444]">Admin sign-in required.</td></tr>`;

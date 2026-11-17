@@ -129,6 +129,10 @@ const { runExposureScan, startGitExposureWatcher } = require('./gitExposure');
 const anomalyAgent = require('./anomalyAgent');
 const updateLog = require('./updateLog');
 const junkalotUpdate = require('./junkalotUpdate');
+// Availability watchdog + dependency self-heal for junkalot.co (owner, 2026-11-17):
+// a missing node_modules on Parrot took the site down with nobody told. Probes every
+// 3 min, alerts on bot 5, restores the dep tree from the editing copy when it vanishes.
+const junkalotGuard = require('./junkalotGuard');
 // Bots, build guards and agents: one feed, pulled from junkalot and phantomide
 // (owner SSH only — bot rows are never published), recorded here for every
 // Telegram delivery, and snapshotted back onto both Parrot admins.
@@ -430,7 +434,7 @@ const PRICING_CATALOG = [
     id: 'starter_plus',
     name: 'HaksterAI Starter Plus',
     stripeProductName: 'HaksterAI Starter Plus',
-    description: '$5.99 for the first month, then $10.99/month.',
+    description: 'Monthly: $5.99 for the first month, then $10.99/month. Annual plan: $109.99/year.',
     features: ['Everything in Starter', '$5.99 first month', 'Then $10.99/month', 'Cancel anytime'],
     prices: [
       {
@@ -919,14 +923,23 @@ async function refreshPricesFromStripe() {
 // coupon must not silently charge full price on a plan we advertise at $5.99.
 async function introDiscountFor(stripe, priceObj) {
   if (!priceObj?.introCoupon) return null;
+  const expectedDiscount = Number(priceObj.amount) - Number(priceObj.introAmount);
+  if (!Number.isInteger(expectedDiscount) || expectedDiscount <= 0 || !priceObj.currency) {
+    throw new Error('The advertised introductory price is not configured safely; checkout is unavailable.');
+  }
   try {
     const coupon = await stripe.coupons.retrieve(priceObj.introCoupon);
-    if (coupon && coupon.valid) return [{ coupon: coupon.id }];
-    console.warn(`[stripe] intro coupon ${priceObj.introCoupon} is not valid any more; charging list price`);
+    const matchesOffer = coupon
+      && coupon.valid
+      && coupon.duration === 'once'
+      && coupon.amount_off === expectedDiscount
+      && String(coupon.currency || '').toLowerCase() === String(priceObj.currency).toLowerCase();
+    if (matchesOffer) return [{ coupon: coupon.id }];
+    throw new Error('The Stripe coupon does not match the advertised first-month offer.');
   } catch (err) {
-    console.warn(`[stripe] intro coupon ${priceObj.introCoupon} lookup failed: ${err.message}`);
+    console.error(`[stripe] intro coupon ${priceObj.introCoupon} unavailable or mismatched: ${err.message}`);
+    throw new Error('The introductory offer is temporarily unavailable. Please try again later.');
   }
-  return null;
 }
 
 // ── Guest checkout accounts ────────────────────────────────────────────────
@@ -1558,6 +1571,45 @@ app.use((err, req, res, next) => {
     });
   }
   return next(err);
+});
+
+// ── Owner SMS gateway (our own transport: phone SIM / carrier bridge) ───────
+// The policy lives in notifySms.js: SMS_ENABLED must be true, the /sms switch must
+// be on, the recipient must be the one authorized number, and the daily cap is
+// counted from the append-only log. These routes only expose that same path to the
+// owner's own tooling; they add no way around the guards.
+app.get('/api/sms/status', requireOwner, (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const gateway = require('./smsGateway');
+    const notify = require('./notifySms');
+    const trial = notify.trialConfig();
+    res.json({
+      ok: true,
+      gateway: gateway.status(),
+      mirror: notify.smsEnabled(),
+      masterSwitch: trial.enabled,
+      trialMode: trial.trialMode,
+      maxPerDay: trial.maxPerDay,
+      sendsToday: notify.sentInLast24h(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sms/send', express.json({ limit: '8kb' }), requireOwner, async (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const text = String(req.body?.text || '').trim().slice(0, 640);
+    if (!text) return res.status(400).json({ ok: false, error: 'text is required' });
+    const notify = require('./notifySms');
+    const result = await notify.sendSms(text);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // POST /api/stripe/claim { sessionId } — hand a guest buyer the account that
@@ -7679,6 +7731,9 @@ app.get('/api/users', requireOwner, (_req, res) => {
   res.json({ users, stats });
 });
 
+// ── Owner-only account risk dashboard and review actions ──────────
+require('./accountRisk').mountAccountRiskRoutes(app, { requireOwner, getDb });
+
 // ── User activity & tracking ──────────────────────────────────────
 app.get('/api/users/activity', requireOwner, (req, res) => {
   const db = getDb();
@@ -8745,6 +8800,14 @@ app.post('/api/admin/gmail/disconnect', requireOwner, async (req, res) => {
 
 // ── Owner-only mail client (multi-account: Gmail OAuth + IMAP/SMTP) ──
 try {
+  // Freebuff (Codebuff) device-code login for Email Monitor (additive)
+  try { require('./freebuff-cli-auth').mountAuthRoutes(app, {
+    // Only a browser that already proves the owner key may adopt the CLI's
+    // stored Freebuff identity as a session.
+    isOwnerRequest: (req) => { try { return isOwnerUser(getUserByApiKey(req)); } catch { return false; } },
+  }); }
+  catch (e) { console.error('[freebuff-auth] mount failed:', e.message); }
+
   require('./mail')({
     app,
     requireOwner,
@@ -9008,7 +9071,8 @@ function getUserByApiKey(req) {
   const apiKey = req.headers['x-api-key'] || bearerKey || req.body?.apiKey;
   if (!apiKey) return null;
   const db = getDb();
-  return db.prepare('SELECT * FROM users WHERE api_key = ?').get(apiKey);
+  // Suspended and banned accounts cannot authenticate to API routes that use this helper.
+  return db.prepare("SELECT * FROM users WHERE api_key = ? AND status = 'active'").get(apiKey);
 }
 
 function reserveUsage(user) {
@@ -10297,7 +10361,7 @@ app.use('/admin', (req, res, next) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-  res.send(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="haksterAi admin."><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><title>Admin — haksterAi</title><style>html,body{height:100%;margin:0;background:#0a0a0f;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}.box{background:#111118;border:1px solid #7c3aed;border-radius:16px;padding:32px 28px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 40px #7c3aed33}.t{font-weight:800;letter-spacing:1px;font-size:1.05rem;margin-bottom:6px}.s{color:#94a3b8;font-size:.8rem;line-height:1.5;margin-bottom:18px;word-break:break-word}a{display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border-radius:9px;padding:10px 16px}a[hidden]{display:none}</style></head><body><div id="gate"><div class="box"><div class="t">HAKSTER ADMIN</div><div class="s" id="msg">Verifying owner session…</div><a id="signin" hidden href="/?signin=1&redirect=${encodeURIComponent('/admin/' + page + '/')}">Sign in as owner</a></div></div><script data-cfasync="false">(async () => {const page=${JSON.stringify(page)};const msg=document.getElementById('msg');const signin=document.getElementById('signin');const fail=t=>{msg.textContent=t;signin.hidden=false;};const goSignIn=t=>{fail(t);setTimeout(()=>{window.location.replace(signin.getAttribute('href')||'/?signin=1');},900);};const keys=(()=>{try{const g=localStorage.getItem('hakster_google_token'),a=localStorage.getItem('hakster_api_key'),out=[];if(g)out.push(['hakster_google_token',g]);if(a&&a!==g)out.push(['hakster_api_key',a]);return out;}catch{return [];}})();if(!keys.length){fail('Sign in with the owner account to open admin.');return;}let key='',me=null,offline=false;for(const pair of keys){let r=null;try{r=await fetch('/api/auth/me',{headers:{'x-api-key':pair[1]},cache:'no-store'});}catch{offline=true;continue;}if(r.status===401){try{if(localStorage.getItem(pair[0])===pair[1])localStorage.removeItem(pair[0]);}catch{}continue;}if(!r.ok){fail('The server could not verify the owner session. Try again in a moment.');return;}me=await r.json().catch(()=>null);if(me&&me.user&&me.user.is_owner){key=pair[1];break;}fail('This area is owner-only. Sign in with the owner account.');return;}if(!key){if(offline){fail('Could not reach the server. Check the connection and reload.');return;}goSignIn('Your session has expired. Signing you in again…');return;}try{sessionStorage.setItem('hakster_owner_verified_at',String(Date.now()));}catch{}try{const pageRes=await fetch('/api/admin/page/'+encodeURIComponent(page),{headers:{'x-api-key':key},cache:'no-store'});if(pageRes.status===401){goSignIn('Your session has expired. Signing you in again…');return;}if(!pageRes.ok){fail('Owner session could not open this page ('+pageRes.status+').');return;}const html=await pageRes.text();const unRocket=s=>s.replace(/type="[A-Za-z0-9_-]+-text\\/javascript"/g,'type="text/javascript"').replace(/type="[A-Za-z0-9_-]+-module"/g,'type="module"').replace(/<script[^>]*rocket-loader[^>]*>[\\s\\S]*?<\\/script>/g,'');document.open();document.write(unRocket(html));document.close();setTimeout(()=>{const left=document.querySelectorAll('script[type$="-text/javascript"],script[type$="-module"]').length;if(!left)return;const d=document.createElement('div');d.setAttribute('style','position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483647;background:#3b0d12;color:#fecdd3;border:1px solid #f43f5e;border-radius:10px;padding:12px 14px;font:600 13px/1.5 ui-monospace,monospace');d.textContent='This admin page loaded but its scripts are still rewritten by a CDN proxy. Reload once; if it repeats, the gate transform needs updating. ('+left+' rewritten script tag(s) left)';document.body.appendChild(d);},6000);}catch(e){fail('Admin could not load: '+((e&&e.message)||'network error'));}})();</script></body></html>`);
+  res.send(`<!doctype html><html lang="en"><head><script>(function(){if(window.__fbGate)return;window.__fbGate=1;try{var k='';try{k=localStorage.getItem('hakster_google_token')||localStorage.getItem('hakster_api_key')||'';}catch(e2){}var h={};if(k)h['x-api-key']=k;fetch('/api/auth/freebuff/me',{credentials:'same-origin',headers:h}).then(function(r){if(r.status===401){/* keep the page the owner asked for: freebuff sign-in returns here */var n=location.pathname+location.search;location.replace('/auth/freebuff?next='+encodeURIComponent(n));}}).catch(function(){});}catch(e){}})();</script><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="haksterAi admin."><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><title>Admin — haksterAi</title><style>html,body{height:100%;margin:0;background:#0a0a0f;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}.box{background:#111118;border:1px solid #7c3aed;border-radius:16px;padding:32px 28px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 40px #7c3aed33}.t{font-weight:800;letter-spacing:1px;font-size:1.05rem;margin-bottom:6px}.s{color:#94a3b8;font-size:.8rem;line-height:1.5;margin-bottom:18px;word-break:break-word}a{display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border-radius:9px;padding:10px 16px}a[hidden]{display:none}</style></head><body><div id="gate"><div class="box"><div class="t">HAKSTER ADMIN</div><div class="s" id="msg">Verifying owner session…</div><a id="signin" hidden href="/?signin=1&redirect=${encodeURIComponent('/admin/' + page + '/')}">Sign in as owner</a></div></div><script data-cfasync="false">(async () => {const page=${JSON.stringify(page)};const msg=document.getElementById('msg');const signin=document.getElementById('signin');const fail=t=>{msg.textContent=t;signin.hidden=false;};const goSignIn=t=>{fail(t);setTimeout(()=>{window.location.replace(signin.getAttribute('href')||'/?signin=1');},900);};const keys=(()=>{try{const g=localStorage.getItem('hakster_google_token'),a=localStorage.getItem('hakster_api_key'),out=[];if(g)out.push(['hakster_google_token',g]);if(a&&a!==g)out.push(['hakster_api_key',a]);return out;}catch{return [];}})();if(!keys.length){fail('Sign in with the owner account to open admin.');return;}let key='',me=null,offline=false;for(const pair of keys){let r=null;try{r=await fetch('/api/auth/me',{headers:{'x-api-key':pair[1]},cache:'no-store'});}catch{offline=true;continue;}if(r.status===401){try{if(localStorage.getItem(pair[0])===pair[1])localStorage.removeItem(pair[0]);}catch{}continue;}if(!r.ok){fail('The server could not verify the owner session. Try again in a moment.');return;}me=await r.json().catch(()=>null);if(me&&me.user&&me.user.is_owner){key=pair[1];break;}fail('This area is owner-only. Sign in with the owner account.');return;}if(!key){if(offline){fail('Could not reach the server. Check the connection and reload.');return;}goSignIn('Your session has expired. Signing you in again…');return;}try{sessionStorage.setItem('hakster_owner_verified_at',String(Date.now()));}catch{}try{const pageRes=await fetch('/api/admin/page/'+encodeURIComponent(page),{headers:{'x-api-key':key},cache:'no-store'});if(pageRes.status===401){goSignIn('Your session has expired. Signing you in again…');return;}if(!pageRes.ok){fail('Owner session could not open this page ('+pageRes.status+').');return;}const html=await pageRes.text();const unRocket=s=>s.replace(/type="[A-Za-z0-9_-]+-text\\/javascript"/g,'type="text/javascript"').replace(/type="[A-Za-z0-9_-]+-module"/g,'type="module"').replace(/<script[^>]*rocket-loader[^>]*>[\\s\\S]*?<\\/script>/g,'');document.open();document.write(unRocket(html));document.close();setTimeout(()=>{const left=document.querySelectorAll('script[type$="-text/javascript"],script[type$="-module"]').length;if(!left)return;const d=document.createElement('div');d.setAttribute('style','position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483647;background:#3b0d12;color:#fecdd3;border:1px solid #f43f5e;border-radius:10px;padding:12px 14px;font:600 13px/1.5 ui-monospace,monospace');d.textContent='This admin page loaded but its scripts are still rewritten by a CDN proxy. Reload once; if it repeats, the gate transform needs updating. ('+left+' rewritten script tag(s) left)';document.body.appendChild(d);},6000);}catch(e){fail('Admin could not load: '+((e&&e.message)||'network error'));}})();</script></body></html>`);
 });
 
 // ── Owner-only dashboard ──────────────────────────────────────────
@@ -10931,6 +10995,14 @@ function startServer(delay = 2000) {
     // Start Telegram bot fleet
     telegramBots.initBots();
     telegramBots.sendDeployStatus('haksterAi server started');
+
+    // Junkalot guard: probes junkalot.co and self-heals a missing dependency tree.
+    // Alerts go through bot 5 (uptime). Read-only against the site; never restarts anything.
+    try {
+      junkalotGuard.start({ alert: telegramBots.sendUptimeAlert });
+    } catch (e) {
+      console.warn('  ⚠ Junkalot guard failed to start:', e.message);
+    }
 
     // Dell Auto Agent — read-only security checks + IP audit on every startup.
     // Delayed so the boot burst settles and the first run measures real state.

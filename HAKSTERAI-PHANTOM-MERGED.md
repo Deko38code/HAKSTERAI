@@ -11867,3 +11867,246 @@ and only sends when the report signature changes or 6 hours have passed.
 **Still open:** the Cloudflare edge lock is staged only — no token, no rule, nothing armed. The
 OMP snapshot template captures ("use omp snap… each thumbnail with pg #") are not done. No config was
 edited and no process was killed, stopped or restarted by hand.
+
+---
+
+## 2026-11-17 — Admin dashboard no longer dead-ends in the Freebuff login
+
+**Reported (owner):** "clicking dashboard stops on freebuff auth flow … dont let freebuff
+login stop my admin flow tho".
+
+**Verified root causes (Dell, haksterAi server, pm2 `hakster`)**
+1. The `/admin` gate shell redirected a 401 to a bare `/auth/freebuff`, and
+   `public/auth/freebuff/index.html` hard-coded the post-login destination to `/admin/mail/`.
+   Clicking Dashboard landed on Email Monitor's sign-in page and then in Email Monitor —
+   the dashboard was never reached.
+2. Freebuff sessions live only in the process (`sessions` Map). `readCredentials()` scanned only
+   Codebuff paths (`~/.config/codebuff/…`, `~/.codebuff/…`), but the Freebuff CLI (Bun) keeps its
+   identity in `~/.config/manicode/credentials.json` shaped as `{ default: { email, id, name,
+   tokenStore: 'keychain' } }` with the token in the OS keychain. After any restart nothing
+   adopted, so every admin page bounced into a fresh interactive login.
+
+**Fix (application code only, no config touched)**
+- `server/src/index.js` — `/admin` gate redirects to
+  `/auth/freebuff?next=<pathname+search>` and sends the stored owner key (`x-api-key`) on its
+  `/api/auth/freebuff/me` check.
+- `public/auth/freebuff/index.html` — `nextTarget()` reads `?next=`, accepts same-origin paths
+  only (rejects `//host`, schemes, backslashes, whitespace), defaults to `/admin/mail/`;
+  success and the "Already signed in" link continue to that target. Its `/me` call sends the
+  owner key.
+- `server/src/freebuff-cli-auth.js` — `credCandidates()` adds
+  `~/.config/manicode/credentials.json` + `auth.json`; `readCredentials()` unwraps the
+  `{ default: {…} }` profile shape; `/api/auth/freebuff/me` adopts the CLI's stored identity as
+  a session (sets `fb_session`) **only when the request already proves the owner key** —
+  `mountAuthRoutes(app, { isOwnerRequest })` wired to `isOwnerUser(getUserByApiKey(req))`.
+  Anonymous callers still get 401 and no cookie.
+- `src/pages/admin/mail.astro` and `email.astro` — inner gate also sends the owner key and
+  preserves the return path. `dist/admin/mail|email/index.html` and
+  `dist/auth/freebuff/index.html` were patched identically (no full `astro build` run).
+
+**Verified (live, 2026-11-17 ~03:38Z)**
+- `GET /api/auth/freebuff/me` anonymous → `401 {"ok":false}`, no `Set-Cookie`.
+- In-process test with the mounted handler: `isOwnerRequest` false → 401; true → `200`
+  `{"ok":true,"user":{email,id,name},"adopted":true}` + cookie; re-request with that cookie → 200.
+- `nextTarget()` unit cases: 7/7 PASS (including `//evil.com`, `https://evil.com`, `\evil` → fallback).
+- `node --check` on `index.js` and `freebuff-cli-auth.js`; inline scripts of the auth page and
+  both astro gates parse.
+- `hakster` auto-applied via `serverBuild` idle apply (restart count 3). Live
+  `https://haksterai.com/admin/dashboard/` now serves the gate carrying `next=` + `x-api-key`;
+  `/auth/freebuff` serves `nextTarget` + owner-key `/me`; `/admin/mail/` gate carries `next=`.
+
+**Not done:** no git commit — `server/src/index.js` and the two astro pages already carried
+unrelated uncommitted work from earlier sessions (junkalotGuard, accountRisk, Stripe intro
+coupon guard, `getUserByApiKey` status filter), so the tree could not be staged scoped to this
+fix.
+
+
+## 2026-11-17 — Rule: ship through the npm production build, never a bare restart
+
+Owner, 2026-11-17: "however we built with npm is the way cause all pic show faster for sure" and
+"we build that way to serve all ways add rule".
+
+Standing rule for every site we build and deploy:
+
+- Publish through the project's npm production build. For Junkalot that is
+  `npm run build:update` (scripts/stage-update.mjs) in `/home/ghost694/junkalot` on Parrot.
+  `next.config.js` selects the live tree through `JL_DIST_DIR`, so the build step is the only thing
+  that actually changes what the running service serves.
+- Never deploy by restarting the service on its own, and never by running the dev server. A bare
+  restart re-serves the previous `distDir` and nothing changes.
+- After the build, verify live: `/api/version` reports the new build id with `update.phase "done"`,
+  then check the public page and its images.
+- Why, in the owner's words: the built output is what serves images and assets fast.
+- `scripts/deploy-release.sh` wraps this same path with a per-deploy release record and a rollback
+  line, so it is the preferred wrapper when a rollback point matters.
+
+
+## 2026-11-17 — Cadence: after every big fix or finding, record it here
+
+Owner, 2026-11-17: "always after big fixes and findings". So this file is updated after each
+substantial fix or significant finding, not only on request — a dated entry with the verified facts,
+what changed, and what it means. Back up first (`<file>.bak-<stamp>`), append only, never rewrite or
+delete earlier entries. Same entry goes to the other knowledge doc and, for Junkalot work, to
+`docs/junkalot-brain-current.md` in both copies.
+
+Findings recorded at this point (all verified today):
+
+- **Stale-HEAD deploy trap.** The owner's Capistrano-style deploy template built from
+  `git archive HEAD`. On Parrot, HEAD (58fa9df) predates the working tree: `JunkProgress.tsx`,
+  `JunkToastStack.tsx` and `scripts/phantom-status-service.js` are untracked and 32 other paths are
+  modified, so that template would have shipped a site without the toast stack, progress dock, chat
+  auto-resume or status service. It also called `pm2 reload --only junkalot` — Junkalot is systemd
+  (`junkalot.service`), there is no such pm2 app, so it would have failed after building.
+  `scripts/deploy-release.sh` was written instead and its dirty-tree gate was proven to stop on the
+  35-path list.
+- **The new progress dock and toast stack are inert in production.** The live page ships
+  `#junk-toast-stack` and `#junk-progress`, but no `junkalot-toast-ws` meta tag is rendered, so
+  neither ever opens a connection; they only respond to a manual `window.JunkProgress(...)` /
+  `window.JunkToast(...)` call. Real update progress still comes from the existing update card,
+  which polls `/api/version`. Making the dock live needs either a same-origin Next route reading
+  `127.0.0.1:3002` (no tunnel change) or a tunnel route (owner decision).
+- **Parrot memory pressure.** After the build: load ~4.2 on 2 CPUs, swap 8.2 of 8.6 GiB (~95%) and
+  actively thrashing (`si/so` 3/33 MB/s, ~79% I/O wait). `llama-server` holds ~7 GB total (1.4 GB
+  resident + 5.58 GB swapped). Reported read-only; nothing was stopped, flushed or reprioritized.
+  The Dell is healthy: load 0.61, swap 12.5% and parked at `si/so` 0/0.
+- **`UpdateToast.tsx` differs between the two Junkalot copies.** The editing copy has a
+  "Server last replied" line fed from `update.checkedAt`; master does not, and master is what builds
+  and serves. Same mtime on both, so it came from an earlier conditional patch. Left as-is pending
+  the owner's choice.
+
+
+## 2026-11-17 — EZ Texting trial: API access DENIED, trial guards added
+
+Owner asked for the trial SMS gateway (one authorized number, no customer messaging) across
+PhantomIDE, HaksterAI and Junkalot. First step was to verify API access — which is a read-only
+call, so nothing was sent and nothing was spent.
+
+**Finding: the API rejects the stored credentials.** `GET https://a.eztexting.com/v1/messages`
+with `EZ_TEXTING_USER` / `EZ_TEXTING_PASSWORD` from `server/.env` returns **401 "Invalid username or
+password"**. Both variables are present; the provider refuses them. HaksterAI's SMS mirror has
+therefore been failing silently — `server/data/sms-log.jsonl` shows `sms.destination_lookup_failed`
+roughly every 30 minutes through 2026-11-17, which is the same 401. Nothing was ever delivered.
+
+What that means: the trial's API access is NOT verified, so per the owner's own rule
+`SMS_ENABLED` stays false. The likely causes, in order: the trial plan may not include API access;
+the stored password may have changed; or EZ Texting's current v1 API wants a generated API key
+rather than the account login. The owner has to look at the dashboard (API / Developer /
+Integrations) — an agent must not guess credentials or reset an account password.
+
+**Guards added to `server/src/notifySms.js`** (additive; existing behaviour untouched):
+
+- `SMS_ENABLED` — master switch, **defaults to false**. Checked as the first statement of `sendSms`,
+  so while it is false nothing is looked up, no destination is resolved and no network call is made.
+  This also stops the recurring 401 lookups.
+- `SMS_TRIAL_MODE` (default true) + `SMS_ALLOWED_RECIPIENT` — the resolved recipient is compared to
+  the single authorized number and a mismatch is denied **locally**, before the provider is called.
+- `SMS_MAX_MESSAGES_PER_DAY` (default 3, clamped to 1–20) — counted from the append-only send log, so
+  a restart cannot reset the cap.
+- `SMS_CUSTOMER_MESSAGING` (default false) — no customer-facing path exists in this module.
+- Every denial appends `sms.denied` with a reason and no numbers.
+
+Verified with credentials loaded, without contacting the provider: 5/5 — defaults are trial-on /
+disabled / cap 3; unset `SMS_ENABLED` denies before any lookup; a non-authorized recipient is denied
+locally; the cap is honoured; and the last six log rows contain no full phone number.
+`node --check` clean. Backups `notifySms.js.bak-sms-trialguards-*` and `.bak-sms-order-*`.
+
+Still pending: real API credentials from the dashboard, a single approved test SMS (owner approval
+required), and routing PhantomIDE/Junkalot events into this gateway — not built yet, because wiring
+two more surfaces to a gateway that cannot authenticate would be dead code.
+
+## 2026-11-17 — Own SMS gateway (no rented provider required)
+
+Owner instruction: "build our own sms". Built a self-hosted transport layer on the Dell
+instead of depending on the Ez Texting trial, whose stored credentials still answer 401.
+
+- `server/src/smsGateway.js` (new) — transport router, tried in this order:
+  1. `phone` — Dell SSHes to the owner's Android phone (Termux:API) and runs
+     `termux-sms-send`; the message leaves from his own SIM. Real SMS, any recipient,
+     no per-message cost. Inbound readable with `termux-sms-list`.
+  2. `carrier-email` — `<10-digit>@<carrier gateway domain>` through SMTP; free, owner's
+     own phone only. The domain is read from env and never guessed.
+  3. `eztexting` — the existing rented API, kept so nothing working was removed.
+- `server/scripts/sms.js` (new) — `status`, `probe`, `send` (dry run unless `--send`),
+  `inbox`. No credential or full number is ever printed.
+- `server/scripts/sms-check.js` (new) — 15 read-only guard checks: master switch refuses,
+  no transport is called while disabled, cap clamped 1–20, trial defaults on, customer
+  messaging off, destination explicit-or-null, masking, and a hostile-message test proving
+  the phone command carries only digits plus base64.
+- `server/scripts/phone-sms-setup.sh` (new) — generates `server/data/phone_sms_key` (600)
+  and prints the Termux steps. It never contacts the phone; Deke runs it and types his own
+  password. Key created this session; it is not installed on the phone yet.
+- `server/src/notifySms.js` (patched, backup `.bak-own-gateway-20261117T053320Z`) — policy
+  stays here, transport moved to the gateway. `SMS_ENABLED`, the `/sms` switch, the
+  single-recipient rule and the daily cap all run before `gateway.deliver()` is reached.
+  `/sms` status and `/sms test` now describe whichever transports are configured.
+- `server/src/index.js` — owner-gated `GET /api/sms/status` and `POST /api/sms/send`.
+  Both answer 401 without an owner session, verified live on haksterai.com. The routes add
+  no way around the guards.
+- `docs/sms-own-gateway.md` (new) — transports, env lines, setup steps, verification.
+
+Verified on the Dell: `sms-check.js` 15/15 pass; `sms.js status` reports only `eztexting`
+configured; a dry-run send prints a masked plan and sends nothing; `node --check` clean on
+every changed file. hakster auto-applied the source change (pid 169754, restarts 8) and the
+new routes answer 401 rather than 404.
+
+Not yet true and not claimed: no message has been sent by this gateway, `SMS_ENABLED` is
+false, the phone's sshd is not running (ping 10.0.0.147 answers, port 8022 refused), and no
+carrier gateway or SMTP account is in `server/.env`. Those are the owner's steps.
+
+## 2026-11-17 — Phase A read-only discovery: verified three-box inventory
+
+Owner supplied a master infrastructure directive and asked for Phase A discovery first. Read-only only:
+no service, config, tunnel or process was touched.
+
+Verified hardware/OS (all three reachable over SSH):
+- Dell `ghost-Inspiron-7348` 10.0.0.131 — Mint 22.2, i7-5500U 4C, 7.7 GB RAM, 10 GB swap (8+2 files),
+  457 GB disk 65% used, node 24.14.0, npm 12.2.0 (npm warns it wants node >=24.15).
+- Parrot `parrot` 10.0.0.251 — Parrot Security 7.4, i5-3427U 4C, 3.7 GB RAM (95% used),
+  16 GB swap with 9.6 GB used, 226 GB disk 96% used (12 GB free), node 20.20.2.
+- Third box hostname `ghost694` 10.0.0.210 — Mint 22.3, AMD A12-9720P 4C, 7.1 GB RAM (1.2 used),
+  54 GB free, node 24.14.0, docker + containerd installed with 0 containers, nginx, postgresql@16,
+  pm2-root with `kiro-gateway` errored at ~3148 restarts. It is NOT a live mirror of anything.
+
+Topology (verified from running tunnel configs, not from the directive):
+- Dell pm2: rmt, cinevault, miniforge, hakster, tools-gateway, stalkerhek, mockminer, orebolt,
+  orebolt-real, hakterm, claude-code-proxy, ensure-up + 3 cloudflared tunnels
+  (flixchill-config, rmt-auth-dell, haksterai-dell) + tunnel-watchdog.
+- Parrot: systemd `junkalot.service` (next start -p 5006, Restart=always), pm2 `phantom` (13 restarts,
+  160% CPU), `phantom-status` (127.0.0.1:3002), email-monitor errored 351 restarts,
+  two cloudflared connectors (pids 1620, 1778) both on the SAME config.yml.
+- Routes: haksterai.com/www -> Dell 3579; rmt + rentmytrailer + *.haksterai.com -> Dell 8112 (8111 https
+  also answers 200); flixchill.link -> Dell 8081; phantomide.com -> Parrot 4000; junkalot.co -> Parrot 5006;
+  dash.phantomide.com -> Parrot 5173; junkalotjunkremoval.com -> Parrot 5006 by config;
+  email-monitor-3230f40cc3.haksterai.com -> Parrot 9191.
+
+Public health at 14:2x UTC: haksterai.com 200, phantomide.com 200, junkalot.co 200, flixchill.link 200,
+rmt.haksterai.com 200, dash.phantomide.com 530 (nothing listening on 5173),
+junkalotjunkremoval.com 404 served by Wix ("ConnectYourDomain Error", server Pepyaka) — DNS points at Wix,
+not at Parrot, so that tunnel route is inert.
+
+Main risks found: Parrot disk/RAM (52 GB of junkalot/backups, 12 GB free, swap 9.6/16 GB);
+dash.phantomide.com down; two cloudflared connectors sharing one config on Parrot; a stale
+`haksterai-config.yml` on the Dell that overlaps live hostnames but is not running; crash-looping
+email-monitor (Parrot) and kiro-gateway (Mint); large dirty trees on all three boxes.
+No central monitoring spans the boxes; tunnel-watchdog exists only on the Dell.
+Databases were not inspected (no credentials used); no DNS queries were run.
+
+## 2026-11-17 — Inbound forwarding URL tested; sender field bug found and fixed
+
+Tested the documented forwarding URL end to end with a realistic EZ Texting keyword forward
+(form post): `POST https://haksterai.com/api/eztexting/inbound` answers
+`{"ok":true,"forwarded":false,"reason":"EZ_TEXTING_WEBHOOK_SECRET is not set"}` and appends to
+`server/data/inbound-sms-log.jsonl`.
+
+The test exposed a real defect: EZ Texting's forward form names the sender `phonenumber`
+(all lowercase). `server/src/eztextingInbound.js` only accepted `phoneNumber`, `from`,
+`number`, etc., so the sender was silently dropped and `phone_tail` was empty. Added the
+lowercase variants to PHONE_KEYS (backup `eztextingInbound.js.bak-phonenumber-20261117T054833Z`).
+
+Verified after the change: local parse of both delivery shapes returns the last four digits,
+and a live form post now records `"phone_tail":"4567"` where it previously recorded `""`.
+`node --check` clean; hakster auto-applied the edit (pid 182223, restarts 9) and the site
+answers 200 again after a brief 502 during the swap.
+
+Still true: no Telegram forward until `EZ_TEXTING_WEBHOOK_SECRET` is in server/.env, and the
+outbound API still answers 401 with the stored credentials.

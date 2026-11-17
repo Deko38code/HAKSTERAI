@@ -78,8 +78,10 @@ function pick(obj, keys) {
 }
 
 const PHONE_KEYS = [
-  'phoneNumber', 'phone_number', 'mobileNumber', 'mobile_number', 'from', 'fromNumber',
-  'from_number', 'number', 'phone', 'src', 'sender',
+  // EZ Texting's own "Forward to URL" form post sends lowercase `phonenumber`
+  // (verified 2026-11-17 — without it the sender arrived blank in the log).
+  'phoneNumber', 'phonenumber', 'phone_number', 'mobileNumber', 'mobilenumber', 'mobile_number',
+  'from', 'fromNumber', 'fromnumber', 'from_number', 'number', 'phone', 'src', 'sender',
 ];
 const TEXT_KEYS = ['message', 'messageBody', 'message_body', 'body', 'text', 'content', 'msgs', 'msg'];
 

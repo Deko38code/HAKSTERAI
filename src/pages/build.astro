@@ -4072,8 +4072,8 @@ import Layout from '../layouts/Layout.astro';
       overlay.innerHTML = `
         <div style="background:#111118;border:1px solid #7c3aed/50;border-radius:16px;padding:32px;max-width:480px;width:90%;box-shadow:0 0 64px rgba(124,58,237,0.3);">
           <div style="text-align:center;margin-bottom:24px;">
-            <div style="font-size:28px;font-weight:bold;color:#a855f7;margin-bottom:8px;">Upgrade to Pro</div>
-            <div style="font-size:14px;color:#94a3b8;">You've used all 5 free AI calls and 5 free web lookups. Pick a plan to keep going.</div>
+            <div id="upgrade-modal-title" style="font-size:28px;font-weight:bold;color:#a855f7;margin-bottom:8px;">Usage limit reached</div>
+            <div id="upgrade-modal-copy" style="font-size:14px;color:#94a3b8;">Choose a plan to continue.</div>
           </div>
           <div id="upgrade-modal-plans" style="display:flex;flex-direction:column;gap:12px;">
             <div style="font-size:13px;color:#94a3b8;">Loading plans...</div>
@@ -4092,6 +4092,8 @@ import Layout from '../layouts/Layout.astro';
       // Plans come from the live catalog, so a new Stripe price shows up here
       // without editing this page. Nothing is hardcoded except formatting.
       const planWrap = overlay.querySelector('#upgrade-modal-plans');
+      const titleEl = overlay.querySelector('#upgrade-modal-title');
+      const copyEl = overlay.querySelector('#upgrade-modal-copy');
       const moneyLabel = (cents) => '$' + (cents / 100).toFixed(2).replace(/\.00$/, '');
 
       async function startCheckout(stripePriceId, planId, btn) {
@@ -4124,7 +4126,32 @@ import Layout from '../layouts/Layout.astro';
         try {
           const priceRes = await fetch(`${API}/api/pricing`);
           const catalog = await priceRes.json();
-          const paidPlans = (catalog.plans || []).filter((p) => p.id !== 'free');
+          const allPlans = catalog.plans || [];
+          const usageToken = getStoredAuthToken();
+          let currentPlan = String(googleUser?.plan || 'free').toLowerCase();
+          if (usageToken) {
+            try {
+              const usageRes = await fetch(`${API}/api/usage`, { headers: { 'x-api-key': usageToken } });
+              if (usageRes.ok) {
+                const usage = await usageRes.json();
+                currentPlan = String(usage.plan || currentPlan).toLowerCase();
+              }
+            } catch {}
+          }
+          const litePlan = allPlans.find((p) => p.id === 'lite');
+          const liteMonthly = (litePlan?.prices || []).find((p) => p.billingCycle === 'monthly' && p.amount > 0 && p.stripePriceId);
+          const paidPlans = allPlans.filter((p) => p.id !== 'free' && p.id !== currentPlan);
+          if (currentPlan === 'free') {
+            paidPlans.sort((a, b) => (a.id === 'lite' ? -1 : b.id === 'lite' ? 1 : 0));
+            if (titleEl) titleEl.textContent = liteMonthly ? `Upgrade to Lite — ${moneyLabel(liteMonthly.amount)}/mo` : 'Upgrade to Lite';
+            if (copyEl) copyEl.textContent = 'You’ve reached a free usage limit. Lite includes 30 AI calls and 10 web lookups each month.';
+          } else if (currentPlan === 'lite') {
+            if (titleEl) titleEl.textContent = 'Lite monthly limit reached';
+            if (copyEl) copyEl.textContent = 'Your Lite plan includes 30 AI calls and 10 web lookups each month. Choose another plan to continue.';
+          } else {
+            if (titleEl) titleEl.textContent = 'Usage limit reached';
+            if (copyEl) copyEl.textContent = 'Choose another plan to continue.';
+          }
           planWrap.textContent = '';
           let shown = 0;
           paidPlans.forEach((plan) => {

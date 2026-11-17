@@ -310,7 +310,7 @@ async function sendPlanPicker(bot, chatId) {
     const paidPrices = (data.plans || []).flatMap(plan => plan.prices.filter(pr => pr.amount > 0).map(pr => ({ plan, price: pr })));
     if (paidPrices.length === 0) return bot.sendMessage(chatId, 'No paid plans configured yet.');
     const keyboard = paidPrices.map(({ plan, price }) => ([{
-      text: `${plan.name} — ${price.name} ($${(price.amount / 100).toFixed(2)}/${price.billingCycle === 'yearly' ? 'yr' : 'mo'})`,
+      text: `${plan.name} — ${price.name} ($${(price.amount / 100).toFixed(2)}/${price.billingCycle === 'yearly' ? 'yr' : 'mo'}${price.introLabel ? ` · ${price.introLabel}` : ''})`,
       callback_data: `sub:${plan.id}:${price.id}`,
     }]));
     await bot.sendMessage(chatId, '💳 *Choose a plan:*', { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
@@ -855,7 +855,7 @@ async function handleMessage(roleKey, msg) {
   // ── Web vulnerability scan + login audit — reachable from ANY fleet bot, so the
   //    checks work today even before the slot-7 security token exists. The security
   //    bot owns them permanently once it is created.
-  if (/^\/(?:scan|scanall|scanlast|lastscan|logins|ips|baseline|guard|access|whois|deny|undeny|denials|enforce|observe)\b/i.test(text)) {
+  if (/^\/(?:scan|scanall|scanlast|lastscan|logins|ips|baseline|files|guard|access|whois|deny|undeny|denials|enforce|observe)\b/i.test(text)) {
     try {
       const reply = await handleSecurityCommand(text);
       if (reply) return await bot.sendMessage(chatId, reply);

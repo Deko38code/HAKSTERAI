@@ -3,6 +3,20 @@ import Layout from '../../layouts/Layout.astro';
 ---
 
 <Layout title="Admin — Email Monitor | haksterAi" description="Owner-only Gmail inbox and sending monitor.">
+<script is:inline>(function(){
+/* Redirect to Freebuff only when its session check explicitly rejects the request. */
+if (window.__fbGate) return; window.__fbGate = 1;
+try {
+  var fbKey = ''; try { fbKey = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch (e) {}
+  fetch('/api/auth/freebuff/me', { credentials: 'same-origin', headers: fbKey ? { 'x-api-key': fbKey } : {} })
+    .then(function (r) {
+      if (r.status === 401) { var n = location.pathname + location.search; location.replace('/auth/freebuff?next=' + encodeURIComponent(n)); return; }
+      if (!r.ok) document.dispatchEvent(new CustomEvent('hakster-freebuff-auth-error'));
+    })
+    .catch(function () { document.dispatchEvent(new CustomEvent('hakster-freebuff-auth-error')); });
+} catch (e) {}
+})();</script>
+
   <main class="mx-auto min-h-screen max-w-6xl px-5 pb-16 pt-28 text-slate-100">
     <nav class="mb-5 text-sm text-slate-500"><a href="/" class="hover:text-violet-300">Home</a> <span class="px-2">›</span><span class="text-amber-300">Admin</span> <span class="px-2">›</span><span class="text-slate-300">Email Monitor</span></nav>
 
@@ -22,6 +36,7 @@ import Layout from '../../layouts/Layout.astro';
         <article class="rounded-2xl border border-amber-300/15 bg-amber-300/5 p-5"><p class="text-xs uppercase tracking-wider text-amber-200/70">Google setup</p><h2 class="mt-2 font-semibold text-amber-100">One-time configuration</h2><p class="mt-2 text-sm text-amber-100/70">Enable the Gmail API and register <code class="break-all text-xs">https://haksterai.com/api/admin/gmail/callback</code> in the Google OAuth client. Inbox access uses a restricted scope; Google may require test-user access or OAuth verification.</p></article>
       </div>
 
+      <div id="freebuff-auth-error" role="status" aria-live="polite" class="mt-5 hidden rounded-xl border border-rose-300/20 bg-rose-300/5 px-4 py-3 text-sm text-rose-200">Freebuff sign-in could not be verified. Reload this page or <a class="underline" href="/auth/freebuff">sign in again</a>.</div>
       <div class="mt-7 flex flex-wrap items-center gap-3">
         <button id="gmail-connect" type="button" class="rounded-xl bg-violet-400 px-5 py-3 font-bold text-black transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">Connect Gmail · inbox + send</button>
         <button id="gmail-refresh" type="button" disabled class="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">↻ Refresh inbox</button>
@@ -46,7 +61,12 @@ import Layout from '../../layouts/Layout.astro';
   <script is:inline>
     (() => {
       const apiBase = location.port === '4321' ? 'http://localhost:3579' : '';
-      const token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || '';
+      document.addEventListener('hakster-freebuff-auth-error', () => {
+        document.getElementById('freebuff-auth-error')?.classList.remove('hidden');
+      });
+      const headers = {};
+      const ownerKeys = [localStorage.getItem('hakster_google_token'), localStorage.getItem('hakster_api_key')]
+        .filter((key, index, all) => key && all.indexOf(key) === index);
       const authBadge = document.getElementById('gmail-auth-status');
       const status = document.getElementById('gmail-status');
       const connectButton = document.getElementById('gmail-connect');
@@ -57,7 +77,6 @@ import Layout from '../../layouts/Layout.astro';
       const compose = document.getElementById('gmail-compose');
       const sendButton = document.getElementById('gmail-send');
       const sendStatus = document.getElementById('gmail-send-status');
-      const headers = { 'x-api-key': token };
       const params = new URLSearchParams(location.search);
       const POPUP_FLAG = 'haksterai_gmail_popup_pending';
       const POPUP_CHANNEL = 'haksterai-gmail-monitor';
@@ -168,15 +187,27 @@ import Layout from '../../layouts/Layout.astro';
       async function initialize() {
         connectButton.disabled = true;
         refreshButton.disabled = true;
-        if (!token) {
+        if (!ownerKeys.length) {
           setBadge('Sign in as owner');
           status.textContent = 'Sign in to HaksterAI with the owner account to use the Gmail monitor.';
           return;
         }
         try {
-          const ownerResponse = await fetch(apiBase + '/api/auth/me', { headers, cache: 'no-store' });
-          const ownerData = ownerResponse.ok ? await ownerResponse.json() : null;
-          if (!ownerData?.user?.is_owner) throw new Error('Owner access required.');
+          let ownerKey = '';
+          for (const key of ownerKeys) {
+            const ownerResponse = await fetch(apiBase + '/api/auth/me', { headers: { 'x-api-key': key }, cache: 'no-store' });
+            if (ownerResponse.status === 401) {
+              for (const name of ['hakster_google_token', 'hakster_api_key']) {
+                if (localStorage.getItem(name) === key) localStorage.removeItem(name);
+              }
+              continue;
+            }
+            if (!ownerResponse.ok) continue;
+            const ownerData = await ownerResponse.json().catch(() => null);
+            if (ownerData?.user?.is_owner) { ownerKey = key; break; }
+          }
+          if (!ownerKey) throw new Error('Owner access required. Sign in to HaksterAI with the owner account.');
+          headers['x-api-key'] = ownerKey;
           setBadge('Owner verified', true);
           const response = await fetch(apiBase + '/api/admin/gmail/status', { headers, cache: 'no-store' });
           const data = await response.json().catch(() => ({}));

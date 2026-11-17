@@ -62,6 +62,7 @@ const HELP = [
   '`/logins` — recent successful and failed logins',
   '`/ips` — source IPs seen, with counts',
   '`/baseline` — what the bot has learned (usual IPs, users, hours)',
+  '`/files` — junkalot files, deps, build and unit on Parrot',
   '',
   '*Access · paid · denials*',
   '`/guard` — who was challenged or denied in the last 24h',
@@ -273,6 +274,9 @@ const COMMANDS = {
   '/logins': loginsNow,
   '/ips': ipsNow,
   '/baseline': baselineNow,
+  // Junkalot's files, dependency tree, staged build and unit on Parrot — the check that
+  // would have caught the 2026-11-17 outage. Restores a missing node_modules on the way through.
+  '/files': () => require('./junkalotGuard').filesReport(),
 };
 
 // Returns message text for a security-bot command, or null when the text is not ours.
