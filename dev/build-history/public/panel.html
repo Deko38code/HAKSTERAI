@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build History · HaksterAI</title>
+<style>
+  :root{
+    --bg:#07090c;--panel:#0d1117;--panel2:#11171f;--line:#1e2733;
+    --text:#d7e2ee;--mute:#7c8ea3;--green:#3ddc84;--red:#ff6b6b;--amber:#ffc857;--blue:#6cb6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+  header{position:sticky;top:0;z-index:5;background:#07090ce8;backdrop-filter:blur(6px);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  h1{font-size:15px;margin:0;letter-spacing:.04em;color:var(--green)}
+  .sub{font-size:11px;color:var(--mute)}
+  .filters{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto}
+  select,input,button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12px}
+  button{cursor:pointer}
+  button:hover,select:hover,input:hover{border-color:#2f4054}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--green);outline-offset:1px}
+  main{padding:16px 18px 60px;max-width:1180px;margin:0 auto}
+  .project{font-size:11px;letter-spacing:.12em;color:var(--mute);margin:22px 0 8px;text-transform:uppercase}
+  .empty{border:1px dashed var(--line);border-radius:8px;padding:18px;color:var(--mute);font-size:12px}
+  .build{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:10px;overflow:hidden}
+  .build>summary{list-style:none;cursor:pointer;padding:12px 14px;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center}
+  .build>summary::-webkit-details-marker{display:none}
+  .badge{font-size:10px;font-weight:700;letter-spacing:.06em;padding:3px 8px;border-radius:999px;border:1px solid}
+  .b-success{color:var(--green);border-color:#3ddc8455;background:#3ddc8414}
+  .b-failed{color:var(--red);border-color:#ff6b6b55;background:#ff6b6b14}
+  .b-rolled_back{color:var(--amber);border-color:#ffc85755;background:#ffc85714}
+  .b-unknown{color:var(--mute);border-color:#7c8ea355;background:#7c8ea314}
+  .b-running{color:var(--blue);border-color:#6cb6ff55;background:#6cb6ff14}
+  .b-title{font-size:13px}
+  .b-meta{font-size:11px;color:var(--mute);margin-top:2px}
+  .b-when{font-size:11px;color:var(--mute);text-align:right}
+  .body{border-top:1px solid var(--line);padding:12px 14px 16px;background:#0a0e13}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px 12px}
+  .card h3{margin:0 0 6px;font-size:11px;letter-spacing:.1em;color:var(--mute);text-transform:uppercase;font-weight:700}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;font-size:12px}
+  .kv dt{color:var(--mute)}
+  .kv dd{margin:0;word-break:break-word}
+  .files{margin:0;padding-left:16px;font-size:12px}
+  .files li{margin:1px 0}
+  .tag{font-size:10px;padding:1px 6px;border-radius:4px;background:#1b2531;color:var(--mute);margin-right:6px}
+  .stages{display:flex;flex-direction:column;gap:4px;font-size:12px}
+  .stage{display:flex;gap:8px;align-items:center}
+  .dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;background:#2a3542}
+  .dot.done{background:var(--green)}.dot.failed{background:var(--red)}.dot.running{background:var(--blue)}
+  pre.logs{max-height:240px;overflow:auto;background:#05070a;border:1px solid var(--line);border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap;margin:6px 0 0}
+  a{color:var(--blue)}
+  .unknown{color:var(--amber)}
+  .stab{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:12px 14px;margin-bottom:14px}
+  .stab-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .stab-state{font:700 12px/1 ui-monospace,monospace;padding:4px 10px;border-radius:999px;border:1px solid}
+  .s-STABLE{color:var(--green);border-color:#3ddc8455;background:#3ddc8414}
+  .s-VERIFYING,.s-BUILDING,.s-DEPLOYING,.s-TESTING,.s-BUILT,.s-READY{color:var(--blue);border-color:#6cb6ff55;background:#6cb6ff14}
+  .s-DEGRADED{color:var(--amber);border-color:#ffc85755;background:#ffc85714}
+  .s-FAILED{color:var(--red);border-color:#ff6b6b55;background:#ff6b6b14}
+  .s-ROLLED_BACK{color:var(--amber);border-color:#ffc85755;background:#ffc85714}
+  .s-UNKNOWN{color:var(--mute);border-color:#7c8ea355;background:#7c8ea314}
+  .stab-reason{font-size:12px;color:var(--mute);flex:1 1 260px}
+  .stab-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-top:10px}
+  .chk{display:flex;gap:8px;align-items:flex-start;font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+  .chk .st{font-weight:700}
+  .chk.pass .st{color:var(--green)}.chk.fail .st{color:var(--red)}.chk.unknown .st{color:var(--amber)}
+  .chk .lbl{flex:1 1 auto}
+  .chk .det{display:block;color:var(--mute);font-size:10px;margin-top:2px;word-break:break-word}
+  .countdown{font-size:12px;color:var(--text)}
+  .countdown b{color:var(--green)}
+  .evs{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:4px 12px;margin-bottom:14px}
+  .ev{display:grid;grid-template-columns:150px 150px 1fr auto;gap:10px;font-size:11px;padding:5px 0;border-bottom:1px solid #10161e}
+  .ev:last-child{border-bottom:0}
+  .ev .t{color:var(--mute)}
+  .ev .n{color:var(--blue)}
+  .ev .p{color:var(--green);text-align:right}
+  @media (max-width:640px){.ev{grid-template-columns:1fr auto}.ev .t,.ev .n{grid-column:1/-1}}
+  .foot{margin-top:14px;font-size:11px;color:var(--mute)}
+  @media (max-width:640px){
+    header{padding:10px 12px}
+    main{padding:12px 10px 60px}
+    .build>summary{grid-template-columns:auto 1fr;gap:8px}
+    .b-when{grid-column:1/-1;text-align:left}
+    .kv{grid-template-columns:96px 1fr}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>BUILD HISTORY</h1>
+    <div class="sub" id="sub">loading…</div>
+  </div>
+  <div class="filters">
+    <select id="f-project" aria-label="Filter by project">
+      <option value="">All projects</option>
+      <option value="haksterai">HaksterAI</option>
+    </select>
+    <select id="f-status" aria-label="Filter by status">
+      <option value="">All statuses</option>
+      <option value="success">Success</option>
+      <option value="failed">Failed</option>
+      <option value="rolled_back">Rolled back</option>
+      <option value="unknown">Unknown / interrupted</option>
+    </select>
+    <input id="f-since" type="date" aria-label="Filter from date">
+    <input id="f-id" type="search" placeholder="build id" aria-label="Filter by build id">
+    <button id="refresh" type="button">Refresh</button>
+  </div>
+</header>
+
+<main>
+  <section id="haksterai">
+    <div class="project">HaksterAI · this host (Dell) · separate project</div>
+    <div id="stability-banner" class="empty">Loading stability evidence…</div>
+    <div id="haksterai-list"></div>
+    <div class="project">Applet lifecycle events · HaksterAI audit log</div>
+    <div id="applet-events" class="empty">Loading applet events…</div>
+  </section>
+
+  <section id="phantomide">
+    <div class="project">PhantomIDE · separate project</div>
+    <div class="empty" id="phantomide-note">Not connected. PhantomIDE keeps its own build history; this panel only ever receives the sanitized metadata feed, and that integration is not enabled in this isolated build.</div>
+  </section>
+
+  <section id="junkalot">
+    <div class="project">Junkalot · separate project</div>
+    <div class="empty">Out of scope. This panel does not read, write or display Junkalot build data.</div>
+  </section>
+
+  <div class="foot" id="foot"></div>
+</main>
+
+<script>
+  const DEV_TOKEN = '__DEV_TOKEN__';
+  const API = '/api/build-history';
+  const state = { rows: [], total: 0, problems: [] };
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+
+  const UNKNOWN = '<span class="unknown">UNKNOWN</span>';
+  const val = (v) => (v == null || v === '' ? UNKNOWN : esc(v));
+
+  function badge(outcome, status) {
+    const o = status === 'running' ? 'running' : (outcome || 'unknown');
+    const label = { success: 'SUCCESS', failed: 'FAILED', rolled_back: 'ROLLED BACK', unknown: 'UNKNOWN', running: 'RUNNING' }[o] || 'UNKNOWN';
+    return `<span class="badge b-${o}">${label}</span>`;
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return 'UNKNOWN';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return 'UNKNOWN';
+    return d.toLocaleString();
+  }
+  function fmtDur(ms) {
+    if (!Number.isFinite(ms)) return 'UNKNOWN';
+    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+  }
+
+  function filesBlock(title, group, count) {
+    if (!group) return '';
+    const sections = ['added', 'modified', 'renamed', 'deleted', 'copied', 'changed']
+      .filter((k) => (group[k] || []).length)
+      .map((k) => `<div><span class="tag">${k}</span></div><ul class="files">${group[k].map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`)
+      .join('');
+    return `<div class="card"><h3>${esc(title)}${Number.isFinite(count) ? ` · ${count}` : ''}</h3>${sections || '<div class="sub">no changes recorded</div>'}</div>`;
+  }
+
+  function buildHtml(b) {
+    const g = b.git || {};
+    const gh = g.remote && g.remote.provider === 'github'
+      ? `<a href="https://github.com/${encodeURIComponent(g.remote.owner)}/${encodeURIComponent(g.remote.repo)}/commit/${encodeURIComponent(g.commit)}" target="_blank" rel="noopener noreferrer">${esc(g.shortCommit || 'commit')}</a>`
+      : val(g.shortCommit);
+    const stages = (b.stages || []).map((s) =>
+      `<div class="stage"><span class="dot ${esc(s.status)}"></span><span>${esc(s.label)}</span><span class="sub">${s.status === 'pending' ? '' : fmtDur(s.ms)}</span></div>`).join('');
+    const logs = (b.logs?.tail || []).length
+      ? `<pre class="logs">${esc((b.logs.tail || []).join('\n'))}</pre>`
+      : '<div class="sub">No build output recorded.</div>';
+    const warn = (b.logs?.warnings || []).length;
+    const errs = (b.logs?.errors || []).length;
+
+    return `
+    <details class="build" data-id="${esc(b.buildId)}">
+      <summary>
+        ${badge(b.outcome, b.buildStatus)}
+        <div>
+          <div class="b-title">${esc(b.summary || b.buildId)}</div>
+          <div class="b-meta">${esc(b.buildId)} · ${esc(g.branch || 'branch UNKNOWN')} · ${g.dirty ? `${g.uncommittedCount} uncommitted` : 'clean tree'} · ${fmtDur(b.durationMs)}</div>
+        </div>
+        <div class="b-when">${fmtTime(b.startedAt)}</div>
+      </summary>
+      <div class="body">
+        <div class="grid">
+          <div class="card">
+            <h3>Identity</h3>
+            <dl class="kv">
+              <dt>Build id</dt><dd>${esc(b.buildId)}</dd>
+              <dt>Project</dt><dd>${val(b.project)}</dd>
+              <dt>Box</dt><dd>${val(b.box)}</dd>
+              <dt>Trigger</dt><dd>${val(b.trigger)}</dd>
+              <dt>Started</dt><dd>${fmtTime(b.startedAt)}</dd>
+              <dt>Finished</dt><dd>${b.finishedAt ? fmtTime(b.finishedAt) : UNKNOWN}</dd>
+              <dt>Duration</dt><dd>${fmtDur(b.durationMs)}</dd>
+            </dl>
+          </div>
+          <div class="card">
+            <h3>Source control</h3>
+            <dl class="kv">
+              <dt>Branch</dt><dd>${val(g.branch)}</dd>
+              <dt>Commit</dt><dd>${gh}</dd>
+              <dt>Tag</dt><dd>${val(g.describe)}</dd>
+              <dt>Working tree</dt><dd>${g.dirty ? `<span class="unknown">dirty · ${g.uncommittedCount} uncommitted change(s) included</span>` : 'clean'}</dd>
+              <dt>Committed changes</dt><dd>${Number.isFinite(g.committedCount) ? g.committedCount : UNKNOWN}</dd>
+            </dl>
+            <div class="sub" style="margin-top:6px">A commit alone never describes the build: uncommitted changes are recorded separately and shown here.</div>
+          </div>
+          <div class="card">
+            <h3>Runtime</h3>
+            <dl class="kv">
+              <dt>Node</dt><dd>${val(b.versions?.node)}</dd>
+              <dt>npm</dt><dd>${val(b.versions?.npm)}</dd>
+              <dt>Astro</dt><dd>${val(b.versions?.astro)}</dd>
+              <dt>Health check</dt><dd>${val(b.health?.result)}</dd>
+              <dt>Tests</dt><dd>${b.tests?.ran ? esc(b.tests.result) : 'not run'}</dd>
+            </dl>
+          </div>
+          <div class="card">
+            <h3>Dependencies</h3>
+            <dl class="kv">
+              <dt>Added</dt><dd>${b.dependencies?.diff ? b.dependencies.diff.added.length : UNKNOWN}</dd>
+              <dt>Updated</dt><dd>${b.dependencies?.diff ? b.dependencies.diff.updated.length : UNKNOWN}</dd>
+              <dt>Removed</dt><dd>${b.dependencies?.diff ? b.dependencies.diff.removed.length : UNKNOWN}</dd>
+              <dt>Lockfile</dt><dd>${b.dependencies?.after?.lockHash || UNKNOWN}</dd>
+            </dl>
+          </div>
+          <div class="card">
+            <h3>Deployment</h3>
+            <dl class="kv">
+              <dt>Approved</dt><dd>${b.approved ? esc(b.approvedBy || 'yes') : 'not approved'}</dd>
+              <dt>Outcome</dt><dd>${val(b.deployment?.outcome)}</dd>
+              <dt>Rollback ref</dt><dd>${b.rollback?.available ? esc(b.rollback.reference) : UNKNOWN}</dd>
+              <dt>Previous build</dt><dd>${b.previous?.buildId ? esc(b.previous.buildId) : 'first recorded build'}</dd>
+            </dl>
+          </div>
+          <div class="card">
+            <h3>Stages</h3>
+            <div class="stages">${stages || '<div class="sub">No stages recorded.</div>'}</div>
+            <div class="sub" style="margin-top:6px">Warnings: ${warn} · Errors: ${errs}</div>
+          </div>
+        </div>
+
+        <div class="grid" style="margin-top:12px">
+          ${filesBlock('Committed changes', g.committed, g.committedCount)}
+          ${filesBlock('Uncommitted changes in this build', g.uncommitted, g.uncommittedCount)}
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h3>Build log (secrets redacted before storage)</h3>
+          ${logs}
+          ${(b.logs?.errors || []).length ? `<h3 style="margin-top:8px">Errors</h3><pre class="logs">${esc(b.logs.errors.join('\n'))}</pre>` : ''}
+        </div>
+      </div>
+    </details>`;
+  }
+
+  function params() {
+    const p = new URLSearchParams();
+    const project = document.getElementById('f-project').value;
+    const status = document.getElementById('f-status').value;
+    const since = document.getElementById('f-since').value;
+    const id = document.getElementById('f-id').value.trim();
+    if (project) p.set('project', project);
+    if (status) p.set('status', status);
+    if (since) p.set('since', since + 'T00:00:00Z');
+    if (id) p.set('buildId', id);
+    return p;
+  }
+
+  function stabilityHtml(st) {
+    if (!st) return '<div class="empty">No stability evidence available.</div>';
+    const w = st.window || {};
+    const t = st.timestamps || {};
+    const cd = Number.isFinite(w.remainingSec)
+      ? (w.remainingSec > 0 ? `${Math.floor(w.remainingSec / 60)}m ${w.remainingSec % 60}s remaining` : 'window complete')
+      : 'UNKNOWN';
+    const checks = (st.checks || []).map((c) => `
+      <div class="chk ${esc(c.status)}">
+        <span class="st">${c.status === 'pass' ? '✓' : c.status === 'fail' ? '✗' : '?'}</span>
+        <span class="lbl">${esc(c.label || c.id)}${c.detail ? `<span class="det">${esc(c.detail)}</span>` : ''}</span>
+      </div>`).join('');
+    return `
+      <div class="stab">
+        <div class="stab-head">
+          <span class="stab-state s-${esc(st.state)}">${esc(st.state)}</span>
+          <span class="stab-reason">${esc(st.reason || '')}</span>
+          <span class="countdown">window <b>${esc(String(w.elapsedSec ?? '?'))}s</b> / ${esc(String(w.configuredSec ?? '?'))}s · ${esc(cd)}</span>
+        </div>
+        <div class="stab-reason" style="margin-top:6px">
+          Window approved: <b>${w.approved ? 'yes' : 'NO — awaiting owner approval (proposed 5–15 min)'}</b> ·
+          last check ${esc(t.lastCheckAt || 'UNKNOWN')} ·
+          last deployment ${esc(t.lastDeployedAt || 'UNKNOWN')}${Number.isFinite(t.deployedAgeSec) ? ` (${esc(String(t.deployedAgeSec))}s ago)` : ''} ·
+          ${Number.isFinite(t.stableForSec) && t.buildFirstStableAt ? `STABLE for ${esc(String(t.stableForSec))}s` : 'not yet STABLE'}
+        </div>
+        <div class="stab-grid">${checks || '<div class="sub">no checks recorded</div>'}</div>
+      </div>`;
+  }
+
+  async function loadStability() {
+    const el = document.getElementById('stability-banner');
+    try {
+      const res = await fetch(API + '/stability', { headers: { 'x-api-key': DEV_TOKEN }, cache: 'no-store' });
+      if (!res.ok) throw new Error('http ' + res.status);
+      el.outerHTML = stabilityHtml(await res.json()).replace('<div class="stab">', '<div id="stability-banner" class="stab">');
+    } catch (e) {
+      el.className = 'empty';
+      el.textContent = 'Stability evidence unavailable: ' + e.message;
+    }
+  }
+
+  async function loadEvents() {
+    const el = document.getElementById('applet-events');
+    try {
+      const res = await fetch(API.replace('/build-history', '') + '/applet/events?limit=60', {
+        headers: { 'x-api-key': DEV_TOKEN }, cache: 'no-store',
+      });
+      if (!res.ok) throw new Error('http ' + res.status);
+      const data = await res.json();
+      const rows = data.entries || [];
+      el.className = rows.length ? 'evs' : 'empty';
+      el.innerHTML = rows.length
+        ? rows.map((e) => `<div class="ev"><span class="t">${esc(e.at)}</span><span class="n">${esc(e.event)}</span><span>${esc([e.stage, e.buildId, e.detail].filter(Boolean).join(' · '))}</span><span class="p">${Number.isFinite(e.percent) ? esc(String(e.percent)) + '%' : ''}</span></div>`).join('')
+        : 'No applet events recorded yet. Nothing is shown rather than a placeholder entry.';
+    } catch (e) {
+      el.className = 'empty';
+      el.textContent = 'Applet events unavailable: ' + e.message;
+    }
+  }
+
+  async function load() {
+    const list = document.getElementById('haksterai-list');
+    try {
+      const res = await fetch(API + '/list?' + params().toString(), { headers: { 'x-api-key': DEV_TOKEN }, cache: 'no-store' });
+      if (!res.ok) throw new Error('http ' + res.status);
+      const data = await res.json();
+      state.rows = data.rows || [];
+      state.total = data.total || 0;
+      state.problems = data.problems || [];
+      list.innerHTML = state.rows.length
+        ? state.rows.map(buildHtml).join('')
+        : '<div class="empty">No builds recorded yet. Nothing is shown rather than a placeholder record.</div>';
+      document.getElementById('sub').textContent =
+        `${state.rows.length} of ${state.total} build(s) · ${new Date().toLocaleTimeString()}` +
+        (state.problems.length ? ` · ${state.problems.length} unreadable record line(s)` : '');
+    } catch (e) {
+      list.innerHTML = `<div class="empty">Could not load build history: ${esc(e.message)}</div>`;
+      document.getElementById('sub').textContent = 'load failed';
+    }
+  }
+
+  ['f-project', 'f-status', 'f-since', 'f-id'].forEach((id) => {
+    const el = document.getElementById(id);
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => load());
+  });
+  document.getElementById('refresh').addEventListener('click', () => { load(); loadStability(); loadEvents(); });
+  load();
+  loadStability();
+  loadEvents();
+  setInterval(load, 15000);
+  setInterval(loadStability, 10000);
+  setInterval(loadEvents, 10000);
+</script>
+</body>
+</html>

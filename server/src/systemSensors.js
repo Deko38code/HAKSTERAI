@@ -114,9 +114,19 @@ function reduceSensors(json) {
     other: [],
     chip: null,
   };
-  // Prefer the laptop's own SMM chip; fall back to coretemp/k10temp.
-  const preferred = Object.keys(json).find(name => /dell_smm|coretemp|k10temp|cpu_thermal|acpitz/i.test(name));
-  const order = preferred ? [preferred, ...Object.keys(json).filter(n => n !== preferred)] : Object.keys(json);
+  // Read the laptop's own SMM chip first: dell_smm is the only chip on this
+  // class of machine that carries the fan, SODIMM and ambient sensors.
+  // coretemp/k10temp carry CPU cores only. Every chip is scanned (no early
+  // break) so the fan and RAM readings are not lost to a CPU-only chip
+  // winning the old "first chip with a temperature" race.
+  const RANK = [/dell_smm/i, /coretemp|k10temp|cpu_thermal|acpitz/i];
+  const rank = (name) => {
+    const i = RANK.findIndex((re) => re.test(name));
+    return i === -1 ? RANK.length : i;
+  };
+  const order = Object.keys(json).map((name, i) => ({ name, i }))
+    .sort((a, b) => rank(a.name) - rank(b.name) || a.i - b.i)
+    .map((e) => e.name);
   for (const chipName of order) {
     const chip = json[chipName];
     if (!chip || typeof chip !== 'object') continue;
@@ -133,9 +143,10 @@ function reduceSensors(json) {
       else if (/sodimm|dimm|ram|mem/.test(l) && out.ramC == null) out.ramC = Math.round(temp);
       else if (/ambient|board|mainboard/.test(l) && out.ambientC == null) out.ambientC = Math.round(temp);
       else out.other.push({ label: String(label), c: Math.round(temp), chip: String(chipName) });
-      if (out.cpuC != null || out.ramC != null) out.chip = String(chipName);
+      if (out.cpuC != null || out.ramC != null) {
+        if (!out.chip) out.chip = String(chipName);
+      }
     }
-    if (out.cpuC != null || out.ramC != null) break;
   }
   if (!out.cpuC && !out.ramC && !out.fanRpm && !out.other.length) return null;
   return out;

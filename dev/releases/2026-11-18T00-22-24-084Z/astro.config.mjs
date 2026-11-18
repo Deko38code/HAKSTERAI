@@ -1,0 +1,1 @@
+/home/ghost/haksterAi/astro.config.mjs

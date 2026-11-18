@@ -278,6 +278,791 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:190px"><strong style="color:#c4b5fd">HaksterAI update ready</strong><br /><span id="haksterai-update-detail" style="color:#94a3b8;font-size:12px">A newer version is available.</span></span><button id="haksterai-update-now" type="button" style="border:0;background:#7c3aed;color:white;border-radius:9px;padding:8px 12px;font-weight:700;cursor:pointer">Update</button><button id="haksterai-update-later" type="button" style="border:1px solid #334155;background:#1e293b;color:#cbd5e1;border-radius:9px;padding:8px 12px;cursor:pointer">Later</button></div>
     </aside>
 
+    <!-- Phantom server applet — the same widget junkalot.co runs, ported whole:
+         bottom-right card, docks to a chip after 10 s of "up to date", tucks into
+         a slim edge tab 20 s later, and comes back out the moment a build is
+         pushed. Only the site name and the data differ: every figure is read
+         from haksterai.com's own /api/version, and there is no percentage unless
+         the server reports measured progress. -->
+    <aside id="phantom-server-applet" data-mode="card" data-state="checking" role="status" aria-live="polite">
+      <style>
+        #phantom-server-applet{position:fixed;right:6px;bottom:6px;z-index:1998;font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:#d7ffe4}
+        #phantom-server-applet .psa-card{border:1px solid rgba(0,255,65,.45);border-top:2px solid #00ff41;border-radius:12px;background:linear-gradient(135deg,#050508 0%,#0c0c18 100%);box-shadow:0 12px 42px rgba(0,255,65,.24);padding:12px 14px;width:min(420px,calc(100vw - 12px))}
+        #phantom-server-applet[data-state="ready"] .psa-card,#phantom-server-applet[data-state="applying"] .psa-card{border-color:rgba(251,191,36,.55);border-top-color:rgba(251,191,36,.7);box-shadow:0 12px 42px rgba(251,191,36,.22)}
+        #phantom-server-applet[data-state="offline"] .psa-card{border-color:rgba(248,113,113,.55);border-top-color:rgba(248,113,113,.75);box-shadow:0 12px 42px rgba(248,113,113,.22)}
+        #phantom-server-applet[data-state="failed"] .psa-card{border-color:rgba(248,113,113,.55);border-top-color:rgba(248,113,113,.75);box-shadow:0 12px 42px rgba(248,113,113,.22)}
+        #phantom-server-applet .psa-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 10px;margin-bottom:8px}
+        #phantom-server-applet .psa-brand{color:#00ff41;font-size:13px;font-weight:800;letter-spacing:3px;text-shadow:0 0 15px rgba(0,255,65,.8)}
+        #phantom-server-applet .psa-sub{color:#00cc33;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+        #phantom-server-applet .psa-state{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;border-radius:9999px;padding:4px 12px;font-size:12px;font-weight:700;background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.5);color:#00ff41;margin-bottom:8px}
+        #phantom-server-applet[data-state="failed"] .psa-state{background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.6);color:#f87171}
+        #phantom-server-applet[data-state="ready"] .psa-state,#phantom-server-applet[data-state="applying"] .psa-state{background:rgba(251,191,36,.14);border-color:rgba(251,191,36,.6);color:#fbbf24}
+        #phantom-server-applet[data-state="offline"] .psa-state{background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.6);color:#f87171}
+        #phantom-server-applet .psa-detail{color:#9fe8b4;font-size:12px;overflow-wrap:anywhere;margin-bottom:8px}
+        #phantom-server-applet .psa-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:4px 10px;font-size:11px;color:#7fd99a;font-variant-numeric:tabular-nums;margin-bottom:8px}
+        #phantom-server-applet .psa-grid b{color:#d7ffe4;font-weight:600}
+        #phantom-server-applet .psa-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+        #phantom-server-applet .psa-actions[hidden],#phantom-server-applet .psa-bar[hidden]{display:none}
+        #phantom-server-applet .psa-actions button{border:1px solid rgba(0,255,65,.35);background:#0b1410;color:#b9ffd0;border-radius:9px;padding:8px 12px;font:700 12px/1 inherit;cursor:pointer}
+        #phantom-server-applet .psa-actions button.psa-primary{background:#00ff41;border-color:#00ff41;color:#04120a}
+        #phantom-server-applet .psa-actions button.psa-primary[disabled]{opacity:.75;cursor:default}
+        #phantom-server-applet .psa-bar{position:relative;display:block;height:8px;background:#04120a;border:1px solid rgba(0,255,65,.35);border-radius:999px;overflow:hidden;margin-bottom:8px;box-shadow:inset 0 1px 2px rgba(0,0,0,.6)}
+        #phantom-server-applet .psa-fill{position:absolute;top:0;left:0;bottom:0;width:100%;border-radius:999px;background:linear-gradient(90deg,#00b83a,#00ff41 55%,#9dffb8);box-shadow:0 0 14px rgba(0,255,65,.55);animation:psa-pulse 1.4s ease-in-out infinite}
+        @keyframes psa-pulse{0%,100%{opacity:.45}50%{opacity:.9}}
+        #phantom-server-applet .psa-foot{padding-top:7px;border-top:1px solid rgba(0,255,65,.16);display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#7fd99a}
+        /* §18: the footer link is a real tap target. Its text is 15px tall, so it
+           carries padding and an equal negative margin — the hit area reaches
+           33x~107px while the visual layout stays exactly where it was. */
+        #phantom-server-applet .psa-foot a{color:#00ff41;font-weight:700;text-decoration:none;display:inline-block;padding:9px 6px;margin:-9px -6px}
+        #phantom-server-applet .psa-chip,#phantom-server-applet .psa-tab{display:none}
+        #phantom-server-applet[data-mode="chip"] .psa-card,#phantom-server-applet[data-mode="tab"] .psa-card{display:none}
+        #phantom-server-applet[data-mode="chip"] .psa-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(0,255,65,.45);border-radius:9999px;background:linear-gradient(135deg,#050508 0%,#0c0c18 100%);box-shadow:0 6px 18px rgba(0,255,65,.18);color:#d7ffe4;padding:7px 12px;font:12px/1.2 inherit;cursor:pointer}
+        #phantom-server-applet[data-mode="tab"] .psa-tab{display:inline-flex;flex-direction:column;align-items:center;gap:4px;position:fixed;right:10px;bottom:96px;border:1px solid rgba(0,255,65,.55);border-radius:12px;background:linear-gradient(135deg,#050508 0%,#0c0c18 100%);box-shadow:0 6px 18px rgba(0,255,65,.18);color:#00ff41;padding:10px 6px;cursor:pointer;font-size:11px;line-height:1}
+        #phantom-server-applet .psa-tab>span:first-child{font-size:15px}
+        #phantom-server-applet .psa-chip b{color:#d7ffe4;font-weight:700}
+        #phantom-server-applet .psa-chip .psa-code{color:#00cc33;font-variant-numeric:tabular-nums}
+        @media (prefers-reduced-motion: reduce){#phantom-server-applet .psa-fill{animation:none;opacity:.7}}
+        /* ── live build progress (measured, never invented) ── */
+        #phantom-server-applet .psa-live{margin:0 0 8px;padding:7px 8px;border:1px solid rgba(0,255,65,.18);border-radius:8px;background:rgba(0,255,65,.04)}
+        #phantom-server-applet .psa-live[hidden],#phantom-server-applet .psa-stab[hidden],#phantom-server-applet .psa-error[hidden]{display:none}
+        #phantom-server-applet .psa-live-head,#phantom-server-applet .psa-live-sub{display:flex;justify-content:space-between;gap:8px}
+        #phantom-server-applet .psa-live-head{font-size:11px;font-weight:700;color:#00ff41}
+        #phantom-server-applet .psa-live-sub{font-size:10px;color:#7fd99a;margin-top:2px}
+        #phantom-server-applet #psa-stage{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        #phantom-server-applet #psa-clock{flex:0 0 auto;font-variant-numeric:tabular-nums}
+        #phantom-server-applet .psa-updates{list-style:none;margin:5px 0 0;padding:0;max-height:92px;overflow:auto;font-size:10px;line-height:1.45;color:#9fe8b4}
+        #phantom-server-applet .psa-updates li{display:flex;gap:6px}
+        #phantom-server-applet .psa-updates .t{color:#0f7a33;flex:0 0 auto;font-variant-numeric:tabular-nums}
+        #phantom-server-applet .psa-error{margin:6px 0 0;padding:6px;border:1px solid rgba(248,113,113,.45);border-radius:6px;background:rgba(248,113,113,.08);color:#ffb4b4;font:10px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;max-height:110px;overflow:auto}
+        #phantom-server-applet .psa-stab{margin:0 0 8px;font-size:11px;color:#9fe8b4}
+        #phantom-server-applet .psa-stab b{color:#00ff41}
+        #phantom-server-applet .psa-stab[data-state="DEGRADED"],#phantom-server-applet .psa-stab[data-state="FAILED"]{color:#ffb4b4}
+        #phantom-server-applet .psa-stab[data-state="DEGRADED"] b,#phantom-server-applet .psa-stab[data-state="FAILED"] b{color:#f87171}
+        #phantom-server-applet .psa-stab[data-state="VERIFYING"] b{color:#fbbf24}
+        /* spinner in the docked chip / edge tab while work is active */
+        #phantom-server-applet .psa-ring{position:relative;display:inline-block;width:16px;height:16px;flex:0 0 16px}
+        #phantom-server-applet .psa-ring::before{content:"";position:absolute;inset:0;border-radius:50%;border:2px solid rgba(0,255,65,.25);border-top-color:#00ff41}
+        #phantom-server-applet .psa-spin[data-active="1"] .psa-ring::before{animation:psa-spin 1s linear infinite}
+        @keyframes psa-spin{to{transform:rotate(360deg)}}
+        #phantom-server-applet .psa-spin[data-failed="1"] .psa-ring::before{border-top-color:#f87171}
+        #phantom-server-applet .psa-tab .psa-ring{width:18px;height:18px}
+        @media (prefers-reduced-motion: reduce){
+          #phantom-server-applet .psa-spin[data-active="1"] .psa-ring::before{animation:none;border-top-color:#00ff41;border-right-color:#00ff41}
+        }
+        /* Phones: leave a real gutter so the card never clips off the left edge. */
+        @media (max-width:480px){#phantom-server-applet .psa-card{width:calc(100vw - 20px)}}
+      </style>
+      <div class="psa-card">
+        <div class="psa-head">
+          <span class="psa-brand"><span id="psa-ghost" aria-hidden="true">👻</span> PHANTOM IDE</span>
+          <span class="psa-sub">Update from PhantomIDE server</span>
+        </div>
+        <div class="psa-state"><span id="psa-icon" aria-hidden="true">●</span><span id="psa-title">haksterai.com — checking</span></div>
+        <div class="psa-detail" id="psa-detail">Reading the site build…</div>
+        <div class="psa-live" id="psa-live" hidden>
+          <div class="psa-live-head"><span id="psa-stage">—</span><span id="psa-clock">—</span></div>
+          <div class="psa-live-sub"><span id="psa-elapsed">elapsed —</span><span id="psa-eta">ETA unknown</span></div>
+          <ol class="psa-updates" id="psa-updates" aria-label="Timestamped build updates"></ol>
+          <pre class="psa-error" id="psa-error" hidden></pre>
+        </div>
+        <div class="psa-stab" id="psa-stab" hidden data-state="UNKNOWN">Stability <b id="psa-stab-state">UNKNOWN</b> <span id="psa-stab-detail">—</span></div>
+        <div class="psa-grid">
+          <span>Site build <b id="psa-site-build">—</b></span>
+          <span>Server <b id="psa-server">—</b></span>
+          <span>Pending <b id="psa-pending">—</b></span>
+          <span>Checked <b id="psa-checked">—</b></span>
+        </div>
+        <div class="psa-bar" id="psa-bar" hidden role="progressbar" aria-label="Update progress" aria-valuetext="Applying — the server reports no measured percentage"><span class="psa-fill"></span></div>
+        <div class="psa-actions" id="psa-actions" hidden>
+          <button type="button" class="psa-primary" id="psa-update-now">Update now</button>
+          <button type="button" id="psa-later">Later</button>
+        </div>
+        <div class="psa-foot"><span>HaksterAI · Powered by <a href="https://phantomide.com" target="_blank" rel="noopener noreferrer">PhantomIDE.com</a></span></div>
+      </div>
+      <button type="button" class="psa-chip psa-spin" id="psa-chip" data-active="0" data-failed="0" title="haksterai.com is up to date. Show the full update status.">
+        <span class="psa-ring" aria-hidden="true" id="psa-chip-ring"></span><b id="psa-chip-title">Up to date</b><span class="psa-code" id="psa-chip-code"></span><span aria-hidden="true" style="color:#0f7a33">▴</span>
+      </button>
+      <button type="button" class="psa-tab psa-spin" id="psa-tab" data-active="0" data-failed="0" title="haksterai.com is up to date. Open the update status." aria-label="haksterai.com is up to date. Open the update status.">
+        <span class="psa-ring" aria-hidden="true" id="psa-tab-ring"></span><span id="psa-tab-pct" aria-hidden="true" style="color:#64748b;font-size:10px">◂</span>
+      </button>
+    </aside>
+    <script is:inline data-cfasync="false">
+      (() => {
+        const root = document.getElementById('phantom-server-applet');
+        if (!root) return;
+        const el = (id) => document.getElementById(id);
+        const iconEl = el('psa-icon');
+        const titleEl = el('psa-title');
+        const detailEl = el('psa-detail');
+        const siteBuildEl = el('psa-site-build');
+        const serverEl = el('psa-server');
+        const pendingEl = el('psa-pending');
+        const checkedEl = el('psa-checked');
+        const actionsEl = el('psa-actions');
+        const updateBtn = el('psa-update-now');
+        const laterBtn = el('psa-later');
+        const barEl = el('psa-bar');
+        const chipTitleEl = el('psa-chip-title');
+        const chipCodeEl = el('psa-chip-code');
+        // Live build feed (spinner / progress / stability). Same measured data
+        // the isolated preview streams — nothing here is simulated.
+        const liveEl = el('psa-live');
+        const stageEl = el('psa-stage');
+        const clockEl = el('psa-clock');
+        const elapsedEl = el('psa-elapsed');
+        const etaEl = el('psa-eta');
+        const updatesEl = el('psa-updates');
+        const errorEl = el('psa-error');
+        const stabEl = el('psa-stab');
+        const stabStateEl = el('psa-stab-state');
+        const stabDetailEl = el('psa-stab-detail');
+        const tabPctEl = el('psa-tab-pct');
+        const live = { job: null, stability: null, at: 0, connected: false, audited: {}, lastStage: '', lastState: '', closedBuild: '' };
+
+        // Same timings junkalot.co runs, so both sites behave identically.
+        const POLL_MS = 2000;          // visible-tab poll: a pushed build shows within ~2 s
+        const OFFLINE_AFTER = 2;       // two misses (~4 s) means the site really is not answering
+        const AUTO_SECS = 8;           // visible countdown before a ready update reloads the tab
+        const DOCK_AFTER_MS = 10000;   // up-to-date card stays 10 s, then docks to a chip
+        const HIDE_AFTER_MS = 20000;   // chip stays 20 s, then tucks into the edge tab
+        const CLOSE_AFTER_UPDATE_MS = 5000; // junkalot's done-hide: a finished update closes its card in 5 s
+        const LATER_MS = 30 * 60 * 1000;
+        const LATER_KEY = 'phantom-applet-later';
+
+        let state = 'checking';
+        let misses = 0;
+        let wasOffline = false;
+        let lastCheck = 0;
+        let countdown = 0;
+        let countdownTimer = 0;
+        let dockTimer = 0;
+        let dockPending = false;   // a close is already scheduled; polls must not push it out
+        let dockDelay = 0;         // how far away that pending close is, so a sooner one can replace it
+        let hideTimer = 0;
+        let readyBuild = '';
+        let busy = false;
+        let queuedShown = '';      // which queued server update already opened the card
+        let pollTimer = 0;
+
+        const pageBuildNow = () => document.documentElement.dataset.haksterBuild || '';
+        const short = (v) => {
+          const s = String(v || '');
+          return s.length > 18 ? s.slice(0, 8) + '…' + s.slice(-6) : (s || '—');
+        };
+        const ago = (ts) => {
+          const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+          if (secs < 60) return secs + 's ago';
+          if (secs < 3600) return Math.round(secs / 60) + 'm ago';
+          return Math.round(secs / 3600) + 'h ago';
+        };
+
+        const readLater = () => {
+          try {
+            const raw = JSON.parse(localStorage.getItem(LATER_KEY) || 'null');
+            return raw && Number.isFinite(raw.until) && raw.until > Date.now() ? raw : null;
+          } catch { return null; }
+        };
+        const setLater = (build) => {
+          try { localStorage.setItem(LATER_KEY, JSON.stringify({ until: Date.now() + LATER_MS, build })); } catch {}
+        };
+        const clearLater = () => { try { localStorage.removeItem(LATER_KEY); } catch {} };
+
+        // Publish how much room the applet takes from the bottom of the screen, so
+        // other fixed panels (the sponsored ads card) can dock ABOVE it on phones
+        // instead of being buried underneath it. Measured from the visible mode's
+        // own box, so it follows the card -> chip -> tab transitions.
+        const publishHeight = () => {
+          try {
+            const mode = root.dataset.mode || 'card';
+            const visible = root.querySelector(mode === 'chip' ? '.psa-chip' : mode === 'tab' ? '.psa-tab' : '.psa-card');
+            const rect = visible ? visible.getBoundingClientRect() : null;
+            const gap = rect && rect.height ? Math.max(0, Math.round(window.innerHeight - rect.top)) : 0;
+            document.documentElement.style.setProperty('--phantom-applet-h', gap + 'px');
+          } catch {}
+        };
+        const setMode = (mode) => { root.dataset.mode = mode; publishHeight(); };
+        const expand = () => {
+          setMode('card');
+          clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+          scheduleDock();
+        };
+
+        const paintState = (next) => {
+          state = next;
+          root.dataset.state = next;
+          const icon = { checking: '●', live: '✓', restored: '✓', ready: '▲', applying: '⚙', offline: '⚠', building: '⚙', failed: '✗' }[next] || '●';
+          const title = {
+            checking: 'haksterai.com — checking',
+            live: 'haksterai.com is up to date',
+            restored: 'haksterai.com is answering again',
+            ready: 'Update available',
+            applying: 'Update applying on the server',
+            offline: 'haksterai.com is not answering',
+            building: 'Build running',
+            failed: 'Build failed',
+          }[next] || 'haksterai.com';
+          if (iconEl) iconEl.textContent = icon;
+          if (titleEl) titleEl.textContent = title;
+          if (chipTitleEl) chipTitleEl.textContent = next === 'ready' ? 'Update ready' : 'Up to date';
+          publishHeight();
+        };
+
+        const clearCountdown = () => { if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = 0; } countdown = 0; };
+
+        const scheduleDock = (delayMs) => {
+          // The version poll runs every 2 s and asks for a short close after an
+          // update finishes. Restarting the timer on every poll would push the
+          // close out forever, so a pending close is never restarted by an equal
+          // or longer one — only a sooner close may replace it (the 10 s close a
+          // freshly opened card arms is cut to 5 s the moment the build is done).
+          const wanted = Number.isFinite(delayMs) ? delayMs : DOCK_AFTER_MS;
+          if (dockPending) {
+            if (!Number.isFinite(delayMs)) return;
+            const pending = dockDelay || DOCK_AFTER_MS;
+            if (wanted >= pending) return;
+          }
+          clearTimeout(dockTimer); clearTimeout(hideTimer);
+          dockPending = true;
+          dockDelay = wanted;
+          dockTimer = window.setTimeout(() => {
+            dockPending = false;
+            dockDelay = 0;
+            if (root.dataset.mode !== 'card') return;
+            // 'ready' is a build sitting on the server waiting for this tab;
+            // like junkalot's toast it announces that and then docks to its chip.
+            if (state !== 'live' && state !== 'restored' && state !== 'ready') return;
+            // Never dock away while a build is actually running — the spinner
+            // belongs on screen for the whole build, not after it.
+            if (live.job && (live.job.state === 'RUNNING' || live.job.state === 'QUEUED')) return;
+            setMode('chip');
+            // Remember which build this close was for: its later frames must not
+            // re-open the card, while a genuinely new build still can.
+            live.closedBuild = (live.job && live.job.buildId) || live.closedBuild;
+            audit('applet.collapse', { buildId: live.job && live.job.buildId });
+            hideTimer = window.setTimeout(() => {
+              if (root.dataset.mode === 'chip' && (state === 'live' || state === 'restored' || state === 'ready')) setMode('tab');
+            }, HIDE_AFTER_MS);
+          }, wanted);
+        };
+
+        const apiApply = async () => {
+          if (busy) return;
+          busy = true;
+          clearCountdown();
+          clearLater();
+          if (updateBtn) { updateBtn.disabled = true; updateBtn.textContent = 'Updating…'; }
+          if (detailEl) detailEl.textContent = 'Checking that the server is answering before this tab reloads…';
+          let ok = true;
+          try { ok = typeof window.haksterServerHealthy === 'function' ? await window.haksterServerHealthy() : true; } catch { ok = false; }
+          if (ok) { location.reload(); return; }
+          if (typeof window.haksterUpdateWhenReady === 'function') {
+            if (detailEl) detailEl.textContent = 'The server is restarting — this tab reloads by itself as soon as the new build answers.';
+            window.haksterUpdateWhenReady();
+            return;
+          }
+          if (detailEl) detailEl.textContent = 'The server is restarting — reloading in a few seconds.';
+          window.setTimeout(() => location.reload(), 4000);
+        };
+
+        // A ready build is announced, then applied after a visible countdown —
+        // never a blind reload, so the tab cannot land in a restart.
+        // A new page build needs no forced reload: the server, the API and the
+        // applet are already on the new code, and reloading the tab is exactly
+        // the screen flash the applet exists to avoid. Say the new build is
+        // ready; Update now opens it, otherwise the next natural page load does.
+        const armCountdown = (build) => {
+          if (countdownTimer) return;
+          if (detailEl) {
+            detailEl.textContent = 'New page build ' + short(build) + ' is live — this tab is on ' + short(pageBuildNow())
+              + '. Nothing was reloaded; Update now opens it, or it applies on your next page load.';
+          }
+        };
+
+        // A queued update — server code on disk ahead of the running process, or
+        // files waiting to be applied — opens the card by itself, the same way
+        // junkalot's toast fires for a build that is ready on the server. This is
+        // decided from the public /api/version answer, so it happens in every
+        // browser on every machine, not only where the build was made.
+        const announceQueued = (serverInfo = {}) => {
+          const count = Number.isFinite(Number(serverInfo.pending)) ? Number(serverInfo.pending) : 0;
+          paintState('ready');
+          if (barEl) barEl.hidden = true;
+          if (actionsEl) actionsEl.hidden = true;
+          if (detailEl) detailEl.textContent = 'Update queued on the server — '
+            + (count ? count + ' file' + (count === 1 ? '' : 's') : 'server changes')
+            + ' waiting to be applied; it applies itself when the server is idle.';
+          // Open once per queued update and STAY open while the update is
+          // outstanding: the card only retracts after the work is done, exactly
+          // as asked — progress on screen while it runs, back to the edge after.
+          if (queuedShown !== 'queued') {
+            queuedShown = 'queued';
+            setMode('card');
+            clearTimeout(dockTimer); clearTimeout(hideTimer);
+            dockPending = false; dockDelay = 0;
+          }
+        };
+
+        const check = async () => {
+          try {
+            const res = await fetch('/api/version?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' });
+            if (!res.ok) throw new Error('status ' + res.status);
+            const data = await res.json();
+            const server = (data && data.server) || {};
+            lastCheck = Date.now();
+            misses = 0;
+            if (siteBuildEl) siteBuildEl.textContent = short(data && data.build);
+            if (pendingEl) pendingEl.textContent = Number.isFinite(Number(server.pending)) ? Number(server.pending) + ' files' : '—';
+            if (checkedEl) checkedEl.textContent = ago(lastCheck);
+            if (chipCodeEl) chipCodeEl.textContent = short(data && data.build);
+
+            const pageBuild = pageBuildNow();
+            const newerBuild = !!(data && data.build && pageBuild && data.build !== pageBuild);
+            // While a build owns the card, the version poll must not overwrite
+            // the measured stage/percent with "up to date" — but it keeps the
+            // build ids and checked timestamp fresh underneath.
+            // A finished build must not keep the card open. livejob reports a
+            // completed build as VERIFYING, so the moment the server answers
+            // with the build this page is already on — and nothing newer is
+            // waiting — the update is done and the card closes itself.
+            const buildDone = !!(live.job && live.job.state === 'VERIFYING'
+              && String(live.job.status || '') === 'completed'
+              && !server.applying && !newerBuild);
+            // An update is queued when the server has code or files waiting to
+            // apply. It must announce itself, not sit silently behind the word
+            // "stale" in a detail line.
+            const queuedUpdate = !server.applying && !!(server.stale || Number(server.pending) > 0);
+            // Was the card announcing a queued update a moment ago? Then the
+            // update has just finished applying and this card retracts.
+            const wasQueued = !!queuedShown;
+            if (!queuedUpdate) queuedShown = '';
+            // The live build feed can own the card and return from this poll
+            // below. Still surface the applet if the version endpoint reports
+            // that an update has started while the user has it tucked away.
+            if (server.applying && root.dataset.mode !== 'card') {
+              setMode('card');
+              clearTimeout(dockTimer); clearTimeout(hideTimer);
+              dockPending = false; dockDelay = 0;
+            }
+            if (liveOwns() && !buildDone) { if (checkedEl) checkedEl.textContent = ago(lastCheck); return; }
+            if (server.error) {
+              if (serverEl) serverEl.textContent = 'unavailable';
+            } else {
+              if (serverEl) serverEl.textContent = short(server.build) + (server.stale ? ' · behind disk' : ' · current');
+            }
+
+            if (server.applying) {
+              clearCountdown();
+              setMode('card');
+              // The update is running: hold the card until it reports done.
+              clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+              queuedShown = 'queued';
+              paintState('applying');
+              if (actionsEl) actionsEl.hidden = true;
+              if (barEl) barEl.hidden = false;
+              if (detailEl) detailEl.textContent = 'The server is applying a new build. This tab reloads when the new one is answering.';
+            } else if (newerBuild) {
+              // A ready build fires the card once; the 2 s poll must not keep
+              // throwing it back open after it has docked for this same build.
+              const nextReady = String(data.build);
+              const newlyReady = nextReady !== readyBuild;
+              readyBuild = nextReady;
+              const postponed = readLater();
+              if (postponed && postponed.build === readyBuild) {
+                paintState('ready');
+                if (barEl) barEl.hidden = true;
+                if (actionsEl) actionsEl.hidden = false;
+                if (detailEl) detailEl.textContent = 'New build ' + short(readyBuild) + ' is live — this tab is on ' + short(pageBuild) + '. Postponed — Update now applies it.';
+              } else {
+                paintState('ready');
+                if (barEl) barEl.hidden = true;
+                if (actionsEl) actionsEl.hidden = false;
+                armCountdown(readyBuild);
+              }
+              if (newlyReady) {
+                setMode('card');
+                // Same lifecycle as junkalot's update toast: the card fires for
+                // the new build, then gets out of the way instead of sitting over
+                // the page forever. The chip that replaces it keeps "Update now"
+                // one click away, and the next build opens the card again.
+                clearTimeout(dockTimer); clearTimeout(hideTimer);
+                dockPending = false; dockDelay = 0;
+                scheduleDock();
+              }
+            } else {
+              clearCountdown();
+              readyBuild = '';
+              if (barEl) barEl.hidden = true;
+              if (actionsEl) actionsEl.hidden = true;
+              if (wasOffline) {
+                paintState('restored');
+                if (detailEl) detailEl.textContent = 'haksterai.com is answering again — site build ' + short(data && data.build) + '.';
+                wasOffline = false;
+                window.setTimeout(() => { if (state === 'restored') { paintState('live'); scheduleDock(); } }, 6000);
+                setMode('card');
+              } else if (state !== 'live') {
+                if (queuedUpdate && !buildDone) announceQueued(server);
+                else {
+                  const justFinished = buildDone || wasQueued;
+                  paintState('live');
+                  if (detailEl) detailEl.textContent = (justFinished ? 'Update complete — ' : '')
+                    + 'haksterai.com is up to date — site build ' + short(data && data.build) + ', server current.';
+                  scheduleDock(justFinished ? CLOSE_AFTER_UPDATE_MS : undefined);
+                }
+              } else {
+                if (queuedUpdate && !buildDone) announceQueued(server);
+                else {
+                  const justFinished = buildDone || wasQueued;
+                  if (detailEl) detailEl.textContent = (justFinished ? 'Update complete — ' : '')
+                    + 'haksterai.com is up to date — site build ' + short(data && data.build) + ', server current.';
+                  // Re-opened or already showing live while an update just
+                  // finished: still close, on the same short timer.
+                  if (justFinished && root.dataset.mode === 'card') scheduleDock(CLOSE_AFTER_UPDATE_MS);
+                }
+              }
+            }
+            if (!busy && updateBtn) { updateBtn.disabled = false; updateBtn.textContent = 'Update now'; }
+          } catch {
+            misses += 1;
+            if (misses >= OFFLINE_AFTER) {
+              wasOffline = true;
+              clearCountdown();
+              paintState('offline');
+              setMode('card');
+              clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+              if (barEl) barEl.hidden = true;
+              if (actionsEl) actionsEl.hidden = true;
+              if (serverEl) serverEl.textContent = 'no response';
+              if (detailEl) detailEl.textContent = 'haksterai.com has not answered — the server is restarting, or the tunnel is not routing.';
+            }
+          }
+          if (checkedEl && lastCheck) checkedEl.textContent = ago(lastCheck);
+        };
+
+        updateBtn?.addEventListener('click', (event) => { event.stopPropagation(); apiApply(); });
+        laterBtn?.addEventListener('click', () => {
+          clearCountdown();
+          setLater(readyBuild);
+          if (barEl) barEl.hidden = true;
+          if (actionsEl) actionsEl.hidden = false;
+          if (detailEl) detailEl.textContent = 'Postponed for 30 minutes — Update now applies it sooner.';
+          scheduleDock();
+        });
+        el('psa-chip')?.addEventListener('click', expand);
+        el('psa-tab')?.addEventListener('click', expand);
+
+        const startPolling = () => {
+          if (pollTimer) return;
+          pollTimer = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            check();
+          }, POLL_MS);
+        };
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') check();
+        });
+        // Keep the published height honest as the card's text reflows or the
+        // window changes size.
+        window.addEventListener('resize', publishHeight);
+        window.addEventListener('orientationchange', publishHeight);
+        if (typeof ResizeObserver === 'function') {
+          const cardBox = root.querySelector('.psa-card');
+          if (cardBox) new ResizeObserver(publishHeight).observe(cardBox);
+        }
+        publishHeight();
+
+        // Exposed after check() exists, for the headless runtime check and for a
+        // manual re-check from the console. Read-only: it only re-runs the poll.
+        // ── Live build feed ────────────────────────────────────────────────
+        // Server-sent events carry the same measured snapshot the isolated
+        // preview uses. Auth is header-only: EventSource cannot send headers,
+        // so this uses fetch + a stream reader and never puts the key in a URL.
+        // A build that stops reporting is aged out to DISCONNECTED/UNKNOWN —
+        // there is no path here that shows success without a fresh frame.
+
+        const audit = (event, extra) => {
+          try {
+            let key = '';
+            try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+            if (!key) return; // public visitors cannot write the audit log
+            const now = Date.now();
+            const dedupe = event + '|' + ((extra && extra.buildId) || '');
+            if (live.audited[dedupe] && now - live.audited[dedupe] < 3000) return;
+            live.audited[dedupe] = now;
+            fetch('/api/applet/event', {
+              method: 'POST',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+              body: JSON.stringify(Object.assign({ event }, extra || {})),
+              keepalive: true,
+            }).catch(() => {});
+          } catch {}
+        };
+
+        const liveOwns = () => {
+          const j = live.job;
+          if (!j) return false;
+          if (j.state === 'RUNNING' || j.state === 'QUEUED') return true;
+          if (j.state === 'VERIFYING' || j.state === 'FAILED' || j.state === 'UNKNOWN') {
+            // Three minutes, not fifteen: livejob reports a COMPLETED build as
+            // VERIFYING, so a long window left the card pinned open long after
+            // the update had finished. Long enough to cover a restart + health
+            // check, short enough that the card cannot outstay the update.
+            return !!(j.startedAt && Date.now() - Date.parse(j.startedAt) < 3 * 60 * 1000);
+          }
+          return false;
+        };
+        const fmtSecs = (s) => {
+          if (!Number.isFinite(s) || s < 0) return '—';
+          const m = Math.floor(s / 60);
+          const r = Math.round(s % 60);
+          return m ? m + 'm ' + String(r).padStart(2, '0') + 's' : r + 's';
+        };
+        const utcClock = (iso) => {
+          const t = Date.parse(iso || '');
+          if (!Number.isFinite(t)) return '';
+          const d = new Date(t);
+          return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0')
+            + ':' + String(d.getUTCSeconds()).padStart(2, '0');
+        };
+        const paintLive = (stateName, title, detail) => {
+          paintState(stateName);
+          if (titleEl) titleEl.textContent = title;
+          if (detailEl) detailEl.textContent = detail;
+        };
+        const setSpinner = (mode, failed) => {
+          [el('psa-chip'), el('psa-tab')].forEach((b) => {
+            if (!b) return;
+            b.dataset.active = mode ? '1' : '0';
+            b.dataset.failed = failed ? '1' : '0';
+          });
+        };
+
+        const renderLive = (snap) => {
+          if (!snap || typeof snap !== 'object') return;
+          const firstFrame = !live.at;
+          live.at = Date.now();
+          const job = snap.job || {};
+          const prevState = live.job && live.job.state;
+          live.job = job;
+
+          const running = job.state === 'RUNNING' || job.state === 'QUEUED';
+          const verifying = job.state === 'VERIFYING';
+          // livejob reports a FINISHED build as VERIFYING. That frame should open
+          // the card once — an update must still announce itself — but once the
+          // applet has closed for that build it must not re-open it on the next
+          // 5 s poll. Treating every such frame as work was what kept the card
+          // open forever; ignoring them entirely meant an update could pass
+          // without the applet ever showing. One open per build, then closed.
+          const doneBuild = verifying && String(job.status || '') === 'completed';
+          const alreadyClosed = doneBuild && !!job.buildId && live.closedBuild === job.buildId;
+          const verifyingLive = verifying && !alreadyClosed;
+          const failed = job.state === 'FAILED';
+          const unknown = job.state === 'UNKNOWN';
+          const work = running || verifyingLive || failed || unknown;
+
+          setSpinner(running || verifyingLive, failed);
+          if (tabPctEl) {
+            tabPctEl.textContent = failed ? '✗' : Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : '·';
+            tabPctEl.style.color = failed ? '#f87171' : '#00ff41';
+          }
+
+          // Expand once work exists; a panel the user already opened is only
+          // re-rendered, never reset — the state comes straight from the frame.
+          if ((running || verifyingLive) && root.dataset.mode !== 'card') {
+            expand();
+            audit('applet.expand', { buildId: job.buildId, stage: job.stage && job.stage.id });
+          }
+          // A running build, or a health check that is genuinely still running,
+          // keeps the card up. A FINISHED build is only announcing itself and
+          // must be allowed to close on check()'s short timer — clearing its
+          // pending dock here was what kept the card pinned after an update.
+          if (running || (verifyingLive && !doneBuild)) { clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0; }
+
+          if (liveEl) liveEl.hidden = !work;
+          if (stageEl) stageEl.textContent = job.stage && job.stage.label ? job.stage.label : (unknown ? 'UNKNOWN' : (job.label || '—'));
+          if (clockEl) clockEl.textContent = unknown ? 'UNKNOWN' : Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : 'in progress';
+          if (elapsedEl) elapsedEl.textContent = unknown ? 'elapsed UNKNOWN' : 'elapsed ' + fmtSecs(job.elapsedSec);
+          if (etaEl) etaEl.textContent = Number.isFinite(job.etaSec) ? 'ETA ~' + fmtSecs(job.etaSec) : 'ETA unknown';
+          if (updatesEl) {
+            const rows = Array.isArray(job.updates) ? job.updates.slice(-6) : [];
+            updatesEl.replaceChildren(...rows.map((u) => {
+              const li = document.createElement('li');
+              const t = document.createElement('span');
+              t.className = 't';
+              t.textContent = utcClock(u.at);
+              const x = document.createElement('span');
+              x.textContent = String(u.text || '');
+              li.append(t, x);
+              return li;
+            }));
+            updatesEl.hidden = rows.length === 0;
+          }
+          if (errorEl) {
+            const tail = Array.isArray(job.errorTail) && job.errorTail.length ? job.errorTail.join('\n') : String(job.error || '');
+            errorEl.textContent = failed ? tail.slice(-1200) : '';
+            errorEl.hidden = !(failed && errorEl.textContent);
+          }
+
+          if (running) {
+            paintLive('building',
+              'Building — ' + (Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : 'in progress'),
+              (job.stage && job.stage.label ? job.stage.label + ' · ' : '')
+                + 'elapsed ' + fmtSecs(job.elapsedSec) + ' · ' + (Number.isFinite(job.etaSec) ? 'ETA ~' + fmtSecs(job.etaSec) : 'ETA unknown'));
+            if (prevState !== 'RUNNING' && prevState !== 'QUEUED') audit('spinner.activate', { buildId: job.buildId, stage: job.stage && job.stage.id, percent: job.percent });
+            const stageId = job.stage && job.stage.id;
+            if (stageId && stageId !== live.lastStage) {
+              live.lastStage = stageId;
+              if (prevState === 'RUNNING' || prevState === 'QUEUED') audit('job.stage', { buildId: job.buildId, stage: stageId, percent: job.percent });
+            }
+          } else if (verifyingLive) {
+            paintLive('applying', 'Build complete — verifying health',
+              (job.label || 'Health verification running') + ' · stability window is separate');
+            if (prevState === 'RUNNING' || prevState === 'QUEUED') audit('job.complete', { buildId: job.buildId, percent: job.percent });
+          } else if (failed) {
+            paintLive('failed', 'Build failed', job.error || job.label || 'The build failed — log preserved below.');
+            if (prevState !== 'FAILED') audit('job.failed', { buildId: job.buildId, stage: job.stage && job.stage.id });
+          } else if (unknown) {
+            paintLive('offline', 'Build telemetry lost — state UNKNOWN', job.label || 'No frame from the build for over 3 minutes.');
+            if (prevState !== 'UNKNOWN') audit('telemetry.lost', { buildId: job.buildId });
+          } else if (!firstFrame && live.connected === false) {
+            // back from a disconnect with an idle job: say so, don't fake success
+            paintLive('restored', 'Telemetry restored', 'Build ' + short(job.buildId || '') + ' state: ' + (job.state || 'IDLE'));
+            scheduleDock();
+          }
+
+          // A finished build closes on the same 5 s clock junkalot's toast uses,
+          // armed straight from the telemetry frame instead of waiting out the
+          // version poll — the poll can add its full 2 s interval to the close.
+          if (doneBuild && root.dataset.mode === 'card') scheduleDock(CLOSE_AFTER_UPDATE_MS);
+
+          // Stability is its own countdown, after the build is done.
+          const st = snap.stability;
+          if (st && stabEl) {
+            const state = String(st.state || 'UNKNOWN');
+            const win = st.window || {};
+            stabEl.hidden = false;
+            stabEl.dataset.state = state;
+            if (stabStateEl) stabStateEl.textContent = state === 'STABLE' ? '✓ STABLE' : state;
+            let detail = '';
+            if (state === 'VERIFYING' && Number.isFinite(win.remainingSec)) detail = '· ' + fmtSecs(win.remainingSec) + ' left of ' + fmtSecs(win.configuredSec) + ' window';
+            else if (state === 'STABLE') detail = '· ' + fmtSecs(st.timestamps && st.timestamps.stableForSec) + ' stable';
+            else detail = '· ' + String(st.reason || 'no reason reported');
+            if (stabDetailEl) stabDetailEl.textContent = detail;
+            if (state === 'STABLE' && live.lastState !== 'STABLE') {
+              live.lastState = 'STABLE';
+              audit('stability.verified', { buildId: job.buildId });
+            }
+          }
+
+          if (firstFrame && (running || verifying)) audit('spinner.activate', { buildId: job.buildId, stage: job.stage && job.stage.id, percent: job.percent });
+          live.connected = true;
+        };
+
+        let liveTimer = 0;
+        const pollLive = async () => {
+          try {
+            let key = '';
+            try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+            const res = await fetch('/api/applet/status?t=' + Date.now(), {
+              headers: key ? { 'x-api-key': key } : {},
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
+            if (!res.ok) throw new Error('status ' + res.status);
+            renderLive(await res.json());
+          } catch {}
+          scheduleLivePoll();
+        };
+        const scheduleLivePoll = () => {
+          clearTimeout(liveTimer);
+          liveTimer = window.setTimeout(pollLive, 5000);
+        };
+        const connectLive = async () => {
+          let key = '';
+          try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+          try {
+            const res = await fetch('/api/applet/stream?t=' + Date.now(), {
+              headers: key ? { 'x-api-key': key } : {},
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
+            if (!res.ok || !res.body || !res.body.getReader) throw new Error('stream ' + res.status);
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              let cut = buf.indexOf('\n\n');
+              while (cut >= 0) {
+                const frame = buf.slice(0, cut);
+                buf = buf.slice(cut + 2);
+                const data = frame.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+                if (data) {
+                  try {
+                    const msg = JSON.parse(data);
+                    if (msg && msg.type === 'snapshot') renderLive(msg);
+                  } catch {}
+                }
+                cut = buf.indexOf('\n\n');
+              }
+            }
+          } catch {}
+          clearTimeout(liveTimer);
+          pollLive();
+        };
+
+        // A frame older than 30 s means the telemetry path is gone. Everything
+        // on screen becomes UNKNOWN — never the last percentage, never success.
+        window.setInterval(() => {
+          if (!live.at) return;
+          if (Date.now() - live.at <= 30000) return;
+          if (!live.connected) return;
+          live.connected = false;
+          setSpinner(false, true);
+          if (tabPctEl) { tabPctEl.textContent = '?'; tabPctEl.style.color = '#f87171'; }
+          if (liveEl) liveEl.hidden = false;
+          if (stageEl) stageEl.textContent = 'UNKNOWN';
+          if (clockEl) clockEl.textContent = 'UNKNOWN';
+          if (elapsedEl) elapsedEl.textContent = 'elapsed UNKNOWN';
+          if (etaEl) etaEl.textContent = 'ETA unknown';
+          if (updatesEl) updatesEl.replaceChildren();
+          if (errorEl) errorEl.hidden = true;
+          if (stabEl) {
+            stabEl.hidden = false;
+            stabEl.dataset.state = 'UNKNOWN';
+            if (stabStateEl) stabStateEl.textContent = 'UNKNOWN';
+            if (stabDetailEl) stabDetailEl.textContent = '· no telemetry';
+          }
+          paintLive('offline', 'DISCONNECTED — state UNKNOWN',
+            'No frame from the server for ' + Math.round((Date.now() - live.at) / 1000) + 's. Nothing here is being reported as success.');
+          audit('telemetry.lost', { buildId: live.job && live.job.buildId });
+        }, 1000);
+
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') { pollLive(); }
+        });
+        el('psa-chip')?.addEventListener('click', () => audit('applet.expand', { buildId: live.job && live.job.buildId }));
+        el('psa-tab')?.addEventListener('click', () => audit('applet.expand', { buildId: live.job && live.job.buildId }));
+
+        window.__phantomApplet = {
+          check, renderLive,
+          // Read-only view of the applet's own timers. The headless checks read
+          // this instead of guessing from the DOM alone; it changes nothing.
+          snapshot: () => ({
+            mode: root.dataset.mode, state, dockPending, dockDelay,
+            hasDockTimer: Boolean(dockTimer), closedBuild: live.closedBuild,
+            jobState: live.job ? live.job.state : null,
+          }),
+        };
+        check();
+        startPolling();
+        connectLive();
+      })();
+    </script>
+
     <script is:inline data-cfasync="false">
       (() => {
         const problem = document.getElementById('haksterai-problem-toast');
@@ -361,6 +1146,18 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           try {
             const latest = await remoteBuildId();
             if (!latest || latest === currentBuild) return;
+            // The Phantom server applet in the bottom-right corner owns the update
+            // UI on every page that carries it (the same widget as junkalot.co).
+            // This top banner stays as the fallback for pages without the applet,
+            // and the "seen" log keeps recording either way.
+            if (document.getElementById('phantom-server-applet')) {
+              if (update && !update.hidden) { update.hidden = true; cancelAutoApply(); }
+              if (announcedBuild !== latest) {
+                announcedBuild = latest;
+                logUpdateSeen(latest, currentBuild);
+              }
+              return;
+            }
             const deferredUntil = Number(localStorage.getItem(laterKey) || 0);
             if (updateDetail) {
               const built = Number.isFinite(Date.parse(latest)) ? new Date(latest).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : latest;
@@ -417,18 +1214,13 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         }
         function armAutoApply() {
           if (autoApplyTimer || !update || update.hidden) return;
-          const until = Date.now() + AUTO_APPLY_MS;
-          const paint = () => {
-            if (!updateDetail) return;
-            // Strip a previous countdown before re-rendering, so a later check that
-            // rewrites the detail line cannot leave a stale number behind.
-            const base = (updateDetail.textContent || '').replace(/\s*·\s*applies automatically in \d+s$/, '');
-            const secs = Math.max(0, Math.ceil((until - Date.now()) / 1000));
-            updateDetail.textContent = base + ' · applies automatically in ' + secs + 's';
-          };
-          paint();
-          autoApplyTick = window.setInterval(paint, 1000);
-          autoApplyTimer = window.setTimeout(() => { applyUpdate(); }, AUTO_APPLY_MS);
+          // Owner decision (2026-11-18): no timed reload. A build that lands
+          // while a tab is open must not flash the screen — the banner waits
+          // for Update, and the next natural page load picks the build up.
+          if (updateDetail) {
+            updateDetail.textContent = (updateDetail.textContent || '').replace(/\s*·\s*applies automatically in \d+s$/, '')
+              + ' · Update opens the new build; nothing reloads by itself.';
+          }
         }
         document.getElementById('haksterai-update-later')?.addEventListener('click', () => {
           // "Later" is a deliberate choice, so it cancels the one-minute auto-apply
@@ -447,7 +1239,6 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
       })();
     </script>
 
-    <script is:inline data-cfasync="false" src="/js/session-timeout.js"></script>
 
     <!-- Always-visible scrollbars. Firefox already draws real bars from the rules in
          global.css; Chrome/Chromium on Linux uses overlay scrollbars that ignore

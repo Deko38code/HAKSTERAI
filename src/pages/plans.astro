@@ -3,7 +3,9 @@ import Layout from '../layouts/Layout.astro';
 ---
 
 <Layout title="Plans & pricing — HaksterAI">
-  <div class="min-h-screen pt-[72px] pb-16 bg-[#0a0a0f] text-[#e2e8f0] px-4">
+  <!-- The applet keeps the bottom-right corner (§18); this padding lets the last
+       plan row scroll clear of it instead of sitting underneath the Subscribe buttons. -->
+  <div class="min-h-screen pt-[72px] bg-[#0a0a0f] text-[#e2e8f0] px-4" style="padding-bottom: calc(4rem + var(--phantom-applet-h, 0px));">
     <div class="mx-auto max-w-5xl">
 
       <nav class="flex items-center gap-2 text-xs text-[#64748b] mb-6">

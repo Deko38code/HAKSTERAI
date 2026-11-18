@@ -1633,6 +1633,22 @@ import Layout from '../layouts/Layout.astro';
         loadActivityLog();
       }, delay || 250);
     }
+    // A server update restarts the process, and for a second or two the
+    // database is not open yet, so /api/* can answer 401 for a session that is
+    // perfectly valid. Ask again before treating the key as dead — otherwise
+    // every in-place update bounces the signed-in owner back to sign-in.
+    let authRetries = 0;
+    async function ensureSessionStillValid() {
+      for (let i = 0; i < 3; i++) {
+        try {
+          const r = await liveFetch('/api/auth/me', { headers: authHeaders(), cache: 'no-store' });
+          if (r.ok) return true;
+          if (r.status !== 401) return true; // 5xx/network: not a verdict on the key
+        } catch {}
+        await new Promise((res) => setTimeout(res, 1500));
+      }
+      return false;
+    }
     async function loadDashboard() {
       const seq = ++dashboardSeq;
       try {
@@ -1641,6 +1657,11 @@ import Layout from '../layouts/Layout.astro';
           // One sign-in, straight back here: a dead key used to land on '/' with no way
           // back, so the next click asked for the PIN and a sign-in again.
           if (res.status === 401) {
+            if (authRetries < 1 && await ensureSessionStillValid()) {
+              authRetries += 1;
+              if (seq === dashboardSeq) loadDashboard();
+              return;
+            }
             window.location.href = '/?signin=1&redirect=' + encodeURIComponent(window.location.pathname);
             return;
           }

@@ -65,16 +65,26 @@ function listSourceFiles(dir = SRC_DIR, out = []) {
     if (ent.isDirectory()) {
       if (ent.name === 'node_modules' || ent.name.startsWith('.')) continue;
       listSourceFiles(full, out);
-    } else if (ent.isFile() && ent.name.endsWith('.js') && !ent.name.includes('.bak')) {
+    } else if (ent.isFile() && (ent.name.endsWith('.js') || ent.name.endsWith('.cjs')) && !ent.name.includes('.bak')) {
       out.push(full);
     }
   }
   return out;
 }
 
+// The live applet, build-history recorder and stability monitor live under
+// dev/ and are loaded by this process. Watching them here means a fix to the
+// applet itself ships the same way every other server change does — when the
+// box is idle, in the background, with no manual restart.
+const EXTRA_SOURCE_DIRS = [
+  path.join(__dirname, '..', '..', 'dev', 'applet'),
+  path.join(__dirname, '..', '..', 'dev', 'build-history', 'lib'),
+];
+
 function computeStamp() {
   if (Date.now() - stampCache.at < STAMP_TTL_MS && stampCache.stamp) return stampCache;
   const files = listSourceFiles();
+  for (const dir of EXTRA_SOURCE_DIRS) listSourceFiles(dir, files);
   const hash = crypto.createHash('sha256');
   const details = [];
   for (const full of files.sort()) {
@@ -135,6 +145,10 @@ function isIdle() {
  */
 function track() {
   return function serverBuildTracker(req, res, next) {
+    // The applet's own status stream is a read-only telemetry feed, not live
+    // work. Counting it as long-lived would keep `idle` false for as long as
+    // any browser tab is open, and updates would never apply in the background.
+    if (req.path === '/api/applet/stream' || req.path === '/api/applet/status') return next();
     inflight++;
     let marked = false;
     const markTimer = setTimeout(() => {
