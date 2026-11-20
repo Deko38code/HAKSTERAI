@@ -21,6 +21,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const stability = require('../build-history/lib/stability.cjs');
 const livejob = require('../build-history/lib/livejob.cjs');
+const patterns = require('../build-history/lib/patterns.cjs');
 
 const ROOT = path.join(__dirname, '..', '..');  // dev/applet -> dev -> repo root
 const DIST_INDEX = path.join(ROOT, 'dist', 'index.html');
@@ -233,6 +234,8 @@ function baseSnapshot(scope) {
     },
   };
   snap.job = jobState(serverStatus);
+  // Learned build timings, derived from recorded builds only (never stored twice).
+  snap.pattern = patterns.buildPattern();
   return { snap, serverStatus };
 }
 
@@ -249,6 +252,7 @@ async function publicSnapshot() {
     server: { status: snap.server.status, uptimeSec: snap.server.uptimeSec, node: snap.server.node },
     build: { id: snap.build.id, builtAt: snap.build.builtAt, ageSec: snap.build.ageSec },
     job: jobFor('public', snap.job),
+    pattern: snap.pattern,
     stability: pubStability,
   };
 }
@@ -323,10 +327,16 @@ async function stabilitySummary(scope) {
       deployedAgeSec: s.timestamps.deployedAgeSec,
     },
     evidence: s.evidence,
+    heal: s.heal || null,
+    watchdog: s.watchdog ? { stale: Boolean(s.watchdog.stale), evidenceAgeSec: s.watchdog.evidenceAgeSec } : null,
   };
   if (scope === 'public') {
+    // Public visitors get the state and which check is failing, not the host's
+    // memory/load/disk figures — those stay on the owner and signed-in views.
+    const publicReason = String(s.reason || '').replace(/\s*\([^)]*\)/g, '');
     return {
       ...base,
+      reason: publicReason,
       checks: (s.checks || []).map((c) => ({ id: c.id, status: c.status })),
     };
   }

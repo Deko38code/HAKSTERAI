@@ -138,7 +138,8 @@ function mountAppletStream(app, deps) {
       res.set('X-Applet-Scope', scope);
       res.json(snap);
     } catch (e) {
-      res.status(500).json({ error: 'telemetry unavailable', detail: e.code || e.message, scope });
+      console.error('[applet/status] telemetry unavailable:', e);
+      res.status(500).json({ error: 'telemetry unavailable', scope });
     }
   });
 
@@ -150,8 +151,8 @@ function mountAppletStream(app, deps) {
    */
   app.post('/api/applet/event', (req, res) => {
     const { scope } = resolveScope(req, deps);
-    if (scope === 'public') {
-      return res.status(401).json({ error: 'signed-in applet required to record audit events' });
+    if (scope !== 'owner') {
+      return res.status(403).json({ error: 'owner scope required to record audit events' });
     }
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     const now = Date.now();

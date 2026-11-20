@@ -18,12 +18,29 @@ import Layout from '../layouts/Layout.astro';
       <p class="text-sm text-[#94a3b8] mb-8 max-w-2xl">
         Every plan is billed through Stripe. Prices below are read live from Stripe, so what you
         see here is exactly what checkout charges. No account needed to pay — we create one from
-        the email you use at checkout. Cancel any time from the billing portal.
+        the email you use at checkout. Cancel any time from the
+        <a href="https://billing.stripe.com/p/login/fZu3cv4lqaqncMIauIbMQ00" target="_blank" rel="noopener" class="text-[#a855f7] hover:underline">billing portal</a>.
       </p>
 
       <div id="msg" class="hidden mb-6 rounded-xl border px-4 py-3 text-sm"></div>
       <div id="plan-grid" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div class="rounded-2xl border border-[#1e1e2e] bg-[#111118] p-5 text-sm text-[#94a3b8]">Loading live prices...</div>
+      </div>
+
+      <!-- Billing is managed on Stripe's own customer portal. Same login link
+           the confirmation card gives a new subscriber. -->
+      <div class="mt-6 rounded-2xl border border-[#1e1e2e] bg-[#111118] p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 class="text-base font-semibold">Manage your billing</h2>
+          <p class="mt-1 text-xs text-[#94a3b8] max-w-xl">
+            Already subscribed? Update your card, download invoices, or cancel — everything happens
+            in the Stripe billing portal, on Stripe's own page.
+          </p>
+        </div>
+        <a href="https://billing.stripe.com/p/login/fZu3cv4lqaqncMIauIbMQ00" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center gap-2 rounded-lg border border-[#7c3aed]/60 px-4 py-2.5 text-sm font-semibold text-[#e2e8f0] hover:bg-[#7c3aed]/15 transition-colors whitespace-nowrap">
+          Open the billing portal →
+        </a>
       </div>
 
       <p class="mt-8 text-xs text-[#64748b]">

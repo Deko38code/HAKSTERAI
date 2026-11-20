@@ -18,6 +18,15 @@
 const { mountAppletStream } = require('../../dev/applet/stream.cjs');
 
 function mountApplet(app, deps) {
+  // The stability watchdog beats on its own timer so the applet's first read is
+  // never empty and a stalled monitor is detectable instead of silently stale
+  // (owner, 2026-11-21: "add watchdog to it for debugging").
+  try {
+    const stability = require('../../dev/build-history/lib/stability.cjs');
+    if (typeof stability.startWatchdog === 'function') stability.startWatchdog();
+  } catch (e) {
+    console.error('[applet] stability watchdog not started:', e.message);
+  }
   return mountAppletStream(app, {
     getUserByKey: (key) => {
       if (!key || typeof key !== 'string') return null;

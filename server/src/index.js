@@ -491,8 +491,10 @@ const PRICING_CATALOG = [
     id: 'enterprise',
     name: 'HaksterAI Enterprise',
     stripeProductName: 'HaksterAI Enterprise',
-    description: 'Team access, admin controls, and custom deployment support.',
-    features: ['Team seats', 'Higher limits', 'Admin dashboard', 'Priority support'],
+    // Owner 2026-11-21: no paid plan includes the admin dashboard — it is
+    // owner-gated behind the admin pin pad — so the card must not sell it.
+    description: 'Team access, higher limits, and custom deployment support.',
+    features: ['Team seats', 'Higher limits', 'Priority support'],
     prices: [
       {
         id: 'enterprise_monthly',
@@ -2227,7 +2229,6 @@ app.get('/api/version', (_req, res) => {
         build: st.serverBuild,
         stale: st.stale,
         pending: st.pendingCount,
-        files: st.pendingFiles.slice(0, 8),
         idle: st.idle,
         applying: st.applying,
       };
@@ -2237,7 +2238,8 @@ app.get('/api/version', (_req, res) => {
     res.set('cache-control', 'no-store');
     res.json({ build: buildIdCache.id, server: serverBuildInfo, checkedAt: new Date().toISOString() });
   } catch (e) {
-    res.status(500).json({ error: 'build id unavailable', detail: e.message });
+    console.error('[api/version] build id unavailable:', e);
+    res.status(500).json({ error: 'build id unavailable' });
   }
 });
 

@@ -35,6 +35,7 @@ const {
 } = require('./loginAudit');
 const { handleDomainCommand } = require('./telegramDomainBot');
 const siteKeys = require('./telegramSiteKeys');
+const invoiceDesk = require('./telegramInvoiceBot');
 const marketplace = require('./telegramMarketplace');
 const builds = require('./telegramBuilds');
 const entitlements = require('./telegramEntitlements');
@@ -611,7 +612,13 @@ function initBots() {
     bot.getMe().then(me => {
       ROLES[key].username = me.username;
       console.log(`[telegram] ${ROLES[key].name} bot live @${me.username}`);
-    }).catch(e => console.error(`[telegram] ${ROLES[key].name} getMe failed:`, e.message));
+    }).catch(e => {
+      console.error(`[telegram] ${ROLES[key].name} getMe failed:`, e.message);
+      if (/401|Unauthorized/i.test(e.message || '') && ROLES[key] && ROLES[key].bot === bot) {
+        ROLES[key].bot = null; // dead token — never report this role as live
+        bot.stopPolling().catch(() => {});
+      }
+    });
 
     // Handle polling errors gracefully instead of crashing
     // 409 fix: exponential backoff (15s→30s→60s→120s) with dedupe + permanent
@@ -664,6 +671,13 @@ function initBots() {
         console.error(`[telegram] ${ROLES[key].name}: 401 Unauthorized (bad/revoked token) — stopping polling permanently`);
         bot.stopPolling().catch(() => {});
         _poll409Dead = true;
+        // Drop the dead instance so the role reads as offline instead of
+        // "assigned but always 401". The coder-bot command fallback keys off
+        // this, and sendToRole stops trying a token Telegram has revoked.
+        if (ROLES[key] && ROLES[key].bot === bot) ROLES[key].bot = null;
+        if (key === 'TELEGRAM_BOT_TOKEN_1' && ROLES.TELEGRAM_BOT_TOKEN_2 && ROLES.TELEGRAM_BOT_TOKEN_2.bot) {
+          console.warn('[telegram] command bot offline (revoked token) — coder bot carries /ask and /hakster until a new token is planted');
+        }
       } else {
         // Transient edge errors (502/504/429) and anything unexpected: log at
         // most once per 5 minutes per bot with a running count, or immediately
@@ -852,6 +866,18 @@ async function handleMessage(roleKey, msg) {
     }
   }
 
+  // ── Invoice desk: owner-only client invoices, PDF invoices, rate card and
+  //    quotes. Owner-only is enforced inside the module (TELEGRAM_OWNER_CHAT);
+  //    anything that is not one of these commands falls through untouched.
+  if (/^\/(?:invoice|invnew|invrec|invadd|invlist|invshow|invpdf|invsent|invpaid|invvoid|invdisc|invtax|invset|rates|setrate|quote)\b/i.test(text)) {
+    try {
+      const handled = await invoiceDesk.handleInvoiceCommand({ text, chatId, bot, roleKey, msg });
+      if (handled) return;
+    } catch (e) {
+      return bot.sendMessage(chatId, `Invoice desk error: ${e.message}`);
+    }
+  }
+
   // ── Web vulnerability scan + login audit — reachable from ANY fleet bot, so the
   //    checks work today even before the slot-7 security token exists. The security
   //    bot owns them permanently once it is created.
@@ -1016,6 +1042,41 @@ async function handleMessage(roleKey, msg) {
   }
 
   // ── Role 2: deploy/status bot (mostly passive) ──
+  // ── Command-bot fallback on the coder bot ────────────────────────────
+  // Owner 2026-11-21: "use other bot to fix token". Slot 1's token is revoked
+  // (Telegram answers 401 and no backup copy survives), and only BotFather can
+  // reissue it. Until a new token is planted in server/.env, the coder bot
+  // carries the command surface, so /ask and /hakster keep working from a live
+  // bot. Reports and alerts keep using slot 2 exactly as before; when slot 1
+  // comes back this branch goes quiet on its own.
+  if (roleKey === 'TELEGRAM_BOT_TOKEN_2' && !(ROLES.TELEGRAM_BOT_TOKEN_1 && ROLES.TELEGRAM_BOT_TOKEN_1.bot)) {
+    const fallbackMatch = text.match(/^\/(?:ask|hakster)\s+([\s\S]+)$/i);
+    if (!fallbackMatch) {
+      return bot.sendMessage(chatId,
+        '🚀 *haksterAI Deploy / Status Bot*\n\nThis channel receives server alerts automatically.\n'
+        + '`/status` — current server status\n'
+        + '`/ask <prompt>` — ask the agent (command bot is offline; this bot carries it until its token is reissued)',
+        { parse_mode: 'Markdown' });
+    }
+    await bot.sendChatAction(chatId, 'typing');
+    const ent = await gateChatSurface(bot, chatId, 'agent-ask');
+    if (!ent) return;
+    const typingInterval = setInterval(() => {
+      try { bot.sendChatAction(chatId, 'typing'); } catch {}
+    }, 4000);
+    try {
+      const sessionId = `telegram-${chatId}`;
+      const response = await runAgent(fallbackMatch[1].trim(), sessionId, ent.isOwner, ent.apiKey);
+      persistAssistantTurn(sessionId, response);
+      clearInterval(typingInterval);
+      await safeSendMarkdown(bot, chatId, response);
+    } catch (e) {
+      clearInterval(typingInterval);
+      await replyAgentError(bot, chatId, e);
+    }
+    return;
+  }
+
   if (roleKey === 'TELEGRAM_BOT_TOKEN_2') {
     return bot.sendMessage(chatId,
       '🚀 *haksterAI Deploy / Status Bot*\n\nThis channel receives server alerts automatically.\n`/status` — current server status',

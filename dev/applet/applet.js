@@ -259,10 +259,16 @@
       }
 
       const ups = Array.isArray(job.updates) ? job.updates : [];
-      updatesEl.innerHTML = ups.slice(-6).map((u) => {
-        const t = utcTime(u.at);
-        return `<li><span class="t">${t}</span><span>${escapeHtml(u.text)}</span></li>`;
-      }).join('');
+      updatesEl.replaceChildren(...ups.slice(-6).map((u) => {
+        const li = document.createElement('li');
+        const time = document.createElement('span');
+        time.className = 't';
+        time.textContent = utcTime(u.at);
+        const text = document.createElement('span');
+        text.textContent = String(u.text || '');
+        li.append(time, text);
+        return li;
+      }));
 
       if (failed && (job.error || (job.errorTail || []).length)) {
         errorEl.hidden = false;
@@ -361,7 +367,7 @@
     const b = snap.build || {};
     setRow('server', b.serverStale ? 'RESTART PENDING' : 'CURRENT',
       `page build ${b.id || 'UNKNOWN'}\nserver boot ${b.serverBuild || 'UNKNOWN'}\n` +
-      `pending server files ${b.pending ?? 'UNKNOWN'}${b.pendingFiles && b.pendingFiles.length ? '\n' + b.pendingFiles.join('\n') : ''}`);
+      `pending server files ${b.pending ?? 'UNKNOWN'}`);
 
     // ── spinner state + audit of job transitions ───────────────────────────
     if (job.buildId && job.buildId !== lastBuildId) {

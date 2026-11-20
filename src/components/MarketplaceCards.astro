@@ -1,0 +1,320 @@
+---
+/**
+ * Marketplace cards — the bottom of the landing page.
+ *
+ * These are the same cards the HaksterAI bot shows in Telegram
+ * (haksterai.com/marketplace), fed by the same live sources so the site and the
+ * bot never disagree:
+ *   plans  <- GET /api/stripe/plans        live Stripe prices, never hard-coded
+ *   builds <- GET /api/marketplace/catalog owner-managed catalog builds
+ *   market <- TopReels listings            readable from the site market itself
+ */
+---
+<section id="marketplace" class="mx-auto max-w-6xl px-6 pt-16" style="padding-bottom: calc(4rem + var(--phantom-applet-h, 0px));">
+  <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+    <div>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="rounded-full border border-[#7c3aed]/30 bg-[#7c3aed]/10 px-3 py-1 text-xs font-semibold text-[#a855f7]">🛒 MARKETPLACE</span>
+      </div>
+      <h2 class="text-2xl md:text-3xl font-bold text-[#e2e8f0] leading-tight tracking-tight">Plans, catalog sites, and the site market</h2>
+      <p class="mt-3 text-sm md:text-base text-[#94a3b8] leading-relaxed max-w-2xl">
+        The same cards the HaksterAI bot shows in Telegram. Prices are read live from Stripe,
+        so what you see here is exactly what checkout charges.
+      </p>
+    </div>
+    <a href="/marketplace" class="inline-flex items-center gap-2 rounded-lg border border-[#1e1e2e] px-4 py-2.5 text-sm font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/60 transition-colors whitespace-nowrap">
+      Open the full marketplace →
+    </a>
+  </div>
+
+  <div id="mk-plans" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div class="rounded-2xl border border-[#1e1e2e] bg-[#111118] p-5 text-sm text-[#94a3b8]">Loading live prices…</div>
+  </div>
+  <div id="mk-msg" class="hidden mt-4 rounded-xl border px-4 py-3 text-sm"></div>
+  <p class="mt-4 text-xs text-[#64748b]">
+    Already subscribed?
+    <a href="https://billing.stripe.com/p/login/fZu3cv4lqaqncMIauIbMQ00" target="_blank" rel="noopener" class="text-[#a855f7] font-semibold hover:underline">Manage or cancel your plan in the billing portal →</a>
+  </p>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-2xl border border-[#7c3aed]/30 bg-gradient-to-b from-[#1a1030]/60 to-[#0d0d14] p-6 flex flex-col">
+      <span class="inline-block w-fit rounded-full border border-[#ffd166]/50 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[#ffd166]">Our catalog</span>
+      <h3 class="mt-3 text-lg md:text-xl font-bold text-[#e2e8f0]">Choose any site from our catalog, fully built</h3>
+      <p class="mt-2 text-sm text-[#94a3b8] leading-relaxed">
+        Pick a build we have already designed and we finish it for you — real pages, your brand,
+        your domain, launched. One payment — a lifetime subscription, no renewals.
+      </p>
+      <div class="mt-4 flex flex-wrap gap-2 text-xs">
+        <span class="rounded-full border border-[#262a38] bg-[#171a25] px-3 py-1.5 text-[#e2e8f0]"><strong class="text-[#00ff88]">$999</strong> lifetime subscription</span>
+        <span class="rounded-full border border-[#262a38] bg-[#171a25] px-3 py-1.5 text-[#e2e8f0]">Fully built</span>
+        <span class="rounded-full border border-[#262a38] bg-[#171a25] px-3 py-1.5 text-[#e2e8f0]">Published + verified</span>
+      </div>
+      <ul id="mk-catalog" class="mt-4 flex flex-wrap gap-2 text-xs text-[#94a3b8]">
+        <li class="rounded-lg border border-[#1e1e2e] bg-[#111118] px-2.5 py-1.5">Loading catalog…</li>
+      </ul>
+      <a href="https://rmt.haksterai.com/apps/sites/topreels-3230f40cc3/index.html#site-market" target="_blank" rel="noopener" class="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-[#7c3aed] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6d28d9] transition-colors">
+        Request this build →
+      </a>
+      <p class="mt-3 text-[11px] text-[#64748b]">Builds are confirmed by the owner before work starts — nothing is charged by this page.</p>
+    </div>
+
+    <div class="rounded-2xl border border-[#1e1e2e] bg-[#111118] p-6 flex flex-col">
+      <span class="inline-block w-fit rounded-full border border-[#7c3aed]/30 bg-[#7c3aed]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[#a855f7]">Site market</span>
+      <h3 class="mt-3 text-lg md:text-xl font-bold text-[#e2e8f0]">Buy or bid on a live site</h3>
+      <div id="mk-listings" class="mt-3 flex-1 text-sm text-[#94a3b8]">Loading live listings…</div>
+      <a href="https://rmt.haksterai.com/apps/sites/topreels-3230f40cc3/index.html#site-market" target="_blank" rel="noopener" class="mt-5 inline-flex items-center justify-center gap-2 rounded-lg border border-[#1e1e2e] px-4 py-2.5 text-sm font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/60 transition-colors">
+        Open the site market →
+      </a>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function initMarketplaceCards() {
+    const API = location.port === '4321' ? 'http://localhost:3579' : '';
+    const planBox = document.getElementById('mk-plans');
+    const msg = document.getElementById('mk-msg');
+    const catalogList = document.getElementById('mk-catalog');
+    const marketBox = document.getElementById('mk-listings');
+    if (!planBox || !catalogList || !marketBox) return;
+
+    function money(cents) {
+      const n = Number(cents);
+      if (!isFinite(n)) return '';
+      const value = n / 100;
+      return '$' + value.toFixed(2).replace(/\.00$/, '');
+    }
+    function perCycle(cycle) {
+      if (cycle === 'yearly' || cycle === 'annual') return '/yr';
+      return '/mo';
+    }
+    function say(text, tone) {
+      if (!msg) return;
+      msg.textContent = text;
+      msg.className = 'mt-4 rounded-xl border px-4 py-3 text-sm ' + (tone === 'bad'
+        ? 'block border-[#ef4444]/40 bg-[#ef4444]/10 text-[#fca5a5]'
+        : 'block border-[#7c3aed]/40 bg-[#7c3aed]/10 text-[#c084fc]');
+    }
+    function authToken() {
+      try {
+        return localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
+      } catch (e) { return null; }
+    }
+
+    // Same checkout the plans page and the Telegram mini app use: a signed-in
+    // buyer sends their key; a signed-out buyer goes to Stripe, which collects
+    // the email and the paid webhook creates the account.
+    async function startCheckout(priceId, planId, btn, note) {
+      const token = authToken();
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Opening secure checkout…';
+      note.textContent = '';
+      try {
+        const res = await fetch(API + '/api/stripe/checkout', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { 'x-api-key': token } : {}),
+          body: JSON.stringify({ priceId, planId, returnTo: '/' }),
+        });
+        const data = await res.json();
+        btn.disabled = false;
+        btn.textContent = original;
+        if (data.url) { window.location.href = data.url; return; }
+        note.textContent = data.error || 'Checkout could not start — try again.';
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = original;
+        note.textContent = 'Network error — try again.';
+      }
+    }
+
+    function planCard(plan) {
+      const card = document.createElement('div');
+      const isOffer = (plan.prices || []).some((p) => p.introAmount);
+      card.className = 'rounded-2xl border bg-[#111118] p-5 flex flex-col '
+        + (isOffer ? 'border-[#7c3aed]/60 shadow-[0_0_40px_rgba(124,58,237,0.18)]' : 'border-[#1e1e2e]');
+
+      const h = document.createElement('h3');
+      h.className = 'text-base font-semibold text-[#e2e8f0]';
+      h.textContent = plan.name || plan.id;
+      card.appendChild(h);
+
+      if (isOffer) {
+        const badge = document.createElement('span');
+        badge.className = 'mt-1 inline-block w-fit rounded-full bg-[#7c3aed]/20 px-2 py-0.5 text-[11px] font-semibold text-[#c084fc]';
+        badge.textContent = 'Intro offer';
+        card.appendChild(badge);
+      }
+
+      if (plan.description) {
+        const d = document.createElement('p');
+        d.className = 'mt-2 text-xs text-[#94a3b8]';
+        d.textContent = plan.description;
+        card.appendChild(d);
+      }
+
+      const prices = (plan.prices || []).filter((p) => p.amount === 0 || p.priceId);
+      const priceBox = document.createElement('div');
+      priceBox.className = 'mt-4 space-y-2';
+      prices.forEach((p) => {
+        const row = document.createElement('div');
+        row.className = 'flex flex-wrap items-center justify-between gap-2';
+
+        const amount = document.createElement('div');
+        amount.className = 'text-xl font-bold text-[#e2e8f0]';
+        amount.textContent = p.amount === 0 ? 'Free' : money(p.amount) + perCycle(p.billingCycle);
+        row.appendChild(amount);
+
+        if (p.amount > 0 && p.priceId) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'rounded-lg bg-[#7c3aed] px-3 py-2 text-xs font-semibold text-white hover:bg-[#6d28d9] transition-colors disabled:opacity-50';
+          btn.textContent = (p.introAmount ? 'Start for ' + money(p.introAmount) : 'Subscribe') + ' →';
+          const note = document.createElement('p');
+          note.className = 'text-[11px] text-[#64748b] min-h-[1em]';
+          note.setAttribute('role', 'status');
+          btn.addEventListener('click', () => startCheckout(p.priceId, plan.id, btn, note));
+          row.appendChild(btn);
+          priceBox.appendChild(row);
+          if (p.introLabel || p.introAmount) {
+            const intro = document.createElement('div');
+            intro.className = 'text-[11px] text-[#c084fc]';
+            intro.textContent = p.introLabel || 'First month ' + money(p.introAmount);
+            priceBox.appendChild(intro);
+          }
+          priceBox.appendChild(note);
+          return;
+        }
+        priceBox.appendChild(row);
+      });
+      card.appendChild(priceBox);
+
+      const features = plan.features || [];
+      if (features.length) {
+        const ul = document.createElement('ul');
+        ul.className = 'mt-4 space-y-1 text-xs text-[#94a3b8] flex-1';
+        features.forEach((f) => {
+          const li = document.createElement('li');
+          li.textContent = '✓ ' + f;
+          ul.appendChild(li);
+        });
+        card.appendChild(ul);
+      }
+
+      if (plan.id === 'free') {
+        const a = document.createElement('a');
+        a.href = '/build';
+        a.className = 'mt-4 rounded-lg border border-[#1e1e2e] px-3 py-2 text-center text-xs font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/60 transition-colors';
+        a.textContent = 'Start free';
+        card.appendChild(a);
+      }
+
+      return card;
+    }
+
+    fetch(API + '/api/stripe/plans', { headers: { accept: 'application/json' } })
+      .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then((data) => {
+        const plans = (data && data.plans) || [];
+        if (!plans.length) throw new Error('empty catalog');
+        planBox.textContent = '';
+        plans.forEach((plan) => planBox.appendChild(planCard(plan)));
+      })
+      .catch((err) => {
+        planBox.textContent = '';
+        say('Live prices could not be loaded (' + String(err.message || 'network').replace(/[<>&]/g, '') + '). Please refresh in a moment.', 'bad');
+      });
+
+    // Catalog builds. The static list is the fallback the marketplace mini app
+    // also uses — shown only when the owner-managed API has no items yet.
+    const CATALOG_FALLBACK = ['TapLocal', 'BookBloom', 'CartDash', 'MenuMingle', 'EventNest',
+                              'GearGlow', 'HomeSpark', 'StayScout', 'CreatorKit', 'ClassPop'];
+    function chip(text) {
+      const li = document.createElement('li');
+      li.className = 'rounded-lg border border-[#1e1e2e] bg-[#111118] px-2.5 py-1.5';
+      li.textContent = text;
+      return li;
+    }
+    fetch(API + '/api/marketplace/catalog', { headers: { accept: 'application/json' } })
+      .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then((data) => {
+        const items = ((data && data.items) || []).filter((i) => i && (i.name || i.slug));
+        catalogList.textContent = '';
+        if (!items.length) {
+          CATALOG_FALLBACK.forEach((name) => catalogList.appendChild(chip(name)));
+          return;
+        }
+        items.forEach((item) => {
+          catalogList.appendChild(chip(item.name + (item.priceCents ? ' — ' + money(item.priceCents) : '')));
+        });
+      })
+      .catch(() => {
+        catalogList.textContent = '';
+        CATALOG_FALLBACK.forEach((name) => catalogList.appendChild(chip(name)));
+      });
+
+    // Site market. The listing feed is only readable from the site itself, so a
+    // blocked read falls back to the same honest pointer the mini app shows.
+    const MARKET_PAGE = 'https://rmt.haksterai.com/apps/sites/topreels-3230f40cc3/index.html#site-market';
+    function marketFallback() {
+      marketBox.textContent = '';
+      const p = document.createElement('p');
+      p.className = 'text-sm text-[#94a3b8]';
+      p.textContent = 'Live listings open on the site market — the listing feed is only readable from the site itself.';
+      marketBox.appendChild(p);
+    }
+    fetch('https://rmt.haksterai.com/api/topreels/marketplace/listings', { headers: { accept: 'application/json' } })
+      .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then((data) => {
+        const listings = ((data && data.listings) || []).filter((l) => l && (l.title || l.site_url));
+        if (!listings.length) { marketFallback(); return; }
+        marketBox.textContent = '';
+        listings.slice(0, 4).forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'rounded-xl border border-[#1e1e2e] bg-[#0a0a0f] p-3 mb-2';
+
+          const h = document.createElement('div');
+          h.className = 'text-sm font-semibold text-[#e2e8f0]';
+          h.textContent = item.title || 'Listing';
+          row.appendChild(h);
+
+          if (item.description) {
+            const d = document.createElement('div');
+            d.className = 'mt-1 text-xs text-[#64748b]';
+            d.textContent = item.description;
+            row.appendChild(d);
+          }
+
+          const tags = document.createElement('div');
+          tags.className = 'mt-2 flex flex-wrap gap-2 text-[11px]';
+          const mode = document.createElement('span');
+          mode.className = 'rounded-full border border-[#262a38] bg-[#171a25] px-2.5 py-1 text-[#e2e8f0]';
+          mode.textContent = item.mode === 'bids' ? 'Private bids' : 'For sale';
+          tags.appendChild(mode);
+          if (item.mode === 'bids') {
+            const min = document.createElement('span');
+            min.className = 'rounded-full border border-[#262a38] bg-[#171a25] px-2.5 py-1 text-[#e2e8f0]';
+            min.textContent = 'Bids start at $99';
+            tags.appendChild(min);
+          } else if (item.ask_price_cents) {
+            const ask = document.createElement('span');
+            ask.className = 'rounded-full border border-[#262a38] bg-[#171a25] px-2.5 py-1 text-[#e2e8f0]';
+            ask.textContent = money(item.ask_price_cents) + ' ask';
+            tags.appendChild(ask);
+          }
+          row.appendChild(tags);
+
+          const view = document.createElement('a');
+          view.className = 'mt-2 inline-block text-xs font-semibold text-[#a855f7] hover:underline';
+          view.href = MARKET_PAGE;
+          view.target = '_blank';
+          view.rel = 'noopener';
+          view.textContent = 'View listing →';
+          row.appendChild(view);
+
+          marketBox.appendChild(row);
+        });
+      })
+      .catch(marketFallback);
+  })();
+</script>

@@ -40,6 +40,9 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'stability-config.json');
 const STATE_FILE = path.join(DATA_DIR, 'stability-state.json');
 const AUDIT_FILE = path.join(DATA_DIR, 'stability-audit.jsonl');
+const LEARNING_FILE = path.join(DATA_DIR, 'stability-learning.jsonl');
+const HEAL_FILE = path.join(DATA_DIR, 'stability-heal.jsonl');
+let lastHealKey = '';
 
 const REPO = path.join(__dirname, '..', '..', '..');
 const DIST_INDEX = path.join(REPO, 'dist', 'index.html');
@@ -58,6 +61,78 @@ const POLICY = {
 };
 
 let last = { at: 0, snapshot: null, inflight: null };
+
+/**
+ * Watchdog (owner, 2026-11-21: "add watchdog to it for debugging").
+ * The monitor is only as good as its last measurement, and a stall used to read
+ * as whatever old state the caller happened to hold. This beats on its own
+ * timer, pre-warms the snapshot so the applet's first read is never empty,
+ * records slow or failed beats to an append-only debug log, and lets every
+ * snapshot say how old its evidence is.
+ */
+const WATCHDOG_MS = Math.max(5000, Number(process.env.HAKSTER_STABILITY_WATCHDOG_MS) || 60000);
+const WATCHDOG_STALE_MS = Math.max(30000, Number(process.env.HAKSTER_STABILITY_STALE_MS) || 180000);
+const WATCHDOG_LOG = path.join(DATA_DIR, 'stability-watchdog.jsonl');
+const SLOW_BEAT_MS = 15000;
+const watchdog = { startedAt: null, beats: 0, failures: 0, lastBeatAt: null, lastDurationMs: null, lastError: null, timer: null };
+
+function watchdogLog(kind, extra = {}) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.appendFileSync(WATCHDOG_LOG, JSON.stringify({ at: new Date().toISOString(), kind, ...extra }) + '\n', { mode: 0o600 });
+  } catch (_) {}
+}
+
+function watchdogReport() {
+  const ageMs = last.at ? Date.now() - last.at : null;
+  return {
+    running: Boolean(watchdog.timer),
+    intervalMs: WATCHDOG_MS,
+    startedAt: watchdog.startedAt,
+    beats: watchdog.beats,
+    failures: watchdog.failures,
+    lastBeatAt: watchdog.lastBeatAt,
+    lastDurationMs: watchdog.lastDurationMs,
+    lastError: watchdog.lastError,
+    evidenceAgeSec: ageMs == null ? null : Math.round(ageMs / 1000),
+    stale: ageMs == null ? true : ageMs > WATCHDOG_STALE_MS,
+  };
+}
+
+function startWatchdog() {
+  if (watchdog.timer) return watchdogReport();
+  watchdog.startedAt = new Date().toISOString();
+  watchdog.timer = setInterval(async () => {
+    const t0 = Date.now();
+    try {
+      const s = await refresh();
+      const durationMs = Date.now() - t0;
+      watchdog.beats += 1;
+      watchdog.lastBeatAt = new Date().toISOString();
+      watchdog.lastDurationMs = durationMs;
+      const err = s && s.reason && /monitor error/.test(s.reason) ? s.reason : null;
+      if (err) { watchdog.failures += 1; watchdog.lastError = err; watchdogLog('beat-failed', { error: err, durationMs }); }
+      else if (durationMs > SLOW_BEAT_MS) watchdogLog('beat-slow', { durationMs, state: s && s.state });
+    } catch (e) {
+      watchdog.failures += 1;
+      watchdog.lastError = e.code || e.message;
+      watchdogLog('beat-threw', { error: watchdog.lastError, durationMs: Date.now() - t0 });
+    }
+  }, WATCHDOG_MS);
+  if (watchdog.timer.unref) watchdog.timer.unref();
+  watchdogLog('started', { intervalMs: WATCHDOG_MS, staleMs: WATCHDOG_STALE_MS });
+  return watchdogReport();
+}
+
+function stopWatchdog() {
+  if (watchdog.timer) { clearInterval(watchdog.timer); watchdog.timer = null; }
+}
+
+// Load is only reported unhealthy when it stays above the limit across several
+// consecutive samples — memory and disk still fail immediately.
+const LOAD_LIMIT = 6;       // load per core — genuine saturation on a shared desktop
+const LOAD_SAMPLES = 4;     // consecutive samples (~20 s at the 5 s cadence)
+const loadHistory = [];
 let previous = { restartTime: null, buildId: null, at: 0 };
 
 function readJson(file, fallback) {
@@ -85,19 +160,46 @@ function httpOnce(url, timeout, headers) {
   return new Promise((resolve) => {
     const lib = url.startsWith('https') ? https : http;
     const started = Date.now();
-    const req = lib.get(url, { timeout, headers: headers || {} }, (res) => {
+    // Every probe must settle exactly once. The old body cap called
+    // res.destroy() and then waited for 'end', which never fires on a
+    // destroyed stream — any page larger than 100 KB hung the whole
+    // evaluation, so the applet sat on zeros (owner 2026-11-21: "its been
+    // on zero"). Now truncation resolves immediately, the response socket is
+    // closed, and a hard deadline settles the promise no matter what the
+    // server or the socket does.
+    let settled = false;
+    let res = null;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      try { if (res) res.destroy(); } catch (_) { /* already closed */ }
+      try { req.destroy(); } catch (_) { /* already closed */ }
+      resolve(value);
+    };
+    const req = lib.get(url, { timeout, headers: headers || {} }, (response) => {
+      res = response;
       let body = '';
-      res.on('data', (c) => { body += c; if (body.length > 100000) res.destroy(); });
-      res.on('end', () => resolve({
+      const finish = (truncated) => done({
         ok: res.statusCode >= 200 && res.statusCode < 300,
         status: res.statusCode,
         ms: Date.now() - started,
         body,
+        truncated: !!truncated,
         location: res.headers.location || null,
-      }));
+      });
+      res.on('data', (c) => {
+        if (settled) return;
+        body += c;
+        if (body.length > 100000) finish(true);
+      });
+      res.on('end', () => finish(false));
+      res.on('close', () => finish(false));
+      res.on('error', (e) => done({ ok: false, status: res.statusCode || 0, ms: Date.now() - started, error: e.code || e.message }));
     });
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0, ms: Date.now() - started, error: 'timeout' }); });
-    req.on('error', (e) => resolve({ ok: false, status: 0, ms: Date.now() - started, error: e.code || e.message }));
+    const deadline = setTimeout(() => done({ ok: false, status: 0, ms: Date.now() - started, error: 'deadline' }), Number(timeout) > 0 ? Number(timeout) + 2000 : 10000);
+    req.on('timeout', () => done({ ok: false, status: 0, ms: Date.now() - started, error: 'timeout' }));
+    req.on('error', (e) => done({ ok: false, status: 0, ms: Date.now() - started, error: e.code || e.message }));
   });
 }
 
@@ -122,6 +224,27 @@ async function httpGet(url, timeout = 6000, maxHops = 3, headers = null) {
   }
   return { ok: false, status: 0, ms: 0, error: 'too many redirects', hops };
 }
+
+/**
+ * Transient-failure retry. One dropped probe on a busy box or a Cloudflare blip
+ * is not evidence that the service is broken, and the applet must not flash
+ * DEGRADED for it. Every network check gets one immediate retry before it is
+ * marked fail (owner, 2026-11-21: "always or fails til gets build right",
+ * "for smoothest updates etc always").
+ */
+async function httpGetRetry(url, timeout = 6000, maxHops = 3, headers = null) {
+  const first = await httpGet(url, timeout, maxHops, headers);
+  if (first.ok) return first;
+  await new Promise((z) => setTimeout(z, 500));
+  const second = await httpGet(url, timeout, maxHops, headers);
+  return second.ok
+    ? { ...second, retried: true }
+    : { ...second, retried: true, firstStatus: first.status, firstError: first.error };
+}
+
+const retryNote = (r) => (r && r.retried && !r.ok)
+  ? ` · retried, first attempt ${r.firstError || `http ${r.firstStatus}`}`
+  : '';
 
 function pm2Rows() {
   return new Promise((resolve) => {
@@ -233,18 +356,23 @@ async function evaluate() {
   const hakster = pm2 ? pm2.find((p) => p.name === 'hakster') : null;
 
   // 1 — Node process uptime and unexpected restarts
+  let serverUptimeSec = null;
   if (!hakster) {
     add('process-uptime', 'Node process uptime', 'unknown', 'hakster not visible in PM2');
   } else {
     const uptimeSec = Math.round((now - hakster.uptimeMs) / 1000);
+    serverUptimeSec = uptimeSec;
     const restarted = previous.restartTime != null && hakster.restarts > previous.restartTime;
     add('process-uptime', 'Node process uptime', restarted ? 'fail' : 'pass',
       `up ${uptimeSec}s · restarts ${hakster.restarts}${restarted ? ' · INCREASED since last sample' : ''}`);
     previous.restartTime = hakster.restarts;
   }
 
-  // 2 — PM2 state
-  add('pm2-state', 'PM2 process state', hakster && hakster.status === 'online' ? 'pass' : 'fail',
+  // 2 — PM2 state. No PM2 data is a measurement gap, not a failing service:
+  // marking it 'fail' let a PM2 visibility hiccup drive a FAILED verdict (codex
+  // review, 2026-11-21). The service's own health checks still decide.
+  add('pm2-state', 'PM2 process state',
+    !hakster ? 'unknown' : (hakster.status === 'online' ? 'pass' : 'fail'),
     hakster ? `${hakster.name} ${hakster.status} · ${Math.round(hakster.cpu)}% cpu` : 'no PM2 data');
 
   // 3 — database connectivity and a real query
@@ -252,19 +380,22 @@ async function evaluate() {
   add('database', 'Database connectivity', db.status, db.detail);
 
   // 4 — application health endpoint
-  const health = await httpGet('http://127.0.0.1:3579/api/health');
-  add('health-endpoint', 'Health endpoint', health.ok ? 'pass' : 'fail', `http ${health.status} · ${health.ms}ms`, { latencyMs: health.ms });
+  const health = await httpGetRetry('http://127.0.0.1:3579/api/health');
+  add('health-endpoint', 'Health endpoint', health.ok ? 'pass' : 'fail', `http ${health.status} · ${health.ms}ms${retryNote(health)}`,
+    { latencyMs: health.ms, retried: Boolean(health.retried), healed: Boolean(health.retried && health.ok) });
 
   // 5 — public availability and latency
-  const site = await httpGet('https://haksterai.com/');
+  const site = await httpGetRetry('https://haksterai.com/');
   add('public-site', 'Public site availability', site.ok ? 'pass' : 'fail',
-    `http ${site.status} · ${site.ms}ms${site.hops && site.hops.length ? ' · ' + site.hops.join(' · ') : ''}`, { latencyMs: site.ms });
+    `http ${site.status} · ${site.ms}ms${site.hops && site.hops.length ? ' · ' + site.hops.join(' · ') : ''}${retryNote(site)}`,
+    { latencyMs: site.ms, retried: Boolean(site.retried), healed: Boolean(site.retried && site.ok) });
 
   // 6 — API + stream surface
-  const api = await httpGet('http://127.0.0.1:3579/api/version');
+  const api = await httpGetRetry('http://127.0.0.1:3579/api/version');
   let apiOk = false;
   try { apiOk = api.ok && Boolean(JSON.parse(api.body).build); } catch (_) {}
-  add('api', 'API responses', apiOk ? 'pass' : 'fail', `http ${api.status} · ${api.ms}ms`, { latencyMs: api.ms });
+  add('api', 'API responses', apiOk ? 'pass' : 'fail', `http ${api.status} · ${api.ms}ms${retryNote(api)}`,
+    { latencyMs: api.ms, retried: Boolean(api.retried), healed: Boolean(api.retried && apiOk) });
 
   // The applet feed is probed on the port this project actually serves on —
   // production (PORT, default 3579) or the isolated preview (3999). Public
@@ -317,9 +448,21 @@ async function evaluate() {
   } catch (_) { /* keep the os.freemem fallback */ }
   const free = memFreeRatio;
   const load = os.loadavg()[0] / Math.max(1, os.cpus().length);
-  const resourcesOk = free > 0.05 && load < 1.5 && (!disk || disk.pct > 2);
+  // This box is also the owner's desktop, so routine browsing and a Claude/IDE
+  // session already put ~1.5–2 load per core on it without the service being in
+  // trouble. Service latency is measured directly by the endpoint checks above;
+  // this check watches for genuine host pressure (memory nearly gone, disk
+  // nearly full, or load four-times oversubscribed). Load must stay high across
+  // consecutive samples before it counts — a single spike from the app's own
+  // boot-time secret scan or a build must not flip the applet to DEGRADED
+  // (owner, 2026-11-21: "its failing resources — fix asap", "need stable
+  // stability"). Numbers stay in the detail either way.
+  loadHistory.push(load);
+  while (loadHistory.length > LOAD_SAMPLES) loadHistory.shift();
+  const sustainedLoad = loadHistory.length >= LOAD_SAMPLES && loadHistory.every((v) => v >= LOAD_LIMIT);
+  const resourcesOk = free > 0.05 && !sustainedLoad && (!disk || disk.pct > 2);
   add('resources', 'CPU, memory and disk', resourcesOk ? 'pass' : 'fail',
-    `mem available ${(free * 100).toFixed(1)}% · load ${load.toFixed(2)}/core · disk free ${disk ? disk.pct + '%' : 'unknown'}`);
+    `mem available ${(free * 100).toFixed(1)}% · load ${load.toFixed(2)}/core${sustainedLoad ? ' sustained' : ''} · disk free ${disk ? disk.pct + '%' : 'unknown'}`);
 
   // 8 — error rate, measured as a delta since the previous sample
   const errs = errorRate();
@@ -330,10 +473,10 @@ async function evaluate() {
   add('artifact', 'Deployed build identity', dep.id ? 'pass' : 'unknown', dep.id ? `build ${dep.id} · ${dep.builtAt}` : 'dist build id unreadable');
 
   // 10 — critical client workflows
-  const plans = await httpGet('https://haksterai.com/plans');
+  const plans = await httpGetRetry('https://haksterai.com/plans');
   add('workflow', 'Client workflow (/plans)', plans.ok ? 'pass' : 'fail',
     `http ${plans.status} · ${plans.ms}ms · landed ${plans.finalUrl || 'n/a'}` +
-    (plans.hops && plans.hops.length ? ' · ' + plans.hops.join(' · ') : ''), { latencyMs: plans.ms });
+    (plans.hops && plans.hops.length ? ' · ' + plans.hops.join(' · ') : '') + retryNote(plans), { latencyMs: plans.ms });
 
   // ── state ────────────────────────────────────────────────────────────────
   const prev = readJson(STATE_FILE, {});
@@ -344,7 +487,15 @@ async function evaluate() {
   const criticalFail = checks.some((c) => critical.includes(c.id) && c.status === 'fail');
   const anyFail = checks.some((c) => c.status === 'fail');
   const passCount = checks.filter((c) => c.status === 'pass').length;
-  const evidenceRatio = passCount / checks.length;
+  // UNKNOWN means "the monitor could not measure", never "several checks
+  // failed". Counting only passes made a boot or a busy moment — where the
+  // checks DID answer, just with fail — drop below 0.5 and flash UNKNOWN before
+  // flipping back to DEGRADED (owner, 2026-11-21: "says stability unknown then
+  // degraded again"). A pass or a fail is both evidence; only 'unknown' means
+  // no measurement was produced.
+  const measuredCount = checks.filter((c) => c.status === 'pass' || c.status === 'fail').length;
+  const evidenceRatio = measuredCount / checks.length;
+  const passRatio = passCount / checks.length;
 
   const windowSec = cfg.observationWindowSec;
   let windowStartedAt = prev.windowStartedAt || null;
@@ -355,11 +506,40 @@ async function evaluate() {
   const elapsedSec = Math.max(0, Math.round((now - Date.parse(windowStartedAt)) / 1000));
   const remainingSec = Math.max(0, windowSec - elapsedSec);
 
+  const booting = serverUptimeSec != null && serverUptimeSec < 25;
+  // A restart we can see in PM2 explains the failing probes underneath it: the
+  // process is not up yet, so health/api/public checks answer 404/502. That is a
+  // deploy window, not a silent outage — report VERIFYING, never FAILED, and let
+  // the next samples decide once the process answers again.
+  // Only a PM2 row that EXISTS and is not online is a restart. With no PM2 data
+  // at all we cannot claim one — treating "pm2 unavailable" as "restarting"
+  // would mask a real failure as a deploy window. The checks themselves then
+  // decide (a dead process still fails health/public/api), and the pm2-state
+  // check's own detail says the data was unavailable.
+  const pm2Stopped = Boolean(hakster) && hakster.status !== 'online';
+  const restarting = pm2Stopped || restartSeen;
   let state;
   const reasons = [];
-  if (evidenceRatio < 0.5) { state = 'UNKNOWN'; reasons.push('less than half of the checks produced evidence'); }
-  else if (criticalFail) { state = 'FAILED'; reasons.push('a critical check failed'); }
-  else if (anyFail) { state = 'DEGRADED'; reasons.push('one or more required checks failing'); }
+  // Name the failing checks in the reason itself — the applet prints this line
+  // verbatim, and "one or more checks failing" told the owner nothing (2026-11-21:
+  // "stability degrading one or more feat failing ... on applet").
+  const failing = checks.filter((c) => c.status === 'fail');
+  const nameFails = (list) => list.map((c) => (c.detail ? `${c.id} (${c.detail})` : c.id)).join(' · ');
+  // Self-heal summary: which checks a bounded retry rescued, and which stayed
+  // failing after the retry (escalated for a human, never force-restarted).
+  const healed = checks.filter((c) => c.healed).map((c) => c.id);
+  const escalated = failing.map((c) => c.id);
+  const healKey = healed.join(',') + '|' + escalated.join(',');
+  if (healKey !== lastHealKey) {
+    lastHealKey = healKey;
+    if (healed.length) healLog('retry-saved', { checks: healed });
+    if (escalated.length) healLog('escalated', { checks: escalated, reason: reasons.join(' · ') });
+  }
+  if (evidenceRatio < 0.5) { state = 'UNKNOWN'; reasons.push('fewer than half of the checks could be measured'); }
+  else if (booting) { state = 'VERIFYING'; reasons.push(`server restarted ${serverUptimeSec}s ago — checks resume`); }
+  else if (restarting) { state = 'VERIFYING'; reasons.push('service restarting — checks resume when it answers'); }
+  else if (criticalFail) { state = 'FAILED'; reasons.push('critical check failed: ' + nameFails(failing.filter((c) => critical.includes(c.id)))); }
+  else if (anyFail) { state = 'DEGRADED'; reasons.push('failing: ' + nameFails(failing)); }
   else if (remainingSec > 0) { state = 'VERIFYING'; reasons.push(`observation window ${elapsedSec}s of ${windowSec}s`); }
   else if (!cfg.windowApproved) { state = 'VERIFYING'; reasons.push('checks pass for the full proposed window, but the window itself is not owner-approved'); }
   else { state = 'STABLE'; reasons.push(`no failing check for ${elapsedSec}s`); }
@@ -386,7 +566,14 @@ async function evaluate() {
       stableForSec: prev.buildFirstStableAt ? Math.round((now - Date.parse(prev.buildFirstStableAt)) / 1000) : 0,
       deployedAgeSec: dep.mtimeMs ? Math.round((now - dep.mtimeMs) / 1000) : null,
     },
-    evidence: { checks: checks.length, passing: passCount, ratio: Math.round(evidenceRatio * 100) / 100 },
+    evidence: { checks: checks.length, passing: passCount, measured: measuredCount, ratio: Math.round(passRatio * 100) / 100, evidenceRatio: Math.round(evidenceRatio * 100) / 100 },
+    heal: {
+      policy: 'retry + record only — no restart, no delete, no config edit',
+      attemptsPerCheck: 2,
+      healed,
+      escalated,
+    },
+    watchdog: watchdogReport(),
   };
 
   // Merge, never replace: errorRate() keeps its read offset in this same file,
@@ -400,11 +587,69 @@ async function evaluate() {
     lastEvaluatedAt: new Date(now).toISOString(),
   });
 
+  recordLearning(snapshot, prev.lastState);
   audit(snapshot, prev.lastState);
   return snapshot;
 }
 
 /** Append-only audit log: every state change, plus a heartbeat every 60 s. */
+/**
+ * Learning patterns. Every transition into DEGRADED/FAILED appends the set of
+ * failing check ids as a reusable pattern, and every recovery appends how long
+ * the pattern held. Append-only: a pattern's recurrence count is derived by
+ * counting earlier lines, never stored by rewriting the file
+ * (owner, 2026-11-21: "add learning pattern").
+ */
+/**
+ * Self-heal ledger (owner, 2026-11-21: "add auto fix heal"). Append-only record
+ * of what the monitor tried and what happened. The heal layer is deliberately
+ * bounded by CLAUDE.md §11: it retries measurements and records evidence, and
+ * NEVER restarts a service, kills a process, edits config or deletes anything —
+ * those stay approval-gated. Every entry names the check and the outcome.
+ */
+function healLog(event, extra = {}) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.appendFileSync(HEAL_FILE, JSON.stringify({
+      at: new Date().toISOString(),
+      kind: 'self-heal',
+      event,
+      policy: 'retry + record only — no restart, no delete, no config edit',
+      ...extra,
+    }) + '\n', { mode: 0o600 });
+  } catch (_) {}
+}
+
+function recordLearning(snapshot, previousState) {
+  const failing = snapshot.checks.filter((c) => c.status === 'fail');
+  const failingFrom = (s) => s === 'DEGRADED' || s === 'FAILED';
+  const intoFail = failingFrom(snapshot.state) && previousState !== snapshot.state;
+  const recovered = failingFrom(previousState) && !failingFrom(snapshot.state);
+  if (!intoFail && !recovered) return;
+  const patternKey = failing.map((c) => c.id).sort().join(',') || 'none';
+  let seen = 0;
+  try {
+    for (const line of fs.readFileSync(LEARNING_FILE, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try { if (JSON.parse(line).patternKey === patternKey) seen++; } catch (_) {}
+    }
+  } catch (_) { /* first record */ }
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.appendFileSync(LEARNING_FILE, JSON.stringify({
+      at: new Date().toISOString(),
+      kind: intoFail ? 'failure-pattern' : 'recovery',
+      patternKey,
+      seen: seen + 1,
+      state: snapshot.state,
+      previousState: previousState || null,
+      failing: failing.map((c) => ({ id: c.id, detail: c.detail })),
+      reason: snapshot.reason,
+      stableForSec: (snapshot.timestamps && snapshot.timestamps.stableForSec) || 0,
+    }) + '\n', { mode: 0o600 });
+  } catch (_) {}
+}
+
 function audit(snapshot, previousState) {
   const changed = previousState && previousState !== snapshot.state;
   const aged = !previousState || Date.now() - (last.auditAt || 0) > 60000;
@@ -438,8 +683,23 @@ function audit(snapshot, previousState) {
  */
 async function snapshot(force = false) {
   if (force) return refresh();
-  if (!last.snapshot || Date.now() - last.at >= 5000) refresh();
-  return last.snapshot || null;
+  const age = last.at ? Date.now() - last.at : Infinity;
+  if (!last.snapshot || age >= 5000) refresh();
+  const snap = last.snapshot || null;
+  if (!snap) return null;
+  // A stale snapshot must never read as a current one: if the watchdog has not
+  // produced a measurement within the stale window, say so instead of showing
+  // yesterday's green.
+  const ageNow = last.at ? Date.now() - last.at : Infinity;
+  if (ageNow > WATCHDOG_STALE_MS) {
+    return {
+      ...snap,
+      state: 'UNKNOWN',
+      reason: `watchdog: last successful check ${Math.round(ageNow / 1000)}s ago` + (watchdog.lastError ? ` · ${watchdog.lastError}` : ''),
+      watchdog: watchdogReport(),
+    };
+  }
+  return snap;
 }
 
 function refresh() {
@@ -460,4 +720,4 @@ function refresh() {
   return last.inflight;
 }
 
-module.exports = { snapshot, config, POLICY, AUDIT_FILE, STATE_FILE, CONFIG_FILE };
+module.exports = { snapshot, config, POLICY, AUDIT_FILE, LEARNING_FILE, STATE_FILE, CONFIG_FILE, WATCHDOG_LOG, startWatchdog, stopWatchdog, watchdogReport };
