@@ -1,0 +1,28 @@
+{
+  "name": "HaksterAI",
+  "short_name": "HaksterAI",
+  "description": "HaksterAI — an AI-powered CLI and agent fleet that turns your terminal into an agentic engineering powerhouse.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "background_color": "#010103",
+  "theme_color": "#00ff41",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["productivity", "developer", "utilities"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Build", "short_name": "Build", "url": "/build" },
+    { "name": "Dashboard", "short_name": "Dashboard", "url": "/dashboard" },
+    { "name": "HakTerm", "short_name": "HakTerm", "url": "/hakterm" },
+    { "name": "Marketplace", "short_name": "Market", "url": "/marketplace/" }
+  ]
+}

@@ -1,0 +1,85 @@
+name: Delete Spam Comments
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      comment_id:
+        description: "Comment ID to check for spam (numeric)"
+        required: true
+        type: number
+
+permissions:
+  id-token: write
+  issues: write
+  contents: read
+
+jobs:
+  authorize:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - name: Check org membership
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          STATUS=$(gh api -i "orgs/${{ github.repository_owner }}/members/${{ github.actor }}" 2>/dev/null | head -1 | awk '{print $2}')
+          if [ "$STATUS" = "204" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::@${{ github.actor }} is not an org member — manual trigger denied."
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  delete-spam:
+    needs: [authorize]
+    if: >-
+      always()
+      && (needs.authorize.result == 'skipped' && github.event.comment.user.type != 'Bot')
+      || (needs.authorize.result == 'success' && needs.authorize.outputs.allowed == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: scripts/github-automation
+        run: npm install
+
+      - name: Build TypeScript
+        working-directory: scripts/github-automation
+        run: npm run build
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Delete spam comments
+        working-directory: scripts/github-automation
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+          SCAN_MODE: single
+          COMMENT_ID: ${{ github.event.comment.id || inputs.comment_id }}
+        run: node dist/delete_spam_comments.js
+
+      - name: Create workflow summary
+        if: always()
+        env:
+          COMMENT_ID: ${{ github.event.comment.id || inputs.comment_id }}
+        run: |
+          echo "## Spam Comment Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Comment ID: $COMMENT_ID" >> $GITHUB_STEP_SUMMARY
+          echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

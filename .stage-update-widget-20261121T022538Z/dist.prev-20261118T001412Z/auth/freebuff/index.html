@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email Monitor — Sign in with Freebuff</title>
+<style>
+  :root { --mint:#3ddc97; --bg:#0b0f0d; --card:#121a16; --line:#1f2b25; --txt:#e8f5ef; --dim:#8fa8a0; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center;
+         background:radial-gradient(circle at 50% 0%,#12251d 0%,var(--bg) 60%);
+         font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--txt); padding:24px; }
+  .card { width:100%; max-width:440px; background:var(--card); border:1px solid var(--line);
+          border-radius:16px; padding:32px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  h1 { margin:0 0 6px; font-size:22px; letter-spacing:-.02em; }
+  .sub { color:var(--dim); font-size:14px; margin:0 0 24px; }
+  .brand { display:inline-flex; align-items:center; gap:8px; margin-bottom:18px;
+           font-size:13px; color:var(--mint); font-weight:600; letter-spacing:.02em; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--mint); box-shadow:0 0 10px var(--mint); }
+  button { width:100%; padding:14px 18px; border-radius:11px; border:0; cursor:pointer;
+           font-size:15px; font-weight:650; background:var(--mint); color:#05130d;
+           transition:filter .15s, transform .05s; }
+  button:hover:not(:disabled) { filter:brightness(1.08); }
+  button:active:not(:disabled) { transform:translateY(1px); }
+  button:disabled { opacity:.55; cursor:default; }
+  .state { margin-top:20px; padding:16px; border-radius:11px; background:#0d1512;
+           border:1px solid var(--line); font-size:14px; display:none; }
+  .state.show { display:block; }
+  .state.err { border-color:#5b2626; background:#1a1010; color:#ffb4b4; }
+  .state.ok  { border-color:#1f4b38; background:#0e1a14; color:var(--mint); }
+  a.link { color:var(--mint); word-break:break-all; }
+  code { background:#0a110e; border:1px solid var(--line); padding:2px 7px; border-radius:6px;
+         font-size:13px; color:var(--mint); }
+  .row { display:flex; gap:10px; align-items:center; margin-top:14px; }
+  .spin { width:16px; height:16px; border:2px solid var(--line); border-top-color:var(--mint);
+          border-radius:50%; animation:sp .8s linear infinite; flex:0 0 auto; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  .foot { margin-top:22px; font-size:12px; color:#5d6f69; text-align:center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="brand"><span class="dot"></span> EMAIL MONITOR</div>
+  <h1>Sign in with Freebuff</h1>
+  <p class="sub">Approves through the official Freebuff CLI. No password.</p>
+
+  <button id="go">Continue with Freebuff</button>
+  <div class="state" id="state"></div>
+  <div class="foot">HaksterAI · Email Monitor</div>
+</div>
+
+<script>
+(function () {
+  var go = document.getElementById('go');
+  var state = document.getElementById('state');
+  var pollTimer = null;
+  var sid = null;
+
+  // Where to continue after sign-in. The admin gate passes the page the owner
+  // actually asked for (e.g. /admin/dashboard/); without it default to Email
+  // Monitor so the original behaviour is unchanged.
+  function nextTarget() {
+    var fallback = '/admin/mail/';
+    try {
+      var p = new URLSearchParams(window.location.search).get('next');
+      if (!p) return fallback;
+      if (p.charAt(0) !== '/' || p.charAt(1) === '/' || p.indexOf('\\') !== -1) return fallback;
+      if (/[\s<>"]/.test(p)) return fallback;
+      return p;
+    } catch (e) { return fallback; }
+  }
+
+  function show(msg, cls) {
+    state.className = 'state show' + (cls ? ' ' + cls : '');
+    state.innerHTML = msg;
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[<>&"]/g, function (c) {
+      return ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c];
+    });
+  }
+  function stop() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    go.disabled = false;
+    go.textContent = 'Continue with Freebuff';
+  }
+
+  function begin(endpoint, body) {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    go.disabled = true;
+    go.textContent = 'Starting…';
+    show('<div class="row"><span class="spin"></span> Starting Freebuff login…</div>');
+
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok || !d.loginUrl) {
+          var detail = d.error || 'Freebuff CLI did not return a login URL';
+          if (d.detail) detail += ' (' + d.detail + ')';
+          throw new Error(detail);
+        }
+        sid = d.sid;
+
+        var w = window.open(d.loginUrl, '_blank', 'noopener');
+        show(
+          (w ? 'Approve the login in the tab that just opened.'
+             : 'Open this link to approve:') +
+          '<div class="row"><a class="link" href="' + esc(d.loginUrl) +
+          '" target="_blank" rel="noopener">' + esc(d.loginUrl) + '</a></div>' +
+          '<div class="row"><span class="spin"></span> Waiting for approval…</div>'
+        );
+        go.textContent = 'Waiting for approval…';
+
+        var tries = 0;
+        function poll() {
+          if (!sid) return;
+          tries++;
+          if (tries > 150) { stop(); show('Login timed out. Try again.', 'err'); return; }
+
+          fetch('/api/auth/freebuff/cli/status?sid=' + encodeURIComponent(sid))
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+              if (s.ok && s.status === 'success') {
+                stop();
+                var who = (s.user && (s.user.email || s.user.name || s.user.id)) || 'your Freebuff account';
+                var dest = nextTarget();
+                show('Signed in as <code>' + esc(who) + '</code>. Continuing…', 'ok');
+                go.textContent = 'Signed in';
+                setTimeout(function () { window.location.href = dest; }, 900);
+              } else if (s.status === 'expired') {
+                stop(); show('That login expired. Try again.', 'err');
+              } else if (s.status === 'error') {
+                stop(); show('Freebuff error: ' + esc(s.error || 'unknown'), 'err');
+              }
+            })
+            .catch(function () { /* keep polling through transient errors */ });
+        }
+        poll();
+        pollTimer = setInterval(poll, 2000);
+      })
+      .catch(function (e) {
+        stop();
+        show('Error: ' + esc(e.message || 'unknown'), 'err');
+      });
+  }
+
+  go.addEventListener('click', function () { begin('/api/auth/freebuff/cli/start'); });
+
+  // AUTO-START: reuse a valid session, otherwise start the saved profile.
+  // The owner key lets the server adopt the CLI's stored identity instead of
+  // asking for a fresh interactive login after a restart.
+  var fbKey = '';
+  try { fbKey = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch (e) {}
+  fetch('/api/auth/freebuff/me', {
+    credentials: 'same-origin',
+    headers: fbKey ? { 'x-api-key': fbKey } : {}
+  })
+    .then(function (r) {
+      if (r.ok) {
+        go.disabled = true;
+        go.textContent = 'Already signed in';
+        show('Your Freebuff session is active. <a class="link" href="' + esc(nextTarget()) + '">Continue</a>.', 'ok');
+        return null;
+      }
+      return fetch('/api/auth/freebuff/profile');
+    })
+    .then(function (r) { return r ? r.json() : null; })
+    .then(function (p) {
+      if (p && p.profile && p.profile.email) {
+        go.textContent = 'Auto-starting for ' + p.profile.email + '…';
+        begin('/api/auth/freebuff/cli/autostart');
+      }
+    })
+    .catch(function () { /* stay on the button */ });
+})();
+</script>
+</body>
+</html>

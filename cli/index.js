@@ -192,11 +192,27 @@ function _isHaksterApi(url) {
   }
 }
 
+// Short conversational messages skip the agent tool loop: no recall_memory,
+// no THINK/ACT/OBSERVE turns — one streamed answer, ~1-2s instead of 5-7s.
+function _looksConversational(text) {
+  const t = String(text || '').trim();
+  if (!t || t.length > 40) return false;
+  if (/[\/`$]/.test(t)) return false; // commands, paths, code
+  const action = /\b(create|write|edit|fix|run|build|deploy|install|check|scan|search|find|open|list|add|remove|delete|update|restart|kill|git|patch|refactor|test)\b/i;
+  return !action.test(t);
+}
+
 function fetchUrl(url, { method = 'GET', headers = {}, body = null, timeoutMs = 0 } = {}) {
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('https') ? https : http;
-    const reqHeaders = _isHaksterApi(url) && !headers['x-api-key']
-      ? { ...headers, 'x-api-key': process.env.HAKSTER_API_KEY }
+    // Always identify the CLI to our own API, whichever key was supplied, so the
+    // CLI/API entitlement gate sees it.
+    const reqHeaders = _isHaksterApi(url)
+      ? {
+          ...headers,
+          ...(headers['x-api-key'] ? {} : { 'x-api-key': process.env.HAKSTER_API_KEY }),
+          'x-hakster-client': 'cli',
+        }
       : headers;
     const req = lib.request(url, { method, headers: reqHeaders }, (res) => {
       if (res.statusCode >= 400) {
@@ -677,7 +693,9 @@ program
     try { serverCfg = getConfig(); } catch { /* no server configured */ }
     const { server, apiKey } = serverCfg;
     const readline = require('readline');
-    const history = (opts.fresh ? [] : loadHistory());
+    // Only the tail of the last session is restored: a full transcript of
+    // tens of thousands of tokens made every reply slow (and often empty).
+    const history = (opts.fresh ? [] : loadHistory().slice(-8));
     // ── Session-wide tool call log (table of contents) ──
     // Every tool call gets a persistent #id (never resets within the session) so
     // the user can say "check #25" and both of us can find exactly which call that was.
@@ -1361,6 +1379,60 @@ program
       // ══════════════════════════════════════════════════════════════════
       // ── ONLINE MODE — SSE streaming to server ──
       // ══════════════════════════════════════════════════════════════════
+      // ── Conversational fast path — one streamed answer, no tool loop ──
+      if (_looksConversational(text)) {
+        pending = true;
+        let plain = '';
+        try {
+          const r = await fetch(`${server}/api/chat/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+            body: JSON.stringify({
+              // Compact context — a short question does not need the whole system
+              // prompt or the full restored transcript.
+              messages: [{ role: 'system', content: String(sysPrompt).slice(0, 4000) }, ...history.slice(-6)],
+              stream: true,
+              model: opts.model || DEFAULT_MODEL,
+              provider: opts.provider || DEFAULT_AI_PROVIDER,
+            }),
+          });
+          if (r.ok && r.body) {
+            const reader = r.body.getReader();
+            const dec = new TextDecoder();
+            let raw = '';
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              raw += dec.decode(value, { stream: true });
+            }
+            for (const ln of raw.split('\n')) {
+              if (!ln.startsWith('data: ')) continue;
+              try {
+                const e = JSON.parse(ln.slice(6));
+                if (e.type === 'delta' && e.content) {
+                  process.stdout.write(e.content);
+                  plain += e.content;
+                }
+              } catch {}
+            }
+          }
+        } catch (e) {
+          process.stdout.write(`${C.red}✗ ${e.message}${C.reset}\n`);
+        }
+        if (plain.trim()) {
+          history.push({ role: 'assistant', content: plain });
+          saveHistory(history);
+          try { mem.extractAndSaveMemory(text, plain); } catch {}
+        } else {
+          console.log(`${C.yellow}  (no answer text came back — send it again)${C.reset}`);
+        }
+        console.log();
+        pending = false;
+        if (rl.closed) process.exit(0);
+        else rl.prompt();
+        return;
+      }
+
       const agentCwd = inferAgentCwd(text);
       const body = JSON.stringify({
         messages: [{ role: 'system', content: sysPrompt }, ...history],
@@ -1379,6 +1451,7 @@ program
       _lastSendTime = Date.now();
       let fullResponse = '';
       let toolCount = 0;
+      let sawDone = false; // a 'done' event means the turn is over, even if the socket drops
       let turnCount = 0;
       let isThinking = false;
       let thinkingBuf = '';
@@ -1779,6 +1852,7 @@ program
                 process.stdout.write(`\n${C.red}  ✗ ${evt.error || evt.message}${C.reset}\n`);
               }
               else if (evt.type === 'done') {
+                sawDone = true;
                 stopSpinner();
                 const elapsed = Date.now() - (todoState.startTime || Date.now());
                 showTodo({ status: 'done', phase: 'COMPLETE', activeTool: 'complete', completedTools: Math.max(todoState.completedTools, toolCount), totalTools: Math.max(todoState.totalTools, toolCount), turnCount: turnCount, avgToolTime: _avg(gridToolTimes), sessionDur: elapsed });
@@ -1797,9 +1871,52 @@ program
           }
         });
 
-        res.on('end', () => {
+        res.on('end', async () => {
           stopSpinner();
           sseWatchdog.stop();
+          // A tool turn can end with no visible text at all — the model returns
+          // its final message empty. Ask once more on the plain (tool-free)
+          // chat stream so the user always gets an answer instead of a silent
+          // return to the prompt.
+          if (!fullResponse.trim()) {
+            try {
+              const plainRes = await fetch(`${server}/api/chat/stream`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+                body: JSON.stringify({
+                  messages: [{ role: 'system', content: sysPrompt }, ...history],
+                  stream: true,
+                  model: opts.model || DEFAULT_MODEL,
+                  provider: opts.provider || DEFAULT_AI_PROVIDER,
+                }),
+              });
+              if (plainRes.ok && plainRes.body) {
+                const reader = plainRes.body.getReader();
+                const dec = new TextDecoder();
+                let raw = '';
+                for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  raw += dec.decode(value, { stream: true });
+                }
+                let printed = false;
+                for (const ln of raw.split('\n')) {
+                  if (!ln.startsWith('data: ')) continue;
+                  try {
+                    const e = JSON.parse(ln.slice(6));
+                    if (e.type === 'delta' && e.content) {
+                      if (!printed) { process.stdout.write('\n'); printed = true; }
+                      process.stdout.write(e.content);
+                      fullResponse += e.content;
+                    }
+                  } catch {}
+                }
+              }
+            } catch { /* fall through to the honest notice below */ }
+            if (!fullResponse.trim()) {
+              console.log(`${C.yellow}  (no answer text came back — send it again or try /offline)${C.reset}`);
+            }
+          }
           if (fullResponse) {
             history.push({ role: 'assistant', content: fullResponse });
             saveHistory(history);
@@ -1822,6 +1939,9 @@ program
         });
 
         res.on('error', (err) => {
+          // The server closes the socket right after 'done'; that is a finished
+          // turn, not a failure. res.on('end') renders the answer and re-prompts.
+          if (sawDone) return;
           stopSpinner();
           sseWatchdog.stop();
           console.error(`${C.red}  ✗ Stream error: ${err.message}${C.reset}`);
@@ -2030,32 +2150,143 @@ program
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
     try {
       const data = await fetchJson(`${server}/api/agent/mcp-status`, { headers });
-      const servers = data.servers || data || {};
-      if (typeof servers === 'object') {
-        console.log(`${C.cyan}MCP Servers & Tools:${C.reset}`);
-        let total = 0;
-        for (const [name, info] of Object.entries(servers)) {
-          const toolList = info.tools || info || [];
-          const count = Array.isArray(toolList) ? toolList.length : 0;
-          total += count;
-          console.log(`\n  ${C.green}${name}${C.reset} ${C.gray}(${count} tools)${C.reset}`);
-          if (Array.isArray(toolList)) {
-            for (const t of toolList.slice(0, 8)) {
-              const tName = typeof t === 'string' ? t : (t.name || '?');
-              const tDesc = typeof t === 'object' ? (t.description || '').slice(0, 60) : '';
-              console.log(`    ${C.gray}•${C.reset} ${tName}${tDesc ? ` ${C.gray}— ${tDesc}${C.reset}` : ''}`);
-            }
-            if (toolList.length > 8) console.log(`    ${C.gray}... and ${toolList.length - 8} more${C.reset}`);
-          }
+      const raw = data.servers || data || [];
+      // The server returns an array of { name, initialized, toolCount, tools }.
+      // Older builds answered an object keyed by server name — accept both, and
+      // never print a bare array index as if it were a server name.
+      const list = Array.isArray(raw)
+        ? raw.map((s) => (s && typeof s === 'object' ? s : { name: String(s), tools: [] }))
+        : Object.entries(raw).map(([n, s]) => ({ name: n, ...(s && typeof s === 'object' ? s : { tools: [] }) }));
+
+      // The configured belt (all servers in .hakster/mcp.json), so a configured
+      // server that has not connected yet still shows up instead of vanishing.
+      let configured = [];
+      try {
+        const belt = await fetchJson(`${server}/api/mcp/servers`, { headers, timeoutMs: 8000 });
+        configured = Array.isArray(belt && belt.servers) ? belt.servers : [];
+      } catch { /* optional */ }
+
+      console.log(`${C.cyan}MCP Servers & Tools:${C.reset}`);
+      let total = 0;
+      for (const info of list) {
+        const name = info.name || info.server || '?';
+        const toolList = Array.isArray(info.tools) ? info.tools : [];
+        const count = Number.isFinite(info.toolCount) ? info.toolCount : toolList.length;
+        total += count;
+        const state = info.initialized === false || info.lazy
+          ? `${C.gray}(lazy — connects on first use)${C.reset}`
+          : `${C.green}✓ connected${C.reset}`;
+        console.log(`\n  ${C.green}${name}${C.reset} ${C.gray}(${count} tools)${C.reset} ${state}`);
+        for (const t of toolList.slice(0, 8)) {
+          const tName = typeof t === 'string' ? t : (t.name || '?');
+          const tDesc = typeof t === 'object' ? (t.description || '').slice(0, 60) : '';
+          console.log(`    ${C.gray}•${C.reset} ${tName}${tDesc ? ` ${C.gray}— ${tDesc}${C.reset}` : ''}`);
         }
-        console.log(`\n${C.cyan}Total: ${total} tools${C.reset}`);
-      } else {
-        console.log(JSON.stringify(data, null, 2));
+        if (toolList.length > 8) console.log(`    ${C.gray}... and ${toolList.length - 8} more${C.reset}`);
       }
+      const liveNames = new Set(list.map((s) => String(s.name || '').toLowerCase()));
+      const missing = configured.filter((s) => s && s.name && !liveNames.has(String(s.name).toLowerCase()));
+      if (missing.length) {
+        console.log(`\n${C.yellow}Configured but not connected:${C.reset}`);
+        for (const s of missing) console.log(`  ${C.yellow}○${C.reset} ${s.name}`);
+      }
+      console.log(`\n${C.cyan}Total: ${total} tools from ${list.length}/${configured.length || list.length} servers${C.reset}\n`);
     } catch (err) {
       console.error(`${C.red}Error: ${err.message}${C.reset}`);
       process.exit(1);
     }
+  });
+
+// ── services ────────────────────────────────────────────────────────────
+// Every service we run, on this box and across the fleet, with a live probe.
+program
+  .command('services')
+  .alias('ports')
+  .description('List every service and port (this host + the fleet) with live health')
+  .action(async () => {
+    const net = require('net');
+    const { execFile } = require('child_process');
+
+    const SERVICES = [
+      { host: '127.0.0.1',   port: 3579,  name: 'haksterAi server',      path: '/api/health' },
+      { host: '127.0.0.1',   port: 4000,  name: 'phantom core',          path: '/' },
+      { host: '127.0.0.1',   port: 8082,  name: 'claude-code-proxy',     path: '/' },
+      { host: '127.0.0.1',   port: 5555,  name: 'miniforge',             path: '/' },
+      { host: '127.0.0.1',   port: 8081,  name: 'cinevault',             path: '/' },
+      { host: '127.0.0.1',   port: 11434, name: 'ollama relay',          path: '/api/tags' },
+      { host: '127.0.0.1',   port: 5432,  name: 'postgres',              tcp: true },
+      { host: '10.0.0.251',  port: 5006,  name: 'junkalot.co (Parrot)',  path: '/' },
+      { host: '10.0.0.251',  port: 4199,  name: 'free-lanes (Parrot)',   path: '/health' },
+      { host: '10.0.0.251',  port: 4000,  name: 'phantom (Parrot)',      path: '/' },
+      { host: '10.0.0.251',  port: 5555,  name: 'miniforge (Parrot)',    path: '/' },
+      { host: '10.0.0.131',  port: 3579,  name: 'haksterAi (Dell)',      path: '/api/health' },
+      { host: '10.0.0.210',  port: 3579,  name: 'haksterAi (mint)',      path: '/api/health' },
+    ];
+
+    const probeTcp = (host, port, timeoutMs = 1200) => new Promise((resolve) => {
+      const started = Date.now();
+      const sock = net.connect({ host, port });
+      const done = (up) => { try { sock.destroy(); } catch {} resolve({ up, ms: Date.now() - started }); };
+      sock.setTimeout(timeoutMs);
+      sock.once('connect', () => done(true));
+      sock.once('timeout', () => done(false));
+      sock.once('error', () => done(false));
+    });
+
+    const probeHttp = (host, port, p, timeoutMs = 1500) => new Promise((resolve) => {
+      const started = Date.now();
+      const mod = require('http');
+      const req = mod.get({ host, port, path: p || '/', timeout: timeoutMs }, (res) => {
+        res.resume();
+        res.on('end', () => resolve({ up: res.statusCode < 500, code: res.statusCode, ms: Date.now() - started }));
+      });
+      req.on('timeout', () => { req.destroy(); resolve({ up: false, ms: Date.now() - started }); });
+      req.on('error', () => resolve({ up: false, ms: Date.now() - started }));
+    });
+
+    console.log(`\n${C.cyan}Fleet services${C.reset}`);
+    const results = await Promise.all(SERVICES.map(async (s) => {
+      const r = s.tcp ? await probeTcp(s.host, s.port) : await probeHttp(s.host, s.port, s.path);
+      return { ...s, ...r };
+    }));
+    for (const r of results) {
+      const localOnly = r.host === '127.0.0.1' && !r.up;
+      const mark = r.up
+        ? `${C.green}● up${C.reset}`
+        : localOnly ? `${C.gray}— not on this host${C.reset}` : `${C.red}○ down${C.reset}`;
+      const addr = `${r.host}:${String(r.port).padEnd(5)}`;
+      const extra = r.code ? `${C.gray}HTTP ${r.code}${C.reset}` : `${C.gray}tcp${C.reset}`;
+      const ms = r.up ? `${C.gray}${r.ms}ms${C.reset}` : `${C.gray}—${C.reset}`;
+      console.log(`  ${mark}  ${addr} ${r.name.padEnd(24)} ${extra.padEnd(18)} ${ms}`);
+    }
+
+    // Local listeners, labelled where we know the port.
+    const labels = { 3579: 'haksterAi', 4000: 'phantom', 4199: 'free-lanes', 5006: 'junkalot',
+      5555: 'miniforge', 5556: 'miniforge-dev', 8081: 'cinevault', 8082: 'claude-code-proxy',
+      11434: 'ollama', 5432: 'postgres', 3001: 'app 3001', 3002: 'app 3002', 8888: 'app 8888',
+      9999: 'app 9999', 9050: 'tor-socks', 80: 'http', 22: 'ssh', 53: 'dns' };
+    const listening = await new Promise((resolve) => {
+      execFile('ss', ['-ltn'], { timeout: 4000 }, (err, stdout) => {
+        if (err) return resolve([]);
+        const ports = new Set();
+        for (const line of String(stdout).split('\n').slice(1)) {
+          const m = line.trim().split(/\s+/)[3];
+          if (!m) continue;
+          const port = Number(String(m).split(':').pop());
+          if (port) ports.add(port);
+        }
+        resolve([...ports].sort((a, b) => a - b));
+      });
+    });
+    console.log(`\n${C.cyan}Listening on this host${C.reset}`);
+    if (!listening.length) {
+      console.log(`  ${C.gray}(ss unavailable)${C.reset}`);
+    } else {
+      for (const port of listening) {
+        console.log(`  ${C.green}●${C.reset} ${String(port).padEnd(6)} ${labels[port] ? labels[port] : `${C.gray}unmapped${C.reset}`}`);
+      }
+    }
+    console.log();
   });
 
 // ── agent (one-shot with SSE) ───────────────────────────────────────────

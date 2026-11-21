@@ -25,12 +25,33 @@
   var MIN_OVERFLOW = 24; // ignore boxes with less than this to scroll
   var MIN_VISIBLE = 24;  // hide a bar when its box is mostly off screen
   var Z = 2147483000;
+  // Element kinds that can be a scroll container. Anything else (span, b, i,
+  // svg, path, img, a …) is never measured — reading its scrollHeight would
+  // still force a layout, and there are thousands of them on a dashboard.
+  // A real scroll container of another kind opts in with data-hk-scroll.
+  var SCROLL_HOSTS = {
+    DIV: 1, SECTION: 1, ARTICLE: 1, MAIN: 1, ASIDE: 1, NAV: 1, HEADER: 1, FOOTER: 1,
+    PRE: 1, OL: 1, UL: 1, TABLE: 1, TBODY: 1, THEAD: 1, TFOOT: 1, TD: 1, TH: 1,
+    TEXTAREA: 1, FORM: 1, FIELDSET: 1, BLOCKQUOTE: 1, DL: 1, DD: 1, DIALOG: 1, DETAILS: 1,
+  };
 
   var trackStyle = 'position:fixed;z-index:' + Z + ';pointer-events:none;background:rgba(20,20,29,.92);border-radius:999px;transition:opacity .15s ease;';
   var thumbStyle = 'position:absolute;background:#7c3aed;border-radius:999px;pointer-events:auto;cursor:grab;';
 
   var tracked = [];
   var raf = 0;
+
+  // Incremental scanning state (see collect()). `visited` remembers nodes that
+  // were measured and did not scroll; `dirtySet` holds the ancestors of nodes
+  // that changed and must be looked at again.
+  function newSeen() {
+    if (typeof WeakSet === 'function') return new WeakSet();
+    return { has: function () { return false; }, add: function () {} };
+  }
+  var visited = null;
+  var dirtySet = newSeen();
+  var lastFullScan = 0;
+  var FULL_SCAN_MS = 60000;
 
   function makeBar(axis) {
     var bar = document.createElement('div');
@@ -54,13 +75,6 @@
   function hasNativeBar(el, axis) {
     return (axis === 'y' ? el.offsetWidth - el.clientWidth : el.offsetHeight - el.clientHeight) > 4;
   }
-  function skip(el) {
-    if (!el || el.nodeType !== 1) return true;
-    if (el.closest('.xterm')) return true; // xterm draws its own bar
-    if (el === document.body || el === document.documentElement) return false;
-    var r = el.getBoundingClientRect();
-    return r.width < 40 || r.height < 24;
-  }
 
   function collect() {
     var out = [];
@@ -68,9 +82,37 @@
     if (de.scrollHeight - window.innerHeight > MIN_OVERFLOW) out.push({ el: document.scrollingElement || de, axis: 'y', page: true });
     if (de.scrollWidth - window.innerWidth > MIN_OVERFLOW) out.push({ el: document.scrollingElement || de, axis: 'x', page: true });
     var all = document.querySelectorAll('*');
+    // 2026-11-21 (owner: "haksterai admin dash is lagging freezing find
+    // culprit"): this loop used to call getBoundingClientRect() and
+    // getComputedStyle() for EVERY element. On the owner dashboard (~4,400
+    // nodes) the live cards rewrite their DOM every few seconds, which fired a
+    // rescan and forced a full-document layout thousands of times — 7.5 s of
+    // main-thread time in 25 s, with individual freezes over a second.
+    // Second pass (same day, the profile still showed collect() at ~340 ms per
+    // scan): only element kinds that can actually be a scroll container are
+    // measured at all, and elements already tracked stay tracked. Reading
+    // scrollHeight forces a layout, so the whole document must never be read.
+    // Third pass: a node that was already measured and did not scroll is not
+    // measured again on every beat — only new nodes, the ancestors of a DOM
+    // change, and currently tracked elements are. A full re-measure runs on a
+    // resize and once a minute, so nothing can stay missed for long.
+    var full = !visited || Date.now() - lastFullScan > FULL_SCAN_MS;
+    if (full) { visited = newSeen(); lastFullScan = Date.now(); }
+    var dirtyNow = dirtySet;
+    dirtySet = newSeen();
+    var keepEls = [];
+    for (var k = 0; k < tracked.length; k++) keepEls.push(tracked[k].el);
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
-      if (skip(el)) continue;
+      if (!el || el.nodeType !== 1) continue;
+      if (el === document.body || el === document.documentElement) continue;
+      var known = keepEls.indexOf(el) >= 0;
+      if (!full && !known && !dirtyNow.has(el) && visited.has(el)) continue;
+      if (visited.add) visited.add(el);
+      var tag = el.tagName;
+      if (!SCROLL_HOSTS[tag] && !known && !(el.hasAttribute && (el.hasAttribute('data-hk-scroll') || el.hasAttribute('data-scroll')))) continue;
+      if (el.scrollHeight - el.clientHeight <= MIN_OVERFLOW && el.scrollWidth - el.clientWidth <= MIN_OVERFLOW) continue;
+      if (el.closest && el.closest('.xterm')) continue; // xterm draws its own bar
       if (scrollsAxis(el, 'y') && overflows(el, 'y') && !hasNativeBar(el, 'y')) out.push({ el: el, axis: 'y' });
       if (scrollsAxis(el, 'x') && overflows(el, 'x') && !hasNativeBar(el, 'x')) out.push({ el: el, axis: 'x' });
     }
@@ -186,17 +228,35 @@
     if (raf) return;
     raf = requestAnimationFrame(function () { raf = 0; paint(); });
   }
-  function rescan() { track(collect()); }
-
   var scanTimer = 0;
-  function rescanSoon() { clearTimeout(scanTimer); scanTimer = setTimeout(rescan, 250); }
+  var lastScan = 0;
+  function rescan() { lastScan = Date.now(); track(collect()); }
+  // Coalesce bursts of DOM changes into one scan, and never scan more than
+  // once every two seconds. The live dashboard mutates hundreds of nodes every
+  // beat; without this cap the rescan was effectively continuous, and each
+  // scan forces a layout over the whole page.
+  var SCAN_DEBOUNCE_MS = 800;
+  var SCAN_MIN_GAP_MS = 2000;
+  function rescanSoon() {
+    clearTimeout(scanTimer);
+    var wait = Math.max(SCAN_DEBOUNCE_MS, SCAN_MIN_GAP_MS - (Date.now() - lastScan));
+    scanTimer = setTimeout(rescan, wait);
+  }
 
-  window.addEventListener('resize', rescanSoon, { passive: true });
+  window.addEventListener('resize', function () { visited = null; rescanSoon(); }, { passive: true });
   window.addEventListener('scroll', schedule, { passive: true, capture: true });
   if (window.MutationObserver) {
-    new MutationObserver(rescanSoon).observe(document.documentElement, {
-      childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'],
-    });
+    // childList only: class/style toggles inside the live cards fired this
+    // observer constantly and never change what can scroll. The parent of each
+    // changed subtree is looked at again on the next scan even if its nodes
+    // were already measured — a log pane that just grew must not be skipped.
+    new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        var t = records[i].target;
+        if (t && t.nodeType === 1) dirtySet.add(t);
+      }
+      rescanSoon();
+    }).observe(document.documentElement, { childList: true, subtree: true });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', rescan);
   else rescan();

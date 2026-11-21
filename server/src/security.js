@@ -331,7 +331,12 @@ function persistFindings(findings) {
   }
 
   // Resolve findings that are no longer present (mark acknowledged=auto-resolved)
-  const allRows = db.prepare('SELECT key, id, title FROM security_notifications WHERE acknowledged = 0').all();
+  // Rows raised by other detectors (CLI provenance / run-volume) never appear in
+  // this audit's findings, so they must not be auto-resolved here — only the
+  // owner clears those (2026-11-22, CLI guard).
+  const allRows = db.prepare(`SELECT key, id, title FROM security_notifications
+                               WHERE acknowledged = 0
+                                 AND category NOT IN ('cli-provenance', 'cli-volume')`).all();
   const resolved = [];
   for (const row of allRows) {
     if (!currentKeys.has(row.key)) {

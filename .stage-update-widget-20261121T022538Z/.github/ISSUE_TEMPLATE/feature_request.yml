@@ -1,0 +1,52 @@
+name: Feature Request
+description: Suggest an idea for haksterAi
+labels: ["pending-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before submitting a feature request, please [search and confirm](https://github.com/ghoststack/haksterAi/issues?q=sort%3Aupdated-desc+is%3Aissue+is%3Aopen+type%3AFeature) that it does not yet exist. Duplicate requests will be closed.
+
+  - type: dropdown
+    id: hakster-product
+    attributes:
+      label: haksterAi Component
+      description: Which component does this feature request apply to?
+      options:
+        - Agent / LLM Loop
+        - TUI / Terminal UI
+        - MCP Server Integration
+        - Shell Execution
+        - WebSocket API
+        - GitHub Automation
+        - Pentest Agents
+        - Core / All
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: Feature Description
+      description: What problem does this solve and how should it work?
+      placeholder: "Describe the challenge you're facing and your suggested feature."
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: How would you use this feature?
+      placeholder: "Provide concrete examples of when and how you'd use this."
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other relevant details
+      placeholder: "Screenshots, examples from other tools, or technical details."
+    validations:
+      required: false

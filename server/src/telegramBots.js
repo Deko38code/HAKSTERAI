@@ -1488,5 +1488,8 @@ module.exports = {
   // Admin device enrollment: the passkey approval code goes to Deke's phone and
   // is never returned to the browser that asked for it.
   sendSecurityCode: (text) => alertToRole('TELEGRAM_BOT_TOKEN_6', `🔐 *Device verification*\n\n${text}`, { parse_mode: 'Markdown' }),
+  // CLI provenance guard (2026-11-22): reuse the security report channel so a
+  // foreign-CLI launch of our own scripts reaches the owner like any finding.
+  sendSecurityReport,
   ROLES,
 };

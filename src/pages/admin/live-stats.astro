@@ -1,0 +1,187 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout title="Admin — Live Stats | haksterAi">
+  <style is:global>
+    .ls-wrap{max-width:1180px;margin:0 auto;padding:26px max(20px, env(safe-area-inset-left, 0px)) 80px;color:#e2e8f0;}
+    .ls-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:6px;}
+    .ls-eyebrow{font:600 10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em;text-transform:uppercase;color:#64748b;margin:0 0 8px;}
+    .ls-title{font-size:clamp(24px,4vw,34px);font-weight:800;letter-spacing:-.02em;margin:0;}
+    .ls-status{font:500 12px/1.5 ui-monospace,monospace;color:#94a3b8;text-align:right;margin:0;}
+    .ls-status b{color:#22c55e;font-weight:700;}
+    .ls-note{max-width:72ch;color:#94a3b8;font-size:13px;margin:8px 0 22px;line-height:1.55;}
+    .ls-section{margin-top:26px;}
+    .ls-section h2{font-size:13px;letter-spacing:.13em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin:0 0 10px;}
+    .ls-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:10px;}
+    .ls-tile{background:#111118;border:1px solid #1e1e2e;border-radius:12px;padding:12px 13px;min-width:0;}
+    .ls-tile .k{font:600 10px/1 ui-monospace,monospace;letter-spacing:.11em;text-transform:uppercase;color:#64748b;margin:0 0 7px;}
+    .ls-tile .v{font:700 22px/1.1 ui-monospace,monospace;color:#f1f5f9;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+    .ls-tile .s{font-size:11px;color:#94a3b8;margin-top:5px;line-height:1.4;}
+    .ls-tile.money .v{color:#4ade80;}
+    .ls-chart{display:flex;align-items:flex-end;gap:4px;height:130px;padding:18px 10px 6px;background:#0b0b12;border:1px solid #1e1e2e;border-radius:12px;overflow:hidden;}
+    .ls-bar{flex:1 1 0;min-width:3px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#a855f7,#6d28d9);position:relative;}
+    .ls-bar span{position:absolute;top:-15px;left:50%;transform:translateX(-50%);font:600 9px/1 ui-monospace,monospace;color:#94a3b8;white-space:nowrap;}
+    .ls-axis{display:flex;justify-content:space-between;gap:2px;font:500 9.5px/1 ui-monospace,monospace;color:#475569;margin-top:6px;}
+    .ls-card{background:#111118;border:1px solid #1e1e2e;border-radius:14px;padding:15px;min-width:0;}
+    .ls-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #171722;font-size:12.5px;}
+    .ls-row:last-child{border-bottom:0;}
+    .ls-row .k{color:#94a3b8;min-width:0;overflow-wrap:anywhere;}
+    .ls-row .v{font-family:ui-monospace,monospace;color:#e2e8f0;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+    .ls-lane{margin:7px 0;}
+    .ls-lane .lab{display:flex;justify-content:space-between;gap:8px;font:500 11.5px/1.4 ui-monospace,monospace;color:#cbd5e1;margin-bottom:4px;}
+    .ls-lane .lab span:last-child{color:#94a3b8;white-space:nowrap;}
+    .ls-track{height:8px;background:#171722;border-radius:4px;overflow:hidden;}
+    .ls-fill{height:100%;background:#7c3aed;border-radius:4px;}
+    .ls-empty{color:#64748b;font-size:12.5px;margin:0;}
+    .ls-foot{color:#64748b;font-size:11.5px;line-height:1.6;margin-top:26px;border-top:1px solid #1e1e2e;padding-top:12px;}
+    .ls-foot a{color:#a5b4fc;}
+    @media (max-width:480px){
+      .ls-wrap{padding-left:20px;padding-right:20px;}
+      .ls-chart{height:108px;}
+      .ls-bar span{display:none;}
+    }
+  </style>
+
+  <div class="ls-wrap">
+    <header class="ls-head">
+      <div>
+        <p class="ls-eyebrow">HaksterAI · owner</p>
+        <h1 class="ls-title">Live stats</h1>
+      </div>
+      <p class="ls-status" id="ls-status">Owner sign-in required.</p>
+    </header>
+
+    <p class="ls-note">
+      Read straight from the HaksterAI ledgers on each refresh — no stored copy, no estimate. Every
+      derived figure shows the sum it came from. Anything the server could not read says so instead of
+      showing a number.
+    </p>
+
+    <section class="ls-section">
+      <h2>Money recorded</h2>
+      <div class="ls-tiles" id="ls-money"><p class="ls-empty">Waiting for the first read…</p></div>
+    </section>
+
+    <section class="ls-section">
+      <h2>Usage recorded</h2>
+      <div class="ls-tiles" id="ls-usage"><p class="ls-empty">Waiting for the first read…</p></div>
+    </section>
+
+    <section class="ls-section">
+      <h2>Calls per day</h2>
+      <div class="ls-chart" id="ls-chart"></div>
+      <div class="ls-axis" id="ls-axis"></div>
+    </section>
+
+    <section class="ls-section">
+      <h2>Lane mix</h2>
+      <div class="ls-card" id="ls-lanes"><p class="ls-empty">Waiting for the first read…</p></div>
+    </section>
+
+    <section class="ls-section">
+      <h2>Accounts</h2>
+      <div class="ls-card" id="ls-people"><p class="ls-empty">Waiting for the first read…</p></div>
+    </section>
+
+    <p class="ls-foot" id="ls-foot"></p>
+  </div>
+
+  <script>
+    (function () {
+      var token = '';
+      try { token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch (e) {}
+
+      function el(id) { return document.getElementById(id); }
+      function money(cents) { return '$' + (Number(cents || 0) / 100).toFixed(2); }
+      function num(n) { return Number(n || 0).toLocaleString('en-US'); }
+      function tile(k, v, s, cls) {
+        return '<div class="ls-tile' + (cls ? ' ' + cls : '') + '"><p class="k">' + k + '</p><p class="v">' + v + '</p>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>';
+      }
+
+      function render(d) {
+        var h = d.hakster || {};
+        var rev = h.revenue || {};
+        var use = h.usage || {};
+        var ppl = h.people || {};
+
+        el('ls-money').innerHTML = [
+          tile('Revenue, all time', money(rev.allTimeCents), num(rev.payments) + ' completed payment' + (rev.payments === 1 ? '' : 's'), 'money'),
+          tile('Revenue, 30 days', money(rev.month30Cents), 'payment rows inside the last 30 days', 'money'),
+          tile('Active subscriptions', num(rev.activeSubs), 'status = active', ''),
+          tile('Duplicates excluded', money(rev.excludedDuplicateCents), num(rev.excludedDuplicateRows) + ' duplicate row(s) never counted', '')
+        ].join('');
+
+        var calls = Number(use.calls || 0);
+        var it = Number(use.inputTokens || 0);
+        var ot = Number(use.outputTokens || 0);
+        var perCallIn = calls ? Math.round(it / calls) : 0;
+        var perCallOut = calls ? Math.round(ot / calls) : 0;
+        el('ls-usage').innerHTML = [
+          tile('Calls', num(calls), use.firstDay ? use.firstDay + ' → ' + use.lastDay : 'no calls recorded'),
+          tile('Input tokens', num(it), 'sum of input_tokens'),
+          tile('Output tokens', num(ot), 'sum of output_tokens'),
+          tile('Tokens per call', num(perCallIn) + ' / ' + num(perCallOut), 'input / output · ' + num(it) + ' ÷ ' + num(calls) + ', ' + num(ot) + ' ÷ ' + num(calls)),
+          tile('Recorded cost', money(use.costCents), 'as written by the usage writer, not a price'),
+          tile('Accounts', num(ppl.total), num(ppl.activity7d) + ' active in the last 7 days')
+        ].join('');
+
+        // Calls per day — real rows from byDay, nothing filled in.
+        var days = (use.byDay || []).slice(-14);
+        var chart = el('ls-chart'), axis = el('ls-axis');
+        if (!days.length) {
+          chart.innerHTML = '<p class="ls-empty">No usage rows in the last 14 days.</p>';
+          axis.innerHTML = '';
+        } else {
+          var max = Math.max.apply(null, days.map(function (x) { return Number(x.calls) || 0; }).concat([1]));
+          chart.innerHTML = days.map(function (x) {
+            var pct = Math.max(2, Math.round((Number(x.calls) || 0) / max * 88));
+            return '<div class="ls-bar" style="height:' + pct + '%"><span>' + num(x.calls) + '</span></div>';
+          }).join('');
+          axis.innerHTML = days.map(function (x) { return '<span>' + String(x.day || '').slice(5) + '</span>'; }).join('');
+        }
+
+        // Lane mix — provider/model pairs as recorded.
+        var lanes = use.byModel || [];
+        var total = lanes.reduce(function (n, l) { return n + (Number(l.calls) || 0); }, 0);
+        el('ls-lanes').innerHTML = lanes.length
+          ? lanes.map(function (l) {
+              var c = Number(l.calls) || 0;
+              var pct = total ? Math.round(c / total * 100) : 0;
+              var w = Math.max(2, pct);
+              return '<div class="ls-lane"><div class="lab"><span>' + String(l.provider || '?') + ' · ' + String(l.model || '?') + '</span><span>' + num(c) + ' calls · ' + pct + '%</span></div><div class="ls-track"><div class="ls-fill" style="width:' + w + '%"></div></div></div>';
+            }).join('')
+          : '<p class="ls-empty">No lane rows recorded yet.</p>';
+
+        var plans = ppl.plans || [];
+        el('ls-people').innerHTML = plans.length
+          ? plans.map(function (p) { return '<div class="ls-row"><span class="k">' + String(p.plan || 'none') + '</span><span class="v">' + num(p.c) + ' account' + (Number(p.c) === 1 ? '' : 's') + '</span></div>'; }).join('')
+          : '<p class="ls-empty">No accounts recorded yet.</p>';
+
+        el('ls-foot').innerHTML =
+          (d.note || 'Usage is recorded, never billed.') + ' ' +
+          'PhantomIDE and Junkalot money figures are read by the owner page at <a href="/admin/profit">/admin/profit</a>' +
+          ' (bridge state on this read: <b>' + String(d.bridge || 'unavailable') + '</b>). No writes, no charges, no config changes.';
+      }
+
+      async function load() {
+        var status = el('ls-status');
+        if (!token) { status.textContent = 'Owner sign-in required.'; return; }
+        status.textContent = 'Reading live ledgers…';
+        try {
+          var r = await fetch('/api/admin/profit-live', { headers: { 'x-api-key': token }, cache: 'no-store' });
+          var d = await r.json().catch(function () { return {}; });
+          if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+          render(d);
+          status.innerHTML = '<b>LIVE</b> · ' + new Date(d.generatedAt).toLocaleTimeString() + ' · refreshes every 30 s';
+        } catch (e) {
+          var m = String((e && e.message) || 'unknown error');
+          status.textContent = /HTTP 40[13]/.test(m) ? 'Owner sign-in required.' : 'Unavailable: ' + m;
+        }
+      }
+
+      load();
+      setInterval(function () { if (document.visibilityState === 'visible') load(); }, 30000);
+    })();
+  </script>
+</Layout>

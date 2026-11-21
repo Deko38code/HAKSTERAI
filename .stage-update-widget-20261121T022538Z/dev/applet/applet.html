@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaksterAI live applet — dev preview</title>
+<style>
+  /* ── PhantomIDE applet visual language, matched value for value ──────────
+     Colours, radii, sizes, spacing and the green glow are copied from the
+     PhantomIDE live-server dock so the HaksterAI applet is the same object
+     on screen. Only the data behind it is HaksterAI's own. */
+  #phantom-progress-dock{
+    position:fixed;bottom:18px;right:18px;
+    width:min(360px,calc(100vw - 36px));
+    z-index:99999;
+  }
+  #phantom-progress{
+    background:#050b09;color:#00ff88;border:1px solid #00ff88;border-radius:7px;
+    padding:12px;font-family:monospace;box-shadow:0 0 12px #00ff8833;
+    width:100%;box-sizing:border-box;
+  }
+  .phantom-heading,.phantom-footer{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .phantom-heading{font-size:11px;font-weight:bold;margin-bottom:10px}
+  #phantom-percent{font-size:17px}
+  .phantom-track{height:9px;background:#123326;border-radius:20px;overflow:hidden}
+  #phantom-fill{
+    width:0%;height:100%;
+    background:linear-gradient(90deg,#00b85c,#00ff88);
+    box-shadow:0 0 12px #00ff88;transition:width .4s ease;
+  }
+  .phantom-footer{margin-top:9px;font-size:10px;color:#a4c9b4}
+  .phantom-live{color:#00ff88}
+  @media (prefers-reduced-motion:reduce){#phantom-fill{transition:none}}
+
+  /* ── smooth spinner → panel expansion (requirement 2) ───────────────── */
+  #phantom-progress.hp-entering{animation:hp-unfold .24s ease-out}
+  @keyframes hp-unfold{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
+
+  /* ── HaksterAI additions ─────────────────────────────────────────────── */
+  .phantom-heading{cursor:pointer;user-select:none;background:none;border:0;color:inherit;font:inherit;width:100%;padding:0;display:flex;align-items:center;gap:8px}
+  .hp-title{
+    flex:1 1 auto;text-align:left;background:none;border:0;color:inherit;
+    font:inherit;padding:0;margin:0;cursor:pointer;display:flex;align-items:center;
+  }
+  .hp-title:focus-visible,.phantom-heading:focus-visible{outline:2px solid #00ff88;outline-offset:3px;border-radius:4px}
+  .hp-chev{font-size:11px;color:#5fbf8e;margin-left:6px;transition:transform .2s ease}
+  #phantom-progress[data-open="1"] .hp-chev{transform:rotate(180deg)}
+  .hp-collapse{
+    background:none;border:1px solid #123326;color:#5fbf8e;border-radius:5px;
+    font:bold 11px/1 monospace;padding:2px 6px;cursor:pointer;flex:0 0 auto;
+  }
+  .hp-collapse:hover,.hp-collapse:focus-visible{color:#00ff88;border-color:#00ff88}
+  .hp-panels{display:none;margin-top:10px;border-top:1px solid #123326}
+  #phantom-progress[data-open="1"] .hp-panels{display:block}
+  .hp-row{border-bottom:1px solid #10291f}
+  .hp-row:last-child{border-bottom:0}
+  .hp-row>button{
+    display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;
+    color:inherit;font:inherit;font-size:11px;padding:7px 2px;cursor:pointer;text-align:left;
+  }
+  .hp-row>button:focus-visible{outline:2px solid #00ff88;outline-offset:2px}
+  .hp-row .hp-ico{width:16px;text-align:center;flex:0 0 16px}
+  .hp-row .hp-name{flex:1 1 auto;color:#a4c9b4}
+  .hp-row .hp-val{flex:0 0 auto;color:#00ff88;font-weight:bold;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hp-row .hp-val.hp-bad{color:#ff6b6b}
+  .hp-row .hp-val.hp-warn{color:#ffd479}
+  .hp-row .hp-caret{color:#3c7a5e;font-size:10px}
+  .hp-detail{display:none;padding:0 2px 8px 26px;font-size:10px;line-height:1.5;color:#8fbda4;white-space:pre-wrap;word-break:break-word}
+  .hp-row[data-expanded="1"] .hp-detail{display:block}
+  .hp-row[data-expanded="1"] .hp-caret{transform:rotate(90deg)}
+  .hp-powered{margin-top:9px;padding-top:7px;border-top:1px solid #123326;font-size:9px;color:#4f8a6e;display:flex;justify-content:space-between;gap:8px}
+  .hp-powered a{color:#5fbf8e;text-decoration:none}
+  .hp-powered a:hover,.hp-powered a:focus-visible{color:#00ff88;text-decoration:underline}
+  .phantom-track[data-indeterminate="1"]{position:relative;background:repeating-linear-gradient(90deg,#123326 0 14px,#0d2419 14px 28px);background-size:28px 9px;animation:hp-slide 1.1s linear infinite}
+  @keyframes hp-slide{from{background-position:0 0}to{background-position:28px 0}}
+
+  /* ── live build progress block (requirements 3–8) ────────────────────── */
+  .hp-progress{padding:8px 2px;border-bottom:1px solid #10291f}
+  .hp-prog-head{display:flex;justify-content:space-between;gap:8px;font-size:10px}
+  .hp-stage{color:#00ff88;font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hp-clock{color:#a4c9b4;flex:0 0 auto}
+  .hp-prog-sub{display:flex;justify-content:space-between;gap:8px;font-size:9px;color:#4f8a6e;margin-top:3px}
+  .hp-updates{list-style:none;margin:6px 0 0;padding:0;font-size:9px;line-height:1.5;color:#8fbda4;max-height:110px;overflow:auto}
+  .hp-updates li{display:flex;gap:6px}
+  .hp-updates .t{color:#3c7a5e;flex:0 0 auto}
+  .hp-error{margin:6px 0 0;padding:6px;border:1px solid #ff6b6b55;border-radius:5px;background:#2a0f12;color:#ff9b9b;font-size:9px;line-height:1.45;white-space:pre-wrap;max-height:120px;overflow:auto}
+
+  /* collapsed pill — now a small floating spinner (requirements 1 & 9) */
+  #hp-pill{
+    position:fixed;right:18px;bottom:18px;z-index:99999;display:none;
+    width:46px;height:46px;padding:0;border-radius:50%;
+    background:#050b09;color:#00ff88;border:1px solid #00ff88;
+    box-shadow:0 0 12px #00ff8833;cursor:pointer;
+    align-items:center;justify-content:center;
+  }
+  #hp-pill:focus-visible{outline:2px solid #00ff88;outline-offset:3px}
+  #hp-pill .hp-ring{position:absolute;inset:4px;border-radius:50%;border:2px solid #123326;border-top-color:#00ff88}
+  #hp-pill[data-active="1"] .hp-ring{animation:hp-spin 1s linear infinite}
+  #hp-pill .hp-pct{position:relative;font:bold 10px/1 monospace;color:#00ff88}
+  #hp-pill .hp-pct.hp-bad{color:#ff6b6b}
+  @keyframes hp-spin{to{transform:rotate(360deg)}}
+
+  @media (max-width:480px){
+    #phantom-progress-dock{right:10px;left:10px;width:auto;bottom:10px}
+    #hp-pill{right:10px;bottom:10px}
+  }
+  .hp-scope{font-size:9px;color:#4f8a6e}
+
+  /* reduced motion: no unfolding, no sliding, no spinning — state still shown */
+  @media (prefers-reduced-motion:reduce){
+    #phantom-progress.hp-entering{animation:none}
+    .phantom-track[data-indeterminate="1"]{animation:none}
+    .hp-chev,#phantom-fill,.hp-row .hp-caret{transition:none}
+    #hp-pill[data-active="1"] .hp-ring{animation:none;border-top-color:#00ff88;border-right-color:#00ff88}
+  }
+
+  body{margin:0;background:#06100c;color:#9fd3b8;font-family:monospace;min-height:100vh}
+  .preview-note{max-width:640px;margin:40px auto;padding:0 16px;font-size:13px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="preview-note">
+  <h1 style="color:#00ff88;font-size:15px">HaksterAI live applet — isolated preview</h1>
+  <p>This page runs the HaksterAI applet against the isolated development server.
+     Every value comes from a real measurement of this host; nothing is simulated.
+     Production pages are untouched.</p>
+</div>
+
+<div id="phantom-progress-dock" hidden>
+  <div id="phantom-progress" data-open="0">
+    <div class="phantom-heading">
+      <button class="hp-title" type="button" id="hp-toggle" aria-expanded="false" aria-controls="hp-panels">
+        <span>🛡 HAKSTERAI · LIVE SERVER<span class="hp-chev">▾</span></span>
+      </button>
+      <span id="phantom-percent">—</span>
+      <button class="hp-collapse" type="button" id="hp-collapse" aria-label="Collapse the live panel to a small spinner">–</button>
+    </div>
+
+    <div class="phantom-track" role="progressbar" aria-label="Server status" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-indeterminate="0">
+      <div id="phantom-fill"></div>
+    </div>
+
+    <div class="phantom-footer">
+      <span id="phantom-status">Waiting for telemetry…</span>
+      <span class="phantom-live" id="hp-live">● LIVE</span>
+    </div>
+
+    <div class="hp-panels" id="hp-panels">
+      <div class="hp-progress" id="hp-progress" hidden>
+        <div class="hp-prog-head">
+          <span class="hp-stage" id="hp-stage">—</span>
+          <span class="hp-clock" id="hp-clock">—</span>
+        </div>
+        <div class="hp-prog-sub">
+          <span id="hp-elapsed">elapsed —</span>
+          <span id="hp-eta">ETA unknown</span>
+        </div>
+        <ol class="hp-updates" id="hp-updates" aria-label="Timestamped build updates"></ol>
+        <pre class="hp-error" id="hp-error" hidden></pre>
+      </div>
+
+      <div class="hp-row" data-panel="node"><button type="button"><span class="hp-ico">⚙</span><span class="hp-name">Node.js</span><span class="hp-val" data-v>—</span><span class="hp-caret">›</span></button><div class="hp-detail" data-d>—</div></div>
+      <div class="hp-row" data-panel="pm2"><button type="button"><span class="hp-ico">🟢</span><span class="hp-name">PM2</span><span class="hp-val" data-v>—</span><span class="hp-caret">›</span></button><div class="hp-detail" data-d>—</div></div>
+      <div class="hp-row" data-panel="npm"><button type="button"><span class="hp-ico">📦</span><span class="hp-name">npm builds</span><span class="hp-val" data-v>—</span><span class="hp-caret">›</span></button><div class="hp-detail" data-d>—</div></div>
+      <div class="hp-row" data-panel="deploy"><button type="button"><span class="hp-ico">🚀</span><span class="hp-name">Deployments</span><span class="hp-val" data-v>—</span><span class="hp-caret">›</span></button><div class="hp-detail" data-d>—</div></div>
+      <div class="hp-row" data-panel="stability"><button type="button"><span class="hp-ico">🛡</span><span class="hp-name">Stability</span><span class="hp-val" data-v>—</span><span class="hp-caret">›</span></button><div class="hp-detail" data-d>—</div></div>
+      <div class="hp-row" data-panel="server"><button type="button"><span class="hp-ico">📡</span><span class="hp-name">Server</span><span class="hp-val" data-v>—</span><span class="hp-caret">›</span></button><div class="hp-detail" data-d>—</div></div>
+    </div>
+
+    <div class="hp-powered">
+      <span>Powered by <a href="https://phantomide.com" target="_blank" rel="noopener">👻 Phantom IDE</a></span>
+      <span class="hp-scope" id="hp-scope">scope: —</span>
+    </div>
+  </div>
+</div>
+
+<button id="hp-pill" type="button" aria-label="Open the HaksterAI live server panel" data-active="0">
+  <span class="hp-ring"></span>
+  <span class="hp-pct" id="hp-pct">●</span>
+</button>
+
+<script src="./applet.js"></script>
+</body>
+</html>

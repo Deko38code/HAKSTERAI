@@ -1,0 +1,52 @@
+---
+// Chat is a full-screen mount; Miniforge owns the visible application header.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10131c" />
+    <meta name="description" content="HaksterAI-Bots — Chat, powered by Miniforge." />
+    <title>HaksterAI-Bots · Chat</title>
+    <style>
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #10131c; }
+      iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+    </style>
+  </head>
+  <body>
+    <iframe title="HaksterAI-Bots Chat 2" src="/miniforge/app/" loading="eager" allow="clipboard-read; clipboard-write" referrerpolicy="same-origin"></iframe>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const forwarded = new URLSearchParams();
+      const ticket = params.get('hakster_sso');
+      const googleError = params.get('google_error');
+      if (ticket && /^[A-Za-z0-9_-]{32,100}$/.test(ticket)) forwarded.set('hakster_sso', ticket);
+      if (googleError) forwarded.set('google_error', googleError.slice(0, 80));
+      const botFrame = document.querySelector('iframe');
+      const frameUrl = new URL('/miniforge/app/', location.origin);
+      forwarded.forEach((value, key) => frameUrl.searchParams.set(key, value));
+      // The /miniforge/app frame has its own origin storage. Hand off the
+      // signed-in account key from this same-origin page before loading it.
+      const apiKey = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key');
+      const loadBots = (sessionKey) => {
+        if (sessionKey && /^hkai_[A-Za-z0-9]+$/.test(sessionKey)) {
+          frameUrl.searchParams.set('hakster_session', sessionKey);
+          try {
+            const user = JSON.parse(localStorage.getItem('hakster_google_user') || localStorage.getItem('hakster_user') || '{}');
+            frameUrl.searchParams.set('hakster_user', JSON.stringify(user));
+          } catch {}
+        }
+        botFrame.src = frameUrl.pathname + frameUrl.search;
+      };
+      if (apiKey) {
+        loadBots(apiKey);
+      } else {
+        // If the account key was not saved by the current HaksterAI page,
+        // render the regular signed-out Bots page and keep OAuth available.
+        loadBots('');
+      }
+      if (forwarded.size) history.replaceState({}, '', location.pathname);
+    </script>
+  </body>
+</html>

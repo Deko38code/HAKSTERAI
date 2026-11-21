@@ -1,0 +1,286 @@
+#!/usr/bin/env node
+/**
+ * HP-1000 Browser MCP Bridge — unified server that exposes:
+ *   1. hp1000_chat  → Chat with the HP-1000 Ollama model
+ *   2. All Playwright browser tools (proxied from playwright-mcp subprocess)
+ *
+ * The Playwright subprocess is spawned with --headless --no-sandbox and
+ * the bundled Chromium executable path, so browser tools work on this machine.
+ *
+ * Usage in mcp.json:
+ *   "hp-1000-browser": {
+ *     "command": "node",
+ *     "args": ["/home/ghost/haksterAi/server/src/agent/hp1000-browser-mcp-bridge.js"],
+ *     "env": {},
+ *     "tier": 1
+ *   }
+ */
+
+const http = require('http');
+const { spawn } = require('child_process');
+
+const OLLAMA_HOST = process.env.OLLAMA_HOST || 'localhost';
+const OLLAMA_PORT = parseInt(process.env.OLLAMA_PORT || '11434', 10);
+const MODEL = process.env.HP1000_MODEL || 'hp-1000:latest';
+
+const PW_CMD = process.env.PLAYWRIGHT_MCP_CMD || 'playwright-mcp';
+const PW_ARGS = [
+  '--headless',
+  '--no-sandbox',
+  '--executable-path',
+  process.env.CHROMIUM_PATH || '/home/ghost/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome',
+];
+
+// ── Ollama chat helper ──
+function ollamaChat(prompt, system) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: MODEL,
+      prompt,
+      stream: false,
+      options: { temperature: 0.7 },
+    });
+    if (system) {
+      // Use /api/chat with messages for system prompt support
+      const chatBody = JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: prompt },
+        ],
+        stream: false,
+        options: { temperature: 0.7 },
+      });
+      const opts = {
+        hostname: OLLAMA_HOST,
+        port: OLLAMA_PORT,
+        path: '/api/chat',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(chatBody) },
+        timeout: 120000,
+      };
+      const req = http.request(opts, (res) => {
+        let out = '';
+        res.on('data', (d) => { out += d.toString(); });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(out);
+            resolve(parsed.message?.content || parsed.response || out);
+          } catch (_) { resolve(out || '(no output)'); }
+        });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Ollama timeout (120s)')); });
+      req.write(chatBody);
+      req.end();
+      return;
+    }
+    // Fallback: /api/generate without system
+    const opts = {
+      hostname: OLLAMA_HOST,
+      port: OLLAMA_PORT,
+      path: '/api/generate',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 120000,
+    };
+    const req = http.request(opts, (res) => {
+      let out = '';
+      res.on('data', (d) => { out += d.toString(); });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(out);
+          resolve(parsed.response || parsed.message?.content || out);
+        } catch (_) { resolve(out || '(no output)'); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama timeout (120s)')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ── Playwright MCP subprocess management ──
+let pwProc = null;
+let pwInitialized = false;
+let pwPending = new Map(); // id -> {resolve, reject}
+let pwBuffer = '';
+let pwToolList = null;
+
+function startPlaywright() {
+  if (pwProc) return;
+  pwProc = spawn(PW_CMD, PW_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] });
+  pwProc.stdout.on('data', (data) => {
+    pwBuffer += data.toString();
+    let idx;
+    while ((idx = pwBuffer.indexOf('\n')) >= 0) {
+      const line = pwBuffer.slice(0, idx).trim();
+      pwBuffer = pwBuffer.slice(idx + 1);
+      if (!line) continue;
+      try {
+        const msg = JSON.parse(line);
+        if (msg.id && pwPending.has(msg.id)) {
+          const { resolve, reject } = pwPending.get(msg.id);
+          pwPending.delete(msg.id);
+          if (msg.error) reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+          else resolve(msg.result);
+        }
+      } catch (_) {}
+    }
+  });
+  pwProc.stderr.on('data', () => {}); // swallow stderr
+  pwProc.on('error', (err) => {
+    console.error('[hp1000-browser] Failed to spawn playwright-mcp:', err.message);
+  });
+}
+
+let pwNextId = 1;
+function pwSend(method, params) {
+  return new Promise((resolve, reject) => {
+    if (!pwProc) { reject(new Error('Playwright subprocess not running')); return; }
+    const id = pwNextId++;
+    pwPending.set(id, { resolve, reject });
+    const msg = JSON.stringify({ jsonrpc: '2.0', id, method, params: params || {} });
+    pwProc.stdin.write(msg + '\n');
+    setTimeout(() => {
+      if (pwPending.has(id)) {
+        pwPending.delete(id);
+        reject(new Error(`Playwright ${method} timeout (30s)`));
+      }
+    }, 30000);
+  });
+}
+
+async function ensurePwInitialized() {
+  if (pwInitialized) return;
+  startPlaywright();
+  await pwSend('initialize', {
+    protocolVersion: '2024-11-05',
+    capabilities: {},
+    clientInfo: { name: 'hp1000-browser-bridge', version: '1.0.0' },
+  });
+  pwInitialized = true;
+}
+
+async function getPwTools() {
+  if (pwToolList) return pwToolList;
+  await ensurePwInitialized();
+  const result = await pwSend('tools/list', {});
+  pwToolList = result.tools || [];
+  return pwToolList;
+}
+
+async function callPwTool(name, args) {
+  await ensurePwInitialized();
+  return await pwSend('tools/call', { name, arguments: args || {} });
+}
+
+// ── HP-1000 system prompt with browser awareness ──
+const HP1000_BROWSER_SYSTEM = `You are HP-1000, a haksterAI agent with browser automation capabilities.
+
+You have access to Playwright browser tools through your MCP bridge. When a user asks you to browse, scrape, interact with a web page, or perform browser automation, you can instruct the bridge to execute browser actions.
+
+Available browser tools include: browser_navigate, browser_click, browser_type, browser_snapshot, browser_take_screenshot, browser_fill_form, browser_press_key, browser_select_option, browser_hover, browser_tabs, browser_wait_for, browser_console_messages, browser_network_requests, browser_evaluate, browser_close, browser_resize, browser_handle_dialog, browser_file_upload, browser_drop, browser_drag, browser_navigate_back, browser_run_code_unsafe.
+
+When you want to use a browser tool, format your response as a JSON tool call:
+TOOL: browser_navigate {"url": "https://example.com"}
+
+The bridge will execute the tool and return the result. You can chain multiple tool calls.
+Always explain what you're doing before calling a tool. Be concise.`;
+
+// ── MCP JSON-RPC server (stdio) ──
+const rl = require('readline').createInterface({ input: process.stdin, terminal: false });
+function send(msg) { process.stdout.write(JSON.stringify(msg) + '\n'); }
+
+// Cache browser tools for tools/list response
+let cachedBrowserTools = null;
+
+async function getUnifiedTools() {
+  if (!cachedBrowserTools) {
+    try {
+      const pwTools = await getPwTools();
+      cachedBrowserTools = pwTools.map(t => ({
+        name: t.name,
+        description: `[Browser] ${t.description}`,
+        inputSchema: t.inputSchema,
+      }));
+    } catch (err) {
+      cachedBrowserTools = [];
+    }
+  }
+  return [
+    {
+      name: 'hp1000_chat',
+      description: `Chat with HP-1000 (${MODEL}) via local Ollama. The model is aware of browser tools and can request browser actions. Use for autonomous web browsing, scraping, form filling, and browser automation tasks. Give a complete, self-contained prompt.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Complete, self-contained prompt for the model.' },
+          system: { type: 'string', description: 'Optional system prompt override.' },
+        },
+        required: ['prompt'],
+        additionalProperties: false,
+      },
+    },
+    ...cachedBrowserTools,
+  ];
+}
+
+rl.on('line', async (line) => {
+  line = line.trim();
+  if (!line) return;
+  let msg;
+  try { msg = JSON.parse(line); } catch (_) { return; }
+  if (msg.method === 'notifications/initialized') return;
+
+  const { id, method, params } = msg;
+  try {
+    if (method === 'initialize') {
+      send({ jsonrpc: '2.0', id, result: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'hp1000-browser-mcp-bridge', version: '1.0.0' },
+      }});
+    } else if (method === 'tools/list') {
+      const tools = await getUnifiedTools();
+      send({ jsonrpc: '2.0', id, result: { tools } });
+    } else if (method === 'tools/call') {
+      const { name, arguments: args } = params || {};
+
+      // HP-1000 chat tool
+      if (name === 'hp1000_chat') {
+        const system = args.system || HP1000_BROWSER_SYSTEM;
+        const text = await ollamaChat(args.prompt, system);
+        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } });
+        return;
+      }
+
+      // Browser tools — proxy to Playwright MCP
+      if (name.startsWith('browser_')) {
+        const result = await callPwTool(name, args);
+        send({ jsonrpc: '2.0', id, result });
+        return;
+      }
+
+      send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
+    } else {
+      send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown method: ${method}` } });
+    }
+  } catch (e) {
+    send({ jsonrpc: '2.0', id, error: { code: -32000, message: e.message } });
+  }
+});
+
+process.stdin.resume();
+
+// Clean up on exit
+process.on('exit', () => {
+  if (pwProc) { try { pwProc.kill(); } catch (_) {} }
+});
+process.on('SIGTERM', () => {
+  if (pwProc) { try { pwProc.kill(); } catch (_) {} }
+  process.exit(0);
+});
+
+console.error('[hp1000-browser-mcp] Bridge ready — HP-1000 chat + Playwright browser tools');

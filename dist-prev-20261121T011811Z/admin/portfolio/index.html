@@ -1,0 +1,71 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Client portfolio · HaksterAI</title><style>:root{--bg:#07070b;--panel:#101018;--panel-2:#0b0b12;--line:#23233a;--text:#e6e9f0;--muted:#98a2b3;--gold:#d9b34a;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--violet:#a78bfa}*{box-sizing:border-box}body{background:var(--bg);color:var(--text);margin:0;padding:26px 20px 60px;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}.wrap{max-width:1080px;margin:0 auto}.badge{letter-spacing:.16em;text-transform:uppercase;color:var(--gold);background:#1b1810;border:1px solid #3a3320;border-radius:999px;align-items:center;gap:6px;padding:4px 10px;font-size:11px;display:inline-flex}h1{margin:14px 0 6px;font-size:30px;line-height:1.15}.sub{color:var(--muted);margin:0 0 16px;font-size:13px}.bar{flex-wrap:wrap;gap:8px;margin:16px 0 22px;display:flex}.bar a,.bar button{font:inherit;color:#cbd5e1;background:var(--panel);border:1px solid var(--line);cursor:pointer;border-radius:9px;padding:7px 11px;font-size:12px;text-decoration:none}.bar a:hover,.bar button:hover{color:#fff;border-color:#4c4c72}.client{border:1px solid var(--line);background:var(--panel);border-radius:16px;margin-bottom:16px;padding:18px 18px 14px}.top{flex-wrap:wrap;align-items:baseline;gap:10px;display:flex}.cid{letter-spacing:.02em;font-size:20px;font-weight:700}.aid{color:var(--gold);background:#1b1810;border:1px solid #3a3320;border-radius:999px;padding:2px 8px;font-size:12px}.host{color:var(--muted);font-size:13px}.grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:16px;display:grid}.cell .k{text-transform:uppercase;letter-spacing:.18em;color:var(--muted);font-size:10px}.cell .v{margin-top:3px;font-size:15px;font-weight:600}.cell .v.big{font-variant-numeric:tabular-nums;font-size:22px}.ids{color:#a9a9c2;flex-wrap:wrap;gap:6px;margin-top:14px;font-size:11px;display:flex}.ids span{border:1px solid var(--line);border-radius:999px;padding:2px 8px}.note{color:var(--muted);margin-top:12px;font-size:12px}.state{letter-spacing:.08em;text-transform:uppercase;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;display:inline-block}.state.ok{color:#0b1f12;background:var(--ok)}.state.warn{color:#221a05;background:var(--warn)}.state.bad{color:#2a0808;background:var(--bad)}.fine{color:var(--muted);border-top:1px solid var(--line);margin-top:22px;padding-top:14px;font-size:12px}.empty{color:var(--muted);font-size:13px}
+</style></head><body><div class="wrap"><span class="badge">HaksterAI · owner record · never public</span><h1>Client portfolio</h1><p class="sub">One entry per client build, with the stable IDs our audit report cites. Figures are read from the live invoice ledger each time this page loads.</p><div class="bar"><a href="/dashboard">← Dashboard</a><a href="/admin/license/">Licence &amp; contract record</a><button id="audit" type="button">Download audit report</button><button id="refresh" type="button">Refresh</button></div><div id="list"><p class="empty">Reading the owner records…</p></div><p id="readat" class="fine"></p><div class="fine">IDs are minted once and never renumbered. A licence record ID carries the SHA-256 of the exact licence text it identifies, so the audit report always names the document that was current. When the ledger cannot be read, the entry says so and shows no figure rather than an estimate.</div></div><script data-cfasync="false">
+    const key = (() => { try { return localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch { return ''; } })();
+    const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const labels = {
+      'not-started': ['not started', 'ok'], current: ['open', 'ok'], grace: ['grace period', 'warn'],
+      locked: ['locked', 'warn'], 'lien-sale': ['lien sale', 'bad'], 'paid-off': ['paid in full', 'ok'], unknown: ['unknown', 'warn'],
+    };
+    const list = document.getElementById('list');
+
+    function card(c) {
+      const st = c.gate ? (labels[c.gate.state] || [c.gate.state, 'warn']) : ['no live record', 'warn'];
+      const b = c.build;
+      const gateLine = c.gate && c.gate.totalsKnown
+        ? money(c.gate.totalDue) + ' due' + (c.gate.overdueTotal ? ' · ' + money(c.gate.overdueTotal) + ' overdue' : '')
+        : '—';
+      return '<article class="client">'
+        + '<div class="top"><span class="cid">' + esc(c.clientId) + '</span><span class="aid">' + esc(c.auditId) + '</span>'
+        + '<span class="host">' + esc(c.name) + ' · ' + esc(c.hostname) + ' · ' + esc(c.box) + '</span></div>'
+        + '<div class="grid">'
+        + '<div class="cell"><div class="k">Admin state</div><div class="v"><span class="state ' + st[1] + '">' + esc(st[0]) + '</span></div></div>'
+        + '<div class="cell"><div class="k">Total due now</div><div class="v big">' + esc(gateLine) + '</div></div>'
+        + '<div class="cell"><div class="k">Build balance</div><div class="v">' + (b ? money(b.remaining) : '—') + '</div></div>'
+        + '<div class="cell"><div class="k">Paid to date</div><div class="v">' + (b ? money(b.paid) + ' of ' + money(b.total) : '—') + '</div></div>'
+        + '<div class="cell"><div class="k">Projected payoff</div><div class="v">' + (b ? esc(b.projectedPayoffMonth || '—') : '—') + '</div></div>'
+        + '<div class="cell"><div class="k">Licence</div><div class="v">' + esc(c.licence.version || '—') + '</div></div>'
+        + '</div>'
+        + '<div class="ids">'
+        + '<span>licence ' + esc(c.recordIds.licence) + '</span>'
+        + '<span>build ' + esc(c.recordIds.build) + '</span>'
+        + '<span>invoices ' + esc(c.recordIds.invoices) + '</span>'
+        + '<span>text ' + esc(String(c.recordIds.licenceDocument).slice(0, 23)) + '…</span>'
+        + '</div>'
+        + '<p class="note">' + (c.gate && c.gate.note ? esc(c.gate.note) : '') + (c.why ? ' ' + esc(c.why) : '') + '</p>'
+        + '</article>';
+    }
+
+    async function read() {
+      if (!key) { list.innerHTML = '<p class="empty">Sign in to the owner admin to read the portfolio.</p>'; return; }
+      try {
+        const res = await fetch('/api/admin/client-portfolio', { headers: { 'x-api-key': key }, cache: 'no-store' });
+        if (!res.ok) throw new Error('http ' + res.status);
+        const data = await res.json();
+        const clients = data.clients || [];
+        list.innerHTML = clients.length ? clients.map(card).join('') : '<p class="empty">No client records yet.</p>';
+        document.getElementById('readat').textContent = 'Read at ' + String(data.at || '').slice(0, 19).replace('T', ' ') + ' UTC · licence text ' + (data.licenceDocument && data.licenceDocument.sha256 ? String(data.licenceDocument.sha256).slice(0, 16) + '…' : 'unreadable');
+      } catch (err) {
+        list.innerHTML = '<p class="empty">Could not read the portfolio: ' + esc(err.message) + '</p>';
+      }
+    }
+
+    document.getElementById('refresh')?.addEventListener('click', read);
+    document.getElementById('audit')?.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/admin/client-portfolio/audit', { headers: { 'x-api-key': key }, cache: 'no-store' });
+        if (!res.ok) throw new Error('http ' + res.status);
+        const text = await res.text();
+        const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'haksterai-client-portfolio-audit-' + new Date().toISOString().slice(0, 10) + '.md';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } catch (err) {
+        alert('Could not download the audit report: ' + ((err && err.message) || 'request failed'));
+      }
+    });
+
+    read();
+  </script></body></html>

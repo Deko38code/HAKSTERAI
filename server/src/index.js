@@ -16,6 +16,8 @@ const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { diffLines } = require('diff');
 const { getDb } = require('./db');
+const siteAnalytics = require('./siteAnalytics');
+const cloudflareAnalytics = require('./cloudflareAnalytics');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -119,6 +121,8 @@ async function initWebMcp() {
 const { saveMemory, getMemory, searchMemories, listMemories, deleteMemory, getMemoryContext, getMemoryStats, compactMemories, CATEGORIES: MEMORY_CATEGORIES } = require('./memory');
 const { runSecurityAudit, startSecurityScanner, getSecurityNotifications, acknowledgeSecurityNotification, acknowledgeAllSecurityNotifications, SEVERITY: SECURITY_SEVERITY } = require('./security');
 const autoAgent = require('./autoAgent');
+const autoHeal = require('./autoHeal');
+const cliGuard = require('./cliGuard');
 const securityAgents = require('./securityAgents');
 // Free accounts are limited to one per IP; paid accounts and paid checkouts are
 // exempt. Policy lives in its own module so every signup path applies it.
@@ -278,9 +282,12 @@ const USAGE_LIMIT_ENABLED = process.env.USAGE_LIMIT_ENABLED !== 'false'; // defa
 // metered separately by FREE_WEB_RESEARCH_LIMIT below)
 const FREE_USAGE_LIMIT = 5;
 const USAGE_RESET_DAYS = parseInt(process.env.USAGE_RESET_DAYS || '30', 10);
-// Capped paid tier: $3/month buys 30 AI calls + 10 web lookups per calendar
-// month. Lite is metered, so it is deliberately NOT in PAID_PLAN_IDS.
-const LITE_USAGE_LIMIT = 30;
+// Capped paid tiers. Every paid plan is capped now (owner 2026-11-21: "add
+// usage capps on all plans for our profit margin but be fair we go base on
+// users suage on what to give"). The numbers are the 5:1 ceiling from the
+// measured $0.00208 a call, sized against the CHEAPEST way each plan can be
+// bought so no purchase path breaks 5:1 — see CAPPED_PLAN_CALL_LIMITS below.
+const LITE_USAGE_LIMIT = 280;
 const LITE_WEB_RESEARCH_LIMIT = 10;
 const REFERRAL_REWARD_TOKENS = parseInt(process.env.REFERRAL_REWARD_TOKENS || '10000', 10);
 const REFERRAL_SIGNUP_TOKENS = parseInt(process.env.REFERRAL_SIGNUP_TOKENS || '2500', 10);
@@ -389,23 +396,361 @@ const PRICING_CATALOG = [
     ],
   },
   {
+    // Cheapest rungs of the ladder (owner 2026-11-21: "we need as many diff
+    // prices of all sorts ranges"). The $0.45 card fee is fixed, so a card can
+    // only go this low while still clearing 5:1 against the measured $0.00208
+    // a call — these three sit at the floor:
+    //   Micro   12 calls, net $0.20 -> 8.0:1 (5.42c/call)
+    //   Taster  20 calls, net $0.30 -> 7.2:1 (3.75c/call)
+    //   Sprout  26 calls, net $0.40 -> 7.4:1 (3.27c/call)
+    // Per-call price steps down as the pack grows, so nothing undercuts the
+    // rung above it except by buying more calls.
+    id: 'micro_12',
+    name: 'Micro Pack — 12 Calls',
+    description: 'The smallest way in: 12 AI calls for 65 cents. One payment, nothing renews.',
+    features: ['12 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Account from your checkout email'],
+    prices: [
+      {
+        id: 'micro_12_once',
+        name: 'Micro Pack 12',
+        billingCycle: 'one_time',
+        amount: 65,
+        currency: 'usd',
+        tokens: 12,
+        lookupKey: 'haksterai_micro_12',
+      },
+    ],
+  },
+  {
+    id: 'taster_20',
+    name: 'Taster Pack — 20 Calls',
+    description: '20 AI calls for 75 cents, one payment. Enough to see if it fits how you work.',
+    features: ['20 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Upgrade any time'],
+    prices: [
+      {
+        id: 'taster_20_once',
+        name: 'Taster Pack 20',
+        billingCycle: 'one_time',
+        amount: 75,
+        currency: 'usd',
+        tokens: 20,
+        lookupKey: 'haksterai_taster_20',
+      },
+    ],
+  },
+  {
+    id: 'sprout_26',
+    name: 'Sprout Pack — 26 Calls',
+    description: '26 AI calls for 85 cents, one payment. A small job start to finish.',
+    features: ['26 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Upgrade any time'],
+    prices: [
+      {
+        id: 'sprout_26_once',
+        name: 'Sprout Pack 26',
+        billingCycle: 'one_time',
+        amount: 85,
+        currency: 'usd',
+        tokens: 26,
+        lookupKey: 'haksterai_sprout_26',
+      },
+    ],
+  },
+  {
+    // Low-income ladder, first rung (owner 2026-11-21: "we need the other loose
+    // price cards for low income users etc"). Same rules as every paid price:
+    // the $0.45 card fee is added on top of the net, and net must clear 5:1
+    // against the measured $0.00208 a call:
+    //   Pocket      32 calls,  net $0.50  -> 7.5:1  (2.97c/call)  <- under $1
+    //   Starter     80 calls,  net $1.50  -> 9.0:1  (2.44c/call)
+    //   Budget     145 calls,  net $2.50  -> 8.3:1  (2.03c/call)
+    //   Bulk       900 calls,  net $10.00 -> 5.3:1  (1.16c/call)
+    // Per-call price steps down as the pack grows, so the ladder stays honest:
+    // no pack is undercut by the one above it except by buying more calls.
+    // (Try Me Now 50 for $1.45 sits between Pocket and Starter at 2.90c/call.)
+    id: 'pocket_32',
+    name: 'Pocket Pack — 32 Calls',
+    description: 'The cheapest way in: 32 AI calls for under a dollar. One payment, nothing renews.',
+    features: ['32 AI calls', 'Under $1 — one payment', 'No subscription', 'Account from your checkout email'],
+    prices: [
+      {
+        id: 'pocket_32_once',
+        name: 'Pocket Pack 32',
+        billingCycle: 'one_time',
+        amount: 95,
+        currency: 'usd',
+        tokens: 32,
+        lookupKey: 'haksterai_pocket_32',
+      },
+    ],
+  },
+  {
+    // Owner 2026-11-21: "single try me now ... token pkgs ... do 1.45 ...
+    // 6.45 ... plans based of my 5to1 odds". Try Me Now is now the $1.45
+    // monthly plan with a daily allowance (see its entry); the one-time call
+    // products below are the Token Pack and the ladder packs.
+    //
+    // A one-time pack has no subscription and needs no Stripe product: the
+    // price is built with price_data at checkout, so a pack works in live mode
+    // the moment this code is live. One token = one metered AI call, drawn
+    // only after the plan's own allowance (free 5 / lite 30) is spent — see
+    // spendTokenCredit/reserveUsage below. Plan stays 'free'; credits are not
+    // a plan upgrade.
+    //
+    // COST BASIS for the 5:1 rule, measured, not guessed: our ledger's 77
+    // recorded calls average 6,643 input + 523 output tokens; at the cheapest
+    // paid lane's list price ($0.28/M in, $0.42/M out) that is $0.00208 a call.
+    // 5:1 therefore needs >= 1.04c per call. The one-time Token Pack clears
+    // it, and its arithmetic is printed on the packing slip so it can be
+    // re-checked:
+    //   Token Pack  net $6.00, 500 calls -> 5.8:1  ($1.20c/call)
+    // Its shelf price carries the same $0.45 card-processing fee as every
+    // other paid price (see the starter_plus note below), hence 645 cents.
+    //
+    // Try Me Now is NOT a one-time pack (owner 2026-11-21: "make monthy and 50
+    // calls daily" then "well u price it"). It is a monthly plan sold with
+    // inline recurring price_data, and its allowance resets every UTC day:
+    //   50 x ~30.4 = ~1,522 calls/mo at the $0.00208 conservative paid-lane
+    //   basis = ~$3.17 of cost. 5:1 therefore needs >= $15.83 net; with the
+    //   $0.45 card fee that is $16.28. Priced at $16.45 -> $16.00 net ->
+    //   5.05:1, and >10:1 on our real recorded routed cost ($0.000000/call),
+    //   so the price stays honest at either basis. Break-even would be
+    //   $3.62/month; $1.45 would only cover ~3 calls/day. The daily cap is
+    //   enforced in reserveUsage.
+    id: 'try_me',
+    name: 'Try Me Now',
+    description: '50 AI calls every day for $16.45 a month. Resets daily; cancel anytime.',
+    features: ['50 AI calls every day', 'Resets daily', 'Lowest daily-use price', 'Cancel anytime'],
+    prices: [
+      {
+        id: 'try_me_monthly',
+        name: 'Try Me Now Monthly',
+        billingCycle: 'monthly',
+        amount: 1645,
+        currency: 'usd',
+        // Recurring price_data, like the $1.45 Low Budget card: no Stripe
+        // product has to exist first and the plan is resolved from
+        // metadata.planId when the webhook lands.
+        inlineRecurring: true,
+        callsPerDay: 50,
+        lookupKey: 'haksterai_try_me_monthly',
+        stripePriceId: process.env.STRIPE_PRICE_TRY_ME_MONTHLY || null,
+      },
+    ],
+  },
+  {
+    // Low-income ladder, second and third rungs — see the Pocket Pack comment
+    // for the arithmetic: 80 calls on net $1.50 is 9.0:1 (2.44c/call) and
+    // 145 calls on net $2.50 is 8.3:1 (2.03c/call). Both one payment only.
+    id: 'starter_80',
+    name: 'Starter Pack — 80 Calls',
+    description: '80 AI calls, one payment. Enough to finish a real job without a subscription.',
+    features: ['80 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Drawn after your plan allowance'],
+    prices: [
+      {
+        id: 'starter_80_once',
+        name: 'Starter Pack 80',
+        billingCycle: 'one_time',
+        amount: 195,
+        currency: 'usd',
+        tokens: 80,
+        lookupKey: 'haksterai_starter_80',
+      },
+    ],
+  },
+  {
+    id: 'budget_145',
+    name: 'Budget Pack — 145 Calls',
+    description: '145 AI calls, one payment at a lower cost per call than the smaller packs.',
+    features: ['145 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Drawn after your plan allowance'],
+    prices: [
+      {
+        id: 'budget_145_once',
+        name: 'Budget Pack 145',
+        billingCycle: 'one_time',
+        amount: 295,
+        currency: 'usd',
+        tokens: 145,
+        lookupKey: 'haksterai_budget_145',
+      },
+    ],
+  },
+  {
+    // Mid-range rungs — 200 and 300 calls fill the gap between Budget and the
+    // 500 pack, and step the per-call price down (1.73c then 1.48c) without
+    // undercutting the pack above.
+    id: 'steady_200',
+    name: 'Steady Pack — 200 Calls',
+    description: '200 AI calls, one payment at 1.7c a call — for a fortnight of steady use.',
+    features: ['200 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Drawn after your plan allowance'],
+    prices: [
+      {
+        id: 'steady_200_once',
+        name: 'Steady Pack 200',
+        billingCycle: 'one_time',
+        amount: 345,
+        currency: 'usd',
+        tokens: 200,
+        lookupKey: 'haksterai_steady_200',
+      },
+    ],
+  },
+  {
+    id: 'working_300',
+    name: 'Working Pack — 300 Calls',
+    description: '300 AI calls, one payment at 1.5c a call — a working month for a solo user.',
+    features: ['300 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Drawn after your plan allowance'],
+    prices: [
+      {
+        id: 'working_300_once',
+        name: 'Working Pack 300',
+        billingCycle: 'one_time',
+        amount: 445,
+        currency: 'usd',
+        tokens: 300,
+        lookupKey: 'haksterai_working_300',
+      },
+    ],
+  },
+  {
+    id: 'token_pack_500',
+    name: 'Token Pack — 500 Calls',
+    description: 'One payment: 500 AI calls banked on your account. They never expire and nothing renews.',
+    features: ['500 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Drawn after your plan allowance'],
+    prices: [
+      {
+        id: 'token_pack_500_once',
+        name: 'Token Pack 500',
+        billingCycle: 'one_time',
+        amount: 645,
+        currency: 'usd',
+        tokens: 500,
+        lookupKey: 'haksterai_token_pack_500',
+      },
+    ],
+  },
+  {
+    // 700 calls at 1.21c a call — 5.5:1 on net $8.00, and it sits between the
+    // 500 pack and the 900 pack so the per-call price keeps stepping down.
+    id: 'heavy_700',
+    name: 'Heavy Pack — 700 Calls',
+    description: '700 AI calls, one payment at 1.2c a call — heavy daily use without a subscription.',
+    features: ['700 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Drawn after your plan allowance'],
+    prices: [
+      {
+        id: 'heavy_700_once',
+        name: 'Heavy Pack 700',
+        billingCycle: 'one_time',
+        amount: 845,
+        currency: 'usd',
+        tokens: 700,
+        lookupKey: 'haksterai_heavy_700',
+      },
+    ],
+  },
+  {
+    // Top rung of the low-income ladder: 900 calls on net $10.00 is 5.3:1 at
+    // 1.16c/call — the lowest per-call price we can sell and still clear 5:1,
+    // so anything larger would have to break the rule.
+    id: 'bulk_900',
+    name: 'Bulk Pack — 900 Calls',
+    description: '900 AI calls, one payment — our lowest price per call while still clearing 5:1.',
+    features: ['900 AI calls', 'Lowest price per call', 'One payment — nothing renews', 'Credits never expire'],
+    prices: [
+      {
+        id: 'bulk_900_once',
+        name: 'Bulk Pack 900',
+        billingCycle: 'one_time',
+        amount: 1045,
+        currency: 'usd',
+        tokens: 900,
+        lookupKey: 'haksterai_bulk_900',
+      },
+    ],
+  },
+  {
+    // Volume rungs above the 900 pack. These hug the 5:1 floor: 1,500 calls at
+    // $16.45 is 5.13:1 and 3,000 at $31.65 is 5.00:1, so they are the cheapest
+    // per call we can sell and still keep the rule. Nothing is rounded to look
+    // cheaper than it is.
+    id: 'volume_1500',
+    name: 'Volume Pack — 1,500 Calls',
+    description: '1,500 AI calls, one payment at 1.1c a call — our second-lowest per-call price.',
+    features: ['1,500 AI calls', 'One payment — nothing renews', 'Credits never expire', 'Drawn after your plan allowance'],
+    prices: [
+      {
+        id: 'volume_1500_once',
+        name: 'Volume Pack 1500',
+        billingCycle: 'one_time',
+        amount: 1645,
+        currency: 'usd',
+        tokens: 1500,
+        lookupKey: 'haksterai_volume_1500',
+      },
+    ],
+  },
+  {
+    id: 'wholesale_3000',
+    name: 'Wholesale Pack — 3,000 Calls',
+    description: '3,000 AI calls at 1.05c a call — the floor price while still clearing 5:1.',
+    features: ['3,000 AI calls', 'Lowest price per call', 'One payment — nothing renews', 'Credits never expire'],
+    prices: [
+      {
+        id: 'wholesale_3000_once',
+        name: 'Wholesale Pack 3000',
+        billingCycle: 'one_time',
+        amount: 3165,
+        currency: 'usd',
+        tokens: 3000,
+        lookupKey: 'haksterai_wholesale_3000',
+      },
+    ],
+  },
+  {
+    // Low-income monthly plan (owner 2026-11-21: "make the new cheap ones for
+    // low income"). The cheapest monthly card we can sell honestly: $1.45 less
+    // the $0.45 card fee leaves $1.00 net, and 96 calls at the measured
+    // $0.00208 a call cost $0.1997 to serve — 5.0:1, no rounding tricks. It is
+    // sold with price_data (inlineRecurring) so no Stripe product has to exist
+    // first; the webhook resolves the plan from metadata.planId, which is why
+    // the id here must be a real catalog id. Capped in
+    // CAPPED_PLAN_CALL_LIMITS / CAPPED_PLAN_WEB_LIMITS below.
+    id: 'low_income',
+    name: 'HaksterAI Low Budget',
+    description: '$1.45 a month for low-budget users: 96 AI calls and 3 web lookups, capped so the price stays honest.',
+    features: ['96 AI calls / month', '3 web lookups / month', 'Lowest monthly price', 'Cancel anytime'],
+    prices: [
+      {
+        id: 'low_income_monthly',
+        name: 'Low Budget Monthly',
+        billingCycle: 'monthly',
+        amount: 145,
+        currency: 'usd',
+        // One payment path that needs no pre-created Stripe product/price.
+        inlineRecurring: true,
+        tokens: 96,
+        lookupKey: 'haksterai_low_income_monthly',
+        stripePriceId: process.env.STRIPE_PRICE_LOW_INCOME_MONTHLY || null,
+      },
+    ],
+  },
+  {
     // Lowest paid tier. Capped, not unlimited — see LITE_USAGE_LIMIT and
     // CAPPED_PLAN_CALL_LIMITS below. The product name must match the Stripe
     // product exactly so refreshPricesFromStripe() picks up its price.
     id: 'lite',
     name: 'HaksterAI Lite',
     stripeProductName: 'HaksterAI Lite',
-    description: '30 AI calls and 10 web lookups per month at the lowest paid price.',
-    features: ['30 AI calls / month', '10 web lookups / month', 'Cloud model routing', 'Upgrade to Starter for unlimited'],
+    description: '280 AI calls and 10 web lookups per month at the lowest paid price.',
+    features: ['280 AI calls / month', '10 web lookups / month', 'Cloud model routing', 'Upgrade to Starter for 900 calls'],
     prices: [
       {
         id: 'lite_monthly',
         name: 'Lite Monthly',
         billingCycle: 'monthly',
-        amount: 300,
+        amount: 345,
         currency: 'usd',
         lookupKey: 'haksterai_lite_monthly',
-        stripePriceId: process.env.STRIPE_PRICE_LITE_MONTHLY || 'price_1UcC82A0UrVsJMzeA3czYM9b',
+        stripePriceId: process.env.STRIPE_PRICE_LITE_MONTHLY || 'price_1UdxxOA0UrVsJMzeKh22sWDy',
       },
     ],
   },
@@ -413,14 +758,14 @@ const PRICING_CATALOG = [
     id: 'starter',
     name: 'HaksterAI Starter',
     stripeProductName: 'HaksterAI Starter',
-    description: 'Unlimited personal access at the entry price.',
-    features: ['Unlimited app usage', 'Cloud model routing', 'Agent tools', 'Memory and task history'],
+    description: '900 AI calls a month at the entry price — enough for heavy daily use.',
+    features: ['900 AI calls / month', 'Cloud model routing', 'Agent tools', 'Memory and task history'],
     prices: [
       {
         id: 'starter_monthly',
         name: 'Starter Monthly',
         billingCycle: 'monthly',
-        amount: parseInt(process.env.PRICE_STARTER_MONTHLY_CENTS || '999', 10),
+        amount: parseInt(process.env.PRICE_STARTER_MONTHLY_CENTS || '1044', 10),
         currency: 'usd',
         lookupKey: 'haksterai_starter_monthly',
         stripePriceId: process.env.STRIPE_PRICE_STARTER_MONTHLY || null,
@@ -428,35 +773,36 @@ const PRICING_CATALOG = [
     ],
   },
   {
-    // Intro offer: $5.99 for the first month, then $10.99/month. The intro
+    // Intro offer: $6.44 for the first month, then $11.44/month. The intro
     // month is a real Stripe coupon ($5 off, duration "once") applied at
     // checkout — never a separate price, so the invoice stays truthful.
+    // Every paid price carries the $0.45 card-processing fee (owner 2026-11-21).
     id: 'starter_plus',
     name: 'HaksterAI Starter Plus',
     stripeProductName: 'HaksterAI Starter Plus',
-    description: 'Monthly: $5.99 for the first month, then $10.99/month. Annual plan: $109.99/year.',
-    features: ['Everything in Starter', '$5.99 first month', 'Then $10.99/month', 'Cancel anytime'],
+    description: 'Monthly: $6.44 for the first month, then $11.44/month. Annual plan: $110.44/year.',
+    features: ['570 AI calls / month', '$6.44 first month', 'Then $11.44/month', 'Cancel anytime'],
     prices: [
       {
         id: 'starter_plus_monthly',
         name: 'Starter Plus Monthly',
         billingCycle: 'monthly',
-        amount: 1099,
+        amount: 1144,
         currency: 'usd',
         lookupKey: 'haksterai_starter_plus_monthly',
-        stripePriceId: process.env.STRIPE_PRICE_STARTER_PLUS_MONTHLY || 'price_1UcBMQA0UrVsJMze36ws1SJe',
+        stripePriceId: process.env.STRIPE_PRICE_STARTER_PLUS_MONTHLY || 'price_1UdxxPA0UrVsJMze3cRPHBpN',
         introCoupon: process.env.STRIPE_COUPON_INTRO5 || 'HAKSTER_INTRO5',
-        introAmount: 599,
-        introLabel: 'First month $5.99, then $10.99/mo',
+        introAmount: 644,
+        introLabel: 'First month $6.44, then $11.44/mo',
       },
       {
         id: 'starter_plus_yearly',
         name: 'Starter Plus Yearly',
         billingCycle: 'yearly',
-        amount: 10999,
+        amount: 11044,
         currency: 'usd',
         lookupKey: 'haksterai_starter_plus_yearly',
-        stripePriceId: process.env.STRIPE_PRICE_STARTER_PLUS_YEARLY || 'price_1UcBMQA0UrVsJMze38QbSofy',
+        stripePriceId: process.env.STRIPE_PRICE_STARTER_PLUS_YEARLY || 'price_1UdxxPA0UrVsJMzeygh4cJcZ',
       },
     ],
   },
@@ -464,14 +810,14 @@ const PRICING_CATALOG = [
     id: 'pro',
     name: 'HaksterAI Pro',
     stripeProductName: 'HaksterAI Pro',
-    description: 'Unlimited personal access for builders and operators.',
-    features: ['Unlimited app usage', 'Cloud model routing', 'Agent tools', 'Memory and task history'],
+    description: '2,300 AI calls a month for builders and operators.',
+    features: ['2,300 AI calls / month', 'Cloud model routing', 'Agent tools', 'Memory and task history'],
     prices: [
       {
         id: 'pro_monthly',
         name: 'Pro Monthly',
         billingCycle: 'monthly',
-        amount: parseInt(process.env.PRICE_PRO_MONTHLY_CENTS || '2999', 10),
+        amount: parseInt(process.env.PRICE_PRO_MONTHLY_CENTS || '3044', 10),
         currency: 'usd',
         lookupKey: 'haksterai_pro_monthly',
         stripePriceId: process.env.STRIPE_PRICE_PRO_MONTHLY || null,
@@ -480,7 +826,7 @@ const PRICING_CATALOG = [
         id: 'pro_yearly',
         name: 'Pro Yearly',
         billingCycle: 'yearly',
-        amount: parseInt(process.env.PRICE_PRO_YEARLY_CENTS || '29999', 10),
+        amount: parseInt(process.env.PRICE_PRO_YEARLY_CENTS || '30044', 10),
         currency: 'usd',
         lookupKey: 'haksterai_pro_yearly',
         stripePriceId: process.env.STRIPE_PRICE_PRO_YEARLY || null,
@@ -493,15 +839,24 @@ const PRICING_CATALOG = [
     stripeProductName: 'HaksterAI Enterprise',
     // Owner 2026-11-21: no paid plan includes the admin dashboard — it is
     // owner-gated behind the admin pin pad — so the card must not sell it.
-    description: 'Team access, higher limits, and custom deployment support.',
-    features: ['Team seats', 'Higher limits', 'Priority support'],
+    description: 'Team access, 9,000 AI calls a month, custom deployment support, and the PhantomIDE site builder included.',
+    features: ['Team seats', '9,000 AI calls / month', 'Priority support', 'PhantomIDE site builder included', 'First month free — card required'],
+    // Owner 2026-11-21: "enterprise get access to phantomide site builder also
+    // included perk". Advertised and granted on this side; the PhantomIDE side
+    // of the handoff is reported separately (§16).
+    perks: ['PhantomIDE site builder access'],
     prices: [
       {
         id: 'enterprise_monthly',
         name: 'Enterprise Monthly',
         billingCycle: 'monthly',
-        amount: parseInt(process.env.PRICE_ENTERPRISE_MONTHLY_CENTS || '9999', 10),
+        amount: parseInt(process.env.PRICE_ENTERPRISE_MONTHLY_CENTS || '10044', 10),
         currency: 'usd',
+        // Owner 2026-11-21: "do free month on 100$ signup card required card".
+        // A real Stripe trial (30 days) with payment_method_collection forced
+        // to 'always', so no card means no trial; billing starts after it.
+        trialDays: 30,
+        introLabel: 'First month free — card required, then billed monthly',
         lookupKey: 'haksterai_enterprise_monthly',
         stripePriceId: process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY || null,
       },
@@ -509,14 +864,128 @@ const PRICING_CATALOG = [
         id: 'enterprise_yearly',
         name: 'Enterprise Yearly',
         billingCycle: 'yearly',
-        amount: parseInt(process.env.PRICE_ENTERPRISE_YEARLY_CENTS || '99999', 10),
+        amount: parseInt(process.env.PRICE_ENTERPRISE_YEARLY_CENTS || '112445', 10),
         currency: 'usd',
         lookupKey: 'haksterai_enterprise_yearly',
         stripePriceId: process.env.STRIPE_PRICE_ENTERPRISE_YEARLY || null,
       },
     ],
   },
+  {
+    // Team cards (owner 2026-11-21: "need per seat etc", "tea,ms"). One seat
+    // is one teammate with 1,000 AI calls a month; every card is priced at
+    // $10.85 a seat, which is exactly 5:1 on the $0.00208 cost basis
+    // (1,000 x $0.00208 = $2.08 -> $10.40 net after the $0.45 card fee).
+    // Sold with inline recurring price_data, so no Stripe product has to
+    // exist first. accountPlan keeps users.plan inside its CHECK constraint;
+    // the exact allowance lands in users.call_limit_override (seats x 1,000).
+    id: 'team_3',
+    name: 'Team 3',
+    accountPlan: 'enterprise',
+    description: '3 team seats, 3,000 AI calls a month — $10.85 per seat.',
+    features: ['3 team seats', '3,000 AI calls / month', '1,000 calls per seat', 'Cancel anytime'],
+    prices: [{
+      id: 'team_3_monthly', name: 'Team 3 Monthly', billingCycle: 'monthly',
+      amount: 3255, currency: 'usd', inlineRecurring: true, fixedSeats: 3,
+      unitAmount: 1085, seatsIncluded: 1000, lookupKey: 'haksterai_team_3_monthly',
+    }],
+  },
+  {
+    id: 'team_5',
+    name: 'Team 5',
+    accountPlan: 'enterprise',
+    description: '5 team seats, 5,000 AI calls a month — $10.85 per seat.',
+    features: ['5 team seats', '5,000 AI calls / month', '1,000 calls per seat', 'Cancel anytime'],
+    prices: [{
+      id: 'team_5_monthly', name: 'Team 5 Monthly', billingCycle: 'monthly',
+      amount: 5425, currency: 'usd', inlineRecurring: true, fixedSeats: 5,
+      unitAmount: 1085, seatsIncluded: 1000, lookupKey: 'haksterai_team_5_monthly',
+    }],
+  },
+  {
+    id: 'team_10',
+    name: 'Team 10',
+    accountPlan: 'enterprise',
+    description: '10 team seats, 10,000 AI calls a month — $10.85 per seat.',
+    features: ['10 team seats', '10,000 AI calls / month', '1,000 calls per seat', 'Cancel anytime'],
+    prices: [{
+      id: 'team_10_monthly', name: 'Team 10 Monthly', billingCycle: 'monthly',
+      amount: 10850, currency: 'usd', inlineRecurring: true, fixedSeats: 10,
+      unitAmount: 1085, seatsIncluded: 1000, lookupKey: 'haksterai_team_10_monthly',
+    }],
+  },
+  {
+    id: 'team_25',
+    name: 'Team 25',
+    accountPlan: 'enterprise',
+    description: '25 team seats, 25,000 AI calls a month — $10.85 per seat.',
+    features: ['25 team seats', '25,000 AI calls / month', '1,000 calls per seat', 'Cancel anytime'],
+    prices: [{
+      id: 'team_25_monthly', name: 'Team 25 Monthly', billingCycle: 'monthly',
+      amount: 27125, currency: 'usd', inlineRecurring: true, fixedSeats: 25,
+      unitAmount: 1085, seatsIncluded: 1000, lookupKey: 'haksterai_team_25_monthly',
+    }],
+  },
 ];
+
+// ── CLI + API entitlement ───────────────────────────────────────────────────
+// Owner 2026-11-21: "all plans over 20$ get haksterai cli install api also".
+// A plan whose recurring price is over $20 a month includes the HaksterAI CLI
+// and its agent API. Derived from PRICING_CATALOG, never a hand-kept plan list,
+// so moving a price moves the line with it. One-time packs are not plans.
+const CLI_MIN_PRICE_CENTS = 2000;
+const CLI_INSTALL_SH = `#!/bin/sh
+# HaksterAI CLI installer — included with every plan over \$20/month.
+set -eu
+ORIGIN="__ORIGIN__"
+TMP="\${TMPDIR:-/tmp}/hakster-cli-install.$$"
+mkdir -p "\$TMP"
+printf 'HaksterAI CLI — downloading from %s\\n' "\$ORIGIN"
+curl -fsSL "\$ORIGIN/cli/pkg.tar.gz" -o "\$TMP/cli.tar.gz"
+tar -xzf "\$TMP/cli.tar.gz" -C "\$TMP"
+cd "\$TMP/cli"
+npm install --omit=dev --no-audit --no-fund
+if ! npm install -g . >/dev/null 2>&1; then
+  printf 'Global install needs permissions — installing into ~/.local instead.\\n'
+  npm install -g . --prefix "\$HOME/.local"
+  printf 'Add this to your shell profile:  export PATH="\$HOME/.local/bin:\$PATH"\\n'
+fi
+cd /
+rm -rf "\$TMP"
+printf '\\nInstalled. Next:\\n'
+printf '  hakster config set server %s\\n' "\$ORIGIN"
+printf '  export HAKSTER_API_KEY=<your key from %s/dashboard/>\\n' "\$ORIGIN"
+printf '  hakster\\n'
+`;
+function planPriceHasCli(price) {
+  if (!price) return false;
+  if (String(price.billingCycle || '') === 'one_time') return false;
+  return Number(price.amount) > CLI_MIN_PRICE_CENTS;
+}
+function planIncludesCli(planId) {
+  const plan = PRICING_CATALOG.find((p) => p.id === String(planId || '').toLowerCase());
+  return !!(plan && (plan.prices || []).some(planPriceHasCli));
+}
+function userIncludesCli(user) {
+  if (!user) return false;
+  try { if (isOwnerUser(user)) return true; } catch (_) { /* owner helper may load later */ }
+  if (String(user.role || '').toLowerCase() === 'admin') return true;
+  return planIncludesCli(user.plan);
+}
+// Only requests that say they are the CLI are checked here. The web app talks to
+// the same endpoint without this header, so its signed-in behaviour is unchanged.
+function requireCliEntitlement(req, res, next) {
+  const isCli = String(req.headers['x-hakster-client'] || '').toLowerCase() === 'cli';
+  if (!isCli) return next();
+  const user = req.user || getUserByApiKey(req);
+  if (!user) return next();
+  if (userIncludesCli(user)) return next();
+  return res.status(403).json({
+    error: 'The HaksterAI CLI and API are included with every plan over $20 a month. Upgrade to Pro, a Team plan or Enterprise to use the CLI.',
+    upgrade: '/plans/',
+    plan: user.plan || 'free',
+  });
+}
 
 function normalizeReferralCode(code) {
   return String(code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
@@ -922,7 +1391,7 @@ async function refreshPricesFromStripe() {
 }
 
 // The intro coupon is real money off the first invoice, so a missing/expired
-// coupon must not silently charge full price on a plan we advertise at $5.99.
+// coupon must not silently charge full price on a plan we advertise at $6.44.
 async function introDiscountFor(stripe, priceObj) {
   if (!priceObj?.introCoupon) return null;
   const expectedDiscount = Number(priceObj.amount) - Number(priceObj.introAmount);
@@ -1196,6 +1665,102 @@ async function applyOneTimePurchase(stripe, db, session) {
   console.log(`[stripe] marketplace purchase applied: ${slug} ${amountText} user ${userId}`);
 }
 
+// One-time credit pack (Token Pack and the ladder packs). Same rules as a marketplace
+// purchase: one ledger row keyed on the Checkout Session id, so a Stripe
+// redelivery can never credit the same pack twice, plus an owner alert and a
+// durable purchase-log line. The account's plan is left exactly as it was —
+// a pack buys calls, not a plan.
+async function applyCreditPurchase(stripe, db, session) {
+  const tokens = Math.max(0, Math.round(Number(session.metadata?.tokens) || 0));
+  const packId = String(session.metadata?.packId || 'credit_pack');
+  const user = resolveCheckoutUser(db, session);
+  const userId = user.id;
+  const amountDollars = (session.amount_total || 0) / 100;
+  const amountText = `${(session.currency || 'usd').toUpperCase()} ${amountDollars.toFixed(2)}`;
+  const receiptId = 'rcpt_' + crypto.randomBytes(16).toString('hex');
+
+  let firstApplication = true;
+  db.transaction(() => {
+    const ins = db.prepare(`INSERT INTO payments (id, user_id, amount, currency, plan, billing_cycle, status, payment_method, provider_id, description, metadata, completed_at)
+      SELECT ?, ?, ?, ?, ?, 'one_time', 'completed', 'stripe', ?, ?, ?, unixepoch()
+      WHERE NOT EXISTS (SELECT 1 FROM payments WHERE provider_id = ?)`)
+      .run(receiptId, userId, amountDollars, session.currency || 'usd', packId,
+        session.id, `${tokens} AI calls — ${packId}`, JSON.stringify({
+          stripe_session_id: session.id,
+          stripe_customer_id: session.customer || null,
+          stripe_amount_cents: session.amount_total || 0,
+          kind: 'credit_pack',
+          pack_id: packId,
+          tokens,
+          email: user.email || '',
+          paid_at: new Date().toISOString(),
+        }), session.id);
+    firstApplication = ins.changes > 0;
+  })();
+  if (!firstApplication) {
+    console.log(`[stripe] duplicate delivery of credit pack session ${session.id}; already credited`);
+    return;
+  }
+
+  const balance = grantTokenCredits(db, userId, tokens, `purchase:${packId}`, session.id);
+
+  try {
+    require('./telegramSiteKeys').logPurchase({
+      event: 'credits.purchase',
+      paymentId: receiptId,
+      providerId: session.id,
+      userId,
+      email: user.email || user.username,
+      plan: packId,
+      billingCycle: 'one_time',
+      amount: amountText,
+      currency: session.currency || 'usd',
+      mode: session.livemode === false ? 'test' : 'live',
+      note: `${tokens} AI calls`,
+    });
+  } catch (ledgerErr) {
+    console.error('[stripe] purchase ledger write failed:', ledgerErr.message);
+  }
+
+  try {
+    notifPush(`💳 Credit pack ${amountText} · ${tokens} calls`, { type: 'notify', priority: 'high', source: 'stripe' });
+  } catch (_) {}
+  try {
+    await telegramBots.sendPaymentAlert([
+      `*Credit pack purchase*`,
+      `Pack: ${packId} (${tokens} calls)`,
+      `Amount: ${amountText}`,
+      `Customer: ${user.email || user.username} (user ${userId})`,
+      `New credit balance: ${balance}`,
+      `Stripe session: ${session.id}`,
+      `Receipt: ${receiptId} (data/purchase-log.jsonl)`,
+    ].join('\n'));
+  } catch (notifyErr) {
+    console.error('[stripe] credit pack alert failed:', notifyErr.message);
+  }
+  console.log(`[stripe] credit pack applied: ${packId} +${tokens} calls, balance ${balance}, user ${userId}`);
+}
+
+// Stripe's newer API moved two fields this server depends on: the billing
+// period lives on subscription items, and an invoice's subscription lives under
+// parent.subscription_details. Read both locations so a purchase is never
+// recorded with null dates or without its subscription link.
+function stripePeriod(sub) {
+  if (!sub) return { start: null, end: null };
+  const item = sub.items && sub.items.data && sub.items.data[0];
+  return {
+    start: sub.current_period_start ?? (item && item.current_period_start) ?? null,
+    end: sub.current_period_end ?? (item && item.current_period_end) ?? null,
+  };
+}
+
+function invoiceSubscriptionId(invoice) {
+  if (!invoice) return null;
+  return invoice.subscription
+    || (invoice.parent && invoice.parent.subscription_details && invoice.parent.subscription_details.subscription)
+    || null;
+}
+
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
@@ -1224,10 +1789,14 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
           const customerId = session.customer;
           const subId = session.subscription;
           if (!subId) {
-            // One-time purchases (marketplace builds) arrive without a
-            // subscription. Anything else without one is still unhandled.
+            // One-time purchases (marketplace builds, credit packs) arrive
+            // without a subscription. Anything else without one is unhandled.
             if (String(session.metadata?.kind || '') === 'marketplace_item') {
               await applyOneTimePurchase(stripe, db, session);
+              break;
+            }
+            if (String(session.metadata?.kind || '') === 'credit_pack') {
+              await applyCreditPurchase(stripe, db, session);
               break;
             }
             console.warn(`[stripe] paid checkout session ${session.id} has no subscription id; nothing to apply`);
@@ -1243,7 +1812,13 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
 
           const sub = await stripe.subscriptions.retrieve(subId);
           const priceId = sub.items.data[0]?.price?.id || session.metadata?.priceId;
-          const planId = planFromPriceId(priceId);
+          // A per-seat subscription is sold with price_data, so Stripe invents a
+          // price id that this catalog has never seen. The plan we named on the
+          // session is the authority in that case; it must still be a real
+          // catalog id, or a typo would write an unknown plan onto the account.
+          const metaPlanId = String(session.metadata?.planId || '');
+          const planId = planFromPriceId(priceId)
+            || (PRICING_CATALOG.some(item => item.id === metaPlanId) ? metaPlanId : null);
           if (!planId) {
             throw Object.assign(
               new Error(`Paid checkout session ${session.id} references an unrecognized Stripe price ${priceId || '(none)'}`),
@@ -1253,6 +1828,11 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
           const plan = PRICING_CATALOG.find(item => item.id === planId);
           const price = plan?.prices.find(item => item.stripePriceId === priceId);
           const billingCycle = price?.billingCycle || 'monthly';
+          // A team card keeps a plan id the users.plan CHECK allows, while its
+          // exact call entitlement (seats x 1,000) is stored on the account.
+          const accountPlan = plan?.accountPlan || planId;
+          const fixedSeats = Math.round(Number(plan?.fixedSeats) || 0);
+          const seatOverride = fixedSeats > 0 ? fixedSeats * (Number(plan?.seatsIncluded) || 1000) : 0;
 
           // Stripe may redeliver an event. Upsert the subscription and key the
           // initial payment by Checkout Session ID so retries never double-charge
@@ -1262,21 +1842,22 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
           // transaction callback is not visible past it.
           const receiptId = 'rcpt_' + crypto.randomBytes(16).toString('hex');
           let firstApplication = true;
+          const subPeriod = stripePeriod(sub);
           db.transaction(() => {
             // usage_count/usage_reset_at reset so a fresh purchase starts with a
             // clean month instead of inheriting the free tier's spent calls.
-            db.prepare('UPDATE users SET stripe_customer_id = ?, plan = ?, usage_count = 0, usage_reset_at = 0, updated_at = unixepoch() WHERE id = ?')
-              .run(customerId, planId, userId);
+            db.prepare('UPDATE users SET stripe_customer_id = ?, plan = ?, call_limit_override = ?, usage_count = 0, usage_reset_at = 0, updated_at = unixepoch() WHERE id = ?')
+              .run(customerId, accountPlan, seatOverride, userId);
             const existing = db.prepare('SELECT id FROM subscriptions WHERE provider_sub_id = ?').get(subId);
             if (existing) {
               db.prepare(`UPDATE subscriptions SET plan = ?, billing_cycle = ?, status = 'active', current_period_start = ?, current_period_end = ?, metadata = ? WHERE provider_sub_id = ?`)
-                .run(planId, billingCycle, sub.current_period_start, sub.current_period_end,
-                  JSON.stringify({ stripe_customer_id: customerId, price_id: priceId }), subId);
+                .run(accountPlan, billingCycle, subPeriod.start, subPeriod.end,
+                  JSON.stringify({ stripe_customer_id: customerId, price_id: priceId, catalog_plan: planId, seats: fixedSeats || undefined }), subId);
             } else {
               db.prepare("UPDATE subscriptions SET status = 'expired' WHERE user_id = ? AND status = 'active'").run(userId);
               db.prepare(`INSERT INTO subscriptions (id, user_id, plan, billing_cycle, status, current_period_start, current_period_end, provider_sub_id, metadata) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`)
-                .run(subId, userId, planId, billingCycle, sub.current_period_start, sub.current_period_end, subId,
-                  JSON.stringify({ stripe_customer_id: customerId, price_id: priceId }));
+                .run(subId, userId, accountPlan, billingCycle, subPeriod.start, subPeriod.end, subId,
+                  JSON.stringify({ stripe_customer_id: customerId, price_id: priceId, catalog_plan: planId, seats: fixedSeats || undefined }));
             }
             // payments.amount is REAL in dollars, so convert Stripe's cents.
             // The raw cents stay in metadata so nothing is lost in the round trip.
@@ -1385,8 +1966,22 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
         case 'customer.subscription.updated': {
           const sub = event.data.object;
           const priceId = sub.items.data[0]?.price?.id;
-          const planId = planFromPriceId(priceId);
+          // An inline price_data plan (the $1.45 Low Budget card) makes Stripe
+          // invent a price id this catalog has never seen, so the price lookup
+          // misses and this handler used to skip the whole row — leaving
+          // current_period_end frozen at the checkout value and never advancing
+          // it on renewal. Fall back to the plan in the subscription metadata,
+          // then to the plan already stored on the local subscription row.
+          const localSub = db.prepare('SELECT plan FROM subscriptions WHERE provider_sub_id = ?').get(sub.id);
+          const metaPlan = String(sub.metadata?.planId || '');
+          const planId = planFromPriceId(priceId)
+            || (PRICING_CATALOG.some(item => item.id === metaPlan) ? metaPlan : null)
+            || (localSub && PRICING_CATALOG.some(item => item.id === localSub.plan) ? localSub.plan : null);
           if (planId) {
+            const planMeta = PRICING_CATALOG.find(item => item.id === planId);
+            const accountPlan = planMeta?.accountPlan || planId;
+            const fixedSeats = Math.round(Number(planMeta?.fixedSeats) || 0);
+            const seatOverride = fixedSeats > 0 ? fixedSeats * (Number(planMeta?.seatsIncluded) || 1000) : 0;
             // Customer id is the normal link; the subscription's own metadata
             // carries the user id as a fallback for a sub created before the
             // customer link was written (Telegram checkout, early upgrade).
@@ -1399,10 +1994,11 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
               // capped plan (lite) clear its monthly quota at will.
               db.prepare(`UPDATE users
                 SET plan = ?,
+                    call_limit_override = ?,
                     usage_count = CASE WHEN plan = ? THEN usage_count ELSE 0 END,
                     usage_reset_at = CASE WHEN plan = ? THEN usage_reset_at ELSE 0 END,
                     updated_at = unixepoch()
-                WHERE id = ?`).run(planId, planId, planId, user.id);
+                WHERE id = ?`).run(accountPlan, seatOverride, accountPlan, accountPlan, user.id);
               // Stripe's vocabulary does not match the schema's CHECK constraint
               // ('canceled' one L, plus unpaid/incomplete/paused which aren't
               // allowed). Passing them raw made this UPDATE throw and the
@@ -1411,13 +2007,14 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
                 past_due: 'past_due', canceled: 'cancelled', unpaid: 'past_due',
                 incomplete: 'past_due', incomplete_expired: 'expired', paused: 'past_due' };
               const mappedStatus = STATUS_MAP[sub.status] || 'past_due';
+              const subPeriod = stripePeriod(sub);
               db.prepare("UPDATE subscriptions SET status = ?, current_period_start = ?, current_period_end = ? WHERE provider_sub_id = ?")
-                .run(mappedStatus, sub.current_period_start, sub.current_period_end, sub.id);
-              if (user.plan !== planId) {
+                .run(mappedStatus, subPeriod.start, subPeriod.end, sub.id);
+              if (user.plan !== accountPlan) {
                 logStripeEvent(db, {
                   eventId: event.id, eventType: event.type, outcome: 'plan-changed',
-                  userId: user.id, plan: planId,
-                  message: `${user.plan} → ${planId} (${mappedStatus}) via subscription ${sub.id}`,
+                  userId: user.id, plan: accountPlan,
+                  message: `${user.plan} → ${accountPlan} (${mappedStatus}) via subscription ${sub.id}`,
                 });
               }
             }
@@ -1434,11 +2031,18 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
             // `deleted` event after the new checkout already switched the plan.
             // Downgrading here would undo the upgrade the customer just paid
             // for, so the plan only changes when nothing else is still live.
-            const other = db.prepare(`SELECT plan FROM subscriptions
+            const other = db.prepare(`SELECT plan, metadata FROM subscriptions
               WHERE user_id = ? AND provider_sub_id != ? AND status IN ('active','trialing','past_due')
               ORDER BY created_at DESC LIMIT 1`).get(user.id, sub.id);
             if (other && other.plan && other.plan !== 'free') {
-              db.prepare('UPDATE users SET plan = ?, updated_at = unixepoch() WHERE id = ?').run(other.plan, user.id);
+              let otherOverride = 0;
+              try {
+                const otherMeta = JSON.parse(other.metadata || '{}');
+                const otherPlan = PRICING_CATALOG.find(item => item.id === (otherMeta.catalog_plan || other.plan));
+                const otherSeats = Math.round(Number(otherPlan?.fixedSeats) || 0);
+                if (otherSeats > 0) otherOverride = otherSeats * (Number(otherPlan?.seatsIncluded) || 1000);
+              } catch (_) { /* metadata is best-effort */ }
+              db.prepare('UPDATE users SET plan = ?, call_limit_override = ?, updated_at = unixepoch() WHERE id = ?').run(other.plan, otherOverride, user.id);
               console.log(`[stripe] old subscription ${sub.id} deleted — user ${user.id} stays on ${other.plan}`);
               logStripeEvent(db, {
                 eventId: event.id, eventType: event.type, outcome: 'kept-plan',
@@ -1446,7 +2050,7 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
                 message: `old subscription ${sub.id} deleted; account keeps ${other.plan} (another subscription is still active)`,
               });
             } else {
-              db.prepare("UPDATE users SET plan = 'free', updated_at = unixepoch() WHERE id = ?").run(user.id);
+              db.prepare("UPDATE users SET plan = 'free', call_limit_override = 0, updated_at = unixepoch() WHERE id = ?").run(user.id);
               console.log(`[stripe] subscription deleted — user ${user.id} downgraded to free`);
               logStripeEvent(db, {
                 eventId: event.id, eventType: event.type, outcome: 'downgraded',
@@ -1459,9 +2063,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
         }
         case 'invoice.payment_failed': {
           const invoice = event.data.object;
+          const invoiceSubId = invoiceSubscriptionId(invoice);
           const user = db.prepare('SELECT id, plan FROM users WHERE stripe_customer_id = ?').get(invoice.customer);
           if (user) {
-            db.prepare("UPDATE subscriptions SET status = 'past_due' WHERE provider_sub_id = ?").run(invoice.subscription);
+            db.prepare("UPDATE subscriptions SET status = 'past_due' WHERE provider_sub_id = ?").run(invoiceSubId);
             logStripeEvent(db, {
               eventId: event.id, eventType: event.type, outcome: 'payment-failed',
               userId: user.id, plan: user.plan, amountCents: invoice.amount_due || 0,
@@ -1472,14 +2077,25 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
         }
         case 'invoice.payment_succeeded': {
           const invoice = event.data.object;
-          if (invoice.subscription) {
-            db.prepare("UPDATE subscriptions SET status = 'active' WHERE provider_sub_id = ? AND status = 'past_due'").run(invoice.subscription);
+          const invoiceSubId = invoiceSubscriptionId(invoice);
+          // The first invoice (billing_reason 'subscription_create') is the
+          // same money as the checkout session handled above, which already
+          // wrote a payments row. Recording it again as a renewal doubled
+          // revenue and the payment count (seen on the 2026-11-20 lite
+          // purchase). Suppress only when that checkout row really exists
+          // for this subscription, so a missed checkout event still records.
+          const initialInvoiceAlreadyRecorded = invoice.billing_reason === 'subscription_create' && invoiceSubId
+            ? db.prepare("SELECT id FROM payments WHERE status = 'completed' AND description = 'Stripe checkout' AND metadata LIKE ?")
+                .get('%"stripe_subscription_id":"' + invoiceSubId + '"%')
+            : null;
+          if (invoiceSubId) {
+            db.prepare("UPDATE subscriptions SET status = 'active' WHERE provider_sub_id = ? AND status = 'past_due'").run(invoiceSubId);
           }
           // Renewals are payments too — record and report them, keyed by invoice
           // id so a Stripe redelivery never writes a second row or a second alert.
           if (invoice.paid !== false && (invoice.amount_paid || 0) > 0) {
             try {
-              const sub = invoice.subscription ? db.prepare('SELECT * FROM subscriptions WHERE provider_sub_id = ?').get(invoice.subscription) : null;
+              const sub = invoiceSubId ? db.prepare('SELECT * FROM subscriptions WHERE provider_sub_id = ?').get(invoiceSubId) : null;
               const user = db.prepare('SELECT * FROM users WHERE stripe_customer_id = ?').get(invoice.customer);
               // A paid invoice is proof the subscription is live. If an earlier
               // stale event left the account on free while it is still being
@@ -1496,14 +2112,22 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
               }
               const ownerId = user?.id || sub?.user_id;
               if (ownerId) {
-                const inserted = db.prepare(`INSERT INTO payments (id, user_id, amount, currency, plan, billing_cycle, status, payment_method, provider_id, description, metadata, completed_at)
+                if (initialInvoiceAlreadyRecorded) {
+                  logStripeEvent(db, {
+                    eventId: event.id, eventType: event.type, outcome: 'initial-invoice-covered',
+                    userId: ownerId, plan: sub?.plan || user?.plan || 'unknown',
+                    amountCents: invoice.amount_paid || 0,
+                    message: `initial invoice ${invoice.id} already recorded by checkout ${initialInvoiceAlreadyRecorded.id}; not counted twice`,
+                  });
+                }
+                const inserted = initialInvoiceAlreadyRecorded ? { changes: 0 } : db.prepare(`INSERT INTO payments (id, user_id, amount, currency, plan, billing_cycle, status, payment_method, provider_id, description, metadata, completed_at)
                   SELECT ?, ?, ?, ?, ?, ?, 'completed', 'stripe', ?, 'Stripe renewal', ?, unixepoch()
                   WHERE NOT EXISTS (SELECT 1 FROM payments WHERE provider_id = ?)`)
                   .run('rcpt_' + crypto.randomBytes(16).toString('hex'), ownerId, (invoice.amount_paid || 0) / 100,
                     invoice.currency || 'usd', sub?.plan || user?.plan || 'unknown', sub?.billing_cycle || 'monthly',
                     invoice.id, JSON.stringify({
                       stripe_invoice_id: invoice.id,
-                      stripe_subscription_id: invoice.subscription || null,
+                      stripe_subscription_id: invoiceSubId,
                       stripe_customer_id: invoice.customer || null,
                       stripe_amount_cents: invoice.amount_paid || 0,
                       email: user?.email || '', kind: 'renewal',
@@ -1714,7 +2338,10 @@ function getHaksterModelConfig() {
   try {
     const cfg = JSON.parse(fs.readFileSync(haksterConfigPath, 'utf8'));
     if (cfg.provider && !isCerebrasValue(cfg.provider)) provider = cfg.provider;
-    if (cfg.model && !isCerebrasValue(cfg.model)) model = cfg.model;
+    // A GLM tag left in hakster-config.json is the old default the owner is
+    // replacing (2026-11-16, "our deepseek not glm"). Resolve it to the owner's
+    // Claude DeepSeek config instead of serving GLM to chat/agent routes.
+    if (cfg.model && !isCerebrasValue(cfg.model)) model = resolveTerminalModel(cfg.model, provider).model;
   } catch {}
   return { provider, model };
 }
@@ -1778,15 +2405,61 @@ const FREE_WEB_RESEARCH_LIMIT = 5;
 // step with PRICING_CATALOG whenever an unlimited tier is added. 'lite' is
 // deliberately absent: it is a capped $3 tier (30 calls / 10 lookups a month).
 const PAID_PLAN_IDS = new Set(['starter', 'starter_plus', 'pro', 'enterprise']);
-// Capped plans only — anything not listed here is unlimited.
-const CAPPED_PLAN_CALL_LIMITS = { free: FREE_USAGE_LIMIT, lite: LITE_USAGE_LIMIT };
-const CAPPED_PLAN_WEB_LIMITS = { free: FREE_WEB_RESEARCH_LIMIT, lite: LITE_WEB_RESEARCH_LIMIT };
+// Every catalog plan is metered now: free, lite, starter, starter_plus, pro and
+// enterprise. Owner, 2026-11-21: "add usage capps on all plans for our profit
+// margin but be fair we go base on users suage on what to give".
+//
+// Basis, measured not guessed: the live ledger's 77 recorded calls average
+// 6,643 input + 523 output tokens, which at the cheapest paid lane's list
+// price ($0.28/M in, $0.42/M out) is $0.00208 a call, so 5:1 allows
+// net / $0.0104 calls a month. Each cap is sized against the CHEAPEST way that
+// plan can be bought, so no billing cycle can drive a plan below 5:1:
+//   lite        net $3.00   -> 280 calls   (5.15:1)
+//   starter     net $9.99   -> 900 calls   (5.34:1)
+//   starter_plus intro $6.44 -> net $5.99  -> 570 calls (5.05:1)  [intro month is the cheapest month]
+//   pro         yearly $300.44 -> net $299.99/12 -> 2,300 calls (5.24:1)
+//   enterprise  net $99.99  -> 9,000 calls (5.34:1)
+// Every cap is far above real use: the heaviest account on this box has made
+// 53 calls in a month, so a normal user never meets the ceiling. A capped plan
+// that runs out draws bought token-pack credits first, then answers 402 with
+// the upgrade/pack prompt — it never silently changes the plan.
+const CAPPED_PLAN_CALL_LIMITS = {
+  free: FREE_USAGE_LIMIT,
+  // Try Me Now is the one plan whose allowance is per DAY; its usage_count is
+  // reset at the next UTC midnight by reserveUsage, so the same number is the
+  // daily cap everywhere it is displayed.
+  try_me: 50,
+  low_income: 96,
+  lite: LITE_USAGE_LIMIT,
+  starter: 900,
+  starter_plus: 570,
+  pro: 2300,
+  enterprise: 9000,
+};
+const CAPPED_PLAN_WEB_LIMITS = { free: FREE_WEB_RESEARCH_LIMIT, low_income: 3, lite: LITE_WEB_RESEARCH_LIMIT };
 function cappedLimit(map, plan) {
   const key = String(plan || 'free').toLowerCase();
   return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : Infinity;
 }
 function planCallLimit(plan) { return cappedLimit(CAPPED_PLAN_CALL_LIMITS, plan); }
 function planWebResearchLimit(plan) { return cappedLimit(CAPPED_PLAN_WEB_LIMITS, plan); }
+// Plans whose allowance resets every UTC day instead of monthly.
+const DAILY_CALL_LIMITS = { try_me: 50 };
+function planDailyCallLimit(plan) {
+  const key = String(plan || 'free').toLowerCase();
+  return Object.prototype.hasOwnProperty.call(DAILY_CALL_LIMITS, key) ? DAILY_CALL_LIMITS[key] : null;
+}
+// The monthly allowance actually in force for an account: a team card stores
+// its exact entitlement (seats x 1,000) in call_limit_override; everything
+// else falls back to the plan's own cap.
+function effectiveCallLimit(userOrPlan) {
+  if (userOrPlan && typeof userOrPlan === 'object') {
+    const override = Number(userOrPlan.call_limit_override) || 0;
+    if (override > 0) return override;
+    return planCallLimit(userOrPlan.plan);
+  }
+  return planCallLimit(userOrPlan);
+}
 function isLitePlanUser(user) {
   return String(user?.plan || 'free').toLowerCase() === 'lite';
 }
@@ -2183,6 +2856,37 @@ let buildIdCache = { id: '', mtimeMs: 0 };
 // small body, per-IP rate limit, dedupe per (build, from) for 30 minutes.
 const UPDATE_SEEN_FILE = path.join(__dirname, '..', 'data', 'update-seen.jsonl');
 const updateSeenRecent = new Map();
+// ── Phantom applet for our other sites (owner, 2026-11-21: "rmt", "topreels
+// etc", "even phantomide is getting it because its main server host etc") ──
+// The widget is served from here and embedded by our own sites, so the three
+// read-only status endpoints answer with CORS for our domains only. Nothing
+// here is writable and no credentials are shared.
+const APPLET_SCRIPT_FILE = path.join(__dirname, '..', '..', 'dev', 'applet', 'phantom-applet.js');
+app.get('/applet/phantom-applet.js', (_req, res) => {
+  res.type('application/javascript; charset=utf-8');
+  res.set('Cache-Control', 'public, max-age=300');
+  res.sendFile(APPLET_SCRIPT_FILE, (err) => { if (err) res.status(404).end(); });
+});
+const APPLET_CORS_HOSTS = [/(^|\.)haksterai\.com$/i, /(^|\.)phantomide\.com$/i, /(^|\.)junkalot\.co$/i];
+const appletCors = (req, res, next) => {
+  const origin = String(req.headers.origin || '');
+  if (origin) {
+    try {
+      const host = new URL(origin).hostname.toLowerCase();
+      if (APPLET_CORS_HOSTS.some((re) => re.test(host))) {
+        res.set('Access-Control-Allow-Origin', origin);
+        res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.set('Access-Control-Allow-Headers', 'x-api-key, content-type');
+        res.set('Access-Control-Allow-Credentials', 'true');
+        res.set('Vary', 'Origin');
+      }
+    } catch { /* a malformed Origin simply gets no CORS answer */ }
+  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  return next();
+};
+app.use(['/api/version', '/api/applet/status', '/api/applet/stream'], appletCors);
+
 app.post('/api/version/seen', express.json({ limit: '2kb' }), (req, res) => {
   try {
     const clean = (v, n) => String(v == null ? '' : v).replace(/[\r\n\t]/g, ' ').slice(0, n);
@@ -2309,10 +3013,35 @@ app.get('/api/agent/stuck-summary', (_req, res) => {
 });
 
 // ── Security endpoints ────────────────────────────────────────────────────
-app.get('/api/health/security', async (_req, res) => {
+// Owner, 2026-11-21: "admin dash is lagging frewzing find culprit". This route
+// shells out to `npm audit` (~1.6 s, spawns a Node child and calls the npm
+// registry) and the owner card polls it on the 8 s live beat — so a child
+// process was running almost permanently and the dashboard stuttered every
+// beat. Posture findings do not change in 8 s, so the report is cached for
+// five minutes (concurrent callers share one run). `?fresh=1` forces a new
+// audit for a manual re-check.
+const SECURITY_AUDIT_TTL_MS = 5 * 60 * 1000;
+let securityAuditCache = { at: 0, report: null, inflight: null };
+app.get('/api/health/security', async (req, res) => {
   try {
-    const report = await runSecurityAudit(path.join(__dirname, '..'), CORS_ORIGINS);
-    res.json(report);
+    const force = String((req.query && req.query.fresh) || '') === '1';
+    const age = Date.now() - securityAuditCache.at;
+    if (!force && securityAuditCache.report && age < SECURITY_AUDIT_TTL_MS) {
+      return res.json({ ...securityAuditCache.report, cached: true, cacheAgeMs: age });
+    }
+    if (!securityAuditCache.inflight) {
+      securityAuditCache.inflight = runSecurityAudit(path.join(__dirname, '..'), CORS_ORIGINS)
+        .then((report) => {
+          securityAuditCache = { at: Date.now(), report, inflight: null };
+          return report;
+        })
+        .catch((err) => {
+          securityAuditCache.inflight = null;
+          throw err;
+        });
+    }
+    const report = await securityAuditCache.inflight;
+    res.json({ ...report, cached: false });
   } catch (err) {
     res.status(500).json({ error: err.message, summary: { passed: false, total: 0 } });
   }
@@ -2345,6 +3074,116 @@ app.post('/api/health/security/notifications/acknowledge-all', (_req, res) => {
     res.json({ ok: true, count: result.changes });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Auto Heal (owner request 2026-11-22) ──────────────────────────────────
+// The same bounded 10 s loop Junkalot runs, fed only by this box's own tables
+// (security_notifications, ip_guard_events, ip_guard_actions). Owner-only:
+// the log names source IPs. The report provider reuses the cached audit so a
+// cycle never spawns an npm audit of its own.
+autoHeal.setReportProvider(() => securityAuditCache.report);
+app.get('/api/health/auto-heal', requireOwner, (_req, res) => {
+  try {
+    res.json(autoHeal.getAutoHealView());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.post('/api/health/auto-heal/toggle', express.json({ limit: '4kb' }), requireOwner, (req, res) => {
+  try {
+    res.json(autoHeal.setEnabled(Boolean(req.body && req.body.enabled)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── CLI provenance guard (owner request 2026-11-22) ────────────────────────
+// Records every launch of our CLIs and alerts when the launcher is not ours.
+// Detection only: nothing is blocked or killed here. Owner-only: the log names
+// process ids, users and command lines on this box.
+app.get('/api/health/cli-guard', requireOwner, (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(cliGuard.getCliGuardView());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.post('/api/health/cli-guard/scan', express.json({ limit: '2kb' }), requireOwner, (_req, res) => {
+  try {
+    res.json(cliGuard.runScan('manual'));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Public, read-only: the MCP servers this box ships with, names only — no
+// commands, args, env or paths are ever exposed (owner 2026-11-21: "advertise
+// our 20-mcp servers list name top 1st"). Read straight from the live config so
+// the advertised list cannot drift from what the agent actually loads.
+app.get('/api/mcp/servers', (_req, res) => {
+  try {
+    const cfgPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
+    const json = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const servers = Object.entries(json.mcpServers || {}).map(([name, cfg]) => ({
+      name,
+      tier: Number(cfg && cfg.tier) || 0,
+    }));
+    res.set('cache-control', 'no-store');
+    res.json({ count: servers.length, servers });
+  } catch (e) {
+    res.status(500).json({ error: 'mcp config unavailable', count: 0, servers: [] });
+  }
+});
+
+// Public, read-only: the skill catalogue the CLI/Crush brain actually loads,
+// counted from the same skills_paths Crush is configured with (owner 2026-11-21:
+// "get skills list from crush terminal", "list our ... skills"). Names only —
+// no file contents, and only paths under this user's home are ever read.
+let skillsCatalogCache = { at: 0, data: null };
+app.get('/api/skills/catalog', (_req, res) => {
+  try {
+    if (skillsCatalogCache.data && Date.now() - skillsCatalogCache.at < 5 * 60 * 1000) {
+      return res.json(skillsCatalogCache.data);
+    }
+    const home = process.env.HOME || '/home/ghost';
+    let dirs = [];
+    for (const cfgPath of [path.join(home, '.crush.json'), path.join(home, '.local', 'share', 'crush', 'crush.json')]) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        // Crush keeps them under options; accept a top-level copy as a fallback.
+        const paths = (cfg.options && cfg.options.skills_paths) || cfg.skills_paths;
+        if (Array.isArray(paths) && paths.length) { dirs = paths; break; }
+      } catch (_) { /* try the next config */ }
+    }
+    const allowed = dirs.filter((d) => typeof d === 'string' && d.startsWith(home + '/') && !d.includes('..'));
+    const SKIP = new Set(['README', 'DESCRIPTION', 'AGENTS', 'PORT_NOTES', 'INDEX']);
+    const names = new Set();
+    const sources = [];
+    const walk = (dir, depth) => {
+      if (depth > 4) return;
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full, depth + 1);
+        else if (e.name === 'SKILL.md') names.add(path.basename(dir));
+        else if (e.name.endsWith('.md') && path.dirname(full) === dir) names.add(e.name.replace(/\.md$/, ''));
+      }
+    };
+    for (const d of allowed) {
+      const before = names.size;
+      walk(d, 0);
+      if (names.size > before) sources.push(path.basename(d));
+    }
+    const skills = [...names].filter((n) => n && !SKIP.has(String(n).toUpperCase())).sort();
+    const data = { count: skills.length, skills, sources };
+    skillsCatalogCache = { at: Date.now(), data };
+    res.set('cache-control', 'public, max-age=300');
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: 'skills catalogue unavailable', count: 0, skills: [], sources: [] });
   }
 });
 
@@ -3052,7 +3891,7 @@ function customerDirectiveFor(user, sessionId, opts = {}) {
   // Free accounts: 5 regular AI calls (usage_count) + 5 web lookups (own table).
   // Any paid plan passes null so the directive says "no free-call cap" instead
   // of inventing a number.
-  const callLimit = planCallLimit(user.plan);
+  const callLimit = effectiveCallLimit(user);
   const cappedCalls = Number.isFinite(callLimit);
   const webLimit = planWebResearchLimit(user.plan);
   const cappedWeb = Number.isFinite(webLimit);
@@ -3865,7 +4704,7 @@ app.delete('/api/agent/allowlist/:id', requireOwner, (req, res) => {
   res.json({ deleted: true });
 });
 
-app.post('/api/agent/run', requireSignedIn, async (req, res) => {
+app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, res) => {
   const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false, maxTurns: requestedMaxTurns } = req.body;
   const savedAgent = getHaksterModelConfig();
   const requestedProvider = req.body.provider || savedAgent.provider || null;
@@ -6622,6 +7461,21 @@ app.post('/api/images/analyze', requireSignedIn, async (req, res) => {
 // machine actually serving this request — never Parrot, never a guessed host —
 // plus a live check of the public site and whether Cloudflare is in front.
 // Read-only: it starts, stops, and reconfigures nothing.
+//
+// 2026-11-21 (owner: "admin dash is lagging freezing"): this card polls every
+// 8 s, but a fresh CPU figure needs a 250 ms /proc/stat sample and the site
+// check is an outbound HTTPS HEAD through Cloudflare (~400 ms). Both are
+// reused for a few seconds so the beat no longer carries ~650 ms of work on
+// every request. The response timestamps still report when each reading was
+// taken; nothing is presented as fresher than it is.
+const serverStatusCache = { cpu: { at: 0, value: null }, site: { at: 0, value: null } };
+async function cachedCpuSnapshot() {
+  const c = serverStatusCache.cpu;
+  if (c.value && Date.now() - c.at < 5000) return c.value;
+  const value = await systemSensors.cpuSnapshot(250);
+  serverStatusCache.cpu = { at: Date.now(), value };
+  return value;
+}
 app.get('/api/admin/server-status', requireOwner, async (_req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
@@ -6667,16 +7521,24 @@ app.get('/api/admin/server-status', requireOwner, async (_req, res) => {
     // followed, so a hijack or stale route shows up as "Not answering" instead
     // of a false green. cf-ray in the response proves Cloudflare is carrying it.
     const site = { url: 'https://haksterai.com/', online: false, status: 0, ms: 0, viaCloudflare: false, ray: '' };
-    try {
-      const started = Date.now();
-      const upstream = await fetch(site.url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(6000) });
-      site.online = upstream.status > 0 && upstream.status < 500;
-      site.status = upstream.status;
-      site.ms = Date.now() - started;
-      site.ray = upstream.headers.get('cf-ray') || '';
-      site.viaCloudflare = Boolean(site.ray);
-    } catch {
-      site.online = false;
+    if (serverStatusCache.site.value && Date.now() - serverStatusCache.site.at < 20000) {
+      Object.assign(site, serverStatusCache.site.value);
+    } else {
+      try {
+        const started = Date.now();
+        const upstream = await fetch(site.url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(6000) });
+        site.online = upstream.status > 0 && upstream.status < 500;
+        site.status = upstream.status;
+        site.ms = Date.now() - started;
+        site.ray = upstream.headers.get('cf-ray') || '';
+        site.viaCloudflare = Boolean(site.ray);
+      } catch {
+        site.online = false;
+      }
+      // Cache both success and failure: a 20 s old failure is still the truth
+      // until the next real check, and it stops every beat from waiting on a
+      // dead route for the full 6 s timeout.
+      serverStatusCache.site = { at: Date.now(), value: { ...site } };
     }
 
     res.json({
@@ -6693,7 +7555,7 @@ app.get('/api/admin/server-status', requireOwner, async (_req, res) => {
       // Real sensor readings (see server/src/systemSensors.js): CPU busy % over
       // a short /proc/stat sample, meminfo-based memory, and lm-sensors temps.
       // A missing sensor is null, never a guess.
-      cpu: await systemSensors.cpuSnapshot(250),
+      cpu: await cachedCpuSnapshot(),
       hardware: {
         mem: systemSensors.memorySnapshot(),
         sensors: await systemSensors.sensorSnapshot(),
@@ -7359,8 +8221,11 @@ app.get('/api/dashboard', requireOwner, (req, res) => {
       haksterModel = haksterCfg.model || haksterModel;
       haksterProvider = haksterCfg.provider || haksterProvider;
     } catch {}
-    let crushModel = haksterModel;
-    let crushProvider = haksterProvider;
+    // The readout must show what the terminal will actually run, not the GLM
+    // tag still saved in hakster-config.json (owner 2026-11-21).
+    const terminalPick = resolveTerminalModel(haksterModel, haksterProvider);
+    let crushModel = terminalPick.model;
+    let crushProvider = terminalPick.provider;
     const includeSkillList = req.query.compact !== '1';
     let skillsInventory = { total: 0, categories: {}, skills: [] };
     let toolInventory = [];
@@ -7452,12 +8317,37 @@ app.get('/api/dashboard', requireOwner, (req, res) => {
           p.status, p.payment_method, p.provider_id, p.description, p.metadata,
           p.created_at, p.completed_at, u.email, u.username
         FROM payments p LEFT JOIN users u ON u.id = p.user_id
+        WHERE COALESCE(p.duplicate_of, '') = ''
         ORDER BY COALESCE(p.completed_at, p.created_at) DESC LIMIT 50`).all();
       const totals = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount,
           COALESCE(SUM(CASE WHEN completed_at >= unixepoch() - 2592000 THEN amount ELSE 0 END), 0) AS amount30d,
           COALESCE(SUM(CASE WHEN completed_at >= unixepoch() - 2592000 THEN 1 ELSE 0 END), 0) AS count30d
-        FROM payments WHERE status = 'completed'`).get() || {};
-      const signups = db.prepare(`SELECT COUNT(*) AS c FROM users WHERE created_at >= unixepoch() - 604800`).get()?.c || 0;
+        FROM payments WHERE status = 'completed' AND COALESCE(duplicate_of, '') = ''`).get() || {};
+      // Owner, 2026-11-21: "if they paid they sign up". A paying account is a
+      // signup no matter how old its row is, so this counts accounts created in
+      // the last 7 days PLUS anyone with a completed payment or live
+      // subscription. System/owner rows (@hakster.ai, @haksterai.com) and blank
+      // emails are never customers and stay out of it. Real state only.
+      let signups = 0;
+      try {
+        signups = Number(db.prepare(`
+          SELECT COUNT(*) AS c FROM users u
+          WHERE COALESCE(u.email, '') <> ''
+            AND lower(u.email) NOT LIKE '%@hakster.ai'
+            AND lower(u.email) NOT LIKE '%@haksterai.com'
+            AND (
+              u.created_at >= unixepoch() - 604800
+              OR EXISTS (SELECT 1 FROM payments p WHERE p.user_id = u.id
+                         AND p.status = 'completed' AND COALESCE(p.duplicate_of, '') = '')
+              OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id
+                         AND s.status IN ('active', 'trialing'))
+            )`).get()?.c) || 0;
+      } catch (signupErr) {
+        // A missing billing table must not blank the whole card — fall back to
+        // the plain 7-day count and say so in the log.
+        console.error('[dashboard] paid-signup count failed:', signupErr.message);
+        signups = Number(db.prepare(`SELECT COUNT(*) AS c FROM users WHERE created_at >= unixepoch() - 604800`).get()?.c) || 0;
+      }
       const recentCustomers = db.prepare(`SELECT id, username, email, plan, created_at, last_login_at
         FROM users ORDER BY created_at DESC LIMIT 20`).all();
       billing = { payments, totals, signups7d: signups, recentCustomers };
@@ -7535,6 +8425,57 @@ function ensureCrushModelRegistered(cfg, provider, model) {
   return cfg;
 }
 
+// ── Admin terminal model (crush) ─────────────────────────────────
+// Owner 2026-11-16: the terminal must start on the owner's Claude DeepSeek
+// config, never the GLM default sitting in hakster-config.json. The CLI and the
+// server-side agent got that fix then (server/src/modelDefaults.js); on
+// 2026-11-21 the same resolution is applied here to the admin terminal, its
+// dashboard readout and the crush config sync — a GLM value in the config file
+// was still being pinned into every crush start and shown on the admin dash.
+function resolveTerminalModel(configured, configuredProvider) {
+  const cfgModel = String(configured || '').trim();
+  const GLM = /^glm/i;
+  // A deliberate non-GLM choice from the model picker is honoured. GLM or empty
+  // is the stale old default and resolves to the owner's Claude DeepSeek config.
+  if (cfgModel && !GLM.test(cfgModel)) {
+    return { model: cfgModel, provider: configuredProvider || 'ollama', source: 'hakster-config.json' };
+  }
+  let pick;
+  try {
+    pick = require('./modelDefaults').resolveStartupModel('');
+  } catch (_) {
+    pick = { model: 'deepseek-v4.1-flash:cloud', source: 'fallback' };
+  }
+  return { model: pick.model || 'deepseek-v4.1-flash:cloud', provider: 'ollama', source: pick.source };
+}
+
+const OWNER_DEEPSEEK_RE = /^deepseek-v4\.1-flash/i;
+const OWNER_DEEPSEEK_CTX = 1048576; // owner's Claude Code context override
+
+function applyTerminalModelToCrush(cfg, pick) {
+  cfg.models = cfg.models || {};
+  cfg.models.large = cfg.models.large || {};
+  cfg.models.small = cfg.models.small || {};
+  cfg.models.large.model = pick.model;
+  cfg.models.large.provider = pick.provider || 'ollama';
+  cfg.models.small.model = pick.model;
+  cfg.models.small.provider = pick.provider || 'ollama';
+  ensureCrushModelRegistered(cfg, pick.provider || 'ollama', pick.model);
+  if (OWNER_DEEPSEEK_RE.test(pick.model)) {
+    // The owner's DeepSeek tag lives on the local Ollama daemon — the same one
+    // Claude Code uses — not the Parrot daemon crush was pointed at.
+    cfg.providers = cfg.providers || {};
+    const prov = cfg.providers.ollama = cfg.providers.ollama || {};
+    prov.base_url = 'http://127.0.0.1:11434';
+    prov.models = Array.isArray(prov.models) ? prov.models : [];
+    for (const m of prov.models) {
+      if (m && m.id === pick.model) m.context_window = OWNER_DEEPSEEK_CTX;
+    }
+    prov.default_large_model_id = pick.model;
+  }
+  return cfg;
+}
+
 // ── Crush config update (model/provider switch) ──────────────────
 app.get('/api/crush/config', (_req, res) => {
   try {
@@ -7556,8 +8497,11 @@ app.get('/api/crush/config', (_req, res) => {
       } catch {}
     }
 
-    const model = saved.model || crushCfg.models?.large?.model || 'gpt-oss:120b-cloud';
-    const provider = saved.provider || crushCfg.models?.large?.provider || 'ollama';
+    const configuredModel = saved.model || crushCfg.models?.large?.model || '';
+    const configuredProvider = saved.provider || crushCfg.models?.large?.provider || 'ollama';
+    const terminalPick = resolveTerminalModel(configuredModel, configuredProvider);
+    const model = terminalPick.model;
+    const provider = terminalPick.provider;
     res.json({
       ok: true,
       provider,
@@ -8129,10 +9073,15 @@ app.get('/api/stripe/plans', async (_req, res) => {
       name: plan.name,
       description: plan.description,
       features: plan.features,
+      ...(Array.isArray(plan.perks) && plan.perks.length ? { perks: plan.perks } : {}),
       prices: plan.prices
         // A $0 free tier has no price object to check out, but it still needs to
-        // show up as a plan instead of being filtered out entirely.
-        .filter(price => price.stripePriceId || price.amount === 0)
+        // show up as a plan instead of being filtered out entirely. One-time
+        // packs and the per-seat add-on are sold with price_data, so they carry
+        // no Stripe price id by design and must not be filtered out either.
+        .filter(price => price.stripePriceId || price.amount === 0
+          || price.billingCycle === 'one_time' || price.perSeat === true
+          || price.inlineRecurring === true)
         .map(price => ({
           id: price.id,
           name: price.name,
@@ -8140,7 +9089,13 @@ app.get('/api/stripe/plans', async (_req, res) => {
           amount: price.amount,
           currency: price.currency,
           priceId: price.stripePriceId,
+          oneTime: price.billingCycle === 'one_time',
+          ...(Number.isFinite(price.tokens) ? { tokens: price.tokens } : {}),
+          ...(price.perSeat ? { perSeat: true, seatsIncluded: price.seatsIncluded || null } : {}),
+          ...(price.inlineRecurring ? { inlineRecurring: true } : {}),
           ...(price.introAmount ? { introAmount: price.introAmount, introLabel: price.introLabel || null } : {}),
+          ...(price.trialDays ? { trialDays: price.trialDays, introLabel: price.introLabel || null } : {}),
+          cliIncluded: planPriceHasCli(price),
         })),
     })),
   });
@@ -8183,7 +9138,21 @@ app.post('/api/stripe/checkout', async (req, res) => {
     }
   }
   if (!plan) return res.status(400).json({ error: `No plan found for priceId: ${priceId}` });
-  if (!priceObj.stripePriceId) return res.status(400).json({ error: `Plan "${plan.id}" has no Stripe price ID configured. Set the STRIPE_PRICE_* env var.` });
+  const oneTime = priceObj.billingCycle === 'one_time';
+  const fixedSeats = Math.round(Number(priceObj.fixedSeats) || 0);
+  const perSeat = priceObj.perSeat === true || fixedSeats > 0;
+  // One-time packs and the per-seat add-on are sold with price_data, so they
+  // need no Stripe product or price to exist first. Everything else still
+  // requires its configured STRIPE_PRICE_* id.
+  if (!priceObj.stripePriceId && !oneTime && !perSeat && !priceObj.inlineRecurring) {
+    return res.status(400).json({ error: `Plan "${plan.id}" has no Stripe price ID configured. Set the STRIPE_PRICE_* env var.` });
+  }
+  // Seats: "per member, team optional" (owner 2026-11-21). One seat = one
+  // teammate, quantity is whatever the buyer picks, bounded so a typo cannot
+  // open a five-figure checkout.
+  const seats = fixedSeats > 0
+    ? fixedSeats
+    : Math.max(1, Math.min(100, Math.round(Number(req.body?.seats) || 1)));
 
   // Signed-in buyers keep their account attached to the session. Signed-out
   // visitors are allowed straight through: Stripe collects the email and the
@@ -8192,7 +9161,7 @@ app.post('/api/stripe/checkout', async (req, res) => {
   const user = getUserByApiKey(req);
 
   try {
-    // Starter Plus advertises $5.99 for the first month. Apply the real coupon
+    // Starter Plus advertises $6.44 for the first month. Apply the real coupon
     // so the first invoice matches the price we show; if the coupon is gone we
     // fall back to list price rather than inventing a discount.
     const introDiscount = await introDiscountFor(stripe, priceObj);
@@ -8202,22 +9171,79 @@ app.post('/api/stripe/checkout', async (req, res) => {
     const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
     const origin = req.headers.origin || `${/^https?$/.test(fwdProto) ? fwdProto : req.protocol}://${req.get('host')}`;
     const successTarget = returnTo || (user ? '/build' : '/plans');
+    // Seat purchases carry the same one Stripe line with quantity = seats;
+    // a catalogue price id is used when one is configured, otherwise the price
+    // is built inline. One-time packs are a single non-recurring line.
+    let lineItem;
+    if (perSeat) {
+      lineItem = priceObj.stripePriceId
+        ? { price: priceObj.stripePriceId, quantity: seats }
+        : { quantity: seats, price_data: {
+            currency: priceObj.currency || 'usd',
+            // A fixed team card shows the whole-team price on the shelf but
+            // charges it per seat, so Team 3 is 3 x $10.85.
+            unit_amount: priceObj.unitAmount || priceObj.amount,
+            recurring: { interval: 'month' },
+            product_data: { name: `${plan.name} — ${priceObj.name}`, description: `${priceObj.name}: ${seats} teammate${seats === 1 ? '' : 's'}, ${priceObj.seatsIncluded || 1000} AI calls a month each.` },
+          } };
+    } else if (oneTime) {
+      lineItem = { quantity: 1, price_data: {
+        currency: priceObj.currency || 'usd',
+        unit_amount: priceObj.amount,
+        product_data: {
+          name: priceObj.name,
+          description: `${priceObj.tokens} AI calls, one payment, nothing renews`,
+        },
+      } };
+    } else if (priceObj.inlineRecurring) {
+      // A capped monthly plan sold without a Stripe product (the $1.45
+      // low-income card). Recurring price_data makes a real subscription that
+      // bills every month; the plan is resolved from metadata.planId when the
+      // webhook lands because Stripe invents the price id.
+      lineItem = { quantity: 1, price_data: {
+        currency: priceObj.currency || 'usd',
+        unit_amount: priceObj.amount,
+        recurring: { interval: priceObj.billingCycle === 'yearly' ? 'year' : 'month' },
+        product_data: {
+          name: `${plan.name} — ${priceObj.name}`,
+          description: Number.isFinite(planDailyCallLimit(plan.id))
+            ? `${planDailyCallLimit(plan.id)} AI calls every day for ${priceObj.amount / 100} ${String(priceObj.currency || 'usd').toUpperCase()} a month.`
+            : `${planCallLimit(plan.id)} AI calls a month at ${priceObj.amount / 100} ${String(priceObj.currency || 'usd').toUpperCase()} a month.`,
+        },
+      } };
+    } else {
+      lineItem = { price: priceObj.stripePriceId, quantity: 1 };
+    }
     const sessionParams = {
-      mode: 'subscription',
+      mode: oneTime ? 'payment' : 'subscription',
       ...(introDiscount ? { discounts: introDiscount } : {}),
-      line_items: [{ price: priceObj.stripePriceId, quantity: 1 }],
+      line_items: [lineItem],
       integration_identifier: `haksterai_web_${Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz'[crypto.randomInt(26)]).join('')}`,
       metadata: {
         planId: plan.id,
-        priceId: priceObj.stripePriceId,
+        ...(priceObj.stripePriceId ? { priceId: priceObj.stripePriceId } : {}),
+        ...(oneTime ? {
+          kind: 'credit_pack',
+          packId: priceObj.id,
+          tokens: String(priceObj.tokens || 0),
+        } : {}),
+        ...(perSeat ? { seats: String(seats) } : {}),
         ...(user ? { userId: String(user.id) } : { guest: '1' }),
       },
-      ...(user ? { subscription_data: { metadata: { userId: String(user.id), planId: plan.id } } } : {}),
+      ...(!oneTime ? { subscription_data: { metadata: { ...(user ? { userId: String(user.id) } : {}), planId: plan.id, ...(perSeat ? { seats: String(seats) } : {}) } } } : {}),
       success_url: `${origin}${successTarget}${successTarget.includes('?') ? '&' : '?'}checkout=success&plan=${plan.id}&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}${returnTo || '/'}${(returnTo || '/').includes('?') ? '&' : '?'}checkout=cancelled`,
     };
     if (user?.stripe_customer_id) sessionParams.customer = user.stripe_customer_id;
     else if (user?.email) sessionParams.customer_email = user.email;
+    // Free first month: a real Stripe trial with the card required up front.
+    // The card is collected at checkout and billing starts when it ends.
+    if (!oneTime && Number(priceObj.trialDays) > 0) {
+      sessionParams.subscription_data = Object.assign({}, sessionParams.subscription_data, {
+        trial_period_days: Math.round(Number(priceObj.trialDays)),
+      });
+      sessionParams.payment_method_collection = 'always';
+    }
     const session = await stripe.checkout.sessions.create(sessionParams);
     console.log(`[stripe] checkout session created for ${user ? 'user ' + user.id : 'guest checkout'}, plan ${plan.id}, session ${session.id}`);
     res.json({ url: session.url, sessionId: session.id });
@@ -9077,24 +10103,95 @@ function getUserByApiKey(req) {
   return db.prepare("SELECT * FROM users WHERE api_key = ? AND status = 'active'").get(apiKey);
 }
 
+// ── Token credits (one-time packs) ─────────────────────────────────────────
+// One token = one metered AI call. Credits are bought in one-time packs (see
+// the token_pack_500 and ladder-pack entries in PRICING_CATALOG) and are spent only
+// after the account's own plan allowance is used up, so a pack extends a free
+// or lite account without touching its plan. Every grant and every spend is
+// written to token_ledger, so the balance on the dashboard can always be
+// traced back to the payment or the call that moved it.
+function ensureTokenLedgerTable(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS token_ledger (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    delta      INTEGER NOT NULL,
+    reason     TEXT NOT NULL,
+    ref        TEXT,
+    balance    INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_token_ledger_user ON token_ledger(user_id, created_at DESC)');
+}
+
+function logTokenMove(db, userId, delta, reason, ref, balance) {
+  try {
+    ensureTokenLedgerTable(db);
+    db.prepare('INSERT INTO token_ledger (id, user_id, delta, reason, ref, balance) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('tk_' + crypto.randomBytes(12).toString('hex'), userId, delta, String(reason || '').slice(0, 60),
+        ref ? String(ref).slice(0, 160) : null, Number.isFinite(balance) ? balance : null);
+  } catch (err) {
+    // The ledger is for audit only; a write failure must not block the balance.
+    console.warn('[tokens] ledger write failed:', err.message);
+  }
+}
+
+function grantTokenCredits(db, userId, count, reason, ref = null) {
+  const n = Math.max(0, Math.round(Number(count) || 0));
+  if (!userId || !n) return 0;
+  const grant = db.transaction(() => {
+    db.prepare('UPDATE users SET token_balance = COALESCE(token_balance, 0) + ?, updated_at = unixepoch() WHERE id = ?')
+      .run(n, userId);
+    const balance = db.prepare('SELECT COALESCE(token_balance, 0) AS b FROM users WHERE id = ?').get(userId)?.b || 0;
+    logTokenMove(db, userId, n, reason, ref, balance);
+    return balance;
+  });
+  return grant();
+}
+
+// Spend exactly one credit, atomically. Returns false when the balance is 0,
+// which is the caller's signal that the plan allowance really is exhausted.
+function spendTokenCredit(db, userId) {
+  const spend = db.transaction(() => {
+    const res = db.prepare('UPDATE users SET token_balance = COALESCE(token_balance, 0) - 1, updated_at = unixepoch() WHERE id = ? AND COALESCE(token_balance, 0) > 0')
+      .run(userId);
+    if (res.changes !== 1) return false;
+    const balance = db.prepare('SELECT COALESCE(token_balance, 0) AS b FROM users WHERE id = ?').get(userId)?.b || 0;
+    logTokenMove(db, userId, -1, 'call credit', null, balance);
+    return true;
+  });
+  return spend();
+}
+
 function reserveUsage(user) {
   if (!USAGE_LIMIT_ENABLED || !user) return { allowed: true }; // Internal localhost callers have no account to meter.
   const startPlan = String(user.plan || 'free').toLowerCase();
-  const startLimit = planCallLimit(startPlan);
+  const startLimit = effectiveCallLimit(user);
   if (!Number.isFinite(startLimit)) return { allowed: true, plan: startPlan };
 
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
   const reserve = db.transaction((userId) => {
-    const current = db.prepare('SELECT plan, COALESCE(usage_count, 0) AS usage_count, usage_reset_at FROM users WHERE id = ?').get(userId);
+    const current = db.prepare('SELECT plan, COALESCE(call_limit_override, 0) AS call_limit_override, COALESCE(usage_count, 0) AS usage_count, usage_reset_at FROM users WHERE id = ?').get(userId);
     if (!current) return { allowed: false, limit: startLimit, used: startLimit, remaining: 0, plan: startPlan };
 
     const plan = String(current.plan || 'free').toLowerCase();
-    const limit = planCallLimit(plan);
+    const dailyLimit = planDailyCallLimit(plan);
+    const override = Number(current.call_limit_override) || 0;
+    const limit = override > 0
+      ? override
+      : (Number.isFinite(dailyLimit) ? dailyLimit : planCallLimit(plan));
     if (!Number.isFinite(limit)) return { allowed: true, plan };
 
-    // lite resets on the 1st of each UTC month; free keeps the rolling window.
-    const nextResetAt = plan === 'lite' ? nextUtcMonthStartSec(now) : now + USAGE_RESET_DAYS * 86400;
+    // Every capped paid plan resets on the 1st of each UTC month; free keeps
+    // the rolling window. (Before 2026-11-21 only lite was monthly, because it
+    // was the only capped paid plan — now all of them are.)
+    const nextResetAt = override > 0
+      ? nextUtcMonthStartSec(now)
+      : Number.isFinite(dailyLimit)
+        ? nextUtcDayStartSec(now)
+        : (plan !== 'free' && Number.isFinite(limit))
+          ? nextUtcMonthStartSec(now)
+          : now + USAGE_RESET_DAYS * 86400;
 
     let used = Number(current.usage_count) || 0;
     let resetAt = Number(current.usage_reset_at) || 0;
@@ -9104,7 +10201,15 @@ function reserveUsage(user) {
       db.prepare('UPDATE users SET usage_count = 0, usage_reset_at = ? WHERE id = ? AND plan = ?').run(resetAt, userId, plan);
     }
     if (used >= limit) {
-      return { allowed: false, limit, used, remaining: 0, plan };
+      // The plan allowance is spent. Draw one bought token credit before
+      // refusing: that is exactly what a one-time pack buys — extra calls on
+      // the same plan, never a plan change (owner 2026-11-21).
+      if (spendTokenCredit(db, userId)) {
+        const credits = db.prepare('SELECT COALESCE(token_balance, 0) AS b FROM users WHERE id = ?').get(userId)?.b || 0;
+        user.token_balance = credits;
+        return { allowed: true, limit, used, remaining: 0, plan, via: 'token', tokenCredits: credits };
+      }
+      return { allowed: false, limit, used, remaining: 0, plan, tokenCredits: 0 };
     }
 
     // COALESCE(usage_reset_at, ?) never fires for this column: it is declared
@@ -9117,9 +10222,9 @@ function reserveUsage(user) {
           usage_reset_at = COALESCE(NULLIF(usage_reset_at, 0), ?)
       WHERE id = ? AND plan = ? AND COALESCE(usage_count, 0) < ?`).run(resetAt || nextResetAt, userId, plan, limit);
     if (result.changes !== 1) {
-      const latest = db.prepare('SELECT COALESCE(usage_count, 0) AS usage_count, plan FROM users WHERE id = ?').get(userId);
+      const latest = db.prepare('SELECT COALESCE(usage_count, 0) AS usage_count, COALESCE(call_limit_override, 0) AS call_limit_override, plan FROM users WHERE id = ?').get(userId);
       const latestPlan = String(latest?.plan || 'free').toLowerCase();
-      const latestLimit = planCallLimit(latestPlan);
+      const latestLimit = Number(latest?.call_limit_override) > 0 ? Number(latest.call_limit_override) : planCallLimit(latestPlan);
       if (latest && !Number.isFinite(latestLimit)) return { allowed: true, plan: latestPlan };
       const latestUsed = Number(latest?.usage_count) || 0;
       return { allowed: false, limit: latestLimit, used: latestUsed, remaining: 0, plan: latestPlan };
@@ -9393,7 +10498,9 @@ function scanCodexUsage(days = 7) {
 function usageResetWindows(user) {
   const now = Math.floor(Date.now() / 1000);
   const plan = String(user?.plan || 'free').toLowerCase();
-  const planResetAt = plan === 'lite' ? (Number(user?.usage_reset_at) || nextUtcMonthStartSec(now))
+  const dailyCap = Number.isFinite(planDailyCallLimit(plan)) && !(Number(user?.call_limit_override) > 0);
+  const planResetAt = dailyCap ? (Number(user?.usage_reset_at) || nextUtcDayStartSec(now))
+    : plan === 'lite' ? (Number(user?.usage_reset_at) || nextUtcMonthStartSec(now))
     : Number(user?.usage_reset_at) || 0;
   return {
     dailyAt: nextUtcDayStartSec(now),
@@ -9401,7 +10508,7 @@ function usageResetWindows(user) {
     monthlyAt: nextUtcMonthStartSec(now),
     planResetAt: planResetAt || null,
     planWindow: Number.isFinite(planCallLimit(plan))
-      ? (plan === 'lite' ? 'calendar-month' : `rolling-${USAGE_RESET_DAYS}d`)
+      ? (dailyCap ? 'calendar-day' : (plan === 'lite' ? 'calendar-month' : `rolling-${USAGE_RESET_DAYS}d`))
       : 'uncapped',
   };
 }
@@ -9459,8 +10566,8 @@ app.get('/api/usage', (req, res) => {
   res.json({
     plan: user.plan,
     used: user.usage_count || 0,
-    limit: Number.isFinite(planCallLimit(user.plan)) ? planCallLimit(user.plan) : -1, // -1 = unlimited
-    remaining: Number.isFinite(planCallLimit(user.plan)) ? Math.max(0, planCallLimit(user.plan) - (user.usage_count || 0)) : -1,
+    limit: Number.isFinite(effectiveCallLimit(user)) ? effectiveCallLimit(user) : -1, // -1 = unlimited
+    remaining: Number.isFinite(effectiveCallLimit(user)) ? Math.max(0, effectiveCallLimit(user) - (user.usage_count || 0)) : -1,
     webResearchUsed: isUnlimitedWebResearchUser(user) ? 0 : getWebResearchUses(user),
     webResearchRemaining: webResearchRemainingFor(user),
     webResearchLimit: Number.isFinite(planWebResearchLimit(user.plan)) ? planWebResearchLimit(user.plan) : -1,
@@ -9483,6 +10590,278 @@ app.get('/api/usage', (req, res) => {
   });
 });
 
+// ── Owner live profit bridge — HaksterAI's own ledger + PhantomIDE/Junkalot ──
+// 2026-11-21 (owner): "live profit wheels grids charts" / "haksterai.com admin to
+// both live". Read-only accounting (§19): it reports what already happened. It
+// never charges, never changes a plan, a model or a route, and writes nothing back
+// into any project. PhantomIDE's numbers come through its own key-gated bridge
+// using the bridge key this server already reads over SSH for the payoff card;
+// the key is held in memory only, never logged and never echoed.
+const PROFIT_BRIDGE_KEY_FILE = '/home/ghost694/.config/junkalot-payoff-bridge.key';
+const PROFIT_PHANTOM_URL = process.env.PROFIT_PHANTOM_URL || 'https://phantomide.com/api/internal/profit-bridge';
+let _profitBridgeKey = { at: 0, key: '' };
+function readProfitBridgeKey() {
+  if (_profitBridgeKey.key && Date.now() - _profitBridgeKey.at < 300000) return Promise.resolve(_profitBridgeKey.key);
+  const { execFile } = require('child_process');
+  return new Promise((resolve, reject) => {
+    execFile('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=accept-new', process.env.PEER_SSH_ALIAS || 'parrot', 'cat ' + PROFIT_BRIDGE_KEY_FILE], { timeout: 9000 }, (err, stdout) => {
+      if (err) return reject(err);
+      const key = String(stdout || '').trim();
+      if (key.length < 48) return reject(new Error('bridge key unavailable'));
+      _profitBridgeKey = { at: Date.now(), key };
+      return resolve(key);
+    });
+  });
+}
+
+// --- Junkalot client value record - owner only ---------------------------------
+// Owner (2026-11-21): "its just for our records and for to know if client gets
+// more then 249$ usage worth monthly test", "never show junkalot what we make
+// only what they save". The record lives here and not on junkalot.co, so the
+// client can never load it. Read-only: it reads the coach usage file over SSH,
+// prices the measured tokens at a published-rate benchmark and compares that
+// with the plan price. Accounting only (§19): no charge, no plan change.
+const JUNKALOT_USAGE_FILE = process.env.JUNKALOT_USAGE_FILE || '/home/ghost694/junkalot/data/mred-usage.jsonl';
+const JUNKALOT_VALUE_TERMS_FILE = process.env.JUNKALOT_VALUE_TERMS_FILE || path.join(__dirname, '..', '..', 'data', 'value-terms.json');
+const JUNKALOT_VALUE_TERMS_DEFAULT = {
+  planUsdMonth: 249,
+  benchmarkInPerM: 3.0,
+  benchmarkOutPerM: 15.0,
+  rateNote: 'Frontier list-price benchmark at $3.00 per million input tokens and $15.00 per million output tokens. A comparison figure, never a bill and never our cost.',
+};
+function readJunkalotValueTerms() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(JUNKALOT_VALUE_TERMS_FILE, 'utf8'));
+    const num = (value, fallback) => (Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : fallback);
+    return {
+      planUsdMonth: num(raw.planUsdMonth, JUNKALOT_VALUE_TERMS_DEFAULT.planUsdMonth),
+      benchmarkInPerM: num(raw.benchmarkInPerM, JUNKALOT_VALUE_TERMS_DEFAULT.benchmarkInPerM),
+      benchmarkOutPerM: num(raw.benchmarkOutPerM, JUNKALOT_VALUE_TERMS_DEFAULT.benchmarkOutPerM),
+      rateNote: typeof raw.rateNote === 'string' && raw.rateNote.trim() ? raw.rateNote : JUNKALOT_VALUE_TERMS_DEFAULT.rateNote,
+    };
+  } catch {
+    return JUNKALOT_VALUE_TERMS_DEFAULT;
+  }
+}
+let _junkalotUsageCache = { at: 0, text: '' };
+function readJunkalotUsageText() {
+  if (_junkalotUsageCache.text && Date.now() - _junkalotUsageCache.at < 300000) return Promise.resolve(_junkalotUsageCache.text);
+  const { execFile } = require('child_process');
+  return new Promise((resolve, reject) => {
+    execFile('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=accept-new', process.env.PEER_SSH_ALIAS || 'parrot', 'cat ' + JUNKALOT_USAGE_FILE], { timeout: 12000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+      if (err) return reject(err);
+      _junkalotUsageCache = { at: Date.now(), text: String(stdout || '') };
+      return resolve(_junkalotUsageCache.text);
+    });
+  });
+}
+function computeJunkalotValue(text, terms, now) {
+  const rows = [];
+  for (const line of String(text || '').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const row = JSON.parse(trimmed);
+      if (!row || typeof row.at !== 'string' || Number.isNaN(new Date(row.at).getTime())) continue;
+      rows.push(row);
+    } catch { /* a torn line is skipped, never repaired */ }
+  }
+  rows.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  const monthKey = now.toISOString().slice(0, 7);
+  const prevKey = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+  const bucket = (key) => ({ month: key, turns: 0, inTokens: 0, outTokens: 0, days: new Set(), lanes: new Map() });
+  const month = bucket(monthKey);
+  const previous = bucket(prevKey);
+  const dayMap = new Map();
+  const all = { turns: 0, inTokens: 0, outTokens: 0, firstAt: null, lastAt: null };
+  for (const row of rows) {
+    const at = String(row.at);
+    const day = at.slice(0, 10);
+    const inTokens = Number(row.inTokens) || 0;
+    const outTokens = Number(row.outTokens) || 0;
+    all.turns += 1;
+    all.inTokens += inTokens;
+    all.outTokens += outTokens;
+    if (!all.firstAt || at < all.firstAt) all.firstAt = at;
+    if (!all.lastAt || at > all.lastAt) all.lastAt = at;
+    const rowMonth = day.slice(0, 7);
+    const target = rowMonth === monthKey ? month : rowMonth === prevKey ? previous : null;
+    if (!target) continue;
+    target.turns += 1;
+    target.inTokens += inTokens;
+    target.outTokens += outTokens;
+    target.days.add(day);
+    const laneKey = String(row.provider || 'unknown');
+    const lane = target.lanes.get(laneKey) || { provider: laneKey, turns: 0, tokens: 0 };
+    lane.turns += 1;
+    lane.tokens += inTokens + outTokens;
+    target.lanes.set(laneKey, lane);
+    if (rowMonth === monthKey) {
+      const entry = dayMap.get(day) || { day, turns: 0, inTokens: 0, outTokens: 0 };
+      entry.turns += 1;
+      entry.inTokens += inTokens;
+      entry.outTokens += outTokens;
+      dayMap.set(day, entry);
+    }
+  }
+  const value = (inTokens, outTokens) => Math.round(((inTokens / 1e6) * terms.benchmarkInPerM + (outTokens / 1e6) * terms.benchmarkOutPerM) * 100) / 100;
+  const finish = (b) => ({
+    month: b.month,
+    turns: b.turns,
+    inTokens: b.inTokens,
+    outTokens: b.outTokens,
+    valueUsd: value(b.inTokens, b.outTokens),
+    activeDays: b.days.size,
+    lanes: [...b.lanes.values()].sort((x, y) => y.tokens - x.tokens),
+  });
+  const monthOut = finish(month);
+  const previousOut = finish(previous);
+  const elapsedDays = now.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const plan = terms.planUsdMonth;
+  const utilisationPct = plan > 0 ? Math.round((monthOut.valueUsd / plan) * 10000) / 100 : 0;
+  const projectedValueUsd = elapsedDays > 0 ? Math.round((monthOut.valueUsd / elapsedDays) * daysInMonth * 100) / 100 : 0;
+  const patterns = [];
+  patterns.push({ label: 'Active days', value: monthOut.activeDays + ' of ' + elapsedDays, note: monthOut.activeDays ? 'Coach used on ' + monthOut.activeDays + ' day(s) this month.' : 'No coach turns recorded this month yet.' });
+  if (monthOut.activeDays > 0) patterns.push({ label: 'Turns per active day', value: (monthOut.turns / monthOut.activeDays).toFixed(2), note: monthOut.turns + ' turn(s) across ' + monthOut.activeDays + ' day(s).' });
+  if (monthOut.lanes.length) {
+    const top = monthOut.lanes[0];
+    const share = monthOut.turns ? Math.round((top.turns / monthOut.turns) * 100) : 0;
+    patterns.push({ label: 'Dominant lane', value: top.provider + ' · ' + share + '%', note: top.turns + ' of ' + monthOut.turns + ' turn(s) via ' + top.provider + '; ' + top.tokens.toLocaleString('en-US') + ' tokens.' });
+  }
+  if (previousOut.turns > 0) {
+    const delta = Math.round((monthOut.valueUsd - previousOut.valueUsd) * 100) / 100;
+    const pct = previousOut.valueUsd > 0 ? Math.round((delta / previousOut.valueUsd) * 100) : null;
+    patterns.push({ label: 'Month over month', value: pct === null ? (delta >= 0 ? '+' : '') + '$' + delta : (pct >= 0 ? '+' : '') + pct + '%', note: 'Last month $' + previousOut.valueUsd + ' benchmark value over ' + previousOut.turns + ' turn(s).' });
+  } else {
+    patterns.push({ label: 'Month over month', value: 'no prior month', note: 'No coach usage recorded last month, so there is nothing to compare yet.' });
+  }
+  return {
+    monthKey,
+    month: monthOut,
+    previousMonth: previousOut.turns ? previousOut : null,
+    monthToDate: [...dayMap.values()].map((d) => ({ ...d, valueUsd: value(d.inTokens, d.outTokens) })).sort((a, b) => a.day.localeCompare(b.day)),
+    plan: {
+      priceUsd: plan,
+      utilisationPct,
+      surplusUsd: Math.round(Math.max(0, monthOut.valueUsd - plan) * 100) / 100,
+      shortfallUsd: Math.round(Math.max(0, plan - monthOut.valueUsd) * 100) / 100,
+      verdict: monthOut.valueUsd >= plan ? 'over plan - client is receiving more value than the plan price' : monthOut.valueUsd >= plan * 0.75 ? 'near plan - within 25% of the plan price' : monthOut.valueUsd >= plan * 0.25 ? 'within plan' : 'well under plan - usage is a small share of what the plan includes',
+    },
+    projection: { elapsedDays, daysInMonth, projectedValueUsd, projectedTurns: elapsedDays > 0 ? Math.round((monthOut.turns / elapsedDays) * daysInMonth) : 0 },
+    patterns,
+    allTime: { turns: all.turns, tokens: all.inTokens + all.outTokens, valueUsd: value(all.inTokens, all.outTokens), firstAt: all.firstAt, lastAt: all.lastAt },
+    terms,
+    rows: rows.length,
+    source: 'junkalot data/mred-usage.jsonl (read only, over ssh)',
+  };
+}
+
+app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
+  try {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    const payments = db.prepare("SELECT amount, plan, duplicate_of, created_at FROM payments WHERE status = 'completed'").all();
+    const real = payments.filter((p) => !p.duplicate_of);
+    const dupes = payments.filter((p) => p.duplicate_of);
+    const cents = (list) => Math.round(list.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100);
+    const month30 = now - 30 * 86400;
+    const day14 = now - 14 * 86400;
+    const usage = db.prepare(`SELECT COUNT(*) AS calls,
+        COALESCE(SUM(input_tokens),0) AS it, COALESCE(SUM(output_tokens),0) AS ot,
+        COALESCE(SUM(cost),0) AS cost, MIN(created_at) AS first, MAX(created_at) AS last
+      FROM user_token_usage`).get();
+    const byDay = db.prepare(`SELECT date(created_at,'unixepoch') AS day, COUNT(*) AS calls,
+        COALESCE(SUM(output_tokens),0) AS ot
+      FROM user_token_usage WHERE created_at >= ? GROUP BY day ORDER BY day`).all(day14);
+    const byModel = db.prepare(`SELECT provider, model, COUNT(*) AS calls
+      FROM user_token_usage GROUP BY provider, model ORDER BY calls DESC LIMIT 6`).all();
+    const plans = db.prepare('SELECT plan, COUNT(*) AS c FROM users GROUP BY plan').all();
+    const activeSubs = db.prepare("SELECT COUNT(*) AS c FROM subscriptions WHERE status = 'active'").get().c;
+    const payments30 = real.filter((p) => (Number(p.created_at) || 0) >= month30);
+    const activity7d = db.prepare('SELECT COUNT(*) AS c FROM user_activity WHERE created_at >= ?').get(now - 7 * 86400).c;
+
+    let phantom = null;
+    let junkalot = null;
+    let bridgeState = 'unavailable';
+    try {
+      const key = await readProfitBridgeKey();
+      const upstream = await fetch(PROFIT_PHANTOM_URL, {
+        headers: { 'x-junkalot-payoff-bridge': key, accept: 'application/json' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(9000),
+      });
+      if (upstream.ok) {
+        const data = await upstream.json().catch(() => null);
+        if (data?.ok === true && data.totals) {
+          phantom = {
+            checkedAt: data.checkedAt || null,
+            windowDays: Number(data.windowDays) || null,
+            totals: data.totals,
+            verdict: data.verdict || null,
+            clients: Array.isArray(data.clients) ? data.clients.slice(0, 8) : [],
+            history: Array.isArray(data.history) ? data.history.slice(-14) : [],
+          };
+          junkalot = data.coach || null;
+          bridgeState = 'live';
+        }
+      }
+    } catch { bridgeState = 'unavailable'; }
+
+    // Junkalot's client value record: read over SSH, computed here, never written back.
+    let junkalotValue = null;
+    try {
+      const terms = readJunkalotValueTerms();
+      const usageText = await readJunkalotUsageText();
+      junkalotValue = computeJunkalotValue(usageText, terms, new Date());
+    } catch { junkalotValue = null; }
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    return res.json({
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      hakster: {
+        revenue: {
+          allTimeCents: cents(real),
+          month30Cents: cents(payments30),
+          payments: real.length,
+          activeSubs,
+          excludedDuplicateCents: cents(dupes),
+          excludedDuplicateRows: dupes.length,
+        },
+        usage: {
+          calls: usage.calls,
+          inputTokens: usage.it,
+          outputTokens: usage.ot,
+          costCents: Math.round((Number(usage.cost) || 0) * 100),
+          firstDay: usage.first ? new Date(usage.first * 1000).toISOString().slice(0, 10) : null,
+          lastDay: usage.last ? new Date(usage.last * 1000).toISOString().slice(0, 10) : null,
+          byDay,
+          byModel,
+        },
+        people: { total: plans.reduce((n, p) => n + p.c, 0), plans, activity7d },
+      },
+      // Admin session facts for the "active since" card. last_login_at is the
+      // server-side sign-in timestamp written when the account signed in; it is
+      // a real recorded value, never estimated. Sign-out is client-side, so the
+      // page stops its counter on the signout event rather than inventing an end.
+      adminSession: {
+        email: req.user && req.user.email ? String(req.user.email) : null,
+        role: req.user && req.user.role ? String(req.user.role) : null,
+        signedInAtSec: req.user && Number(req.user.last_login_at) ? Number(req.user.last_login_at) : null,
+      },
+      phantom,
+      junkalot,
+      junkalotValue,
+      bridge: bridgeState,
+      note: 'Usage is recorded, never billed. Nothing here charges an account or changes a plan, a model or a route.',
+    });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: 'Profit data is unavailable right now' });
+  }
+});
+
 // GET /api/usage/admin — owner view of usage across every account.
 // Read-only: it reports the counters reserveUsage writes; it never resets them.
 app.get('/api/usage/admin', requireOwner, (req, res) => {
@@ -9493,6 +10872,7 @@ app.get('/api/usage/admin', requireOwner, (req, res) => {
   const monthStart = nextUtcMonthStartSec(now) - 32 * 86400;
 
   const users = db.prepare(`SELECT id, username, email, plan, status, role,
+      COALESCE(call_limit_override, 0) AS call_limit_override,
       COALESCE(usage_count, 0) AS usage_count, usage_reset_at, token_balance, last_login_at, created_at
     FROM users ORDER BY COALESCE(usage_count, 0) DESC, created_at DESC`).all();
 
@@ -9511,7 +10891,7 @@ app.get('/api/usage/admin', requireOwner, (req, res) => {
   const perUserMap = new Map(perUser.map((row) => [row.user_id, row]));
 
   const accounts = users.map((u) => {
-    const limit = planCallLimit(u.plan);
+    const limit = effectiveCallLimit(u);
     const capped = Number.isFinite(limit);
     const usage = perUserMap.get(u.id) || {};
     return {
@@ -9564,7 +10944,7 @@ app.get('/api/usage/admin', requireOwner, (req, res) => {
       COALESCE(SUM(CASE WHEN completed_at >= ? OR created_at >= ? THEN amount ELSE 0 END), 0) AS month30,
       COALESCE(SUM(amount), 0) AS allTime,
       COUNT(*) AS payments
-    FROM payments WHERE status = 'completed'`).get(now - 30 * 86400, now - 30 * 86400);
+    FROM payments WHERE status = 'completed' AND COALESCE(duplicate_of, '') = ''`).get(now - 30 * 86400, now - 30 * 86400);
 
   // Fleet totals from the real request ledger, for comparison with the estimate
   // ledger so the owner can see exactly how far apart the two are.
@@ -9603,7 +10983,7 @@ app.get('/api/usage/admin', requireOwner, (req, res) => {
     tokenLedger,
     revenue: { month30: revenue.month30 || 0, allTime: revenue.allTime || 0, payments: revenue.payments || 0 },
     limitEnabled: USAGE_LIMIT_ENABLED,
-    planLimits: { free: FREE_USAGE_LIMIT, lite: LITE_USAGE_LIMIT },
+    planLimits: Object.assign({}, CAPPED_PLAN_CALL_LIMITS),
     webLimits: { free: FREE_WEB_RESEARCH_LIMIT, lite: LITE_WEB_RESEARCH_LIMIT },
   });
 });
@@ -9617,6 +10997,34 @@ app.get('/api/usage/cli', requireOwner, (req, res) => {
     res.json({ ...scanClaudeCliUsage(days), codex: scanCodexUsage(days) });
   } catch (err) {
     res.status(500).json({ error: 'Could not read the CLI transcripts', detail: err.message });
+  }
+});
+
+// ── Win-back promos ────────────────────────────────────────────────────────
+// Owner, 2026-11-21: "always have agents have promo deal to suck users back in."
+// The live deal is data (data/promos.json, see server/src/promos.js), never a
+// number invented in a reply. Redeeming grants call credits — the same unit the
+// Token Pack products sell — one per account, no plan change.
+const promos = require('./promos');
+
+app.get('/api/promo', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=60');
+  res.json({ promo: promos.publicPromo(promos.activePromo()), line: promos.promoLine() });
+});
+
+app.post('/api/promo/redeem', (req, res) => {
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ ok: false, error: 'Invalid or missing API key' });
+  try {
+    const result = promos.redeemPromo(getDb(), user, req.body?.code, grantTokenCredits);
+    if (result.ok) {
+      console.log(`[promos] user ${user.id} redeemed ${result.promo?.id} (+${result.credits} calls, balance ${result.balance})`);
+      try { notifPush(`🎁 Promo redeemed: ${result.promo?.label} · user ${user.id}`, { type: 'notify', source: 'promos' }); } catch (_) {}
+    }
+    res.status(result.ok ? 200 : 400).json(result);
+  } catch (err) {
+    console.error('[promos] redeem failed:', err.message);
+    res.status(500).json({ ok: false, error: 'Promo could not be applied' });
   }
 });
 
@@ -10343,6 +11751,9 @@ const ADMIN_PAGES = {
   mail: 'admin/mail/index.html',
   skills: 'admin/skills/index.html',
   vault: 'admin/vault/index.html',
+  // 2026-11-21 (owner): "live profit wheels grids charts" — owner-only accounting
+  // page. Hidden behind the same owner gate as every other admin page.
+  profit: 'admin/profit/index.html',
 };
 app.get('/api/admin/page/:page', requireOwner, (req, res) => {
   const page = String(req.params.page || '').toLowerCase();
@@ -10417,6 +11828,30 @@ app.get('/api/media/files', requireSignedIn, (req, res) => {
   }
 });
 
+// Public first-party page analytics. The collector stores salted IP hashes,
+// never raw addresses; admin totals stay owner-gated and process-local.
+app.post('/api/analytics/track', express.text({ type: ['text/plain', 'application/json'], limit: '512b' }), (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const origin = req.get('origin');
+  if (origin) {
+    try { if (new URL(origin).host !== req.get('host')) return res.sendStatus(403); }
+    catch { return res.sendStatus(403); }
+  }
+  let body = req.body;
+  if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = null; } }
+  if (!body || typeof body !== 'object') return res.sendStatus(400);
+  // The origin is served through Cloudflare Tunnel; prefer Cloudflare's
+  // connecting address header when present, while storing only a salted hash.
+  siteAnalytics.record(req.get('cf-connecting-ip') || req.ip, body);
+  res.sendStatus(204);
+});
+
+app.get('/api/admin/site-analytics', requireOwner, async (_req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const [cloudflare] = await Promise.all([cloudflareAnalytics.getSummary()]);
+  res.json({ local: siteAnalytics.summary(), cloudflare });
+});
+
 app.get('/api/media/file', requireSignedIn, (req, res) => {
   const target = mediaAgent.resolveProjectFile(req.query.project, req.query.path);
   if (!target) return res.status(404).json({ error: 'File not found' });
@@ -10486,6 +11921,33 @@ try {
 }
 
 if (fs.existsSync(distPath)) {
+  // ── CLI install (owner 2026-11-21: "all plans over 20$ get haksterai cli
+  // install api also"). The package is served from this box, never npm: the
+  // installer fetches the tarball, installs it, and prints the two commands a
+  // >$20 account needs. Nothing here reads or writes account state.
+  app.get('/install.sh', (req, res) => {
+    const origin = (req.protocol || 'https') + '://' + (req.get('host') || 'haksterai.com');
+    res.type('text/plain; charset=utf-8');
+    res.set('cache-control', 'no-store');
+    res.send(CLI_INSTALL_SH.replace(/__ORIGIN__/g, origin));
+  });
+  app.get('/cli/pkg.tar.gz', (req, res) => {
+    const root = path.join(__dirname, '..', '..');
+    res.type('application/gzip');
+    res.set('cache-control', 'no-store');
+    const tar = require('child_process').spawn('tar', [
+      '-czf', '-', '-C', root,
+      '--exclude=node_modules', '--exclude=ui/node_modules', '--exclude=.git',
+      // Never ship local config, backups or credential-shaped files in a
+      // publicly downloadable package.
+      '--exclude=.phantom-ai-config.json', '--exclude=*.env', '--exclude=.env*',
+      '--exclude=*.bak*', '--exclude=*.key', '--exclude=*.pem', '--exclude=*.p12',
+      'cli',
+    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    tar.on('error', () => { if (!res.headersSent) res.status(500).end('tar unavailable'); });
+    tar.stdout.pipe(res);
+    tar.on('close', (code) => { if (code !== 0 && !res.headersSent) res.status(500).end('package failed'); });
+  });
   app.use(express.static(distPath));
   // SPA fallback: try page-specific index.html first, then root index.html
   // Astro generates /chat/index.html, /terminal/index.html, etc.
@@ -10697,9 +12159,8 @@ ptyWss.on('connection', (ws, req) => {
     if (!crushCfg.models) crushCfg.models = {};
     if (!crushCfg.models.large) crushCfg.models.large = {};
     if (!crushCfg.models.small) crushCfg.models.small = {};
-    if (hakCfg.model) { crushCfg.models.large.model = hakCfg.model; crushCfg.models.small.model = hakCfg.model; }
-    if (hakCfg.provider) { crushCfg.models.large.provider = hakCfg.provider; crushCfg.models.small.provider = hakCfg.provider; }
-    ensureCrushModelRegistered(crushCfg, hakCfg.provider || 'ollama', hakCfg.model);
+    // Owner DeepSeek config, not the GLM tag in hakster-config.json (2026-11-21).
+    applyTerminalModelToCrush(crushCfg, resolveTerminalModel(hakCfg.model, hakCfg.provider));
     applyCrushGuardConfig(crushCfg);
     // Only give crush playwright + filesystem MCP to keep it fast on 4-core machine
     // haksterAi's agent API already has all 6 — crush doesn't need to duplicate them
@@ -10721,9 +12182,7 @@ ptyWss.on('connection', (ws, req) => {
     crushConf.models = crushConf.models || {};
     crushConf.models.large = crushConf.models.large || {};
     crushConf.models.small = crushConf.models.small || {};
-    if (hakCfg.model) { crushConf.models.large.model = hakCfg.model; crushConf.models.small.model = hakCfg.model; }
-    if (hakCfg.provider) { crushConf.models.large.provider = hakCfg.provider; crushConf.models.small.provider = hakCfg.provider; }
-    ensureCrushModelRegistered(crushConf, hakCfg.provider || 'ollama', hakCfg.model);
+    applyTerminalModelToCrush(crushConf, resolveTerminalModel(hakCfg.model, hakCfg.provider));
     applyCrushGuardConfig(crushConf);
     // Only playwright + filesystem for crush
     try {
@@ -10744,9 +12203,7 @@ ptyWss.on('connection', (ws, req) => {
     crushTop.models = crushTop.models || {};
     crushTop.models.large = crushTop.models.large || {};
     crushTop.models.small = crushTop.models.small || {};
-    if (hakCfg.model) { crushTop.models.large.model = hakCfg.model; crushTop.models.small.model = hakCfg.model; }
-    if (hakCfg.provider) { crushTop.models.large.provider = hakCfg.provider; crushTop.models.small.provider = hakCfg.provider; }
-    ensureCrushModelRegistered(crushTop, hakCfg.provider || 'ollama', hakCfg.model);
+    applyTerminalModelToCrush(crushTop, resolveTerminalModel(hakCfg.model, hakCfg.provider));
     applyCrushGuardConfig(crushTop);
     try {
       const mcpPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
@@ -11015,6 +12472,13 @@ function startServer(delay = 2000) {
     startSecurityScanner(path.join(__dirname, '..'), CORS_ORIGINS, notifPush);
     console.log('  ✓ Security scanner started (5-min interval, persistent risk notifications)');
 
+    // Automatic self-heal: 10 s bounded cycle, append-only log (HK_AUTO_HEAL=off kills it).
+    try {
+      autoHeal.startAutoHealScheduler();
+    } catch (e) {
+      console.warn('  ⚠ Auto-heal scheduler failed to start:', e.message);
+    }
+
     // Start the continuous git exposure watcher (6h interval, ~/bin/secret-scan.sh)
     try {
       startGitExposureWatcher(notifPush);
@@ -11026,6 +12490,14 @@ function startServer(delay = 2000) {
     // Start Telegram bot fleet
     telegramBots.initBots();
     telegramBots.sendDeployStatus('haksterAi server started');
+
+    // CLI provenance guard: records launches of our CLIs and alerts the owner
+    // when the launcher is another CLI (Claude Code, Codex, Kiro, …).
+    try {
+      cliGuard.startCliGuard();
+    } catch (e) {
+      console.warn('  ⚠ CLI guard failed to start:', e.message);
+    }
 
     // Junkalot guard: probes junkalot.co and self-heals a missing dependency tree.
     // Alerts go through bot 5 (uptime). Read-only against the site; never restarts anything.

@@ -1,0 +1,1920 @@
+<!DOCTYPE html><html lang="en" data-admin-page="pending" data-hakster-build="2026-11-21T02:35:18.611Z" data-astro-cid-ju4pidww><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="haksterAi is an AI-powered CLI that turns your terminal into an agentic engineering powerhouse."><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#00ff41"><meta name="application-name" content="HaksterAI"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="HaksterAI"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta property="og:image" content="/haksterai-logo.png"><meta property="og:title" content="Admin — Profit | haksterAi"><meta property="og:description" content="haksterAi is an AI-powered CLI that turns your terminal into an agentic engineering powerhouse."><title>Admin — Profit | haksterAi</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="/css/xterm.css"><meta name="haksterai-build" content="2026-11-21T02:35:18.611Z"><link rel="stylesheet" href="/_astro/Layout.52fH7h5b.css"><link rel="stylesheet" href="/_astro/profit.CazlDHOo.css"></head><body data-astro-cid-ju4pidww><!-- Navbar --><header id="navbar" class="fixed top-0 left-0 right-0 z-50 border-b border-[#1e1e2e] bg-[#0a0a0f]/80 backdrop-blur-md transition-shadow duration-300" data-astro-cid-ju4pidww><nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4" data-astro-cid-ju4pidww><!-- Logo --><a href="/" class="flex flex-col items-start gap-0 group" data-astro-cid-ju4pidww><span class="text-[#e2e8f0] font-bold text-2xl md:text-3xl tracking-tight leading-none" data-astro-cid-ju4pidww>hakster<span class="text-[#7c3aed]" data-astro-cid-ju4pidww>Ai</span></span><span class="text-[10px] md:text-[11px] leading-none font-medium tracking-[0.14em] uppercase text-[#64748b] group-hover:text-[#94a3b8] transition-colors whitespace-nowrap" data-astro-cid-ju4pidww>a part of <span class="text-[#a855f7]" data-astro-cid-ju4pidww>PhantomIDE</span></span></a><!-- Desktop nav links --><div class="hidden md:flex items-center gap-2 bg-[#111118]/80 border border-[#1e1e2e] rounded-full px-2 py-1.5 backdrop-blur-sm" data-astro-cid-ju4pidww><div id="admin-tools" data-owner-only="true" class="relative hidden items-center" data-astro-cid-ju4pidww><button id="admin-tools-btn" type="button" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#fbbf24] hover:bg-[#fbbf24]/10 transition-all flex items-center gap-1.5" aria-expanded="false" aria-haspopup="true" aria-controls="admin-tools-menu" data-astro-cid-ju4pidww>🔐 Admin <span class="text-[10px]" data-astro-cid-ju4pidww>▾</span></button><div id="admin-tools-menu" class="hidden absolute right-0 top-[calc(100%+10px)] w-56 rounded-xl border border-[#fbbf24]/30 bg-[#111118] p-2 shadow-2xl z-[60]" data-astro-cid-ju4pidww><a href="/labs" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🧪 Labs</a><a href="/portal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🌐 Portal</a><a href="/dashboard" data-admin-only="true" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>📊 Dashboard</a><a href="/admin/profit" data-admin-only="true" title="Owner only — live profit, wheels, grids and charts" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>💰 Live Profit</a><a href="/admin/email" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>📧 Email Monitor</a><a href="/admin/mail" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>📬 Mail</a><a href="/admin/skills" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🧠 Skills & Brain</a><a href="/miniforge/app/?view=admin" title="Owner only — bot skills, memory clusters and gram-bot sync" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🛡️ Bots Admin</a><a href="/hack" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>⚡ Hack Lab</a><a href="/terminal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>⌨️ Terminal</a><a href="/hakterm/" title="Open HakTerm" class="hakterm-admin-link group my-1 flex items-center gap-2 rounded-xl border border-[#00ff88]/80 bg-gradient-to-r from-[#064527] via-[#075333] to-[#064b3d] px-3 py-2.5 text-[#baffd6] shadow-[0_0_16px_rgba(0,255,100,0.28)] transition-all hover:-translate-y-0.5 hover:border-[#b5ffd2] hover:shadow-[0_0_25px_rgba(0,255,100,0.48)]" data-astro-cid-ju4pidww><span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#00ff88]/60 bg-[#00ff88]/20 text-base text-[#24ff91]" data-astro-cid-ju4pidww>⚡</span><span class="min-w-0 flex-1" data-astro-cid-ju4pidww><span class="block text-sm font-extrabold tracking-wide" data-astro-cid-ju4pidww>HakTerm :8099</span><span class="block text-[9px] font-medium uppercase tracking-[0.14em] text-[#8fffc0]" data-astro-cid-ju4pidww>Agent terminal</span></span><span class="rounded-md border border-[#00ff88]/45 bg-[#00ff88]/10 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[#a5ffca]" data-astro-cid-ju4pidww>OPEN ↗</span></a><a href="/hakterm/?brain=claude" title="Open HakTerm on the Claude CLI — same DeepSeek route the owner already runs" class="group my-1 flex items-center gap-2 rounded-xl border border-[#f0b46a]/70 bg-gradient-to-r from-[#2a1c0c] via-[#24170a] to-[#1d1408] px-3 py-2.5 text-[#ffdca8] shadow-[0_0_14px_rgba(240,180,106,0.22)] transition-all hover:-translate-y-0.5 hover:border-[#ffd7a1] hover:shadow-[0_0_22px_rgba(240,180,106,0.4)]" data-astro-cid-ju4pidww><span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#f0b46a]/60 bg-[#f0b46a]/15 text-base text-[#ffd7a1]" data-astro-cid-ju4pidww>🧠</span><span class="min-w-0 flex-1" data-astro-cid-ju4pidww><span class="block text-sm font-extrabold tracking-wide" data-astro-cid-ju4pidww>Claude CLI</span><span class="block text-[9px] font-medium uppercase tracking-[0.14em] text-[#e7b77c]" data-astro-cid-ju4pidww>DeepSeek route · HakTerm</span></span><span class="rounded-md border border-[#f0b46a]/45 bg-[#f0b46a]/10 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[#ffd7a1]" data-astro-cid-ju4pidww>OPEN ↗</span></a><a href="/commands" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🎛️ Command Center</a></div></div><a href="/miniforge/" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5" title="Open Chat" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>💬</span> Chat</a></div><!-- Desktop CTA + user badge + GitHub --><div class="hidden md:flex items-center gap-3" data-astro-cid-ju4pidww><div id="nav-user-badge" class="hidden items-center gap-2.5 px-3 py-1.5 rounded-lg border border-[#1e1e2e] bg-[#111118]" data-astro-cid-ju4pidww><div id="nav-user-avatar" class="w-7 h-7 rounded-full bg-[#7c3aed]/20 border border-[#7c3aed]/30 flex items-center justify-center text-xs font-bold text-[#a855f7]" data-astro-cid-ju4pidww></div><span id="nav-user-name" class="text-sm text-[#e2e8f0] font-medium max-w-[100px] truncate" data-astro-cid-ju4pidww></span><span id="nav-user-id" class="hidden rounded bg-[#7c3aed]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#c084fc]" data-astro-cid-ju4pidww></span><button id="nav-logout-btn" class="text-[#ef4444] hover:text-red-400 transition-colors text-xs" title="Sign out" data-astro-cid-ju4pidww>⏻</button></div><div id="nav-signin-btn" class="hidden" data-astro-cid-ju4pidww><a href="/api/auth/google/redirect" class="inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6d28d9] transition-colors" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>🔐</span> Sign In</a></div><a id="nav-passkey-btn" href="/passkey" class="inline-flex items-center gap-1.5 rounded-lg border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-3 py-2 text-sm font-semibold text-[#c084fc] hover:bg-[#7c3aed]/20 transition-colors" title="Sign in with a passkey — Windows Hello, Touch ID or your phone" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>🔑</span> Passkey</a><a href="https://github.com" target="_blank" rel="noopener noreferrer" class="text-[#64748b] hover:text-[#e2e8f0] transition-colors" aria-label="GitHub" data-astro-cid-ju4pidww><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-ju4pidww><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z" data-astro-cid-ju4pidww></path></svg></a></div><!-- Mobile hamburger + quick logout --><div class="md:hidden flex items-center gap-2" data-astro-cid-ju4pidww><button id="mobile-logout-btn" class="hidden flex items-center justify-center w-9 h-9 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 text-[#ef4444] transition-colors hover:bg-[#ef4444]/20" aria-label="Sign out" title="Sign out" data-astro-cid-ju4pidww><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-astro-cid-ju4pidww><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" data-astro-cid-ju4pidww></path></svg></button><button id="menu-btn" class="md:hidden flex flex-col justify-center items-center w-9 h-9 gap-1.5 rounded-lg border border-[#1e1e2e] bg-[#111118] hover:border-[#7c3aed]/50 transition-colors" aria-label="Toggle menu" aria-expanded="false" data-astro-cid-ju4pidww><span id="bar1" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300 origin-center" data-astro-cid-ju4pidww></span><span id="bar2" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300" data-astro-cid-ju4pidww></span><span id="bar3" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300 origin-center" data-astro-cid-ju4pidww></span></button></div></nav><!-- Mobile menu (hidden by default) --><div id="mobile-menu" class="md:hidden hidden border-t border-[#1e1e2e] bg-[#0a0a0f]/95 backdrop-blur-md" data-astro-cid-ju4pidww><div class="mx-auto max-w-6xl px-6 py-4 flex flex-col gap-4" data-astro-cid-ju4pidww><div id="mobile-admin-tools" data-owner-only="true" class="hidden flex-col gap-2" data-astro-cid-ju4pidww><button id="mobile-admin-tools-btn" type="button" class="w-full flex items-center justify-between rounded-lg border border-[#fbbf24]/30 bg-[#fbbf24]/5 px-3 py-2.5 text-sm font-semibold text-[#fbbf24]" aria-expanded="false" aria-controls="mobile-admin-tools-menu" data-astro-cid-ju4pidww>🔐 Admin <span data-astro-cid-ju4pidww>▾</span></button><div id="mobile-admin-tools-menu" class="hidden flex-col gap-1 rounded-xl border border-[#fbbf24]/20 bg-[#111118]/80 p-2" data-astro-cid-ju4pidww><a href="/labs" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🧪 Labs</a><a href="/portal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🌐 Portal</a><a href="/dashboard" data-admin-only="true" class="hidden rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>📊 Dashboard</a><a href="/admin/profit" data-admin-only="true" title="Owner only — live profit, wheels, grids and charts" class="hidden rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>💰 Live Profit</a><a href="/admin/email" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>📧 Email Monitor</a><a href="/admin/mail" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>📬 Mail</a><a href="/admin/skills" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🧠 Skills & Brain</a><a href="/miniforge/app/?view=admin" title="Owner only — bot skills, memory clusters and gram-bot sync" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🛡️ Bots Admin</a><a href="/hack" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>⚡ Hack Lab</a><a href="/terminal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>⌨️ Terminal</a><a href="/hakterm/" title="Open HakTerm" class="hakterm-admin-link flex items-center gap-3 rounded-xl border border-[#00ff88]/80 bg-gradient-to-r from-[#064527] via-[#075333] to-[#064b3d] px-3 py-2.5 text-sm font-bold text-[#baffd6] shadow-[0_0_16px_rgba(0,255,100,0.28)]" data-astro-cid-ju4pidww><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#00ff88]/60 bg-[#00ff88]/20 text-lg text-[#24ff91]" data-astro-cid-ju4pidww>⚡</span><span class="flex-1" data-astro-cid-ju4pidww>HakTerm :8099 <span class="ml-1 text-[10px] font-medium uppercase tracking-wider text-[#8fffc0]" data-astro-cid-ju4pidww>Agent terminal</span></span><span class="text-xs text-[#75ffbd]" data-astro-cid-ju4pidww>↗</span></a><a href="/hakterm/?brain=claude" title="Open HakTerm on the Claude CLI — same DeepSeek route the owner already runs" class="flex items-center gap-3 rounded-xl border border-[#f0b46a]/70 bg-gradient-to-r from-[#2a1c0c] via-[#24170a] to-[#1d1408] px-3 py-2.5 text-sm font-bold text-[#ffdca8] shadow-[0_0_14px_rgba(240,180,106,0.22)]" data-astro-cid-ju4pidww><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#f0b46a]/60 bg-[#f0b46a]/15 text-lg text-[#ffd7a1]" data-astro-cid-ju4pidww>🧠</span><span class="flex-1" data-astro-cid-ju4pidww>Claude CLI <span class="ml-1 text-[10px] font-medium uppercase tracking-wider text-[#e7b77c]" data-astro-cid-ju4pidww>DeepSeek · HakTerm</span></span><span class="text-xs text-[#ffd7a1]" data-astro-cid-ju4pidww>↗</span></a><a href="/commands" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🎛️ Command Center</a></div></div><a href="/miniforge/" class="mobile-nav-link text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2" title="Open Chat" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>💬</span> Chat</a><!-- Mobile user badge + logout --><div id="mobile-user-section" class="hidden pt-3" data-astro-cid-ju4pidww><div class="flex items-center gap-2.5 px-1 pb-3 border-b border-[#1e1e2e]" data-astro-cid-ju4pidww><div id="mobile-user-avatar" class="w-8 h-8 rounded-full bg-[#7c3aed]/20 border border-[#7c3aed]/30 flex items-center justify-center text-sm font-bold text-[#a855f7]" data-astro-cid-ju4pidww></div><div class="flex-1 min-w-0" data-astro-cid-ju4pidww><div id="mobile-user-name" class="text-sm text-[#e2e8f0] font-medium truncate" data-astro-cid-ju4pidww></div><div id="mobile-user-email" class="text-xs text-[#64748b] truncate" data-astro-cid-ju4pidww></div><div id="mobile-user-id" class="text-[10px] font-bold text-[#a855f7] truncate" data-astro-cid-ju4pidww></div></div></div><button id="mobile-menu-logout" class="w-full mt-3 flex items-center justify-center gap-2 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 hover:bg-[#ef4444]/20 text-[#ef4444] text-sm font-semibold py-2.5 transition" data-astro-cid-ju4pidww><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-astro-cid-ju4pidww><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" data-astro-cid-ju4pidww></path></svg>Sign Out</button></div><div class="flex items-center gap-3 pt-2" data-astro-cid-ju4pidww><a href="https://github.com" target="_blank" rel="noopener noreferrer" class="text-[#64748b] hover:text-[#e2e8f0] transition-colors" aria-label="GitHub" data-astro-cid-ju4pidww><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-ju4pidww><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z" data-astro-cid-ju4pidww></path></svg></a></div></div></div></header><button type="button" id="global-fullscreen-btn" class="global-fullscreen-btn" title="Fullscreen" aria-label="Fullscreen" aria-pressed="false" data-astro-cid-ju4pidww><svg class="fullscreen-enter" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-astro-cid-ju4pidww><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5" data-astro-cid-ju4pidww></path></svg><svg class="fullscreen-exit" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-astro-cid-ju4pidww><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6" data-astro-cid-ju4pidww></path></svg></button><!-- Page content --><main data-astro-cid-ju4pidww><div class="pl-wrap"><div class="pl-head"><div><p class="pl-eyebrow">haksterAi · owner only · accounting</p><h1 class="pl-title">Live profit</h1></div><div class="pl-status" id="pl-status" role="status" aria-live="polite">Loading live numbers…</div></div><p class="pl-note">Every number here is read from what actually happened: the HaksterAI payment and usage ledgers on this box, and PhantomIDE's own profit ledger on Parrot. Nothing is estimated into a number that was not measured, nothing is billed, and no plan, model or route is changed by this page.</p><section class="pl-section"><h2>Admin session</h2><div class="pl-card pl-session" id="pl-session" role="status" aria-live="polite"><p class="pl-empty">Checking whether an admin session is live…</p></div></section><section class="pl-section"><h2>Wheels</h2><div class="pl-wheels" id="pl-wheels"></div></section><section class="pl-section"><h2>Grid</h2><div class="pl-tiles" id="pl-tiles"></div></section><section class="pl-section"><h2>HaksterAI tokens by day — last 14 days</h2><div class="pl-chart" id="pl-chart"></div><div class="pl-axis"><span id="pl-axis-lo">—</span><span id="pl-axis-hi">—</span></div></section><section class="pl-section"><h2>Both projects live</h2><div class="pl-grid2"><div class="pl-card" id="pl-phantom"><h3>PhantomIDE · Parrot</h3><p class="pl-empty">Reading PhantomIDE's profit ledger…</p></div><div class="pl-card" id="pl-junkalot"><h3>Junkalot · Mr Ed coach</h3><p class="pl-empty">Reading Junkalot's coach usage…</p></div></div></section><section class="pl-section"><h2>Junkalot · client value vs the plan — owner record</h2><div class="pl-card" id="pl-client-value"><p class="pl-empty">Reading Junkalot&rsquo;s coach usage…</p></div></section><section class="pl-section"><h2>Lane budget — when Codex is worth the spend</h2><div class="pl-card" id="pl-lane"><p class="pl-empty">Working out the break-even from the measured rows…</p></div></section><section class="pl-section"><h2>HaksterAI accounts</h2><div class="pl-card" id="pl-people"><p class="pl-empty">Reading accounts…</p></div></section><p class="pl-foot" id="pl-foot">Usage is recorded, never billed. This page is read-only: it never charges an account, changes a plan, or edits a provider configuration. Reading another project's usage file is read-only and does not write into it.</p></div><script>
+    (function () {
+      var money = function (cents) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format((Number(cents) || 0) / 100);
+      };
+      var compact = function (n) {
+        n = Number(n) || 0;
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+        return String(Math.round(n));
+      };
+      var pct = function (n) { return (Number(n) || 0).toFixed(1) + '%'; };
+      var esc = function (s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      };
+      var token = '';
+      try { token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch (e) {}
+
+      function wheel(value, label, caption, color) {
+        var p = Math.max(0, Math.min(100, Number(value) || 0));
+        var circ = 2 * Math.PI * 44;
+        var dash = (p / 100) * circ;
+        return '' +
+          '<div class="pl-wheel">' +
+            '<svg viewBox="0 0 112 112" role="img" aria-label="' + esc(label) + ' ' + p.toFixed(1) + ' percent">' +
+              '<circle cx="56" cy="56" r="44" fill="none" stroke="#1e1e2e" stroke-width="10"></circle>' +
+              '<circle cx="56" cy="56" r="44" fill="none" stroke="' + color + '" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + dash.toFixed(1) + ' ' + circ.toFixed(1) + '" transform="rotate(-90 56 56)"></circle>' +
+              '<text x="56" y="61" text-anchor="middle" font-family="ui-monospace,monospace" font-size="21" font-weight="700" fill="#f1f5f9">' + (p >= 99.95 ? '100%' : pct(p)) + '</text>' +
+            '</svg>' +
+            '<div class="lbl">' + esc(label) + '</div>' +
+            '<div class="cap">' + esc(caption) + '</div>' +
+          '</div>';
+      }
+      function tile(k, v, s, cls) {
+        return '<div class="pl-tile ' + (cls || '') + '"><p class="k">' + esc(k) + '</p><p class="v">' + esc(v) + '</p><div class="s">' + esc(s || '') + '</div></div>';
+      }
+      function row(k, v, cls) {
+        return '<div class="pl-row"><span class="k">' + esc(k) + '</span><span class="v ' + (cls || '') + '">' + esc(v) + '</span></div>';
+      }
+
+      // ── Admin session card ─────────────────────────────────────────────
+      // Owner (2026-11-21): "if any admin are live make card say active since
+      // with counter til logged out or signed out". "Active since" is the
+      // server-recorded sign-in time (users.last_login_at); the counter runs on
+      // that real start and stops the moment this page sees the sign-out.
+      var session = { since: null, timer: null, stoppedAt: null };
+      function elapsedLabel(ms) {
+        var s = Math.max(0, Math.floor(ms / 1000));
+        var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+        return h + 'h ' + String(m).padStart(2, '0') + 'm ' + String(sec).padStart(2, '0') + 's';
+      }
+      function utcLabel(ms) {
+        return new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+      }
+      function paintSession() {
+        var el = document.getElementById('pl-session');
+        if (!el) return;
+        if (session.stoppedAt) {
+          el.innerHTML = '<h3>Admin session <span class="pl-badge off">SIGNED OUT</span></h3>' +
+            '<div class="since">Signed out ' + esc(utcLabel(session.stoppedAt)) + '</div>' +
+            '<div class="clock">' + esc(elapsedLabel(session.stoppedAt - session.since)) + '</div>' +
+            '<div class="who">Session ran from ' + esc(utcLabel(session.since)) + ' to sign-out. The counter is stopped.</div>';
+          return;
+        }
+        if (!session.since) {
+          el.innerHTML = '<h3>Admin session <span class="pl-badge off">NOT LIVE</span></h3>' +
+            '<p class="pl-empty">No admin session is signed in, so there is no start time to count from.</p>';
+          return;
+        }
+        el.innerHTML = '<h3>Admin session <span class="pl-badge live">LIVE</span></h3>' +
+          '<div class="since">Active since ' + esc(utcLabel(session.since)) + '</div>' +
+          '<div class="clock" id="pl-session-clock">' + esc(elapsedLabel(Date.now() - session.since)) + '</div>' +
+          '<div class="who">' + esc((window.__plAdmin && window.__plAdmin.email) || 'owner account') + ' · counter runs until sign-out</div>';
+      }
+      function startSession(signedInAtSec, email) {
+        window.__plAdmin = { email: email || null };
+        if (!Number(signedInAtSec)) { paintSession(); return; }
+        session.since = Number(signedInAtSec) * 1000;
+        session.stoppedAt = null;
+        if (session.timer) clearInterval(session.timer);
+        paintSession();
+        session.timer = setInterval(function () {
+          var clock = document.getElementById('pl-session-clock');
+          if (!clock || !session.since || session.stoppedAt) return;
+          clock.textContent = elapsedLabel(Date.now() - session.since);
+        }, 1000);
+      }
+      function stopSession() {
+        if (!session.since || session.stoppedAt) return;
+        session.stoppedAt = Date.now();
+        if (session.timer) { clearInterval(session.timer); session.timer = null; }
+        paintSession();
+      }
+      window.addEventListener('hakster:signout', stopSession);
+
+      function render(d) {
+        var h = d.hakster || {};
+        var rev = h.revenue || {};
+        var use = h.usage || {};
+        var phantom = d.phantom;
+        var junk = d.junkalot;
+
+        // Real sign-in time from the server row, counted live until sign-out.
+        startSession(d.adminSession && d.adminSession.signedInAtSec, d.adminSession && d.adminSession.email);
+
+        // Wheels — every figure derived from measured rows only.
+        var collected = Number(rev.allTimeCents) || 0;
+        var dupes = Number(rev.excludedDuplicateCents) || 0;
+        var cleanShare = collected + dupes > 0 ? (collected / (collected + dupes)) * 100 : 100;
+        var phantomMargin = phantom && phantom.totals ? Number(phantom.totals.marginPct) || 0 : null;
+        var costShare = phantom && phantom.totals && Number(phantom.totals.bookedCents) > 0
+          ? (Number(phantom.totals.estCostCents) || 0) / Number(phantom.totals.bookedCents) * 100
+          : 0;
+        document.getElementById('pl-wheels').innerHTML =
+          wheel(cleanShare, 'Clean ledger', money(collected) + ' counted · ' + money(dupes) + ' duplicate excluded', '#4ade80') +
+          wheel(phantomMargin == null ? 0 : phantomMargin, 'Phantom margin', phantomMargin == null ? 'PhantomIDE ledger not reachable yet' : 'booked vs modelled token cost, ' + (phantom.windowDays || 30) + '-day window', '#a855f7') +
+          wheel(phantomMargin == null ? 0 : Math.max(0, 100 - costShare), 'Cost headroom', costShare ? pct(costShare) + ' of booked revenue is modelled token cost' : 'flat plan lanes: no metered token bill', '#22d3ee');
+
+        // Grid
+        document.getElementById('pl-tiles').innerHTML =
+          tile('Revenue, all time', money(rev.allTimeCents), (rev.payments || 0) + ' completed payment' + (rev.payments === 1 ? '' : 's') + ' · ' + (rev.activeSubs || 0) + ' active subscription' + (rev.activeSubs === 1 ? '' : 's'), 'money') +
+          tile('Revenue, 30 days', money(rev.month30Cents), 'from the local payments ledger', 'money') +
+          tile('Calls logged', compact(use.calls), (use.firstDay || '—') + ' → ' + (use.lastDay || '—')) +
+          tile('Tokens', compact((Number(use.inputTokens) || 0) + (Number(use.outputTokens) || 0)), compact(use.inputTokens) + ' in · ' + compact(use.outputTokens) + ' out') +
+          tile('Metered provider cost', money(use.costCents), 'recorded by the usage writer', use.costCents ? 'warn' : 'money') +
+          tile('Accounts', compact((h.people && h.people.total) || 0), ((h.people && h.people.plans) || []).map(function (p) { return p.plan + ' ' + p.c; }).join(' · ')) +
+          tile('Activity, 7 days', compact((h.people && h.people.activity7d) || 0), 'signed-in actions recorded') +
+          tile('Duplicate rows excluded', money(dupes), (rev.excludedDuplicateRows || 0) + ' row(s) flagged duplicate_of', dupes ? 'warn' : '');
+
+        // Chart — 14-day window, zero days drawn as a stub, never invented.
+        var byDay = (use.byDay || []);
+        var map = {};
+        byDay.forEach(function (r) { map[r.day] = r; });
+        var days = [];
+        var cursor = new Date();
+        cursor.setUTCHours(0, 0, 0, 0);
+        for (var i = 13; i >= 0; i--) {
+          var dt = new Date(cursor.getTime() - i * 86400000);
+          var key = dt.toISOString().slice(0, 10);
+          days.push({ day: key, calls: (map[key] && Number(map[key].calls)) || 0 });
+        }
+        var max = Math.max.apply(null, days.map(function (d) { return d.calls; }).concat([1]));
+        document.getElementById('pl-chart').innerHTML = days.map(function (d) {
+          var height = d.calls ? Math.max(6, (d.calls / max) * 92) : 3;
+          var label = d.calls ? '<span>' + d.calls + '</span>' : '';
+          return '<div class="pl-bar" style="height:' + height.toFixed(1) + '%;' + (d.calls ? '' : 'background:#1e1e2e;') + '" title="' + d.day + ' · ' + d.calls + ' calls">' + label + '</div>';
+        }).join('');
+        document.getElementById('pl-axis-lo').textContent = days[0].day;
+        document.getElementById('pl-axis-hi').textContent = days[days.length - 1].day;
+
+        // Phantom card
+        var ph = document.getElementById('pl-phantom');
+        if (phantom && phantom.totals) {
+          var t = phantom.totals;
+          ph.innerHTML = '<h3>PhantomIDE · Parrot <span class="pl-badge live">LIVE</span></h3>' +
+            row('Window', (phantom.windowDays || 30) + ' days') +
+            row('Tokens served', compact(t.tokensServed)) +
+            row('Calls', compact(t.calls)) +
+            row('Booked', money(t.bookedCents)) +
+            row('Collected', money(t.collectedCents), 'good') +
+            row('Modelled token cost', money(t.estCostCents)) +
+            row('Margin', money(t.marginCents) + ' · ' + pct(t.marginPct), 'good') +
+            row('Verdict', phantom.verdict ? String(phantom.verdict) : '—') +
+            (Array.isArray(phantom.clients) && phantom.clients.length
+              ? '<h3 style="margin-top:14px;">Clients by margin</h3>' + phantom.clients.slice(0, 6).map(function (c) {
+                  return row(c.label || c.key || 'client', compact(c.tokens) + ' tok · ' + pct(c.marginPct), 'good');
+                }).join('')
+              : '');
+        } else {
+          ph.innerHTML = '<h3>PhantomIDE · Parrot <span class="pl-badge off">OFFLINE</span></h3><p class="pl-empty">PhantomIDE\'s profit ledger could not be reached from this server. The bridge key or the Parrot service is unavailable; nothing was estimated in its place.</p>';
+        }
+
+        // Junkalot card
+        var jk = document.getElementById('pl-junkalot');
+        if (junk && (junk.turns || junk.tokens)) {
+          jk.innerHTML = '<h3>Junkalot · Mr Ed coach <span class="pl-badge live">LIVE</span></h3>' +
+            row('Turns', compact(junk.turns)) +
+            row('Tokens', compact(junk.tokens)) +
+            row('Plan', junk.planUsdMonth ? money(Number(junk.planUsdMonth) * 100) + '/mo' : 'plan-covered') +
+            row('Included in plan', junk.includedInPlan ? 'yes' : 'no') +
+            row('Metered cost', junk.metered ? money(Number(junk.estMarginalCostUsd || 0) * 100) : '$0 marginal', 'good') +
+            row('Newest turn', junk.newestAt ? new Date(junk.newestAt).toLocaleString() : '—') +
+            (Array.isArray(junk.providers) && junk.providers.length
+              ? '<h3 style="margin-top:14px;">Lanes used</h3>' + junk.providers.slice(0, 5).map(function (p) {
+                  return row(p.name || p.provider || 'lane', compact(p.calls || p.turns || 0) + ' turns');
+                }).join('')
+              : '');
+        } else {
+          jk.innerHTML = '<h3>Junkalot · Mr Ed coach <span class="pl-badge off">NO DATA</span></h3><p class="pl-empty">Junkalot\'s coach usage was not readable through PhantomIDE. Nothing was estimated in its place.</p>';
+        }
+
+        // Junkalot client value — owner record only, never rendered on junkalot.co.
+        var cv = d.junkalotValue;
+        var cvEl = document.getElementById('pl-client-value');
+        if (cv && cv.month && cv.plan) {
+          var util = Math.max(0, Math.min(100, Number(cv.plan.utilisationPct) || 0));
+          var barColor = cv.plan.utilisationPct >= 100 ? '#fbbf24' : '#4ade80';
+          cvEl.innerHTML =
+            '<h3>Client value record <span class="pl-badge ' + (cv.plan.utilisationPct >= 100 ? 'off' : 'live') + '">' +
+              (cv.plan.utilisationPct >= 100 ? 'OVER PLAN' : 'WITHIN PLAN') + '</span></h3>' +
+            row('Month', String(cv.monthKey)) +
+            row('Benchmark usage value', money(Math.round((Number(cv.month.valueUsd) || 0) * 100))) +
+            row('Plan price', money(Math.round((Number(cv.plan.priceUsd) || 0) * 100))) +
+            row(cv.plan.surplusUsd > 0 ? 'Client surplus' : 'Under plan by', money(Math.round((cv.plan.surplusUsd > 0 ? cv.plan.surplusUsd : cv.plan.shortfallUsd) * 100))) +
+            row('Utilisation', pct(cv.plan.utilisationPct)) +
+            row('Projected month end', money(Math.round((Number(cv.projection && cv.projection.projectedValueUsd) || 0) * 100))) +
+            row('Turns recorded', String(cv.month.turns) + ' · ' + String(cv.month.activeDays) + ' active day(s)') +
+            row('Tokens', compact((Number(cv.month.inTokens) || 0) + (Number(cv.month.outTokens) || 0)) + ' (' + compact(cv.month.inTokens) + ' in · ' + compact(cv.month.outTokens) + ' out)') +
+            row('Verdict', cv.plan.verdict) +
+            '<div style="margin:12px 0 4px;height:8px;border-radius:999px;background:#1e1e2e;overflow:hidden;"><div style="height:100%;width:' + util.toFixed(1) + '%;background:' + barColor + ';"></div></div>' +
+            '<p class="pl-empty" style="margin:0 0 10px;">' + pct(cv.plan.utilisationPct) + ' of the plan price in measured usage value this month.</p>' +
+            ((cv.patterns || []).length
+              ? '<h3 style="margin-top:12px;">Patterns learned from the rows</h3><ul class="pl-list">' +
+                cv.patterns.map(function (pt) { return '<li><strong>' + esc(pt.label) + ':</strong> ' + esc(pt.value) + ' — ' + esc(pt.note) + '</li>'; }).join('') + '</ul>'
+              : '') +
+            '<p class="pl-empty" style="margin-top:10px;">' + esc((cv.terms && cv.terms.rateNote) || '') + ' Read from Junkalot&rsquo;s coach usage file over SSH, read only. This record is never rendered on the Junkalot site — her admin shows savings, not our margin.</p>';
+        } else {
+          cvEl.innerHTML = '<p class="pl-empty">Junkalot&rsquo;s coach usage file could not be read from Parrot just now, so no value figure is shown rather than an invented one.</p>';
+        }
+
+        // Lane budget — measured token size per call, priced against the paid
+        // Codex lane at a stated benchmark. Advice only: §19 says the setup is
+        // never changed for margin, and nothing here switches a model or route.
+        var lane = document.getElementById('pl-lane');
+        var calls = Number(use.calls) || 0;
+        var inTok = Number(use.inputTokens) || 0;
+        var outTok = Number(use.outputTokens) || 0;
+        var CODEX_IN_PER_M = 0.60, CODEX_OUT_PER_M = 2.40; // stated benchmark, not a quote
+        if (calls > 0) {
+          var inPerCall = inTok / calls, outPerCall = outTok / calls;
+          var codexPerCallUsd = (inPerCall / 1e6) * CODEX_IN_PER_M + (outPerCall / 1e6) * CODEX_OUT_PER_M;
+          var codexPer1kUsd = codexPerCallUsd * 1000;
+          var collected30 = (Number(rev.month30Cents) || 0) / 100;
+          var metered30 = (Number(use.costCents) || 0) / 100;
+          var affordableCalls = codexPerCallUsd > 0 ? collected30 / codexPerCallUsd : null;
+          var callsPerDay = 0;
+          var dayCount = (use.byDay || []).length || 1;
+          (use.byDay || []).forEach(function (r) { callsPerDay += Number(r.calls) || 0; });
+          callsPerDay = callsPerDay / dayCount;
+          var monthlyCalls = callsPerDay * 30;
+          var sharePct = affordableCalls != null && monthlyCalls > 0 ? (affordableCalls / monthlyCalls) * 100 : null;
+          lane.innerHTML =
+            '<h3>Break-even against what was actually collected <span class="pl-badge ' + ((sharePct != null && sharePct < 100) ? 'off' : 'live') + '">' +
+              (sharePct == null ? 'NO ROWS' : sharePct >= 100 ? 'ALL CALLS FIT' : 'PARTIAL') + '</span></h3>' +
+            row('Measured tokens per call', compact(Math.round(inPerCall)) + ' in · ' + compact(Math.round(outPerCall)) + ' out') +
+            row('Codex at $' + CODEX_IN_PER_M.toFixed(2) + '/M in, $' + CODEX_OUT_PER_M.toFixed(2) + '/M out', money(Math.round(codexPer1kUsd * 100)) + ' per 1,000 calls') +
+            row('Collected, last 30 days', money(Number(rev.month30Cents) || 0), 'local payments ledger') +
+            row('Calls Codex could cover for that money', affordableCalls == null ? '—' : compact(Math.round(affordableCalls))) +
+            row('Your current pace', Math.round(callsPerDay) + ' calls/day · ~' + compact(Math.round(monthlyCalls)) + '/month') +
+            row('Share of your volume that fits', sharePct == null ? '—' : pct(Math.max(0, Math.min(100, sharePct)))) +
+            row('Metered provider cost so far', money(Number(use.costCents) || 0), 'recorded by the usage writer') +
+            '<div style="margin:12px 0 4px;height:8px;border-radius:999px;background:#1e1e2e;overflow:hidden;"><div style="height:100%;width:' + Math.max(2, Math.min(100, sharePct == null ? 0 : sharePct)).toFixed(1) + '%;background:' + ((sharePct != null && sharePct < 100) ? '#fbbf24' : '#4ade80') + ';"></div></div>' +
+            '<p class="pl-empty" style="margin:0 0 10px;">At the measured token size, every 1,000 calls on the paid lane costs about ' + money(Math.round(codexPer1kUsd * 100)) + '. That is the number to hold against what the plan actually collected.</p>' +
+            '<h3 style="margin-top:12px;">When to use Codex — policy, not automation</h3>' +
+            '<ul class="pl-list">' +
+              '<li><strong>Use it when the cheap lane fails:</strong> an error or stall on the free/relay lane already falls through the ladder; Codex is the safety net, not the default.</li>' +
+              '<li><strong>Use it for correctness-critical work</strong> — money, billing and anything that must be right first time.</li>' +
+              '<li><strong>Do not route chat volume through it.</strong> At ' + (sharePct == null ? 'this pace' : pct(Math.max(0, Math.min(100, sharePct))) + ' of your volume fitting inside collected revenue') + ', bulk calls are what pushes margin negative.</li>' +
+              '<li><strong>Quota:</strong> no provider quota figure is recorded in this ledger, so no runway is shown. A quota line only appears once a real limit is stored — it is never guessed.</li>' +
+            '</ul>' +
+            '<p class="pl-empty" style="margin-top:10px;">Advice only. This card never changes a model, a route or a plan price (§19): the setup is not altered for margin.</p>';
+        } else {
+          lane.innerHTML = '<p class="pl-empty">No usage rows are recorded yet, so there is no token size to price the paid lane against.</p>';
+        }
+
+        // People
+        var people = document.getElementById('pl-people');
+        var plans = (h.people && h.people.plans) || [];
+        people.innerHTML = plans.length
+          ? '<h3>HaksterAI plans</h3>' + plans.map(function (p) { return row(p.plan, p.c + ' account' + (p.c === 1 ? '' : 's')); }).join('')
+          : '<p class="pl-empty">No accounts recorded yet.</p>';
+
+        document.getElementById('pl-foot').textContent = (d.note || 'Usage is recorded, never billed.') +
+          ' Read from HaksterAI\'s local ledgers' + (d.bridge === 'live' ? ' and PhantomIDE\'s read-only bridge on Parrot' : '; PhantomIDE bridge unavailable on this read') +
+          '. No writes, no charges, no config changes.';
+      }
+
+      async function load() {
+        var status = document.getElementById('pl-status');
+        if (!token) { status.textContent = 'Owner sign-in required.'; stopSession(); paintSession(); return; }
+        status.textContent = 'Reading live ledgers…';
+        try {
+          var r = await fetch('/api/admin/profit-live', { headers: { 'x-api-key': token }, cache: 'no-store' });
+          var d = await r.json().catch(function () { return {}; });
+          if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+          render(d);
+          status.innerHTML = '<b>LIVE</b> · ' + new Date(d.generatedAt).toLocaleTimeString() + ' · refreshes every 30 s';
+        } catch (e) {
+          status.textContent = 'Unavailable: ' + (e && e.message ? e.message : 'unknown error');
+          // A refused credential is a sign-out; a network blip is not, so only
+          // 401/403 stops the session counter.
+          if (/HTTP 40[13]/.test(String(e && e.message))) { stopSession(); }
+        }
+      }
+
+      load();
+      setInterval(function () { if (document.visibilityState === 'visible') load(); }, 30000);
+    })();
+  </script></main><!-- Footer --><footer class="border-t border-[#1e1e2e] bg-[#0a0a0f] py-12 mt-24" data-astro-cid-ju4pidww><div class="mx-auto max-w-6xl px-6" data-astro-cid-ju4pidww><div class="flex flex-col md:flex-row items-center justify-between gap-6" data-astro-cid-ju4pidww><div class="flex items-center gap-2" data-astro-cid-ju4pidww><span class="text-[#e2e8f0] font-bold" data-astro-cid-ju4pidww>hakster<span class="text-[#7c3aed]" data-astro-cid-ju4pidww>Ai</span></span></div><div class="flex items-center gap-6 text-sm text-[#64748b]" data-astro-cid-ju4pidww><a href="/hack" data-owner-only="true" class="hidden hover:text-[#00ff88] transition-colors text-[#00ff88] font-semibold" data-astro-cid-ju4pidww>⚡ Hack Lab</a><a href="/terminal" data-owner-only="true" class="hidden hover:text-[#a855f7] transition-colors" data-astro-cid-ju4pidww>⌨️ Terminal</a><a href="/portal" data-owner-only="true" class="hidden hover:text-[#e2e8f0] transition-colors" data-astro-cid-ju4pidww>🌐 Portal</a><a href="/miniforge/" class="hover:text-[#e2e8f0] transition-colors" data-astro-cid-ju4pidww>💬 Chat</a><a href="https://github.com" target="_blank" rel="noopener noreferrer" class="hover:text-[#e2e8f0] transition-colors" data-astro-cid-ju4pidww>GitHub</a></div><p class="text-xs text-[#64748b]" data-astro-cid-ju4pidww>© 2026 haksterAi. Built for the terminal.</p></div><!-- Bottom bar — same PhantomIDE green credit banner Junkalot carries --><div class="mt-8 border-t border-[#1e1e2e] pt-6 text-center" data-astro-cid-ju4pidww><p class="text-xs text-[#64748b] flex items-center justify-center gap-2 flex-wrap" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>© 2026 haksterAi.</span><span aria-hidden="true" data-astro-cid-ju4pidww>|</span><a href="https://phantomide.com/" target="_blank" rel="noopener noreferrer" aria-label="Built and powered by Phantom IDE. Visit phantomide.com." class="group inline-flex items-center gap-2 rounded-full border border-[#00ff41]/25 bg-[#00ff41]/5 px-3 py-1.5 transition-colors hover:border-[#00ff41]/60 hover:bg-[#00ff41]/10" title="Built and powered by Phantom IDE — phantomide.com" data-astro-cid-ju4pidww><span aria-hidden="true" class="text-base leading-none drop-shadow-[0_0_7px_rgba(0,255,65,0.9)]" data-astro-cid-ju4pidww>👻</span><span class="text-[#94a3b8] group-hover:text-[#e2e8f0]" data-astro-cid-ju4pidww>Built and powered by</span><span class="font-mono font-extrabold tracking-[0.12em] text-[#00ff41] transition-colors group-hover:text-white" data-astro-cid-ju4pidww>PHANTOM IDE</span><span class="text-[#64748b] group-hover:text-[#cbd5e1]" data-astro-cid-ju4pidww>phantomide.com ↗</span></a></p><p class="mt-2 text-xs text-[#64748b]" data-astro-cid-ju4pidww>HaksterAI — Powered by <a href="https://phantomide.com" target="_blank" rel="noopener noreferrer" class="text-[#00ff41] hover:text-white hover:underline transition-colors duration-300" data-astro-cid-ju4pidww>PhantomIDE.com</a></p></div></div></footer><div id="admin-pin-gate" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="admin-pin-title" style="display:none; position:fixed; inset:0; z-index:1000; place-items:center; padding:16px; background:rgba(0,0,0,.88);" data-astro-cid-ju4pidww><section class="w-full max-w-xs rounded-2xl border border-amber-300/30 bg-[#111118] p-6 text-center text-white shadow-2xl" data-astro-cid-ju4pidww><div id="admin-pin-title" class="text-lg font-bold text-amber-300" data-astro-cid-ju4pidww>Admin PIN</div><p id="admin-pin-subtitle" class="mt-2 text-xs tracking-wider text-slate-400" data-astro-cid-ju4pidww>ENTER PIN TO ACCESS ADMIN</p><div class="my-5 flex justify-center gap-2" aria-hidden="true" data-astro-cid-ju4pidww><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span></div><div class="grid grid-cols-3 gap-2" data-astro-cid-ju4pidww><button type="button" data-admin-pin-key="1" aria-label="Digit 1" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>1</button><button type="button" data-admin-pin-key="2" aria-label="Digit 2" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>2</button><button type="button" data-admin-pin-key="3" aria-label="Digit 3" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>3</button><button type="button" data-admin-pin-key="4" aria-label="Digit 4" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>4</button><button type="button" data-admin-pin-key="5" aria-label="Digit 5" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>5</button><button type="button" data-admin-pin-key="6" aria-label="Digit 6" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>6</button><button type="button" data-admin-pin-key="7" aria-label="Digit 7" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>7</button><button type="button" data-admin-pin-key="8" aria-label="Digit 8" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>8</button><button type="button" data-admin-pin-key="9" aria-label="Digit 9" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>9</button><button type="button" data-admin-pin-key="clear" aria-label="Clear PIN" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>CLR</button><button type="button" data-admin-pin-key="0" aria-label="Digit 0" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>0</button><button type="button" data-admin-pin-key="back" aria-label="Delete last digit" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>⌫</button></div><p id="admin-pin-error" class="mt-3 min-h-5 text-sm text-rose-400" role="status" aria-live="polite" data-astro-cid-ju4pidww></p><button type="button" data-admin-pin-close class="mt-2 rounded-lg px-4 py-2 text-sm text-slate-400 hover:bg-white/5" data-astro-cid-ju4pidww>Cancel</button></section></div><aside id="haksterai-problem-toast" role="alert" aria-live="assertive" hidden style="position:fixed;right:18px;bottom:18px;z-index:2000;width:min(440px,calc(100vw - 36px));border:1px solid rgba(248,113,113,.45);border-radius:16px;background:#111118;color:#e2e8f0;box-shadow:0 12px 42px rgba(0,0,0,.55);padding:16px;font:14px/1.45 system-ui,sans-serif" data-astro-cid-ju4pidww><div style="display:flex;align-items:center;gap:8px;color:#fca5a5;font-weight:800" data-astro-cid-ju4pidww><span aria-hidden="true" data-astro-cid-ju4pidww>⚠</span><span data-astro-cid-ju4pidww>HaksterAI noticed a problem</span><button id="haksterai-problem-close" type="button" aria-label="Dismiss problem" style="margin-left:auto;background:transparent;color:#94a3b8;border:0;font-size:20px;cursor:pointer" data-astro-cid-ju4pidww>×</button></div><p id="haksterai-problem-message" style="margin:10px 0;color:#cbd5e1;overflow-wrap:anywhere" data-astro-cid-ju4pidww></p><div style="display:flex;gap:8px" data-astro-cid-ju4pidww><button id="haksterai-problem-copy" type="button" style="border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:9px;padding:7px 11px;cursor:pointer" data-astro-cid-ju4pidww>Copy</button><button id="haksterai-problem-popout" type="button" style="border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:9px;padding:7px 11px;cursor:pointer" data-astro-cid-ju4pidww>Pop out</button></div></aside><aside id="haksterai-update-toast" role="status" aria-live="polite" hidden style="position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:1999;width:min(560px,calc(100vw - 28px));border:1px solid rgba(124,58,237,.55);border-radius:14px;background:#111118;color:#e2e8f0;box-shadow:0 12px 42px rgba(0,0,0,.5);padding:12px 14px;font:14px/1.45 system-ui,sans-serif" data-astro-cid-ju4pidww><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap" data-astro-cid-ju4pidww><span style="flex:1;min-width:190px" data-astro-cid-ju4pidww><strong style="color:#c4b5fd" data-astro-cid-ju4pidww>HaksterAI update ready</strong><br data-astro-cid-ju4pidww><span id="haksterai-update-detail" style="color:#94a3b8;font-size:12px" data-astro-cid-ju4pidww>A newer version is available.</span></span><button id="haksterai-update-now" type="button" style="border:0;background:#7c3aed;color:white;border-radius:9px;padding:8px 12px;font-weight:700;cursor:pointer" data-astro-cid-ju4pidww>Update</button><button id="haksterai-update-later" type="button" style="border:1px solid #334155;background:#1e293b;color:#cbd5e1;border-radius:9px;padding:8px 12px;cursor:pointer" data-astro-cid-ju4pidww>Later</button></div></aside><!-- Phantom server applet — the same widget junkalot.co runs, ported whole:
+         bottom-right card, docks to a chip after 10 s of "up to date", tucks into
+         a slim edge tab 20 s later, and comes back out the moment a build is
+         pushed. Only the site name and the data differ: every figure is read
+         from haksterai.com's own /api/version, and there is no percentage unless
+         the server reports measured progress. --><!-- Owner, 2026-11-21: "only opens when updating ever" — the applet starts
+         fully closed (hidden) on every page load. The old "ring" start painted a
+         spinner in the corner on every hard refresh even when nothing was
+         running; the chip/tab/card are now only entered by a real update event. --><aside id="phantom-server-applet" data-mode="hidden" data-state="checking" role="status" aria-live="polite" data-astro-cid-ju4pidww><div class="psa-card" data-astro-cid-ju4pidww><div class="psa-head" data-astro-cid-ju4pidww><span class="psa-brand" data-astro-cid-ju4pidww><span id="psa-ghost" aria-hidden="true" data-astro-cid-ju4pidww>👻</span> PHANTOM IDE</span><span class="psa-sub" data-astro-cid-ju4pidww>Update from PhantomIDE server</span></div><div class="psa-state" data-astro-cid-ju4pidww><span class="psa-ring psa-load-ring" id="psa-load-ring" aria-hidden="true" data-astro-cid-ju4pidww></span><span id="psa-icon" aria-hidden="true" data-astro-cid-ju4pidww>●</span><span id="psa-title" data-astro-cid-ju4pidww>haksterai.com — checking</span></div><div class="psa-detail" id="psa-detail" data-astro-cid-ju4pidww>Reading the site build…</div><div class="psa-live" id="psa-live" hidden data-astro-cid-ju4pidww><div class="psa-live-head" data-astro-cid-ju4pidww><span id="psa-stage" data-astro-cid-ju4pidww>—</span><span id="psa-clock" data-astro-cid-ju4pidww>—</span></div><div class="psa-live-sub" data-astro-cid-ju4pidww><span id="psa-elapsed" data-astro-cid-ju4pidww>elapsed —</span><span id="psa-eta" data-astro-cid-ju4pidww>ETA unknown</span></div><ol class="psa-updates" id="psa-updates" aria-label="Timestamped build updates" data-astro-cid-ju4pidww></ol><pre class="psa-error" id="psa-error" hidden data-astro-cid-ju4pidww></pre></div><div class="psa-stab" id="psa-stab" hidden data-state="UNKNOWN" role="button" tabindex="0" aria-expanded="false" title="Tap to open the debug strip" data-astro-cid-ju4pidww>Stability <b id="psa-stab-state" data-astro-cid-ju4pidww>UNKNOWN</b> <span id="psa-stab-detail" data-astro-cid-ju4pidww>—</span></div><div class="psa-debug" id="psa-debug" hidden data-astro-cid-ju4pidww><div class="psa-debug-head" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>DEBUG STRIP</span><span id="psa-debug-scope" data-astro-cid-ju4pidww>—</span></div><pre class="psa-debug-body" id="psa-debug-body" data-astro-cid-ju4pidww>—</pre></div><div class="psa-grid" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>Site build <b id="psa-site-build" data-astro-cid-ju4pidww>—</b></span><span data-astro-cid-ju4pidww>Built <b id="psa-build-time" data-astro-cid-ju4pidww>—</b></span><span data-astro-cid-ju4pidww>Server up <b id="psa-uptime" data-astro-cid-ju4pidww>—</b></span><span data-astro-cid-ju4pidww>Server <b id="psa-server" data-astro-cid-ju4pidww>—</b></span><span data-astro-cid-ju4pidww>Pending <b id="psa-pending" data-astro-cid-ju4pidww>—</b></span><span data-astro-cid-ju4pidww>Checked <b id="psa-checked" data-astro-cid-ju4pidww>—</b></span></div><div class="psa-bar" id="psa-bar" hidden data-astro-cid-ju4pidww><span role="progressbar" id="psa-bar-track" aria-valuemin="0" aria-valuemax="100" aria-label="Update progress" aria-valuetext="Applying — the server reports no measured percentage" style="position:relative;display:block;height:8px;background:#04120a;border-radius:999px;overflow:hidden;border:1px solid rgba(0,255,65,.35);box-shadow:inset 0 1px 2px rgba(0,0,0,.6)" data-astro-cid-ju4pidww><span class="jl-fill jl-indeterminate" id="psa-bar-fill" style="position:absolute;top:0;left:0;bottom:0;width:100%;border-radius:999px;background:linear-gradient(90deg,#00b83a,#00ff41 55%,#9dffb8);box-shadow:0 0 14px rgba(0,255,65,.55)" data-astro-cid-ju4pidww></span><span class="jl-shine" aria-hidden="true" style="position:absolute;top:0;bottom:0;width:30%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);mix-blend-mode:screen" data-astro-cid-ju4pidww></span></span><span class="psa-bar-row" data-astro-cid-ju4pidww><span id="psa-bar-label" data-astro-cid-ju4pidww>Update queued</span><span id="psa-bar-pct" hidden data-astro-cid-ju4pidww>0%</span></span></div><div class="psa-actions" id="psa-actions" hidden data-astro-cid-ju4pidww><button type="button" class="psa-primary" id="psa-update-now" data-astro-cid-ju4pidww>Update now</button><button type="button" id="psa-later" data-astro-cid-ju4pidww>Later</button></div><div class="psa-foot" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>HaksterAI · Powered by <a href="https://phantomide.com" target="_blank" rel="noopener noreferrer" data-astro-cid-ju4pidww>PhantomIDE.com</a></span><span class="psa-stab-corner" id="psa-stab-corner" data-state="UNKNOWN" hidden title="Build stability — measured by the stability monitor" data-astro-cid-ju4pidww><i class="psa-stab-dot" aria-hidden="true" data-astro-cid-ju4pidww>●</i><span id="psa-stab-corner-text" data-astro-cid-ju4pidww>builds —</span></span></div></div><button type="button" class="psa-chip psa-spin" id="psa-chip" data-active="0" data-failed="0" title="haksterai.com is up to date. Show the full update status." data-astro-cid-ju4pidww><span class="psa-ring" aria-hidden="true" id="psa-chip-ring" data-astro-cid-ju4pidww></span><b id="psa-chip-title" data-astro-cid-ju4pidww>Up to date</b><span class="psa-code" id="psa-chip-code" data-astro-cid-ju4pidww></span><span aria-hidden="true" style="color:#0f7a33" data-astro-cid-ju4pidww>▴</span></button><button type="button" class="psa-tab psa-spin" id="psa-tab" data-active="0" data-failed="0" title="haksterai.com is up to date. Open the update status." aria-label="haksterai.com is up to date. Open the update status." data-astro-cid-ju4pidww><span class="psa-ring" aria-hidden="true" id="psa-tab-ring" data-astro-cid-ju4pidww></span><span id="psa-tab-pct" aria-hidden="true" style="color:#64748b;font-size:10px" data-astro-cid-ju4pidww>◂</span></button><!-- Startup: only the ring, no panel (owner, 2026-11-21: "only ring and
+           progress on startup"). It spins while the first check runs, fills to
+           a measured percent if one is reported, and disappears the moment the
+           page is known to be idle with nothing queued. --><span class="psa-start psa-spin" id="psa-start" data-active="1" data-failed="0" aria-hidden="true" data-astro-cid-ju4pidww><span class="psa-ring" id="psa-start-ring" data-astro-cid-ju4pidww></span></span></aside><script data-cfasync="false">
+      (() => {
+        const root = document.getElementById('phantom-server-applet');
+        if (!root) return;
+        // No real data yet: the rings spin until the first frame lands.
+        root.dataset.ready = '0';
+        const el = (id) => document.getElementById(id);
+        const iconEl = el('psa-icon');
+        const titleEl = el('psa-title');
+        const detailEl = el('psa-detail');
+        const debugEl = el('psa-debug');
+        const debugBodyEl = el('psa-debug-body');
+        const debugScopeEl = el('psa-debug-scope');
+        const siteBuildEl = el('psa-site-build');
+        const buildTimeEl = el('psa-build-time');
+        const uptimeEl = el('psa-uptime');
+        const serverEl = el('psa-server');
+        const pendingEl = el('psa-pending');
+        const checkedEl = el('psa-checked');
+        const actionsEl = el('psa-actions');
+        const updateBtn = el('psa-update-now');
+        const laterBtn = el('psa-later');
+        const barEl = el('psa-bar');
+        const ghostEl = el('psa-ghost');
+        const barTrackEl = el('psa-bar-track');
+        const barFillEl = el('psa-bar-fill');
+        const barLabelEl = el('psa-bar-label');
+        const barPctEl = el('psa-bar-pct');
+        const chipTitleEl = el('psa-chip-title');
+        const chipCodeEl = el('psa-chip-code');
+        // Live build feed (spinner / progress / stability). Same measured data
+        // the isolated preview streams — nothing here is simulated.
+        const liveEl = el('psa-live');
+        const stageEl = el('psa-stage');
+        const clockEl = el('psa-clock');
+        const elapsedEl = el('psa-elapsed');
+        const etaEl = el('psa-eta');
+        const updatesEl = el('psa-updates');
+        const errorEl = el('psa-error');
+        const stabEl = el('psa-stab');
+        const stabStateEl = el('psa-stab-state');
+        const stabDetailEl = el('psa-stab-detail');
+        const stabCornerEl = el('psa-stab-corner');
+        const stabCornerTextEl = el('psa-stab-corner-text');
+        const tabPctEl = el('psa-tab-pct');
+        const live = { job: null, stability: null, at: 0, connected: false, audited: {}, lastStage: '', lastState: '', closedBuild: '', jobBase: null, stabBase: null, firstTryAt: 0, noFrameReported: false, openTimer: 0 };
+
+        // Same timings junkalot.co runs, so both sites behave identically.
+        const POLL_MS = 2000;          // live-feed re-poll: a pushed build shows within ~2 s
+        const CHECK_MS = 10000;        // version check cycle: the "Checked" cell counts 0→10 s, then restarts (owner, 2026-11-21: "make the checked time go to 10 and restart")
+        const FEED_MS = 5000;          // live applet feed re-poll cadence
+        const OFFLINE_AFTER = 3;       // three misses (~6 s) means the site really is not answering
+        const DOCK_AFTER_MS = 10000;   // up-to-date card stays 10 s, then docks to a chip
+        const HIDE_AFTER_MS = 20000;   // chip stays 20 s, then tucks into the edge tab
+        const CLOSE_AFTER_UPDATE_MS = 5000; // junkalot's done-hide: a finished update closes its card in 5 s
+        const LATER_MS = 30 * 60 * 1000;
+        const LATER_KEY = 'phantom-applet-later';
+        // Owner, 2026-11-21: "if haksterai.com has update queing need to be
+        // applied after no click assumes" / "no updates waiting always need to
+        // auto apply" — a ready update is never left waiting for a click. It
+        // applies itself a few seconds after it is announced. Typing or a
+        // focused form field is an answer, so the reload waits for a quiet
+        // moment instead of landing under someone's hands.
+        const AUTO_APPLY_MS = 12000;        // owner: "12 sec auto apply feat"
+        const AUTO_APPLY_QUIET_MS = 5000;   // after a real click/key, wait this long
+        const AUTO_APPLY_FOCUS_MAX_MS = 60000; // a focused field holds it at most this long
+
+        let state = 'checking';
+        let serverApplying = false;
+        let misses = 0;
+        let wasOffline = false;
+        let lastCheck = 0;
+        // A page refresh announces a ready update once; later checks only update
+        // the chip (owner, 2026-11-21: "when refreshed the pg etc only should pop
+        // out if update is ready only").
+        let firstVersionCheck = true;
+        // Debug strip state — counted from real frames and real fetch failures,
+        // never estimated (owner, 2026-11-21: "add debugger strip on applet to
+        // find issue").
+        const dbg = { frames: 0, errors: 0, lastFrameAt: 0, lastSnap: null };
+        let dockTimer = 0;
+        let dockPending = false;   // a close is already scheduled; polls must not push it out
+        let dockDelay = 0;         // how far away that pending close is, so a sooner one can replace it
+        let hideTimer = 0;
+        let readyBuild = '';
+        let busy = false;
+        // Auto-apply clock (see AUTO_APPLY_MS): armed when a newer build is
+        // detected, cleared the moment this tab is on that build, the visitor
+        // postpones, or the update stops being newer.
+        let autoApplyAt = 0;
+        let autoApplyBuild = '';
+        let autoApplyTimer = 0;
+        let lastInputAt = 0;   // 0 = nobody has touched this page yet
+        let readySinceAt = 0;  // when this tab first saw the build as newer
+        // A tab that reloaded itself for an update shows the finished line once,
+        // on the build it landed on. sessionStorage survives the reload and the
+        // marker is removed the moment it is read, so it never repeats.
+        const APPLIED_KEY = 'phantom-applet-applied';
+        let appliedNoteUntil = 0;
+        // How long the little circle may show a verification check after an
+        // update passed inspection. Set only from measured state, never on a
+        // timer alone (owner, 2026-11-21: "on applet make circle when update is
+        // done a check for verification" / "when stable").
+        let verifiedUntil = 0;
+        let appliedMarker = null;
+        try { appliedMarker = JSON.parse(sessionStorage.getItem(APPLIED_KEY) || 'null'); sessionStorage.removeItem(APPLIED_KEY); } catch { appliedMarker = null; }
+        let queuedShown = '';      // which queued server update already opened the card
+        let pollTimer = 0;
+
+        const pageBuildNow = () => document.documentElement.dataset.haksterBuild || '';
+        const short = (v) => {
+          const s = String(v || '');
+          return s.length > 18 ? s.slice(0, 8) + '…' + s.slice(-6) : (s || '—');
+        };
+        // Build ids are ISO timestamps. In the grid the clock part is what a
+        // reader needs; the full id stays in the element's title.
+        const shortClock = (v) => {
+          const s = String(v || '');
+          const t = Date.parse(s);
+          if (!Number.isFinite(t) || s.length < 16) return short(v);
+          const d = new Date(t);
+          return pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + ':' + pad2(d.getUTCSeconds()) + 'Z';
+        };
+        const ago = (ts) => {
+          const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+          if (secs < 60) return secs + 's ago';
+          if (secs < 3600) return Math.round(secs / 60) + 'm ago';
+          return Math.round(secs / 3600) + 'h ago';
+        };
+
+        // Real build time and real server uptime, taken straight from the live
+        // snapshot (build.builtAt is the moment dist/index.html was written;
+        // server.uptimeSec is the running server's own process uptime). The
+        // uptime is re-painted once a second from that measured base, so the
+        // corner shows a clock that climbs — not a number frozen at page load.
+        const pad2 = (n) => String(n).padStart(2, '0');
+        // Bottom-right corner of the card: when the builds were measured
+        // stable. It repeats the monitor's own state and verification stamp —
+        // a green light plus a check only when the monitor says STABLE, amber
+        // while the window verifies, red on DEGRADED/FAILED, grey when nothing
+        // has been measured yet (owner, 2026-11-21: "add when are builds are
+        // stable on card", "add it to bottom right corner off card", "with
+        // check when stable green light"). No guess is ever painted here.
+        const paintStabCorner = (stateIn) => {
+          if (!stabCornerEl || !stabCornerTextEl) return;
+          const stab = live.stability || {};
+          const s = String(stateIn || stab.state || 'UNKNOWN');
+          stabCornerEl.dataset.state = s;
+          stabCornerEl.hidden = false;
+          let text;
+          if (s === 'STABLE') {
+            const at = stab.timestamps && stab.timestamps.buildFirstStableAt
+              ? new Date(stab.timestamps.buildFirstStableAt) : null;
+            const stamp = at && !Number.isNaN(at.getTime())
+              ? pad2(at.getUTCHours()) + ':' + pad2(at.getUTCMinutes()) + 'Z' : null;
+            text = '✓ builds stable' + (stamp ? ' · ' + stamp : '');
+          } else if (s === 'VERIFYING') {
+            const b = live.stabBase;
+            const left = b && b.remaining != null ? Math.max(0, b.remaining - (Date.now() - b.at) / 1000) : null;
+            text = 'verifying builds' + (left != null ? ' · ' + fmtSecs(left) : '');
+          } else if (s === 'UNKNOWN') {
+            text = 'builds UNKNOWN';
+          } else {
+            text = 'builds ' + s;
+          }
+          stabCornerTextEl.textContent = text;
+          stabCornerEl.title = 'Build stability ' + s + ' — measured by the stability monitor';
+        };
+        // The "finished" line, shared by the poll, the reload note and stability
+        // frames so none of them can disagree about the word stable (§10).
+        const stabilityTail = () => {
+          const stab = live.stability || {};
+          const s = String(stab.state || '');
+          const at = stab.timestamps && stab.timestamps.buildFirstStableAt
+            ? new Date(stab.timestamps.buildFirstStableAt) : null;
+          const stamp = at && !Number.isNaN(at.getTime())
+            ? pad2(at.getUTCHours()) + ':' + pad2(at.getUTCMinutes()) + ':' + pad2(at.getUTCSeconds()) + 'Z' : null;
+          return s === 'STABLE' ? ' · stable' + (stamp ? ' (verified ' + stamp + ')' : '')
+            : (s === 'VERIFYING' ? ' · verifying stability' : '');
+        };
+        // Four-point inspection of the finished build (owner, 2026-11-21: "must
+        // pass 4 point inspection", "all checks", "when stable"). Every point is
+        // measured from the status payload — none of them is assumed:
+        //   1. the build this tab is serving is the build the server reports
+        //   2. the stability monitor says STABLE for it
+        //   3. every stability check it ran is passing
+        //   4. the watchdog's evidence is fresh (not stale)
+        const inspectionFor = () => {
+          const stab = live.stability || {};
+          const ev = stab.evidence || {};
+          const wd = stab.watchdog || {};
+          const page = pageBuildNow();
+          const deployed = String((stab.timestamps && stab.timestamps.deployedBuildId) || '');
+          const checks = Number(ev.checks) || 0;
+          const passing = Number(ev.passing) || 0;
+          return [
+            { id: 'build served', ok: !!page && deployed === page },
+            { id: 'stability verified', ok: String(stab.state || '') === 'STABLE' },
+            { id: 'all checks passing', ok: checks > 0 && passing >= checks },
+            { id: 'watchdog fresh', ok: wd.stale === false },
+          ];
+        };
+        // The four checkpoints are taken 12 s apart (owner, 2026-11-21: "each
+        // checkpoint 12 sec appart"): point N is only stamped once it measures
+        // true AND at least N×12 s have passed since the inspection started.
+        // A point that stops being true loses its stamp, so a degraded build
+        // never keeps a check it no longer earns.
+        const INSPECTION_STEP_MS = 12000;
+        let inspection = { startedAt: 0, doneAt: [0, 0, 0, 0] };
+        let inspectionTimer = 0;
+
+        const inspectionProgress = () => {
+          const pts = inspectionFor();
+          const now = Date.now();
+          pts.forEach((p, i) => {
+            if (!inspection.startedAt || !p.ok) {
+              inspection.doneAt[i] = 0;
+            } else if (!inspection.doneAt[i] && now - inspection.startedAt >= i * INSPECTION_STEP_MS) {
+              inspection.doneAt[i] = now;
+            }
+          });
+          const done = inspection.doneAt.filter(Boolean).length;
+          const all = pts.every((p) => p.ok) && done === pts.length;
+          const nextAt = inspection.startedAt
+            ? inspection.startedAt + done * INSPECTION_STEP_MS : null;
+          const nextIn = nextAt && !all ? Math.max(0, Math.ceil((nextAt - now) / 1000)) : null;
+          return { pts, done, all, nextIn, missing: pts.filter((p) => !p.ok).map((p) => p.id) };
+        };
+        const inspectionText = () => {
+          const p = inspectionProgress();
+          if (p.all) return ' · 4/4 inspection passed';
+          if (!inspection.startedAt) return ' · inspection not started';
+          return ' · inspection ' + p.done + '/4'
+            + (p.nextIn != null && p.nextIn > 0 ? ' — checkpoint ' + (p.done + 1) + ' of 4 in ' + p.nextIn + 's' : '')
+            + (p.missing.length ? ' — waiting on ' + p.missing.join(', ') : '');
+        };
+        const paintVerified = () => {
+          const p = inspectionProgress();
+          // The check window opens only while the finished-update note is up —
+          // a verified update, not a permanent badge on an idle widget.
+          if (p.all && appliedNoteUntil > Date.now()) {
+            verifiedUntil = Math.max(verifiedUntil, Date.now() + CLOSE_AFTER_UPDATE_MS + 60000);
+          }
+          const show = p.all && verifiedUntil > Date.now();
+          root.dataset.verified = show ? '1' : '0';
+          return show;
+        };
+        const startInspection = () => {
+          inspection = { startedAt: Date.now(), doneAt: [0, 0, 0, 0] };
+          verifiedUntil = 0;
+          root.dataset.verified = '0';
+          clearTimeout(inspectionTimer); inspectionTimer = 0;
+          const tick = () => {
+            inspectionTimer = 0;
+            paintVerified();
+            const finished = inspectionProgress().all || appliedNoteUntil <= Date.now();
+            if (root.dataset.state === 'live' && detailEl) detailEl.textContent = appliedTextFor(pageBuildNow());
+            if (!finished) inspectionTimer = window.setTimeout(tick, 1000);
+          };
+          inspectionTimer = window.setTimeout(tick, 1000);
+        };
+        const appliedTextFor = (build) => 'Update applied' + inspectionText()
+          + (inspectionProgress().all ? stabilityTail() : '')
+          + ' — site build ' + shortClock(build) + ', server current.';
+        const fmtBuildTime = (iso) => {
+          const t = Date.parse(String(iso || ''));
+          if (!Number.isFinite(t)) return '';
+          const d = new Date(t);
+          const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+          return d.getUTCDate() + ' ' + month + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + ' UTC';
+        };
+        const fmtUptime = (secs) => {
+          if (!Number.isFinite(secs) || secs < 0) return '';
+          const total = Math.floor(secs);
+          const d = Math.floor(total / 86400);
+          const h = Math.floor((total % 86400) / 3600);
+          const m = Math.floor((total % 3600) / 60);
+          const s = total % 60;
+          if (d) return d + 'd ' + h + 'h ' + pad2(m) + 'm';
+          if (h) return h + 'h ' + pad2(m) + 'm ' + pad2(s) + 's';
+          return m + 'm ' + pad2(s) + 's';
+        };
+        let uptimeBase = null;   // { sec: measured uptime, at: when the frame arrived }
+        const paintBuildTime = (build) => {
+          if (!buildTimeEl || !build || !build.builtAt) return;
+          const shown = fmtBuildTime(build.builtAt);
+          if (!shown) return;
+          buildTimeEl.textContent = shown;
+          const age = Number.isFinite(Number(build.ageSec)) ? Number(build.ageSec) : Math.max(0, Math.round((Date.now() - Date.parse(build.builtAt)) / 1000));
+          buildTimeEl.title = build.builtAt + (Number.isFinite(age) ? ' · ' + fmtUptime(age) + ' ago' : '');
+        };
+        const paintUptime = () => {
+          if (!uptimeEl || !uptimeBase) return;
+          const secs = uptimeBase.sec + (Date.now() - uptimeBase.at) / 1000;
+          uptimeEl.textContent = fmtUptime(secs);
+          uptimeEl.title = 'haksterai server process uptime, measured on the server';
+        };
+        const paintLiveMeta = (snap) => {
+          if (!snap || typeof snap !== 'object') return;
+          paintBuildTime(snap.build);
+          const secs = Number(snap.server && snap.server.uptimeSec);
+          if (Number.isFinite(secs) && secs >= 0) {
+            // The feed caches its snapshot for a few seconds, so a poll can
+            // arrive with an earlier measurement than one already on screen.
+            // Taking it ticks the clock backwards (owner, 2026-11-21: "time
+            // keeps going forward then back"). Uptime only moves forward; a
+            // large drop is a real restart and does reset it.
+            const shown = uptimeBase ? uptimeBase.sec + (Date.now() - uptimeBase.at) / 1000 : null;
+            if (shown === null || secs >= shown || shown - secs > 60) {
+              uptimeBase = { sec: secs, at: Date.now() };
+              paintUptime();
+            }
+          }
+        };
+
+        // Builder decoder: plain English from the raw builder frame. Percent and
+        // ETA are printed only when the builder reported them; a missing value is
+        // named unknown rather than guessed (§10).
+        const decodeBuilder = (job) => {
+          if (!job || typeof job !== 'object') return 'no builder frame';
+          const bits = [String(job.state || 'UNKNOWN')];
+          const pct = Number(job.percent);
+          bits.push(Number.isFinite(pct) ? 'measured ' + Math.round(pct) + '%' : 'percent not reported');
+          const stage = job.stage && (job.stage.label || job.stage.id);
+          const stages = Array.isArray(job.stages) ? job.stages : [];
+          const done = stages.filter((s) => s && s.status === 'done').length;
+          if (stage) bits.push('stage ' + stage + (stages.length ? ' (' + done + '/' + stages.length + ' done)' : ''));
+          else if (stages.length) bits.push('stages ' + done + '/' + stages.length + ' done');
+          if (Number.isFinite(Number(job.elapsedSec))) bits.push('elapsed ' + fmtSecs(Number(job.elapsedSec)));
+          if (Number.isFinite(Number(job.etaSec))) bits.push('ETA ~' + fmtSecs(Number(job.etaSec)) + (job.etaBasis ? ' from ' + String(job.etaBasis) : ''));
+          else bits.push('ETA unknown');
+          if (job.error) bits.push('error: ' + String(job.error).slice(0, 60));
+          return bits.join(' · ');
+        };
+
+        // Debug strip: every line is a value the applet actually received.
+        const paintDebug = () => {
+          if (!debugBodyEl) return;
+          const snap = dbg.lastSnap;
+          const lines = [];
+          const row = (key, value) => lines.push(key.padEnd(8) + ' ' + value);
+          row('scope', snap ? String(snap.scope || 'public') : 'no frame yet');
+          row('frames', dbg.frames + ' received · ' + (dbg.lastFrameAt ? Math.max(0, Math.round((Date.now() - dbg.lastFrameAt) / 1000)) + 's ago' : 'none'));
+          row('poll', 'check ' + Math.round(CHECK_MS / 1000) + 's · feed ' + Math.round(FEED_MS / 1000) + 's · errors ' + dbg.errors + ' · misses ' + misses);
+          // Watch CPU: the server's own measured load and heap, when this scope
+          // carries them (public view does not — it says so instead of guessing).
+          if (snap && snap.server && Number.isFinite(Number(snap.server.load1))) {
+            const cores = Number(snap.server.cores) || null;
+            row('cpu', 'load ' + Number(snap.server.load1).toFixed(2) + (cores ? '/' + cores + ' cores' : '') + (Number.isFinite(Number(snap.server.heapPct)) ? ' · heap ' + snap.server.heapPct + '%' : ''));
+          } else row('cpu', 'not in this scope');
+          const st = snap && snap.stability;
+          if (st) {
+            row('state', String(st.state || 'unknown'));
+            row('reason', String(st.reason || '—'));
+            const ev = st.evidence;
+            if (ev) row('evidence', ev.passing + '/' + ev.checks + ' pass · measured ' + (ev.measured == null ? '?' : ev.measured) + ' · pass ratio ' + ev.ratio + ' · evidence ratio ' + (ev.evidenceRatio == null ? ev.ratio : ev.evidenceRatio));
+            const heal = st.heal;
+            if (heal) row('heal', (heal.healed && heal.healed.length ? 'retry saved ' + heal.healed.join(',') : 'no retry needed') + (heal.escalated && heal.escalated.length ? ' · escalated ' + heal.escalated.join(',') : '') + ' · retry only, no restart');
+            const wd = st.watchdog;
+            if (wd) row('watchdog', (wd.stale ? 'STALE' : 'ok') + ' · evidence ' + (wd.evidenceAgeSec == null ? '?' : wd.evidenceAgeSec) + 's old');
+            else row('watchdog', 'not exposed in this scope');
+            const win = st.window || {};
+            if (win.remainingSec != null) row('window', Math.round(win.remainingSec) + 's left of ' + win.configuredSec + 's' + (win.approved ? ' · approved' : ' · NOT approved'));
+            for (const c of (st.checks || [])) row('check', c.id + ' = ' + c.status + (c.detail ? ' — ' + c.detail : ''));
+          }
+          row('build', 'page ' + short(pageBuildNow()) + ' · server ' + short(snap && snap.build && snap.build.id));
+          if (snap && snap.server && Number.isFinite(Number(snap.server.uptimeSec))) row('uptime', fmtUptime(Number(snap.server.uptimeSec)));
+          if (snap && snap.job) row('job', String(snap.job.state || '?') + (snap.job.label ? ' — ' + snap.job.label : ''));
+          // Builder decoder (owner, 2026-11-21: "add builder decoder"): the raw
+          // builder frame turned into one plain-English line. Only fields the
+          // builder actually sent are decoded; anything missing says unknown.
+          if (snap && snap.job) row('builder', decodeBuilder(snap.job));
+          // Learned build timings: medians of recorded builds only, never estimates.
+          const pat = snap && snap.pattern;
+          if (pat) {
+            row('pattern', pat.sampledBuilds + ' build' + (pat.sampledBuilds === 1 ? '' : 's') + ' · median ' + fmtSecs(Math.round(pat.medianTotalMs / 1000))
+              + (pat.slowestStage ? ' · slowest ' + pat.slowestStage.id + ' ' + fmtSecs(Math.round(pat.slowestStage.medianMs / 1000)) : '')
+              + (pat.trend ? ' · ' + pat.trend : ''));
+          } else row('pattern', 'no recorded builds yet');
+          debugBodyEl.textContent = lines.join('\n');
+          if (debugScopeEl) debugScopeEl.textContent = snap ? String(snap.scope || 'public') : 'no frame';
+        };
+        const toggleDebug = () => {
+          if (!debugEl) return;
+          const open = debugEl.hidden;
+          debugEl.hidden = !open;
+          if (stabEl) { stabEl.setAttribute('aria-expanded', open ? 'true' : 'false'); stabEl.title = open ? 'Tap to close the debug strip' : 'Tap to open the debug strip'; }
+          if (open) paintDebug();
+        };
+
+        // Grid-width clock: hours and minutes only for the server cell; the full
+        // timestamp stays available in the title.
+        const clockHM = (v) => {
+          const t = Date.parse(String(v || ''));
+          if (!Number.isFinite(t)) return short(v);
+          const d = new Date(t);
+          return pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + 'Z';
+        };
+
+        const readLater = () => {
+          try {
+            const raw = JSON.parse(localStorage.getItem(LATER_KEY) || 'null');
+            return raw && Number.isFinite(raw.until) && raw.until > Date.now() ? raw : null;
+          } catch { return null; }
+        };
+        const setLater = (build) => {
+          try { localStorage.setItem(LATER_KEY, JSON.stringify({ until: Date.now() + LATER_MS, build })); } catch {}
+        };
+        const clearLater = () => { try { localStorage.removeItem(LATER_KEY); } catch {} };
+
+        // ── automatic apply ──────────────────────────────────────────────
+        // A ready build is applied, not parked. The countdown shown in the
+        // detail line is computed from this clock, so what the card says and
+        // what happens are the same number (§10).
+        const editableFocused = () => {
+          try {
+            const a = document.activeElement;
+            return !!(a && a.matches && a.matches('input,textarea,select,[contenteditable=""],[contenteditable="true"]'));
+          } catch { return false; }
+        };
+        const quietEnough = () => {
+          // A page nobody has touched is quiet; a focused field starts its own
+          // clock at focus, and an abandoned focus never parks the update
+          // forever (AUTO_APPLY_FOCUS_MAX_MS).
+          const since = lastInputAt ? Date.now() - lastInputAt : Infinity;
+          return editableFocused() ? since >= AUTO_APPLY_FOCUS_MAX_MS : since >= AUTO_APPLY_QUIET_MS;
+        };
+        const autoApplyLeftSec = () => (autoApplyAt ? Math.max(0, Math.ceil((autoApplyAt - Date.now()) / 1000)) : 0);
+        // The card's progress bar, copied from Junkalot's update applet word for
+        // word (owner, 2026-11-21: "my widget is missing progress bar while
+        // updateing like junkalots has", "copy code word for word"): same track,
+        // gradient fill, shine sweep, indeterminate pulse, aria attributes and
+        // label row. The RULE is Junkalot's too — only a real measurement is a
+        // percentage; everything else is indeterminate and shows no number
+        // (§10, "real counts timers no fabs ever").
+        const paintBar = () => {
+          if (!barEl || !barTrackEl || !barFillEl) return;
+          const applying = state === 'applying' || serverApplying;
+          const readyish = state === 'ready' && !!readyBuild;
+          const liveish = state === 'live' || state === 'restored';
+          const job = live.job || null;
+          const running = !!(job && (job.state === 'RUNNING' || job.state === 'QUEUED'
+            || (job.state === 'VERIFYING' && String(job.status || '') !== 'completed')));
+          const visible = applying || running || readyish || liveish;
+          // Junkalot spins the card's ghost while the deploy is working
+          // (queued through verifying); once it is done the ghost stands still.
+          if (ghostEl) ghostEl.classList.toggle('phantom-spin', applying || running || readyish);
+          barEl.hidden = !visible;
+          if (!visible) return;
+          let value = 0;
+          let indeterminate = true;
+          let label;
+          if (applying || running) {
+            const pct = job && job.percent != null && Number.isFinite(Number(job.percent))
+              ? Math.max(0, Math.min(100, Math.round(Number(job.percent)))) : null;
+            indeterminate = pct == null;
+            value = pct == null ? 0 : pct;
+            label = (job && job.stage && job.stage.label) || 'Applying update';
+          } else if (readyish && autoApplyAt) {
+            const left = autoApplyLeftSec();
+            value = Math.max(0, Math.min(100, Math.round(((AUTO_APPLY_MS / 1000 - left) / (AUTO_APPLY_MS / 1000)) * 100)));
+            indeterminate = false;
+            label = left > 0 ? 'Waiting for the reload' : 'Applying now';
+          } else if (readyish) {
+            label = 'Update queued';
+          } else {
+            label = 'Up to date';
+          }
+          if (indeterminate) barTrackEl.removeAttribute('aria-valuenow');
+          else barTrackEl.setAttribute('aria-valuenow', String(value));
+          barTrackEl.setAttribute('aria-valuetext', indeterminate ? label : label + ' ' + value + '%');
+          barFillEl.className = indeterminate ? 'jl-fill jl-indeterminate' : 'jl-fill';
+          barFillEl.style.width = indeterminate ? '100%' : value + '%';
+          if (barLabelEl) barLabelEl.textContent = label;
+          if (barPctEl) { barPctEl.hidden = indeterminate; barPctEl.textContent = value + '%'; }
+        };
+        const cancelAutoApply = () => {
+          if (autoApplyTimer) { clearTimeout(autoApplyTimer); autoApplyTimer = 0; }
+          autoApplyAt = 0;
+          autoApplyBuild = '';
+        };
+        // The card's ready line is the countdown — one composition so the
+        // version poll and the one-second clock cannot disagree.
+        const paintReadyDetail = () => {
+          if (!detailEl || state !== 'ready' || !readyBuild || readLater()) return;
+          const left = autoApplyLeftSec();
+          detailEl.textContent = 'Update ready — page build ' + short(readyBuild) + ' is live; this tab is on ' + short(pageBuildNow())
+            + (left > 0
+              ? '. Applying automatically in ' + left + 's — click Later to postpone.'
+              : (quietEnough() ? '. Applying now…' : '. Waiting for a quiet moment — applying as soon as you are not typing.'));
+        };
+        const tickAutoApply = () => {
+          autoApplyTimer = 0;
+          if (!autoApplyAt) return;
+          if (state !== 'ready' || !readyBuild || readyBuild !== autoApplyBuild || readLater()) { cancelAutoApply(); return; }
+          paintReadyDetail();
+          paintBar();
+          if (autoApplyLeftSec() > 0) { autoApplyTimer = window.setTimeout(tickAutoApply, 1000); return; }
+          if (!quietEnough()) {
+            // Someone is typing or a form has focus: never reload under their
+            // hands. The deadline stays reached, so the card says it is
+            // waiting and the apply lands at the first quiet second.
+            autoApplyTimer = window.setTimeout(tickAutoApply, 1000);
+            return;
+          }
+          audit('applet.auto-apply', { build: autoApplyBuild });
+          apiApply();
+        };
+        const armAutoApply = (build) => {
+          if (!build) return;
+          if (autoApplyBuild === build && autoApplyAt) return;
+          clearTimeout(autoApplyTimer);
+          autoApplyBuild = build;
+          autoApplyAt = Date.now() + AUTO_APPLY_MS;
+          autoApplyTimer = window.setTimeout(tickAutoApply, 1000);
+        };
+
+        // Publish how much room the applet takes from the bottom of the screen, so
+        // other fixed panels (the sponsored ads card) can dock ABOVE it on phones
+        // instead of being buried underneath it. Measured from the visible mode's
+        // own box, so it follows the card -> chip -> tab transitions.
+        const publishHeight = () => {
+          try {
+            const mode = root.dataset.mode || 'card';
+            const visible = root.querySelector(mode === 'chip' ? '.psa-chip' : mode === 'tab' ? '.psa-tab' : mode === 'ring' ? '.psa-start' : '.psa-card');
+            const rect = visible ? visible.getBoundingClientRect() : null;
+            const gap = rect && rect.height ? Math.max(0, Math.round(window.innerHeight - rect.top)) : 0;
+            document.documentElement.style.setProperty('--phantom-applet-h', gap + 'px');
+          } catch {}
+        };
+        const setMode = (mode) => { root.dataset.mode = mode; publishHeight(); };
+        const expand = () => {
+          setMode('card');
+          clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+          const activeJob = live.job && ['RUNNING', 'QUEUED', 'VERIFYING'].includes(live.job.state);
+          if (!activeJob && state !== 'failed' && state !== 'offline' && !serverApplying) scheduleDock();
+        };
+
+        const paintState = (next) => {
+          state = next;
+          root.dataset.state = next;
+          // Something is queued, running or broken: never leave the corner
+          // empty while there is news to show (owner, 2026-11-21: "the applet is
+          // suppose to hide when no update are que").
+          const currentJob = live.job || {};
+          const updateActive = serverApplying || currentJob.state === 'RUNNING' || currentJob.state === 'QUEUED'
+            || (currentJob.state === 'VERIFYING' && String(currentJob.status || '') !== 'completed');
+          if ((root.dataset.mode === 'hidden' || root.dataset.mode === 'ring') && updateActive) {
+            setMode('chip');
+          }
+          const icon = { checking: '●', live: '✓', restored: '✓', ready: '▲', applying: '⚙', offline: '⚠', building: '⚙', failed: '✗' }[next] || '●';
+          const title = {
+            checking: 'haksterai.com — checking',
+            live: 'haksterai.com is up to date',
+            restored: 'haksterai.com is answering again',
+            ready: 'Update ready',
+            applying: 'Update applying on the server',
+            offline: 'haksterai.com is not answering',
+            building: 'Build running',
+            failed: 'Build failed',
+          }[next] || 'haksterai.com';
+          if (iconEl) iconEl.textContent = icon;
+          if (titleEl) titleEl.textContent = title;
+          if (chipTitleEl) {
+            // The docked chip carries the same truth as the panel — an offline
+            // or failing site never reads "Up to date".
+            chipTitleEl.textContent = {
+              ready: 'Update ready',
+              offline: 'Offline',
+              failed: 'Build failed',
+              applying: 'Updating',
+              building: 'Building',
+            }[next] || 'Up to date';
+          }
+          publishHeight();
+          paintBar();
+        };
+
+        const scheduleDock = (delayMs) => {
+          // The version poll runs every 2 s and asks for a short close after an
+          // update finishes. Restarting the timer on every poll would push the
+          // close out forever, so a pending close is never restarted by an equal
+          // or longer one — only a sooner close may replace it (the 10 s close a
+          // freshly opened card arms is cut to 5 s the moment the build is done).
+          const wanted = Number.isFinite(delayMs) ? delayMs : DOCK_AFTER_MS;
+          if (dockPending) {
+            if (!Number.isFinite(delayMs)) return;
+            const pending = dockDelay || DOCK_AFTER_MS;
+            if (wanted >= pending) return;
+          }
+          clearTimeout(dockTimer); clearTimeout(hideTimer);
+          dockPending = true;
+          dockDelay = wanted;
+          dockTimer = window.setTimeout(() => {
+            dockPending = false;
+            dockDelay = 0;
+            if (root.dataset.mode !== 'card' || root.dataset.state === 'failed') return;
+            // 'ready' is a build sitting on the server waiting for this tab;
+            // like junkalot's toast it announces that and then docks to its chip.
+            if (state !== 'live' && state !== 'restored' && state !== 'ready') return;
+            // Never dock away while a build is actually running — the spinner
+            // belongs on screen for the whole build, not after it.
+            if (live.job && (live.job.state === 'RUNNING' || live.job.state === 'QUEUED'
+              || (live.job.state === 'VERIFYING' && String(live.job.status || '') !== 'completed'))) return;
+            setMode('chip');
+            // Remember which build this close was for: its later frames must not
+            // re-open the card, while a genuinely new build still can.
+            live.closedBuild = (live.job && live.job.buildId) || live.closedBuild;
+            audit('applet.collapse', { buildId: live.job && live.job.buildId });
+            hideTimer = window.setTimeout(() => {
+              // Idle after an update: the applet leaves the corner completely
+              // rather than parking an edge tab there forever (owner,
+              // 2026-11-21: "the applet is suppose to hide when no update are
+              // que"). The live poll brings it back on the next real event.
+              if (root.dataset.mode === 'chip' && (state === 'live' || state === 'restored')) setMode('hidden');
+            }, HIDE_AFTER_MS);
+          }, wanted);
+        };
+
+        const apiApply = async () => {
+          if (busy) return;
+          busy = true;
+          cancelAutoApply();
+          clearLater();
+          if (updateBtn) { updateBtn.disabled = true; updateBtn.textContent = 'Updating…'; }
+          if (detailEl) detailEl.textContent = 'Checking that the server is answering before this tab reloads…';
+          // Leave a one-shot note for the reloaded page: it shows "Update
+          // applied · stable" for the build it lands on (owner, 2026-11-21:
+          // "make go from update ready to when finished says update applied
+          // stable").
+          try { sessionStorage.setItem(APPLIED_KEY, JSON.stringify({ build: readyBuild || (live.job && live.job.buildId) || '', at: Date.now() })); } catch {}
+          let ok = true;
+          try { ok = typeof window.haksterServerHealthy === 'function' ? await window.haksterServerHealthy() : true; } catch { ok = false; }
+          if (ok) { location.reload(); return; }
+          if (typeof window.haksterUpdateWhenReady === 'function') {
+            if (detailEl) detailEl.textContent = 'The server is restarting — this tab reloads by itself as soon as the new build answers.';
+            window.haksterUpdateWhenReady();
+            return;
+          }
+          if (detailEl) detailEl.textContent = 'The server is restarting — reloading in a few seconds.';
+          window.setTimeout(() => location.reload(), 4000);
+        };
+
+        // A queued update — server code on disk ahead of the running process, or
+        // files waiting to be applied — opens the card by itself, the same way
+        // junkalot's toast fires for a build that is ready on the server. This is
+        // decided from the public /api/version answer, so it happens in every
+        // browser on every machine, not only where the build was made.
+        const announceQueued = (serverInfo = {}, opts = {}) => {
+          const count = Number.isFinite(Number(serverInfo.pending)) ? Number(serverInfo.pending) : 0;
+          paintState('ready');
+          if (barEl) barEl.hidden = true;
+          if (actionsEl) actionsEl.hidden = true;
+          if (detailEl) detailEl.textContent = 'Update queued on the server — '
+            + (count ? count + ' file' + (count === 1 ? '' : 's') : 'server changes')
+            + ' waiting to be applied; it applies itself when the server is idle.';
+          // Owner, 2026-11-21: "not to open on every refresh only when updating
+          // should pop open" and then "should open then only autohides til
+          // thren". So: a page load that merely lands on a queued update keeps
+          // the card shut (opts.fresh), but a queued update that APPEARS while
+          // the tab is open opens the card once and then auto-hides on the
+          // normal dock timer (10 s to the chip, then the chip tucks away).
+          queuedShown = 'queued';
+          // A queued or ready build is not an update in progress. Keep the
+          // widget hidden until the server reports applying or live build work.
+        };
+
+        const check = async () => {
+          try {
+            const res = await fetch('/api/version?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' });
+            if (!res.ok) throw new Error('status ' + res.status);
+            const data = await res.json();
+            root.dataset.ready = '1';
+            const server = (data && data.server) || {};
+            serverApplying = !!server.applying;
+            lastCheck = Date.now();
+            misses = 0;
+            if (siteBuildEl) { siteBuildEl.textContent = shortClock(data && data.build); siteBuildEl.title = String((data && data.build) || ''); }
+            if (pendingEl) pendingEl.textContent = Number.isFinite(Number(server.pending)) ? Number(server.pending) + ' files' : '—';
+            if (checkedEl) checkedEl.textContent = ago(lastCheck);
+            if (chipCodeEl) chipCodeEl.textContent = shortClock(data && data.build);
+
+            const pageBuild = pageBuildNow();
+            const newerBuild = !!(data && data.build && pageBuild && data.build !== pageBuild);
+            // While a build owns the card, the version poll must not overwrite
+            // the measured stage/percent with "up to date" — but it keeps the
+            // build ids and checked timestamp fresh underneath.
+            // A finished build must not keep the card open. livejob reports a
+            // completed build as VERIFYING, so the moment the server answers
+            // with the build this page is already on — and nothing newer is
+            // waiting — the update is done and the card closes itself.
+            const buildDone = !!(live.job && live.job.state === 'VERIFYING'
+              && String(live.job.status || '') === 'completed'
+              && !server.applying && !newerBuild);
+            // An update is queued when the server has code or files waiting to
+            // apply. It must announce itself, not sit silently behind the word
+            // "stale" in a detail line.
+            const queuedUpdate = !server.applying && !!(server.stale || Number(server.pending) > 0);
+            // Was the card announcing a queued update a moment ago? Then the
+            // update has just finished applying and this card retracts.
+            const wasQueued = !!queuedShown;
+            const shownBuild = readyBuild || (live.job && live.job.buildId) || pageBuild;
+            const verifiedApplied = !server.applying && !server.stale && Number(server.pending) === 0
+              && !!data.build && String(data.build) === String(shownBuild);
+            // The finished line names the real stability state of the build this
+            // tab is now on (owner, 2026-11-21: "when finished says update
+            // applied stable"). Nothing is called stable until the monitor says so.
+            const appliedText = () => appliedTextFor(data && data.build);
+            if (!queuedUpdate) queuedShown = '';
+            // The live build feed can own the card and return from this poll
+            // below. Still surface the applet if the version endpoint reports
+            // that an update has started while the user has it tucked away.
+            if (server.applying && root.dataset.mode !== 'card') {
+              setMode('card');
+              clearTimeout(dockTimer); clearTimeout(hideTimer);
+              dockPending = false; dockDelay = 0;
+            }
+            if (liveOwns() && !buildDone) { if (checkedEl) checkedEl.textContent = ago(lastCheck); return; }
+            if (server.error) {
+              if (serverEl) serverEl.textContent = 'unavailable';
+            } else {
+              if (serverEl) { serverEl.textContent = clockHM(server.build) + (server.stale ? ' · behind disk' : ' · current'); serverEl.title = String(server.build || ''); }
+            }
+
+            if (server.applying) {
+              setMode('card');
+              // The update is running: hold the card until it reports done.
+              clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+              queuedShown = 'queued';
+              paintState('applying');
+              if (actionsEl) actionsEl.hidden = true;
+              if (barEl) barEl.hidden = false;
+              if (detailEl) detailEl.textContent = 'The server is applying a new build. This tab reloads when the new one is answering.';
+            } else if (newerBuild) {
+              serverApplying = false;
+              // A ready build fires the card once; the 2 s poll must not keep
+              // throwing it back open after it has docked for this same build.
+              const nextReady = String(data.build);
+              const newlyReady = nextReady !== readyBuild;
+              readyBuild = nextReady;
+              if (newlyReady) readySinceAt = Date.now();
+              const postponed = readLater();
+              if (postponed && postponed.build === readyBuild) {
+                // A person clicked Later: that is a real answer, so the
+                // apply waits for the 30-minute deferral or Update now.
+                cancelAutoApply();
+                paintState('ready');
+                if (barEl) barEl.hidden = true;
+                if (actionsEl) actionsEl.hidden = false;
+                if (detailEl) detailEl.textContent = 'New build ' + short(readyBuild) + ' is live — this tab is on ' + short(pageBuild) + '. Postponed — Update now applies it.';
+              } else {
+                // Owner, 2026-11-21: "where update ready is after verified" —
+                // the new build is not called ready (and not applied) until the
+                // stability monitor has verified it. Until then the card says
+                // it is verifying, and the apply clock has not started.
+                const st = live.stability || {};
+                const deployed = String((st.timestamps && st.timestamps.deployedBuildId) || '');
+                const verified = st.state === 'STABLE' && deployed === readyBuild;
+                // If verification never reports (feed down), do not park the
+                // update forever: apply after a bounded wait and say so.
+                const verifyOverrun = readySinceAt > 0 && Date.now() - readySinceAt > 180000;
+                paintState('ready');
+                if (barEl) barEl.hidden = true;
+                if (actionsEl) actionsEl.hidden = false;
+                if (verified || verifyOverrun) {
+                  // Owner: "no updates waiting always need to auto apply".
+                  armAutoApply(readyBuild);
+                  paintReadyDetail();
+                } else {
+                  cancelAutoApply();
+                  const left = st.window && Number.isFinite(Number(st.window.remainingSec))
+                    ? Math.max(0, Math.round(Number(st.window.remainingSec))) : null;
+                  if (detailEl) detailEl.textContent = 'New page build ' + short(readyBuild) + ' is live — verifying stability before it is called ready'
+                    + (left != null ? ' (' + left + 's left)' : '') + '. It applies automatically once verified.';
+                }
+              }
+              // A ready build opens the card once and then auto-hides through the
+              // normal dock timer (owner, 2026-11-21: "should open then only
+              // autohides til thren"). The exception kept from the earlier rule
+              // is the page load that merely lands on an already-ready build —
+              // that stays on the chip ("not to open on every refresh only when
+              // updating"). A card the owner opened themselves still retracts on
+              // its dock timer; new work opens it again through the live feed.
+              // A ready build is not running work. The applet opens only after
+              // applying/live telemetry confirms that an update has started.
+            } else {
+              readyBuild = '';
+              readySinceAt = 0;
+              cancelAutoApply();
+              if (barEl) barEl.hidden = true;
+              if (actionsEl) actionsEl.hidden = true;
+              if (wasOffline) {
+                paintState('restored');
+                if (detailEl) detailEl.textContent = 'haksterai.com is answering again — site build ' + shortClock(data && data.build) + '.';
+                wasOffline = false;
+                window.setTimeout(() => { if (state === 'restored') { paintState('live'); scheduleDock(); } }, 6000);
+                // Answering again is reported on the chip; it does not pop the
+                // panel open (only work that is actually updating does).
+              } else if (state !== 'live') {
+                if (queuedUpdate && !buildDone) announceQueued(server, { fresh: firstVersionCheck });
+                else {
+                  const justFinished = (buildDone || wasQueued) && verifiedApplied;
+                  paintState('live');
+                  if (justFinished) { appliedNoteUntil = Date.now() + 120000; startInspection(); }
+                  if (detailEl) detailEl.textContent = (appliedNoteUntil > Date.now() ? appliedText() : justFinished ? appliedText()
+                    : (buildDone || wasQueued ? 'The server is still reporting the update as outstanding — site build ' + shortClock(data && data.build) + '.'
+                      : 'haksterai.com is up to date — site build ' + shortClock(data && data.build) + ', server current.'));
+                  if (justFinished && root.dataset.mode === 'card') scheduleDock(CLOSE_AFTER_UPDATE_MS);
+                  // This tab reloaded itself for this build: say so once.
+                  if (appliedMarker && String(appliedMarker.build || '') === pageBuildNow()) {
+                    appliedMarker = null;
+                    appliedNoteUntil = Date.now() + 120000;
+                    if (detailEl) detailEl.textContent = appliedText();
+                    startInspection();
+                    audit('applet.applied', { build: pageBuildNow() });
+                  }
+                }
+              } else {
+                if (queuedUpdate && !buildDone) announceQueued(server, { fresh: firstVersionCheck });
+                else {
+                  const justFinished = (buildDone || wasQueued) && verifiedApplied;
+                  if (justFinished) { appliedNoteUntil = Date.now() + 120000; startInspection(); }
+                  if (detailEl) detailEl.textContent = (appliedNoteUntil > Date.now() ? appliedText() : justFinished ? appliedText()
+                    : (buildDone || wasQueued ? 'The server is still reporting the update as outstanding — site build ' + shortClock(data && data.build) + '.'
+                      : 'haksterai.com is up to date — site build ' + shortClock(data && data.build) + ', server current.'));
+                  // Re-opened or already showing live while an update just
+                  // finished: still close, on the same short timer.
+                  if (justFinished && root.dataset.mode === 'card') scheduleDock(CLOSE_AFTER_UPDATE_MS);
+                }
+              }
+              // Startup finished with nothing queued: only the ring was shown
+              // while checking — now it leaves too (owner, 2026-11-21: "only
+              // ring and progress on startup", "hide when no update are que").
+              if (!queuedUpdate && (root.dataset.mode === 'ring' || root.dataset.mode === 'tab')) setMode('hidden');
+            }
+            if (!busy && updateBtn) { updateBtn.disabled = false; updateBtn.textContent = 'Update now'; }
+          } catch {
+            misses += 1;
+            dbg.errors += 1;
+            if (misses >= OFFLINE_AFTER) {
+              wasOffline = true;
+              paintState('offline');
+              // Reported on the chip/tab (red). The panel never pops open for a
+              // non-update event (owner, 2026-11-21).
+              clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+              if (barEl) barEl.hidden = true;
+              if (actionsEl) actionsEl.hidden = true;
+              if (serverEl) serverEl.textContent = 'no response';
+              if (detailEl) detailEl.textContent = 'haksterai.com has not answered — the server is restarting, or the tunnel is not routing.';
+            }
+          }
+          firstVersionCheck = false;
+          if (checkedEl && lastCheck) checkedEl.textContent = ago(lastCheck);
+        };
+
+        updateBtn?.addEventListener('click', (event) => { event.stopPropagation(); apiApply(); });
+        laterBtn?.addEventListener('click', () => {
+          cancelAutoApply();
+          setLater(readyBuild);
+          if (barEl) barEl.hidden = true;
+          if (actionsEl) actionsEl.hidden = false;
+          if (detailEl) detailEl.textContent = 'Postponed for 30 minutes — Update now applies it sooner.';
+          scheduleDock();
+        });
+        // Any real interaction counts as "someone is here" for the quiet window.
+        const noteInput = () => { lastInputAt = Date.now(); };
+        document.addEventListener('pointerdown', noteInput, { passive: true });
+        document.addEventListener('keydown', noteInput, { passive: true });
+        // Focusing a field also starts the quiet clock, so a form nobody types
+        // in is released after AUTO_APPLY_FOCUS_MAX_MS instead of blocking forever.
+        document.addEventListener('focusin', (event) => {
+          const t = event.target;
+          if (t && t.matches && t.matches('input,textarea,select,[contenteditable=""],[contenteditable="true"]')) noteInput();
+        }, true);
+        el('psa-chip')?.addEventListener('click', expand);
+        el('psa-tab')?.addEventListener('click', expand);
+        stabEl?.addEventListener('click', toggleDebug);
+        stabEl?.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleDebug(); }
+        });
+
+        const startPolling = () => {
+          if (pollTimer) return;
+          pollTimer = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            check();
+          }, CHECK_MS);
+        };
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') check();
+        });
+        // Keep the published height honest as the card's text reflows or the
+        // window changes size.
+        window.addEventListener('resize', publishHeight);
+        window.addEventListener('orientationchange', publishHeight);
+        if (typeof ResizeObserver === 'function') {
+          const cardBox = root.querySelector('.psa-card');
+          if (cardBox) new ResizeObserver(publishHeight).observe(cardBox);
+        }
+        publishHeight();
+
+        // Exposed after check() exists, for the headless runtime check and for a
+        // manual re-check from the console. Read-only: it only re-runs the poll.
+        // ── Live build feed ────────────────────────────────────────────────
+        // Server-sent events carry the same measured snapshot the isolated
+        // preview uses. Auth is header-only: EventSource cannot send headers,
+        // so this uses fetch + a stream reader and never puts the key in a URL.
+        // A build that stops reporting is aged out to DISCONNECTED/UNKNOWN —
+        // there is no path here that shows success without a fresh frame.
+
+        const audit = (event, extra) => {
+          try {
+            let key = '';
+            try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+            if (!key) return; // public visitors cannot write the audit log
+            const now = Date.now();
+            const dedupe = event + '|' + ((extra && extra.buildId) || '');
+            if (live.audited[dedupe] && now - live.audited[dedupe] < 3000) return;
+            live.audited[dedupe] = now;
+            fetch('/api/applet/event', {
+              method: 'POST',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+              body: JSON.stringify(Object.assign({ event }, extra || {})),
+              keepalive: true,
+            }).catch(() => {});
+          } catch {}
+        };
+
+        const liveOwns = () => {
+          const j = live.job;
+          if (!j) return false;
+          if (j.state === 'RUNNING' || j.state === 'QUEUED') return true;
+          if (j.state === 'VERIFYING' || j.state === 'FAILED' || j.state === 'UNKNOWN') {
+            // Three minutes, not fifteen: livejob reports a COMPLETED build as
+            // VERIFYING, so a long window left the card pinned open long after
+            // the update had finished. Long enough to cover a restart + health
+            // check, short enough that the card cannot outstay the update.
+            return !!(j.startedAt && Date.now() - Date.parse(j.startedAt) < 3 * 60 * 1000);
+          }
+          return false;
+        };
+        const fmtSecs = (s) => {
+          if (!Number.isFinite(s) || s < 0) return '—';
+          const m = Math.floor(s / 60);
+          const r = Math.round(s % 60);
+          return m ? m + 'm ' + String(r).padStart(2, '0') + 's' : r + 's';
+        };
+        const utcClock = (iso) => {
+          const t = Date.parse(iso || '');
+          if (!Number.isFinite(t)) return '';
+          const d = new Date(t);
+          return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0')
+            + ':' + String(d.getUTCSeconds()).padStart(2, '0');
+        };
+        const paintLive = (stateName, title, detail) => {
+          paintState(stateName);
+          if (titleEl) titleEl.textContent = title;
+          if (detailEl) detailEl.textContent = detail;
+        };
+        const setSpinner = (mode, failed) => {
+          [el('psa-chip'), el('psa-tab')].forEach((b) => {
+            if (!b) return;
+            b.dataset.active = mode ? '1' : '0';
+            b.dataset.failed = failed ? '1' : '0';
+          });
+          // The startup ring is the only thing on screen in ring mode, so it keeps
+          // spinning while the first checks settle instead of freezing when the
+          // first idle status frame arrives. Measured progress still takes over
+          // the ring through paintRingProgress.
+          const start = el('psa-start');
+          if (start) {
+            start.dataset.active = '1';
+            start.dataset.failed = failed ? '1' : '0';
+          }
+        };
+        // Draws the measured fraction on the little ring. Only a percent the
+        // server actually reported reaches this function; null means unknown and
+        // the ring keeps spinning (indeterminate) instead of showing a guess.
+        const paintRingProgress = (pct, failed) => {
+          const value = Number.isFinite(pct) ? Math.max(0, Math.min(100, Number(pct))) : null;
+          [el('psa-chip-ring'), el('psa-tab-ring'), el('psa-start-ring')].forEach((r) => {
+            if (!r) return;
+            r.dataset.failed = failed ? '1' : '0';
+            if (value == null) {
+              delete r.dataset.progress;
+              r.style.removeProperty('--p');
+            } else {
+              r.dataset.progress = '1';
+              r.style.setProperty('--p', String(Math.round(value)) + '%');
+            }
+          });
+        };
+
+        const renderLive = (snap) => {
+          if (!snap || typeof snap !== 'object') return;
+          root.dataset.ready = '1';
+          dbg.frames += 1;
+          dbg.lastFrameAt = Date.now();
+          dbg.lastSnap = snap;
+          if (debugEl && !debugEl.hidden) paintDebug();
+          // Real build time + server uptime come from every live frame, so the
+          // card is correct on the first snapshot instead of only after a build.
+          paintLiveMeta(snap);
+          const firstFrame = !live.at;
+          live.at = Date.now();
+          const job = snap.job || {};
+          // Baseline for the one-second clock. Every value in it was measured on
+          // the server; the local second hand only advances it from the moment
+          // this frame arrived. Without it the elapsed/ETA/remaining text sat
+          // frozen on the 5 s poll and read as stuck at zero (owner 2026-11-21:
+          // "make sure the secs and update time ... is correct live always").
+          live.jobBase = (Number.isFinite(job.elapsedSec) || Number.isFinite(job.etaSec)) ? {
+            elapsed: Number.isFinite(job.elapsedSec) ? Number(job.elapsedSec) : null,
+            eta: Number.isFinite(job.etaSec) ? Number(job.etaSec) : null,
+            state: String(job.state || ''),
+            stage: job.stage && job.stage.label ? String(job.stage.label) : '',
+            at: live.at,
+          } : null;
+          const prevState = live.job && live.job.state;
+          live.job = job;
+          // Repaint from each accepted telemetry frame so the card bar follows
+          // the server's latest measured percentage without waiting for a
+          // separate state transition or the one-second clock.
+          paintBar();
+
+          const running = job.state === 'RUNNING' || job.state === 'QUEUED';
+          const verifying = job.state === 'VERIFYING';
+          // livejob reports a FINISHED build as VERIFYING. That frame should open
+          // the card once — an update must still announce itself — but once the
+          // applet has closed for that build it must not re-open it on the next
+          // 5 s poll. Treating every such frame as work was what kept the card
+          // open forever; ignoring them entirely meant an update could pass
+          // without the applet ever showing. One open per build, then closed.
+          const doneBuild = verifying && String(job.status || '') === 'completed';
+          const alreadyClosed = doneBuild && !!job.buildId && live.closedBuild === job.buildId;
+          const verifyingLive = verifying && !alreadyClosed;
+          const failed = job.state === 'FAILED';
+          const unknown = job.state === 'UNKNOWN';
+          const work = running || verifyingLive || failed || unknown;
+
+          setSpinner(running || verifyingLive, failed);
+          // The little ring carries the real fraction while the panel is still
+          // docked, so measured progress is visible before anything pops open.
+          paintRingProgress(failed ? null : job.percent, failed);
+          if (tabPctEl) {
+            tabPctEl.textContent = failed ? '✗' : Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : '·';
+            tabPctEl.style.color = failed ? '#f87171' : '#00ff41';
+          }
+
+          // Let the ring paint its progress for a beat before the panel opens;
+          // while docked the ring is the only place a running build shows.
+          // A build that has already FINISHED is news, not work: it must never
+          // open the panel by itself. Owner, 2026-11-21: "fix applet stays open
+          // on haksterai ... need to stay hidden until updates starts". Without
+          // !doneBuild a page load that landed on a completed-but-verifying job
+          // opened the card and then pinned it forever.
+          if ((running || verifyingLive) && !doneBuild && root.dataset.mode !== 'card' && !live.openTimer) {
+            live.openTimer = window.setTimeout(() => {
+              live.openTimer = 0;
+              if (root.dataset.mode === 'card') return;
+              const current = live.job || {};
+              const stillActive = serverApplying || current.state === 'RUNNING' || current.state === 'QUEUED'
+                || (current.state === 'VERIFYING' && String(current.status || '') !== 'completed');
+              if (!stillActive) {
+                if (root.dataset.mode !== 'card') setMode('hidden');
+                return;
+              }
+              expand();
+              audit('applet.expand', { buildId: live.job && live.job.buildId, stage: live.job && live.job.stage && live.job.stage.id });
+            }, 900);
+          }
+          // A failure only opens the card if this tab watched the build fail.
+          // On a hard refresh the first frame may already say FAILED for a build
+          // that died minutes ago — that is history, not an update in progress,
+          // so the applet stays shut (owner, 2026-11-21: "only opens when
+          // updating ever"). prevState is undefined on the first frame.
+          const failedLive = failed && (prevState === 'RUNNING' || prevState === 'QUEUED' || prevState === 'VERIFYING');
+          if (failedLive) {
+            setMode('card');
+            clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+          }
+          // A running build, or a health check that is genuinely still running,
+          // keeps the card up. A FINISHED build is only announcing itself and
+          // must be allowed to close on check()'s short timer — clearing its
+          // pending dock here was what kept the card pinned after an update.
+          if (running || (verifyingLive && !doneBuild)) { clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0; }
+
+          if (liveEl) liveEl.hidden = !work;
+          if (stageEl) stageEl.textContent = job.stage && job.stage.label ? job.stage.label : (unknown ? 'UNKNOWN' : (job.label || '—'));
+          if (clockEl) clockEl.textContent = unknown ? 'UNKNOWN' : Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : 'in progress';
+          if (elapsedEl) elapsedEl.textContent = unknown ? 'elapsed UNKNOWN' : 'elapsed ' + fmtSecs(job.elapsedSec);
+          if (etaEl) etaEl.textContent = Number.isFinite(job.etaSec) ? 'ETA ~' + fmtSecs(job.etaSec) : 'ETA unknown';
+          if (updatesEl) {
+            const rows = Array.isArray(job.updates) ? job.updates.slice(-6) : [];
+            updatesEl.replaceChildren(...rows.map((u) => {
+              const li = document.createElement('li');
+              const t = document.createElement('span');
+              t.className = 't';
+              t.textContent = utcClock(u.at);
+              const x = document.createElement('span');
+              x.textContent = String(u.text || '');
+              li.append(t, x);
+              return li;
+            }));
+            updatesEl.hidden = rows.length === 0;
+          }
+          if (errorEl) {
+            const tail = Array.isArray(job.errorTail) && job.errorTail.length ? job.errorTail.join('\n') : String(job.error || '');
+            errorEl.textContent = failed ? tail.slice(-1200) : '';
+            errorEl.hidden = !(failed && errorEl.textContent);
+          }
+
+          if (running) {
+            paintLive('building',
+              'Building — ' + (Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : 'in progress'),
+              (job.stage && job.stage.label ? job.stage.label + ' · ' : '')
+                + 'elapsed ' + fmtSecs(job.elapsedSec) + ' · ' + (Number.isFinite(job.etaSec) ? 'ETA ~' + fmtSecs(job.etaSec) : 'ETA unknown'));
+            if (prevState !== 'RUNNING' && prevState !== 'QUEUED') audit('spinner.activate', { buildId: job.buildId, stage: job.stage && job.stage.id, percent: job.percent });
+            const stageId = job.stage && job.stage.id;
+            if (stageId && stageId !== live.lastStage) {
+              live.lastStage = stageId;
+              if (prevState === 'RUNNING' || prevState === 'QUEUED') audit('job.stage', { buildId: job.buildId, stage: stageId, percent: job.percent });
+            }
+          } else if (verifyingLive) {
+            paintLive('applying', 'Build complete — verifying health',
+              (job.label || 'Health verification running') + ' · stability window is separate');
+            if (prevState === 'RUNNING' || prevState === 'QUEUED') audit('job.complete', { buildId: job.buildId, percent: job.percent });
+          } else if (failed) {
+            paintLive('failed', 'Build failed', job.error || job.label || 'The build failed — log preserved below.');
+            if (prevState !== 'FAILED') audit('job.failed', { buildId: job.buildId, stage: job.stage && job.stage.id });
+          } else if (unknown) {
+            paintLive('offline', 'Build telemetry lost — state UNKNOWN', job.label || 'No frame from the build for over 3 minutes.');
+            if (prevState !== 'UNKNOWN') audit('telemetry.lost', { buildId: job.buildId });
+          } else if (!firstFrame && live.connected === false) {
+            // back from a disconnect with an idle job: say so, don't fake success
+            paintLive('restored', 'Telemetry restored', 'Build ' + short(job.buildId || '') + ' state: ' + (job.state || 'IDLE'));
+            scheduleDock();
+          }
+
+          // A finished build closes on the same 5 s clock junkalot's toast uses,
+          // armed straight from the telemetry frame instead of waiting out the
+          // version poll — the poll can add its full 2 s interval to the close.
+          if (doneBuild && root.dataset.mode === 'card') scheduleDock(CLOSE_AFTER_UPDATE_MS);
+
+          // Stability is independent of the server update lifecycle.
+          const st = snap.stability;
+          if (st) live.stability = st;
+          // "Update ready" waits for the new build's verification (owner,
+          // 2026-11-21: "where update ready is after verified"). This frame may
+          // be the one that reports STABLE before the next version poll, so the
+          // apply clock starts the moment verification lands, not up to 10 s later.
+          if (st && root.dataset.state === 'ready' && readyBuild && !autoApplyAt && !readLater()
+            && String(st.state || '') === 'STABLE'
+            && String((st.timestamps && st.timestamps.deployedBuildId) || '') === readyBuild) {
+            armAutoApply(readyBuild);
+            paintReadyDetail();
+          }
+          if (st && stabEl) {
+            const state = String(st.state || 'UNKNOWN');
+            const win = st.window || {};
+            stabEl.hidden = false;
+            stabEl.dataset.state = state;
+            if (stabStateEl) stabStateEl.textContent = state === 'STABLE' ? '✓ STABLE' : state;
+            // The countdown is painted from a monotonic base, never from the raw
+            // frame. The feed caches snapshots, so a cached "27s left" landing
+            // after "20s left" used to flick the clock backwards (owner,
+            // 2026-11-21: "fix time again keeps going foward thrn back").
+            const nextRemaining = Number.isFinite(win.remainingSec) ? Number(win.remainingSec) : null;
+            const prevBase = live.stabBase;
+            const shownRemaining = prevBase && prevBase.remaining != null
+              ? Math.max(0, prevBase.remaining - (Date.now() - prevBase.at) / 1000)
+              : null;
+            const keepPrev = prevBase && prevBase.state === state && nextRemaining != null && shownRemaining != null &&
+              nextRemaining > shownRemaining + 1 && nextRemaining - shownRemaining <= 30;
+            if (!keepPrev) {
+              live.stabBase = {
+                state,
+                remaining: nextRemaining,
+                configured: Number.isFinite(win.configuredSec) ? Number(win.configuredSec) : null,
+                at: Date.now(),
+              };
+            }
+            let detail = '';
+            if (state === 'VERIFYING' && live.stabBase && live.stabBase.remaining != null) {
+              const shown = Math.max(0, live.stabBase.remaining - (Date.now() - live.stabBase.at) / 1000);
+              detail = '· ' + fmtSecs(shown) + ' left of ' + fmtSecs(live.stabBase.configured) + ' window';
+            }
+            else if (state === 'STABLE') {
+              // Verified stability carries its UTC verification time, not just a
+              // duration (owner, 2026-11-21: "when it verify stability add
+              // timestamed").
+              const stableAt = st.timestamps && st.timestamps.buildFirstStableAt;
+              const at = stableAt ? new Date(stableAt) : null;
+              const stamp = at && !Number.isNaN(at.getTime())
+                ? pad2(at.getUTCHours()) + ':' + pad2(at.getUTCMinutes()) + ':' + pad2(at.getUTCSeconds()) + 'Z'
+                : null;
+              const held = st.timestamps && Number.isFinite(Number(st.timestamps.stableForSec)) ? fmtSecs(Number(st.timestamps.stableForSec)) : null;
+              detail = '· verified ' + (stamp || '—') + (held ? ' · ' + held + ' stable' : '');
+            }
+            else detail = '· ' + String(st.reason || 'no reason reported');
+            if (stabDetailEl) stabDetailEl.textContent = detail;
+            paintStabCorner(state);
+            // While the finished-update note is showing, keep it in step with
+            // the real stability state (verifying → stable).
+            if (appliedNoteUntil > Date.now() && root.dataset.state === 'live' && detailEl) {
+              detailEl.textContent = appliedTextFor(pageBuildNow());
+            }
+            // A stability frame can be the first place the finished build is
+            // reported STABLE with every check passing — that is the moment the
+            // circle earns its verification check.
+            paintVerified();
+            if (state === 'STABLE' && live.lastState !== 'STABLE') {
+              live.lastState = 'STABLE';
+              audit('stability.verified', { buildId: job.buildId });
+            }
+          }
+
+          if (firstFrame && (running || verifying)) audit('spinner.activate', { buildId: job.buildId, stage: job.stage && job.stage.id, percent: job.percent });
+          live.connected = true;
+        };
+
+        let liveTimer = 0;
+        const pollLive = async () => {
+          if (!live.firstTryAt) live.firstTryAt = Date.now();
+          const readSnap = async () => {
+            let key = '';
+            try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+            const res = await fetch('/api/applet/status?t=' + Date.now(), {
+              headers: key ? { 'x-api-key': key } : {},
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
+            if (!res.ok) throw new Error('status ' + res.status);
+            return res.json();
+          };
+          try {
+            renderLive(await readSnap());
+          } catch {
+            // One quick self-retry (owner, 2026-11-21: "add auto fix heal"):
+            // a restart or a dropped keep-alive answers once and then recovers,
+            // and one lost poll should not be shown as a lost feed.
+            try {
+              await new Promise((r) => setTimeout(r, 600));
+              renderLive(await readSnap());
+            } catch { dbg.errors += 1; }
+          }
+          scheduleLivePoll();
+        };
+        const scheduleLivePoll = () => {
+          clearTimeout(liveTimer);
+          liveTimer = window.setTimeout(pollLive, FEED_MS);
+        };
+        const connectLive = async () => {
+          let key = '';
+          try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+          try {
+            const res = await fetch('/api/applet/stream?t=' + Date.now(), {
+              headers: key ? { 'x-api-key': key } : {},
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
+            if (!res.ok || !res.body || !res.body.getReader) throw new Error('stream ' + res.status);
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              let cut = buf.indexOf('\n\n');
+              while (cut >= 0) {
+                const frame = buf.slice(0, cut);
+                buf = buf.slice(cut + 2);
+                const data = frame.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+                if (data) {
+                  try {
+                    const msg = JSON.parse(data);
+                    if (msg && msg.type === 'snapshot') renderLive(msg);
+                  } catch {}
+                }
+                cut = buf.indexOf('\n\n');
+              }
+            }
+          } catch {}
+          clearTimeout(liveTimer);
+          pollLive();
+        };
+
+        // One-second heartbeat: the server uptime and the "checked" age move
+        // between the 5 s snapshots instead of sitting frozen on screen. The
+        // uptime is only advanced while a snapshot is fresh (60 s); after that
+        // the last measured value stays as the last known truth.
+        // Move the measured build and stability clocks forward between frames.
+        // The base is always a server value; nothing here invents progress, the
+        // percent stays exactly what the server reported, and every clock stops
+        // once its frame is past the 30 s telemetry limit (the watchdog below
+        // then turns the whole panel to UNKNOWN).
+        const tickLiveClocks = () => {
+          if (!live.at || Date.now() - live.at > 30000) return;
+          const delta = (Date.now() - live.at) / 1000;
+          const b = live.jobBase;
+          if (b && (b.state === 'RUNNING' || b.state === 'QUEUED')) {
+            const elapsed = b.elapsed == null ? null : b.elapsed + delta;
+            const eta = b.eta == null ? null : Math.max(0, b.eta - delta);
+            if (elapsedEl && elapsed != null) elapsedEl.textContent = 'elapsed ' + fmtSecs(elapsed);
+            if (etaEl) etaEl.textContent = eta == null ? 'ETA unknown' : 'ETA ~' + fmtSecs(eta);
+            if (detailEl) {
+              detailEl.textContent = (b.stage ? b.stage + ' · ' : '')
+                + 'elapsed ' + fmtSecs(elapsed == null ? NaN : elapsed)
+                + ' · ' + (eta == null ? 'ETA unknown' : 'ETA ~' + fmtSecs(eta));
+            }
+          }
+          const s = live.stabBase;
+          if (s && s.state === 'VERIFYING' && s.remaining != null && s.configured != null && stabDetailEl) {
+            // Count from the base's OWN accept time, not from the latest frame:
+            // when a cached frame is ignored the base keeps its older timestamp
+            // while live.at moves on, and counting from live.at visibly reset
+            // the countdown upward (owner, 2026-11-21: "time again keeps going
+            // foward thrn back").
+            stabDetailEl.textContent = '· ' + fmtSecs(Math.max(0, s.remaining - (Date.now() - s.at) / 1000)) + ' left of ' + fmtSecs(s.configured) + ' window';
+            paintStabCorner('VERIFYING');
+            paintBar();
+          }
+        };
+
+        window.setInterval(() => {
+          if (document.visibilityState !== 'visible') return;
+          if (uptimeBase && Date.now() - uptimeBase.at <= 60000) paintUptime();
+          if (debugEl && !debugEl.hidden) paintDebug();
+          if (checkedEl && lastCheck) checkedEl.textContent = ago(lastCheck);
+          tickLiveClocks();
+        }, 1000);
+
+        // A frame older than 30 s means the telemetry path is gone. Everything
+        // on screen becomes UNKNOWN — never the last percentage, never success.
+        // A hidden tab is not a dead server: nothing is judged while the page is
+        // in the background, and on return the fresh poll gets a short grace
+        // before a missing frame can be called DISCONNECTED. Without this, coming
+        // back to the tab flashed the red "?" tab until the first poll landed
+        // (owner, 2026-11-21: "shows red cirlce with question mark at the moment
+        // now its hgreen").
+        let resumeGraceUntil = 0;
+        window.setInterval(() => {
+          if (document.visibilityState !== 'visible') return;
+          if (Date.now() < resumeGraceUntil) return;
+          // Never connected at all: give the first fetches a full minute of
+          // retries before declaring the telemetry lost. Previously a page whose
+          // very first frame never arrived stayed on "checking" forever.
+          const stale = live.at ? (Date.now() - live.at > 30000) : (live.firstTryAt > 0 && Date.now() - live.firstTryAt > 60000);
+          if (!stale) return;
+          if (live.at ? !live.connected : live.noFrameReported) return;
+          if (live.at) live.connected = false; else live.noFrameReported = true;
+          setSpinner(false, true);
+          paintRingProgress(null, true);
+          if (tabPctEl) { tabPctEl.textContent = '?'; tabPctEl.style.color = '#f87171'; }
+          if (liveEl) liveEl.hidden = false;
+          if (stageEl) stageEl.textContent = 'UNKNOWN';
+          if (clockEl) clockEl.textContent = 'UNKNOWN';
+          if (elapsedEl) elapsedEl.textContent = 'elapsed UNKNOWN';
+          if (etaEl) etaEl.textContent = 'ETA unknown';
+          if (updatesEl) updatesEl.replaceChildren();
+          if (errorEl) errorEl.hidden = true;
+          if (stabEl) {
+            stabEl.hidden = false;
+            stabEl.dataset.state = 'UNKNOWN';
+            if (stabStateEl) stabStateEl.textContent = 'UNKNOWN';
+            if (stabDetailEl) stabDetailEl.textContent = '· no telemetry';
+            paintStabCorner('UNKNOWN');
+          }
+          paintLive('offline', 'DISCONNECTED — state UNKNOWN',
+            'No frame from the server for ' + Math.round((Date.now() - (live.at || live.firstTryAt)) / 1000) + 's. Nothing here is being reported as success.');
+          audit('telemetry.lost', { buildId: live.job && live.job.buildId });
+        }, 1000);
+
+        document.addEventListener('visibilitychange', () => {
+          // Watch CPU: animations only run while the tab is actually visible.
+          root.dataset.paused = document.visibilityState === 'visible' ? '0' : '1';
+          if (document.visibilityState === 'visible') {
+            // Fresh poll first; the staleness watchdog stays quiet until it has
+            // had a fair chance to answer (see the DISCONNECTED interval above).
+            resumeGraceUntil = Date.now() + 5000;
+            pollLive();
+          }
+        });
+        el('psa-chip')?.addEventListener('click', () => audit('applet.expand', { buildId: live.job && live.job.buildId }));
+        el('psa-tab')?.addEventListener('click', () => audit('applet.expand', { buildId: live.job && live.job.buildId }));
+
+        window.__phantomApplet = {
+          check, renderLive,
+          // Read-only view of the applet's own timers. The headless checks read
+          // this instead of guessing from the DOM alone; it changes nothing.
+          snapshot: () => ({
+            mode: root.dataset.mode, state, dockPending, dockDelay,
+            hasDockTimer: Boolean(dockTimer), closedBuild: live.closedBuild,
+            jobState: live.job ? live.job.state : null,
+          }),
+        };
+        check();
+        startPolling();
+        // Take one live snapshot immediately, then keep polling every 5 s. The
+        // snapshot carries the measured build time and server uptime; waiting
+        // for the SSE stream to end first (the old behaviour) meant those values
+        // never arrived when a proxy held the stream open.
+        pollLive();
+        connectLive();
+      })();
+    </script><script data-cfasync="false">
+      (() => {
+        const problem = document.getElementById('haksterai-problem-toast');
+        const message = document.getElementById('haksterai-problem-message');
+        let lastProblem = '';
+        const showProblem = (value) => {
+          const text = String(value || 'An unexpected error occurred.').replace(/[\\r\\n\\t]+/g, ' ').slice(0, 900);
+          if (!problem || !message || !text || text === lastProblem) return;
+          lastProblem = text;
+          message.textContent = text;
+          problem.hidden = false;
+        };
+        window.addEventListener('error', (event) => showProblem(event.message || 'A page script failed to load.'));
+        window.addEventListener('unhandledrejection', (event) => showProblem(event.reason?.message || event.reason || 'A background request failed.'));
+        window.addEventListener('haksterai:problem', (event) => showProblem(event.detail?.message || event.detail));
+        document.getElementById('haksterai-problem-close')?.addEventListener('click', () => { problem.hidden = true; });
+        document.getElementById('haksterai-problem-copy')?.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(message.textContent || ''); } catch { showProblem('Clipboard access was blocked by this browser.'); }
+        });
+        document.getElementById('haksterai-problem-popout')?.addEventListener('click', () => {
+          const win = window.open('', '_blank');
+          if (!win) return showProblem('The browser blocked the pop-out window.');
+          win.opener = null;
+          const title = win.document.createElement('title'); title.textContent = 'HaksterAI problem details';
+          const heading = win.document.createElement('h1'); heading.textContent = 'HaksterAI noticed a problem';
+          const body = win.document.createElement('pre'); body.textContent = message.textContent || '';
+          win.document.head.append(title); win.document.body.append(heading, body);
+        });
+
+        const update = document.getElementById('haksterai-update-toast');
+        const updateDetail = document.getElementById('haksterai-update-detail');
+        const currentBuild = document.documentElement.dataset.haksterBuild || '';
+        const laterKey = 'haksterai-update-later-until';
+        // How old the new build is, in plain words, from its build timestamp.
+        const ago = (iso) => {
+          const t = Date.parse(iso || '');
+          if (!Number.isFinite(t)) return '';
+          const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+          if (secs < 60) return secs + 's ago';
+          if (secs < 3600) return Math.round(secs / 60) + 'm ago';
+          if (secs < 86400) return Math.round(secs / 3600) + 'h ago';
+          return Math.round(secs / 86400) + 'd ago';
+        };
+        // Every update the widget surfaces is stamped and written to the server's
+        // update log, so we can always see when each build went out and who saw it.
+        const logUpdateSeen = (build, from) => {
+          try {
+            fetch('/api/version/seen', {
+              method: 'POST',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ build, from, path: location.pathname, at: new Date().toISOString() }),
+              keepalive: true,
+            }).catch(() => {});
+          } catch {}
+        };
+        // Runs for every signed-in user (owner and customers), every two minutes
+        // while the tab is visible. Primary check: the tiny /api/version endpoint,
+        // which reports the build id actually deployed. Fallback: re-fetch this
+        // page and read its own build meta, for older servers without the endpoint.
+        const remoteBuildId = async () => {
+          try {
+            const res = await fetch('/api/version?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' });
+            if (res.ok) {
+              const data = await res.json();
+              if (data && data.build) return String(data.build);
+            }
+          } catch { /* fall through to the page check */ }
+          const url = new URL(location.pathname, location.origin);
+          url.searchParams.set('_hakster_version_check', String(Date.now()));
+          const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', headers: { 'x-hakster-version-check': '1' } });
+          if (!response.ok) return '';
+          const html = await response.text();
+          const match = html.match(/<meta\s+name=["']haksterai-build["']\s+content=["']([^"']+)/i);
+          return match ? match[1] : '';
+        };
+        let announcedBuild = '';
+        const checkUpdate = async () => {
+          if (!currentBuild || document.visibilityState !== 'visible') return;
+          try {
+            const latest = await remoteBuildId();
+            if (!latest || latest === currentBuild) return;
+            // The Phantom server applet in the bottom-right corner owns the update
+            // UI on every page that carries it (the same widget as junkalot.co).
+            // This top banner stays as the fallback for pages without the applet,
+            // and the "seen" log keeps recording either way.
+            if (document.getElementById('phantom-server-applet')) {
+              if (update && !update.hidden) { update.hidden = true; cancelAutoApply(); }
+              if (announcedBuild !== latest) {
+                announcedBuild = latest;
+                logUpdateSeen(latest, currentBuild);
+              }
+              return;
+            }
+            const deferredUntil = Number(localStorage.getItem(laterKey) || 0);
+            if (updateDetail) {
+              const built = Number.isFinite(Date.parse(latest)) ? new Date(latest).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : latest;
+              updateDetail.textContent = 'New build ' + built + (ago(latest) ? ' · ' + ago(latest) : '') + '.';
+            }
+            if (Date.now() >= deferredUntil && update) {
+              update.hidden = false;
+              armAutoApply();
+            }
+            if (announcedBuild !== latest) {
+              announcedBuild = latest;
+              logUpdateSeen(latest, currentBuild);
+            }
+          } catch { /* Offline checks are quiet; retry on the next interval. */ }
+        };
+        // Update never reloads blind. A blind reload can land in the half-second a
+        // deploy restarts the server, which shows a dead page instead of the site.
+        // So: ask the server first, and if it is restarting, keep this page alive
+        // and let hakster-resume.js reload the moment it answers again.
+        const updateNow = document.getElementById('haksterai-update-now');
+        const applyUpdate = async () => {
+          cancelAutoApply();
+          localStorage.removeItem(laterKey);
+          if (updateNow?.dataset.busy) return;
+          if (updateNow) {
+            updateNow.dataset.busy = '1';
+            updateNow.textContent = 'Updating…';
+            updateNow.style.opacity = '0.8';
+          }
+          let ok = false;
+          try { ok = typeof window.haksterServerHealthy === 'function' ? await window.haksterServerHealthy() : true; } catch { ok = false; }
+          if (ok) { location.reload(); return; }
+          // Server is mid-restart: hand off to the resume helper, which retries and
+          // reloads automatically when the new build is serving.
+          if (typeof window.haksterUpdateWhenReady === 'function') {
+            window.haksterUpdateWhenReady();
+            if (updateNow) updateNow.textContent = 'Waiting…';
+            return;
+          }
+          window.setTimeout(() => location.reload(), 4000);
+        };
+        updateNow?.addEventListener('click', applyUpdate);
+
+        // Owner, 2026-11-21: "no updates waiting always need to auto apply" —
+        // the fallback banner (pages without the applet) applies a ready build
+        // on its own too. "Later" is a deliberate answer and cancels it. The
+        // countdown is real and shown in the banner's detail line.
+        const AUTO_APPLY_MS = 12000;
+        let autoApplyTimer = 0;
+        let autoApplyTick = 0;
+        let autoApplyUntil = 0;
+        let autoApplyBase = '';
+        function cancelAutoApply() {
+          if (autoApplyTimer) { clearTimeout(autoApplyTimer); autoApplyTimer = 0; }
+          if (autoApplyTick) { clearInterval(autoApplyTick); autoApplyTick = 0; }
+          autoApplyUntil = 0;
+        }
+        function armAutoApply() {
+          if (autoApplyTimer || !update || update.hidden) return;
+          autoApplyBase = String((updateDetail && updateDetail.textContent) || '')
+            .replace(/\s*·\s*applies automatically.*$/, '')
+            .replace(/\s*·\s*Update opens the new build.*$/, '');
+          autoApplyUntil = Date.now() + AUTO_APPLY_MS;
+          autoApplyTick = window.setInterval(() => {
+            const left = Math.max(0, Math.ceil((autoApplyUntil - Date.now()) / 1000));
+            if (updateDetail) updateDetail.textContent = autoApplyBase + (left > 0
+              ? ' · applies automatically in ' + left + 's unless you click Later.'
+              : ' · applying now…');
+            if (left > 0) return;
+            // Never reload over a focused form field — wait for quiet.
+            const a = document.activeElement;
+            const typing = !!(a && a.matches && a.matches('input,textarea,select,[contenteditable=""],[contenteditable="true"]'));
+            if (typing) { autoApplyUntil = Date.now() + 5000; return; }
+            cancelAutoApply();
+            applyUpdate();
+          }, 1000);
+        }
+        document.getElementById('haksterai-update-later')?.addEventListener('click', () => {
+          // "Later" is a deliberate choice, so it cancels the one-minute auto-apply
+          // and defers the banner for 30 minutes.
+          cancelAutoApply();
+          localStorage.setItem(laterKey, String(Date.now() + 30 * 60 * 1000));
+          if (update) update.hidden = true;
+        });
+        window.setTimeout(checkUpdate, 15000);
+        window.setInterval(checkUpdate, 120000);
+        // Coming back to the tab counts as a fresh moment to check — no waiting
+        // for the next two-minute tick.
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') checkUpdate();
+        });
+      })();
+    </script><!-- Always-visible scrollbars. Firefox already draws real bars from the rules in
+         global.css; Chrome/Chromium on Linux uses overlay scrollbars that ignore
+         scrollbar styling, so this fills in a real bar on the page, the dashboard
+         tab strip, tables, logs and every other scrollable box. Layout-safe. --><script data-cfasync="false" src="/js/hakster-scrollbars.js" defer></script><!-- Smooth updates + auto-resume for every user. If the server restarts or
+         hiccups while a tab is open, the tab shows a small "reconnecting" line and
+         picks itself back up on the same page instead of going dead; the Update
+         button reloads only once the server is confirmed answering. --><script data-cfasync="false" src="/js/hakster-resume.js" defer></script><!-- Global JS: mobile menu + scroll shadow + smooth scroll + user badge + logout --><script type="module" src="/_astro/Layout.astro_astro_type_script_index_0_lang.udiFaE-G.js"></script><script data-cfasync="false">
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+      });
+    }
+  </script></body></html>

@@ -10,6 +10,18 @@
 
 'use strict';
 
+// CLI provenance guard (2026-11-22): records who launched this CLI and alerts
+// the owner if it was another CLI (Claude Code, Codex, Kiro, …) rather than our
+// own. Local to this box — no-op where data/hakster.db doesn't exist (customer
+// installs). Detection only, never blocks; must never break the CLI.
+try {
+  const _fs = require('fs');
+  const _path = require('path');
+  if (_fs.existsSync(_path.join(__dirname, 'data', 'hakster.db'))) {
+    require('./server/src/cliGuard').reportInvocation({ script: 'hak', source: 'hook' });
+  }
+} catch (_) { /* the guard must never take the CLI down */ }
+
 // License gate — TUI won't start without valid license
 const { checkLicense } = require('./server/src/license');
 

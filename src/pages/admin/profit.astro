@@ -1,0 +1,476 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout title="Admin — Profit | haksterAi">
+  <style is:global>
+    .pl-wrap{max-width:1180px;margin:0 auto;padding:26px 18px 80px;color:#e2e8f0;}
+    .pl-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:6px;}
+    .pl-eyebrow{font:600 10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em;text-transform:uppercase;color:#64748b;margin:0 0 8px;}
+    .pl-title{font-size:clamp(24px,4vw,34px);font-weight:800;letter-spacing:-.02em;margin:0;}
+    .pl-status{font:500 12px/1.5 ui-monospace,monospace;color:#94a3b8;text-align:right;}
+    .pl-status b{color:#22c55e;font-weight:700;}
+    .pl-note{max-width:70ch;color:#94a3b8;font-size:13px;margin:8px 0 22px;}
+    .pl-section{margin-top:26px;}
+    .pl-section h2{font-size:13px;letter-spacing:.13em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin:0 0 10px;}
+    .pl-wheels{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:12px;}
+    .pl-gainloss{display:grid;grid-template-columns:minmax(150px,190px) minmax(0,1fr);gap:18px;align-items:center;}
+    .pl-gainloss svg{width:100%;max-width:170px;height:auto;display:block;margin:auto;}
+    .pl-gainloss .pl-row{font-size:13px;}
+    .pl-wheel{background:#111118;border:1px solid #1e1e2e;border-radius:14px;padding:14px;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;}
+    .pl-wheel svg{width:112px;height:112px;}
+    .pl-wheel .lbl{font:600 10.5px/1 ui-monospace,monospace;letter-spacing:.11em;text-transform:uppercase;color:#64748b;}
+    .pl-wheel .cap{font-size:11.5px;color:#94a3b8;text-align:center;line-height:1.45;}
+    .pl-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,148px),1fr));gap:10px;}
+    .pl-tile{background:#111118;border:1px solid #1e1e2e;border-radius:12px;padding:12px 13px;min-width:0;}
+    .pl-tile .k{font:600 10px/1 ui-monospace,monospace;letter-spacing:.11em;text-transform:uppercase;color:#64748b;margin:0 0 7px;}
+    .pl-tile .v{font:700 22px/1.1 ui-monospace,monospace;color:#f1f5f9;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+    .pl-tile .s{font-size:11px;color:#94a3b8;margin-top:5px;line-height:1.4;}
+    .pl-tile.money .v{color:#4ade80;}
+    .pl-tile.warn .v{color:#fbbf24;}
+    .pl-chart{display:flex;align-items:flex-end;gap:4px;height:120px;padding:10px;background:#0b0b12;border:1px solid #1e1e2e;border-radius:12px;overflow:hidden;}
+    .pl-bar{flex:1 1 0;min-width:3px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#a855f7,#6d28d9);position:relative;}
+    .pl-bar span{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font:600 9px/1 ui-monospace,monospace;color:#94a3b8;white-space:nowrap;}
+    .pl-axis{display:flex;justify-content:space-between;font:500 10px/1 ui-monospace,monospace;color:#475569;margin-top:6px;}
+    .pl-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:14px;align-items:start;}
+    .pl-card{background:#111118;border:1px solid #1e1e2e;border-radius:14px;padding:15px;min-width:0;}
+    .pl-card h3{font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 10px;color:#c4b5fd;}
+    .pl-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #171722;font-size:12.5px;}
+    .pl-row:last-child{border-bottom:0;}
+    .pl-row .k{color:#94a3b8;min-width:0;}
+    .pl-row .v{font-family:ui-monospace,monospace;color:#e2e8f0;text-align:right;font-variant-numeric:tabular-nums;}
+    .pl-row .v.good{color:#4ade80;}
+    .pl-row .v.bad{color:#f87171;}
+    .pl-badge{display:inline-block;padding:2px 7px;border-radius:999px;border:1px solid #334155;font:600 10px/1.4 ui-monospace,monospace;letter-spacing:.06em;color:#cbd5e1;}
+    .pl-badge.live{border-color:#166534;background:#052e16;color:#4ade80;}
+    .pl-badge.off{border-color:#7f1d1d;background:#2b0b0b;color:#fca5a5;}
+    .pl-list{font-size:12px;color:#cbd5e1;line-height:1.6;margin:0;padding-left:16px;}
+    .pl-empty{font-size:12.5px;color:#64748b;line-height:1.6;}
+    .pl-session{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;}
+    .pl-session .since{font:700 15px/1.3 ui-monospace,monospace;color:#f1f5f9;font-variant-numeric:tabular-nums;}
+    .pl-session .clock{font:700 22px/1.2 ui-monospace,monospace;color:#4ade80;font-variant-numeric:tabular-nums;letter-spacing:.02em;}
+    .pl-session .who{font-size:12px;color:#94a3b8;overflow-wrap:anywhere;}
+    .pl-foot{margin-top:26px;border-top:1px solid #1e1e2e;padding-top:12px;font-size:11.5px;color:#64748b;line-height:1.7;}
+    @media (max-width:480px){
+      .pl-wrap{padding:18px 14px 90px;}
+      .pl-status{text-align:left;}
+      .pl-wheel svg{width:96px;height:96px;}
+      .pl-gainloss{grid-template-columns:1fr;}
+    }
+  </style>
+
+  <div class="pl-wrap">
+    <div class="pl-head">
+      <div>
+        <p class="pl-eyebrow">haksterAi · owner only · accounting</p>
+        <h1 class="pl-title">Live profit</h1>
+      </div>
+      <div class="pl-status" id="pl-status" role="status" aria-live="polite">Loading live numbers…</div>
+    </div>
+    <p class="pl-note">Every number here is read from what actually happened: the HaksterAI payment and usage ledgers on this box, and PhantomIDE's own profit ledger on Parrot. Nothing is estimated into a number that was not measured, nothing is billed, and no plan, model or route is changed by this page.</p>
+
+    <section class="pl-section">
+      <h2>Admin session</h2>
+      <div class="pl-card pl-session" id="pl-session" role="status" aria-live="polite">
+        <p class="pl-empty">Checking whether an admin session is live…</p>
+      </div>
+    </section>
+
+    <section class="pl-section">
+      <h2>Wheels</h2>
+      <div class="pl-wheels" id="pl-wheels"></div>
+    </section>
+
+    <section class="pl-section">
+      <h2>HaksterAI gains and losses · confirmed revenue vs recorded AI cost</h2>
+      <div class="pl-card pl-gainloss" id="pl-gainloss">
+        <div id="pl-gainloss-chart"><p class="pl-empty">Waiting for ledger data…</p></div>
+        <div id="pl-gainloss-rows"></div>
+      </div>
+      <p class="pl-empty" style="margin-top:8px">Net shown here is revenue minus metered AI cost recorded in the usage ledger. It is not full business profit: SMS, infrastructure, payment fees, taxes, refunds and other expenses are not included unless they are recorded in these ledgers.</p>
+    </section>
+
+    <section class="pl-section">
+      <h2>Grid</h2>
+      <div class="pl-tiles" id="pl-tiles"></div>
+    </section>
+
+    <section class="pl-section">
+      <h2>HaksterAI tokens by day — last 14 days</h2>
+      <div class="pl-chart" id="pl-chart"></div>
+      <div class="pl-axis"><span id="pl-axis-lo">—</span><span id="pl-axis-hi">—</span></div>
+    </section>
+
+    <section class="pl-section">
+      <h2>Both projects live</h2>
+      <div class="pl-grid2">
+        <div class="pl-card" id="pl-phantom">
+          <h3>PhantomIDE · Parrot</h3>
+          <p class="pl-empty">Reading PhantomIDE's profit ledger…</p>
+        </div>
+        <div class="pl-card" id="pl-junkalot">
+          <h3>Junkalot · Mr Ed coach</h3>
+          <p class="pl-empty">Reading Junkalot's coach usage…</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="pl-section">
+      <h2>Junkalot · client value vs the plan — owner record</h2>
+      <div class="pl-card" id="pl-client-value">
+        <p class="pl-empty">Reading Junkalot&rsquo;s coach usage…</p>
+      </div>
+    </section>
+
+    <section class="pl-section">
+      <h2>Lane budget — when Codex is worth the spend</h2>
+      <div class="pl-card" id="pl-lane">
+        <p class="pl-empty">Working out the break-even from the measured rows…</p>
+      </div>
+    </section>
+
+    <section class="pl-section">
+      <h2>HaksterAI accounts</h2>
+      <div class="pl-card" id="pl-people">
+        <p class="pl-empty">Reading accounts…</p>
+      </div>
+    </section>
+
+    <p class="pl-foot" id="pl-foot">Usage is recorded, never billed. This page is read-only: it never charges an account, changes a plan, or edits a provider configuration. Reading another project's usage file is read-only and does not write into it.</p>
+  </div>
+
+  <script is:inline>
+    (function () {
+      var money = function (cents) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format((Number(cents) || 0) / 100);
+      };
+      var compact = function (n) {
+        n = Number(n) || 0;
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+        return String(Math.round(n));
+      };
+      var pct = function (n) { return (Number(n) || 0).toFixed(1) + '%'; };
+      var esc = function (s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      };
+      var token = '';
+      try { token = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch (e) {}
+
+      function wheel(value, label, caption, color) {
+        var p = Math.max(0, Math.min(100, Number(value) || 0));
+        var circ = 2 * Math.PI * 44;
+        var dash = (p / 100) * circ;
+        return '' +
+          '<div class="pl-wheel">' +
+            '<svg viewBox="0 0 112 112" role="img" aria-label="' + esc(label) + ' ' + p.toFixed(1) + ' percent">' +
+              '<circle cx="56" cy="56" r="44" fill="none" stroke="#1e1e2e" stroke-width="10"></circle>' +
+              '<circle cx="56" cy="56" r="44" fill="none" stroke="' + color + '" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + dash.toFixed(1) + ' ' + circ.toFixed(1) + '" transform="rotate(-90 56 56)"></circle>' +
+              '<text x="56" y="61" text-anchor="middle" font-family="ui-monospace,monospace" font-size="21" font-weight="700" fill="#f1f5f9">' + (p >= 99.95 ? '100%' : pct(p)) + '</text>' +
+            '</svg>' +
+            '<div class="lbl">' + esc(label) + '</div>' +
+            '<div class="cap">' + esc(caption) + '</div>' +
+          '</div>';
+      }
+      function tile(k, v, s, cls) {
+        return '<div class="pl-tile ' + (cls || '') + '"><p class="k">' + esc(k) + '</p><p class="v">' + esc(v) + '</p><div class="s">' + esc(s || '') + '</div></div>';
+      }
+      function row(k, v, cls) {
+        return '<div class="pl-row"><span class="k">' + esc(k) + '</span><span class="v ' + (cls || '') + '">' + esc(v) + '</span></div>';
+      }
+
+      // ── Admin session card ─────────────────────────────────────────────
+      // Owner (2026-11-21): "if any admin are live make card say active since
+      // with counter til logged out or signed out". "Active since" is the
+      // server-recorded sign-in time (users.last_login_at); the counter runs on
+      // that real start and stops the moment this page sees the sign-out.
+      var session = { since: null, timer: null, stoppedAt: null };
+      function elapsedLabel(ms) {
+        var s = Math.max(0, Math.floor(ms / 1000));
+        var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+        return h + 'h ' + String(m).padStart(2, '0') + 'm ' + String(sec).padStart(2, '0') + 's';
+      }
+      function utcLabel(ms) {
+        return new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+      }
+      function paintSession() {
+        var el = document.getElementById('pl-session');
+        if (!el) return;
+        if (session.stoppedAt) {
+          el.innerHTML = '<h3>Admin session <span class="pl-badge off">SIGNED OUT</span></h3>' +
+            '<div class="since">Signed out ' + esc(utcLabel(session.stoppedAt)) + '</div>' +
+            '<div class="clock">' + esc(elapsedLabel(session.stoppedAt - session.since)) + '</div>' +
+            '<div class="who">Session ran from ' + esc(utcLabel(session.since)) + ' to sign-out. The counter is stopped.</div>';
+          return;
+        }
+        if (!session.since) {
+          el.innerHTML = '<h3>Admin session <span class="pl-badge off">NOT LIVE</span></h3>' +
+            '<p class="pl-empty">No admin session is signed in, so there is no start time to count from.</p>';
+          return;
+        }
+        el.innerHTML = '<h3>Admin session <span class="pl-badge live">LIVE</span></h3>' +
+          '<div class="since">Active since ' + esc(utcLabel(session.since)) + '</div>' +
+          '<div class="clock" id="pl-session-clock">' + esc(elapsedLabel(Date.now() - session.since)) + '</div>' +
+          '<div class="who">' + esc((window.__plAdmin && window.__plAdmin.email) || 'owner account') + ' · counter runs until sign-out</div>';
+      }
+      function startSession(signedInAtSec, email) {
+        window.__plAdmin = { email: email || null };
+        if (!Number(signedInAtSec)) { paintSession(); return; }
+        session.since = Number(signedInAtSec) * 1000;
+        session.stoppedAt = null;
+        if (session.timer) clearInterval(session.timer);
+        paintSession();
+        session.timer = setInterval(function () {
+          var clock = document.getElementById('pl-session-clock');
+          if (!clock || !session.since || session.stoppedAt) return;
+          clock.textContent = elapsedLabel(Date.now() - session.since);
+        }, 1000);
+      }
+      function stopSession() {
+        if (!session.since || session.stoppedAt) return;
+        session.stoppedAt = Date.now();
+        if (session.timer) { clearInterval(session.timer); session.timer = null; }
+        paintSession();
+      }
+      window.addEventListener('hakster:signout', stopSession);
+
+      function render(d) {
+        var h = d.hakster || {};
+        var rev = h.revenue || {};
+        var use = h.usage || {};
+        var phantom = d.phantom;
+        var junk = d.junkalot;
+
+        // Real sign-in time from the server row, counted live until sign-out.
+        startSession(d.adminSession && d.adminSession.signedInAtSec, d.adminSession && d.adminSession.email);
+
+        // Wheels — every figure derived from measured rows only.
+        var collected = Number(rev.allTimeCents) || 0;
+        var dupes = Number(rev.excludedDuplicateCents) || 0;
+        var aiCostCents = Number(use.costCents) || 0;
+        var netAfterAiCents = collected - aiCostCents;
+        var costAgainstRevenuePct = collected > 0 ? aiCostCents / collected * 100 : null;
+        var revenueAfterAiPct = collected > 0 ? netAfterAiCents / collected * 100 : null;
+        var cleanShare = collected + dupes > 0 ? (collected / (collected + dupes)) * 100 : 100;
+        var phantomMargin = phantom && phantom.totals ? Number(phantom.totals.marginPct) || 0 : null;
+        var costShare = phantom && phantom.totals && Number(phantom.totals.bookedCents) > 0
+          ? (Number(phantom.totals.estCostCents) || 0) / Number(phantom.totals.bookedCents) * 100
+          : 0;
+        document.getElementById('pl-wheels').innerHTML =
+          wheel(cleanShare, 'Clean ledger', money(collected) + ' counted · ' + money(dupes) + ' duplicate excluded', '#4ade80') +
+          wheel(phantomMargin == null ? 0 : phantomMargin, 'Phantom margin', phantomMargin == null ? 'PhantomIDE ledger not reachable yet' : 'booked vs modelled token cost, ' + (phantom.windowDays || 30) + '-day window', '#a855f7') +
+          wheel(phantomMargin == null ? 0 : Math.max(0, 100 - costShare), 'Cost headroom', costShare ? pct(costShare) + ' of booked revenue is modelled token cost' : 'flat plan lanes: no metered token bill', '#22d3ee');
+
+        var chartEl = document.getElementById('pl-gainloss-chart');
+        var rowsEl = document.getElementById('pl-gainloss-rows');
+        if (collected > 0) {
+          var ratio = Math.max(0, Math.min(1, aiCostCents / collected));
+          var circumference = 2 * Math.PI * 48;
+          var costArc = circumference * ratio;
+          var gainArc = circumference - costArc;
+          var center = revenueAfterAiPct == null ? '—' : (netAfterAiCents >= 0 ? pct(revenueAfterAiPct) : 'LOSS');
+          chartEl.innerHTML = '<svg viewBox="0 0 120 120" role="img" aria-label="Revenue split: ' + esc(pct(Math.min(100, Math.max(0, 100 - ratio * 100)))) + ' remains after recorded AI cost">' +
+            '<circle cx="60" cy="60" r="48" fill="none" stroke="#1e1e2e" stroke-width="12"></circle>' +
+            '<circle cx="60" cy="60" r="48" fill="none" stroke="#f87171" stroke-width="12" stroke-dasharray="' + costArc.toFixed(1) + ' ' + circumference.toFixed(1) + '" transform="rotate(-90 60 60)"></circle>' +
+            '<circle cx="60" cy="60" r="48" fill="none" stroke="#4ade80" stroke-width="12" stroke-dasharray="' + gainArc.toFixed(1) + ' ' + circumference.toFixed(1) + '" stroke-dashoffset="-' + costArc.toFixed(1) + '" transform="rotate(-90 60 60)"></circle>' +
+            '<text x="60" y="57" text-anchor="middle" fill="#f1f5f9" font-family="ui-monospace,monospace" font-size="16" font-weight="700">' + esc(center) + '</text>' +
+            '<text x="60" y="73" text-anchor="middle" fill="#64748b" font-family="ui-monospace,monospace" font-size="7">AFTER AI COST</text></svg>';
+          rowsEl.innerHTML = row('Confirmed revenue · duplicates excluded', money(collected), 'good') +
+            row('Recorded metered AI cost', money(aiCostCents), 'bad') +
+            row('Net after recorded AI cost', money(netAfterAiCents), netAfterAiCents >= 0 ? 'good' : 'bad') +
+            row('Gain / loss against revenue', revenueAfterAiPct == null ? '—' : pct(revenueAfterAiPct), netAfterAiCents >= 0 ? 'good' : 'bad') +
+            row('Recorded AI cost share', costAgainstRevenuePct == null ? '—' : pct(costAgainstRevenuePct), aiCostCents <= collected ? 'good' : 'bad') +
+            (aiCostCents > collected ? '<p class="pl-empty" style="margin-top:8px;color:#f87171">Recorded AI cost is higher than confirmed revenue by ' + esc(money(aiCostCents - collected)) + '.</p>' : '');
+        } else {
+          chartEl.innerHTML = '<svg viewBox="0 0 120 120" role="img" aria-label="No confirmed revenue recorded"><circle cx="60" cy="60" r="48" fill="none" stroke="#334155" stroke-width="12"></circle><text x="60" y="57" text-anchor="middle" fill="#94a3b8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">NO DATA</text><text x="60" y="73" text-anchor="middle" fill="#64748b" font-family="ui-monospace,monospace" font-size="7">REVENUE</text></svg>';
+          rowsEl.innerHTML = row('Confirmed revenue · duplicates excluded', money(collected)) +
+            row('Recorded metered AI cost', money(aiCostCents), aiCostCents ? 'bad' : '') +
+            row('Net after recorded AI cost', money(netAfterAiCents), netAfterAiCents < 0 ? 'bad' : '') +
+            '<p class="pl-empty" style="margin-top:8px">A revenue percentage is not available until a completed non-duplicate payment is recorded.</p>';
+        }
+
+        // Grid
+        document.getElementById('pl-tiles').innerHTML =
+          tile('Revenue, all time', money(rev.allTimeCents), (rev.payments || 0) + ' completed payment' + (rev.payments === 1 ? '' : 's') + ' · ' + (rev.activeSubs || 0) + ' active subscription' + (rev.activeSubs === 1 ? '' : 's'), 'money') +
+          tile('Revenue, 30 days', money(rev.month30Cents), 'from the local payments ledger', 'money') +
+          tile('Calls logged', compact(use.calls), (use.firstDay || '—') + ' → ' + (use.lastDay || '—')) +
+          tile('Tokens', compact((Number(use.inputTokens) || 0) + (Number(use.outputTokens) || 0)), compact(use.inputTokens) + ' in · ' + compact(use.outputTokens) + ' out') +
+          tile('Metered provider cost', money(use.costCents), 'recorded by the usage writer', use.costCents ? 'warn' : 'money') +
+          tile('Accounts', compact((h.people && h.people.total) || 0), ((h.people && h.people.plans) || []).map(function (p) { return p.plan + ' ' + p.c; }).join(' · ')) +
+          tile('Activity, 7 days', compact((h.people && h.people.activity7d) || 0), 'signed-in actions recorded') +
+          tile('Duplicate rows excluded', money(dupes), (rev.excludedDuplicateRows || 0) + ' row(s) flagged duplicate_of', dupes ? 'warn' : '');
+
+        // Chart — 14-day window, zero days drawn as a stub, never invented.
+        var byDay = (use.byDay || []);
+        var map = {};
+        byDay.forEach(function (r) { map[r.day] = r; });
+        var days = [];
+        var cursor = new Date();
+        cursor.setUTCHours(0, 0, 0, 0);
+        for (var i = 13; i >= 0; i--) {
+          var dt = new Date(cursor.getTime() - i * 86400000);
+          var key = dt.toISOString().slice(0, 10);
+          days.push({ day: key, calls: (map[key] && Number(map[key].calls)) || 0 });
+        }
+        var max = Math.max.apply(null, days.map(function (d) { return d.calls; }).concat([1]));
+        document.getElementById('pl-chart').innerHTML = days.map(function (d) {
+          var height = d.calls ? Math.max(6, (d.calls / max) * 92) : 3;
+          var label = d.calls ? '<span>' + d.calls + '</span>' : '';
+          return '<div class="pl-bar" style="height:' + height.toFixed(1) + '%;' + (d.calls ? '' : 'background:#1e1e2e;') + '" title="' + d.day + ' · ' + d.calls + ' calls">' + label + '</div>';
+        }).join('');
+        document.getElementById('pl-axis-lo').textContent = days[0].day;
+        document.getElementById('pl-axis-hi').textContent = days[days.length - 1].day;
+
+        // Phantom card
+        var ph = document.getElementById('pl-phantom');
+        if (phantom && phantom.totals) {
+          var t = phantom.totals;
+          ph.innerHTML = '<h3>PhantomIDE · Parrot <span class="pl-badge live">LIVE</span></h3>' +
+            row('Window', (phantom.windowDays || 30) + ' days') +
+            row('Tokens served', compact(t.tokensServed)) +
+            row('Calls', compact(t.calls)) +
+            row('Booked', money(t.bookedCents)) +
+            row('Collected', money(t.collectedCents), 'good') +
+            row('Modelled token cost', money(t.estCostCents)) +
+            row('Margin', money(t.marginCents) + ' · ' + pct(t.marginPct), 'good') +
+            row('Verdict', phantom.verdict ? String(phantom.verdict) : '—') +
+            (Array.isArray(phantom.clients) && phantom.clients.length
+              ? '<h3 style="margin-top:14px;">Clients by margin</h3>' + phantom.clients.slice(0, 6).map(function (c) {
+                  return row(c.label || c.key || 'client', compact(c.tokens) + ' tok · ' + pct(c.marginPct), 'good');
+                }).join('')
+              : '');
+        } else {
+          ph.innerHTML = '<h3>PhantomIDE · Parrot <span class="pl-badge off">OFFLINE</span></h3><p class="pl-empty">PhantomIDE\'s profit ledger could not be reached from this server. The bridge key or the Parrot service is unavailable; nothing was estimated in its place.</p>';
+        }
+
+        // Junkalot card
+        var jk = document.getElementById('pl-junkalot');
+        if (junk && (junk.turns || junk.tokens)) {
+          jk.innerHTML = '<h3>Junkalot · Mr Ed coach <span class="pl-badge live">LIVE</span></h3>' +
+            row('Turns', compact(junk.turns)) +
+            row('Tokens', compact(junk.tokens)) +
+            row('Plan', junk.planUsdMonth ? money(Number(junk.planUsdMonth) * 100) + '/mo' : 'plan-covered') +
+            row('Included in plan', junk.includedInPlan ? 'yes' : 'no') +
+            row('Metered cost', junk.metered ? money(Number(junk.estMarginalCostUsd || 0) * 100) : '$0 marginal', 'good') +
+            row('Newest turn', junk.newestAt ? new Date(junk.newestAt).toLocaleString() : '—') +
+            (Array.isArray(junk.providers) && junk.providers.length
+              ? '<h3 style="margin-top:14px;">Lanes used</h3>' + junk.providers.slice(0, 5).map(function (p) {
+                  return row(p.name || p.provider || 'lane', compact(p.calls || p.turns || 0) + ' turns');
+                }).join('')
+              : '');
+        } else {
+          jk.innerHTML = '<h3>Junkalot · Mr Ed coach <span class="pl-badge off">NO DATA</span></h3><p class="pl-empty">Junkalot\'s coach usage was not readable through PhantomIDE. Nothing was estimated in its place.</p>';
+        }
+
+        // Junkalot client value — owner record only, never rendered on junkalot.co.
+        var cv = d.junkalotValue;
+        var cvEl = document.getElementById('pl-client-value');
+        if (cv && cv.month && cv.plan) {
+          var util = Math.max(0, Math.min(100, Number(cv.plan.utilisationPct) || 0));
+          var barColor = cv.plan.utilisationPct >= 100 ? '#fbbf24' : '#4ade80';
+          cvEl.innerHTML =
+            '<h3>Client value record <span class="pl-badge ' + (cv.plan.utilisationPct >= 100 ? 'off' : 'live') + '">' +
+              (cv.plan.utilisationPct >= 100 ? 'OVER PLAN' : 'WITHIN PLAN') + '</span></h3>' +
+            row('Month', String(cv.monthKey)) +
+            row('Benchmark usage value', money(Math.round((Number(cv.month.valueUsd) || 0) * 100))) +
+            row('Plan price', money(Math.round((Number(cv.plan.priceUsd) || 0) * 100))) +
+            row(cv.plan.surplusUsd > 0 ? 'Client surplus' : 'Under plan by', money(Math.round((cv.plan.surplusUsd > 0 ? cv.plan.surplusUsd : cv.plan.shortfallUsd) * 100))) +
+            row('Utilisation', pct(cv.plan.utilisationPct)) +
+            row('Projected month end', money(Math.round((Number(cv.projection && cv.projection.projectedValueUsd) || 0) * 100))) +
+            row('Turns recorded', String(cv.month.turns) + ' · ' + String(cv.month.activeDays) + ' active day(s)') +
+            row('Tokens', compact((Number(cv.month.inTokens) || 0) + (Number(cv.month.outTokens) || 0)) + ' (' + compact(cv.month.inTokens) + ' in · ' + compact(cv.month.outTokens) + ' out)') +
+            row('Verdict', cv.plan.verdict) +
+            '<div style="margin:12px 0 4px;height:8px;border-radius:999px;background:#1e1e2e;overflow:hidden;"><div style="height:100%;width:' + util.toFixed(1) + '%;background:' + barColor + ';"></div></div>' +
+            '<p class="pl-empty" style="margin:0 0 10px;">' + pct(cv.plan.utilisationPct) + ' of the plan price in measured usage value this month.</p>' +
+            ((cv.patterns || []).length
+              ? '<h3 style="margin-top:12px;">Patterns learned from the rows</h3><ul class="pl-list">' +
+                cv.patterns.map(function (pt) { return '<li><strong>' + esc(pt.label) + ':</strong> ' + esc(pt.value) + ' — ' + esc(pt.note) + '</li>'; }).join('') + '</ul>'
+              : '') +
+            '<p class="pl-empty" style="margin-top:10px;">' + esc((cv.terms && cv.terms.rateNote) || '') + ' Read from Junkalot&rsquo;s coach usage file over SSH, read only. This record is never rendered on the Junkalot site — her admin shows savings, not our margin.</p>';
+        } else {
+          cvEl.innerHTML = '<p class="pl-empty">Junkalot&rsquo;s coach usage file could not be read from Parrot just now, so no value figure is shown rather than an invented one.</p>';
+        }
+
+        // Lane budget — measured token size per call, priced against the paid
+        // Codex lane at a stated benchmark. Advice only: §19 says the setup is
+        // never changed for margin, and nothing here switches a model or route.
+        var lane = document.getElementById('pl-lane');
+        var calls = Number(use.calls) || 0;
+        var inTok = Number(use.inputTokens) || 0;
+        var outTok = Number(use.outputTokens) || 0;
+        var CODEX_IN_PER_M = 0.60, CODEX_OUT_PER_M = 2.40; // stated benchmark, not a quote
+        if (calls > 0) {
+          var inPerCall = inTok / calls, outPerCall = outTok / calls;
+          var codexPerCallUsd = (inPerCall / 1e6) * CODEX_IN_PER_M + (outPerCall / 1e6) * CODEX_OUT_PER_M;
+          var codexPer1kUsd = codexPerCallUsd * 1000;
+          var collected30 = (Number(rev.month30Cents) || 0) / 100;
+          var metered30 = (Number(use.costCents) || 0) / 100;
+          var affordableCalls = codexPerCallUsd > 0 ? collected30 / codexPerCallUsd : null;
+          var callsPerDay = 0;
+          var dayCount = (use.byDay || []).length || 1;
+          (use.byDay || []).forEach(function (r) { callsPerDay += Number(r.calls) || 0; });
+          callsPerDay = callsPerDay / dayCount;
+          var monthlyCalls = callsPerDay * 30;
+          var sharePct = affordableCalls != null && monthlyCalls > 0 ? (affordableCalls / monthlyCalls) * 100 : null;
+          lane.innerHTML =
+            '<h3>Break-even against what was actually collected <span class="pl-badge ' + ((sharePct != null && sharePct < 100) ? 'off' : 'live') + '">' +
+              (sharePct == null ? 'NO ROWS' : sharePct >= 100 ? 'ALL CALLS FIT' : 'PARTIAL') + '</span></h3>' +
+            row('Measured tokens per call', compact(Math.round(inPerCall)) + ' in · ' + compact(Math.round(outPerCall)) + ' out') +
+            row('Codex at $' + CODEX_IN_PER_M.toFixed(2) + '/M in, $' + CODEX_OUT_PER_M.toFixed(2) + '/M out', money(Math.round(codexPer1kUsd * 100)) + ' per 1,000 calls') +
+            row('Collected, last 30 days', money(Number(rev.month30Cents) || 0), 'local payments ledger') +
+            row('Calls Codex could cover for that money', affordableCalls == null ? '—' : compact(Math.round(affordableCalls))) +
+            row('Your current pace', Math.round(callsPerDay) + ' calls/day · ~' + compact(Math.round(monthlyCalls)) + '/month') +
+            row('Share of your volume that fits', sharePct == null ? '—' : pct(Math.max(0, Math.min(100, sharePct)))) +
+            row('Metered provider cost so far', money(Number(use.costCents) || 0), 'recorded by the usage writer') +
+            '<div style="margin:12px 0 4px;height:8px;border-radius:999px;background:#1e1e2e;overflow:hidden;"><div style="height:100%;width:' + Math.max(2, Math.min(100, sharePct == null ? 0 : sharePct)).toFixed(1) + '%;background:' + ((sharePct != null && sharePct < 100) ? '#fbbf24' : '#4ade80') + ';"></div></div>' +
+            '<p class="pl-empty" style="margin:0 0 10px;">At the measured token size, every 1,000 calls on the paid lane costs about ' + money(Math.round(codexPer1kUsd * 100)) + '. That is the number to hold against what the plan actually collected.</p>' +
+            '<h3 style="margin-top:12px;">When to use Codex — policy, not automation</h3>' +
+            '<ul class="pl-list">' +
+              '<li><strong>Use it when the cheap lane fails:</strong> an error or stall on the free/relay lane already falls through the ladder; Codex is the safety net, not the default.</li>' +
+              '<li><strong>Use it for correctness-critical work</strong> — money, billing and anything that must be right first time.</li>' +
+              '<li><strong>Do not route chat volume through it.</strong> At ' + (sharePct == null ? 'this pace' : pct(Math.max(0, Math.min(100, sharePct))) + ' of your volume fitting inside collected revenue') + ', bulk calls are what pushes margin negative.</li>' +
+              '<li><strong>Quota:</strong> no provider quota figure is recorded in this ledger, so no runway is shown. A quota line only appears once a real limit is stored — it is never guessed.</li>' +
+            '</ul>' +
+            '<p class="pl-empty" style="margin-top:10px;">Advice only. This card never changes a model, a route or a plan price (§19): the setup is not altered for margin.</p>';
+        } else {
+          lane.innerHTML = '<p class="pl-empty">No usage rows are recorded yet, so there is no token size to price the paid lane against.</p>';
+        }
+
+        // People
+        var people = document.getElementById('pl-people');
+        var plans = (h.people && h.people.plans) || [];
+        people.innerHTML = plans.length
+          ? '<h3>HaksterAI plans</h3>' + plans.map(function (p) { return row(p.plan, p.c + ' account' + (p.c === 1 ? '' : 's')); }).join('')
+          : '<p class="pl-empty">No accounts recorded yet.</p>';
+
+        document.getElementById('pl-foot').textContent = (d.note || 'Usage is recorded, never billed.') +
+          ' Read from HaksterAI\'s local ledgers' + (d.bridge === 'live' ? ' and PhantomIDE\'s read-only bridge on Parrot' : '; PhantomIDE bridge unavailable on this read') +
+          '. No writes, no charges, no config changes.';
+      }
+
+      async function load() {
+        var status = document.getElementById('pl-status');
+        if (!token) { status.textContent = 'Owner sign-in required.'; stopSession(); paintSession(); return; }
+        status.textContent = 'Reading live ledgers…';
+        try {
+          var r = await fetch('/api/admin/profit-live', { headers: { 'x-api-key': token }, cache: 'no-store' });
+          var d = await r.json().catch(function () { return {}; });
+          if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+          render(d);
+          status.innerHTML = '<b>LIVE</b> · ' + new Date(d.generatedAt).toLocaleTimeString() + ' · refreshes every 30 s';
+        } catch (e) {
+          status.textContent = 'Unavailable: ' + (e && e.message ? e.message : 'unknown error');
+          // A refused credential is a sign-out; a network blip is not, so only
+          // 401/403 stops the session counter.
+          if (/HTTP 40[13]/.test(String(e && e.message))) { stopSession(); }
+        }
+      }
+
+      load();
+      setInterval(function () { if (document.visibilityState === 'visible') load(); }, 30000);
+    })();
+  </script>
+</Layout>

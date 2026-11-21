@@ -12,6 +12,27 @@ import { Box as Box16, Text as Text17, useInput as useInput5, useApp, useStdout 
 import { EventEmitter } from "events";
 var SERVER_URL = process.env.HAKSTER_URL || "ws://localhost:3579/ws";
 var API_URL = process.env.HAKSTER_API_URL || "http://localhost:3579";
+
+// ── MCP status: what the agent actually has connected ──────────
+async function fetchMcpStatus() {
+  try {
+    const ctl = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(8000) : void 0;
+    const r = await fetch(`${API_URL}/api/agent/mcp-status`, ctl ? { signal: ctl } : {});
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d && Array.isArray(d.servers) ? d : null;
+  } catch {
+    return null;
+  }
+}
+function mcpSummary(mcp) {
+  if (!mcp || !Array.isArray(mcp.servers)) return null;
+  const total = mcp.servers.length;
+  const live = mcp.servers.filter((x) => x.initialized || (x.toolCount || 0) > 0).length;
+  const tools = mcp.totalMcpTools != null ? mcp.totalMcpTools : mcp.servers.reduce((n, x) => n + (x.toolCount || 0), 0);
+  const lazy = mcp.servers.filter((x) => x.lazy && !(x.initialized || (x.toolCount || 0) > 0)).length;
+  return { live, total, tools, lazy };
+}
 var API_AUTH_HEADERS = process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {};
 var MODEL_CONTEXT = {
   "deepseek-v4.1-flash:cloud": 1048576,
@@ -460,12 +481,14 @@ function StatusBar({
   contextMax = 128e3,
   phase = "IDLE",
   cols = 80,
-  sessionId = ""
+  sessionId = "",
+  mcp = null
 }) {
   const trust = getTrustInfo(trustLevel);
   const ctxPct = Math.round(contextUsed / contextMax * 100);
   const ctxColor = ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green";
   const ctxBar = "\u2588".repeat(Math.floor(ctxPct / 5)).padEnd(20, "\u2591");
+  const mcpColor = !mcp ? "gray" : mcp.live >= mcp.total ? "green" : mcp.live > 0 ? "yellow" : "red";
   const left = `${model}\u2502${provider}`;
   const right = `${trust.label}\u2502${approvalMode}\u2502ctx ${ctxPct}%`;
   const sid = sessionId ? sessionId.slice(0, 8) : "--------";
@@ -481,6 +504,7 @@ function StatusBar({
     ] }),
     /* @__PURE__ */ jsxs(Box, { width: cols, paddingX: 1, justifyContent: "space-between", children: [
       /* @__PURE__ */ jsx(Text, { color: trust.color, bold: true, children: right }),
+      mcp ? /* @__PURE__ */ jsx(Text, { color: mcpColor, bold: true, children: `MCP ${mcp.live}/${mcp.total} \u00b7 ${mcp.tools}` }) : null,
       /* @__PURE__ */ jsxs(Text, { color: ctxColor, children: [
         "[",
         ctxBar,
@@ -497,6 +521,7 @@ import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 var COMMANDS = [
   "/help",
   "/status",
+  "/mcp",
   "/model",
   "/provider",
   "/trust",
@@ -522,6 +547,7 @@ var COMMANDS = [
 var DESCRIPTIONS = {
   "/help": "Show help overlay",
   "/status": "Server status",
+  "/mcp": "MCP servers + tools",
   "/model": "Switch model",
   "/provider": "Switch provider",
   "/trust": "Set trust level",
@@ -568,6 +594,7 @@ import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
 var SLASH_COMMANDS = [
   { cmd: "/help", desc: "Show this help overlay" },
   { cmd: "/status", desc: "Show server status (model, trust, uptime)" },
+  { cmd: "/mcp [server]", desc: "MCP servers connected to this CLI, with tool counts" },
   { cmd: "/model [name]", desc: "Switch model (e.g. /model gpt-5.2)" },
   { cmd: "/provider [name]", desc: "Switch provider (ollama, openai, anthropic, glm)" },
   { cmd: "/trust [level]", desc: "Set trust level (0=suggest, 10=auto-edit, 30=full-auto)" },
@@ -654,6 +681,16 @@ import React4, { useState as useState2, useMemo as useMemo2, useEffect } from "r
 import { Box as Box4, Text as Text4, useInput } from "ink";
 import { Fragment, jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
 var PROVIDERS = [
+  {
+    // Our own config first — the same model and relay the Claude CLI runs on.
+    // Everything below this entry is a backup in the waterfall.
+    id: "hakster",
+    name: "HaksterAI — Phantom Flash",
+    needsKey: false,
+    models: [
+      { id: "deepseek-v4.1-flash:cloud", name: "Phantom Flash (DeepSeek v4.1 Flash)" }
+    ]
+  },
   {
     id: "glm",
     name: "GLM / Charm Cloud",
@@ -977,6 +1014,7 @@ var SYSTEM_COMMANDS = [
 var USER_COMMANDS = [
   { id: "/help", title: "/help", desc: "Show help overlay" },
   { id: "/status", title: "/status", desc: "Server status" },
+  { id: "/mcp", title: "/mcp", desc: "MCP servers + tools" },
   { id: "/model", title: "/model", desc: "Switch model" },
   { id: "/provider", title: "/provider", desc: "Switch provider" },
   { id: "/trust", title: "/trust", desc: "Set trust level" },
@@ -1872,6 +1910,7 @@ function App() {
   const [approval, setApproval] = useState9(null);
   const [contextMax, setContextMax] = useState9(128e3);
   const [contextChars, setContextChars] = useState9(0);
+  const [mcp, setMcp] = useState9(null);
   const inputRef = useRef3("");
   const batchRef = useRef3({ timer: null, text: "" });
   const maxScroll = Math.max(0, output.length - outputHeight);
@@ -2050,10 +2089,9 @@ function App() {
         liveTextRef.current = "";
         setOutput((p) => [...p, { type: "assistant", text: t2 }].slice(-MAX_OUTPUT));
       }
-      setOutput((prev) => {
-        const filtered = prev.filter((e) => e.type !== "thinking");
-        return [...filtered, { type: "thinking", text: t }].slice(-MAX_OUTPUT);
-      });
+      // Drop the stale "thinking" line: the turn is over. (This block used
+      // an undefined `t`, which threw on every done/error and killed the TUI.)
+      setOutput((prev) => prev.filter((e) => e.type !== "thinking"));
       setOutput((p) => [...p, { type: "error", text: typeof err === "string" ? err : err?.message || "Unknown error" }].slice(-MAX_OUTPUT));
       setThinking(false);
     });
@@ -2065,10 +2103,9 @@ function App() {
         liveTextRef.current = "";
         setOutput((p) => [...p, { type: "assistant", text: t2 }].slice(-MAX_OUTPUT));
       }
-      setOutput((prev) => {
-        const filtered = prev.filter((e) => e.type !== "thinking");
-        return [...filtered, { type: "thinking", text: t }].slice(-MAX_OUTPUT);
-      });
+      // Drop the stale "thinking" line: the turn is over. (This block used
+      // an undefined `t`, which threw on every done/error and killed the TUI.)
+      setOutput((prev) => prev.filter((e) => e.type !== "thinking"));
       setThinking(false);
       setStatus((p) => ({ ...p, phase: "done" }));
     });
@@ -2085,7 +2122,28 @@ function App() {
       clearInterval(ctxInterval);
     };
   }, [showSplash, appendToken]);
-  const handleSlashCommand = useCallback((cmd) => {
+  useEffect6(() => {
+    if (showSplash) return;
+    let alive = true;
+    let announced = false;
+    const tick = async () => {
+      const s2 = await fetchMcpStatus();
+      if (!alive || !s2) return;
+      setMcp(s2);
+      if (!announced) {
+        announced = true;
+        const sum = mcpSummary(s2);
+        setOutput((p) => [...p, { type: "system", text: `MCP: ${sum.live}/${sum.total} servers running${sum.lazy ? ` (${sum.lazy} lazy, connect on first call)` : ""} \u00b7 ${sum.tools} tools \u2014 /mcp to list` }].slice(-MAX_OUTPUT));
+      }
+    };
+    tick();
+    const id = setInterval(tick, 15e3);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [showSplash]);
+  const handleSlashCommand = useCallback(async (cmd) => {
     const parts = cmd.trim().split(/\s+/);
     const command = parts[0];
     const arg = parts.slice(1).join(" ");
@@ -2094,7 +2152,7 @@ function App() {
         setShowHelp(true);
         break;
       case "/status":
-        setOutput((p) => [...p, { type: "system", text: `Model: ${status.model} | Provider: ${status.provider || "ollama"} | Phase: ${phase} | Trust: ${status.trust} | Tokens: ${status.tokens} | Context chars: ${contextChars.toLocaleString()}` }].slice(-MAX_OUTPUT));
+        setOutput((p) => [...p, { type: "system", text: `Model: ${status.model} | Provider: ${status.provider || "ollama"} | Phase: ${phase} | Trust: ${status.trust} | Tokens: ${status.tokens} | Context chars: ${contextChars.toLocaleString()} | MCP: ${mcpSummary(mcp) ? `${mcpSummary(mcp).live}/${mcpSummary(mcp).total} servers, ${mcpSummary(mcp).tools} tools` : "unavailable"}` }].slice(-MAX_OUTPUT));
         break;
       case "/model":
         if (arg) {
@@ -2104,6 +2162,29 @@ function App() {
           setShowModelDialog(true);
         }
         break;
+      case "/mcp": {
+        const mcpData = await fetchMcpStatus();
+        if (!mcpData) {
+          setOutput((p) => [...p, { type: "error", text: `MCP status unavailable \u2014 no answer from ${API_URL}/api/agent/mcp-status` }].slice(-MAX_OUTPUT));
+          break;
+        }
+        setMcp(mcpData);
+        const want = String(arg || "").trim().toLowerCase();
+        const lines = [];
+        for (const srv of mcpData.servers) {
+          if (want && String(srv.name).toLowerCase() !== want) continue;
+          const live = srv.initialized || (srv.toolCount || 0) > 0;
+          lines.push(`${live ? "\u2713" : "\u25cb"} ${String(srv.name).padEnd(18)} ${String(srv.toolCount || 0).padStart(3)} tools${srv.lazy ? " (lazy)" : ""}`);
+          if (want && Array.isArray(srv.tools)) {
+            for (const tn of srv.tools) lines.push(`    \u00b7 ${tn}`);
+          }
+        }
+        if (!lines.length) lines.push(want ? `no MCP server named "${arg}"` : "no MCP servers connected");
+        const sum = mcpSummary(mcpData);
+        lines.push(`total: ${sum.live}/${sum.total} servers \u00b7 ${sum.tools} MCP tools \u00b7 ${mcpData.totalTools != null ? mcpData.totalTools : "?"} tools to the agent`);
+        setOutput((p) => [...p, ...lines.map((text) => ({ type: "system", text }))].slice(-MAX_OUTPUT));
+        break;
+      }
       case "/commands":
         setShowCommandsDialog(true);
         break;
@@ -2198,7 +2279,7 @@ function App() {
       default:
         setOutput((p) => [...p, { type: "system", text: `Unknown command: ${command}` }].slice(-MAX_OUTPUT));
     }
-  }, [approval, status, phase, exit]);
+  }, [approval, status, phase, exit, mcp, contextChars]);
   useInput5((raw, key) => {
     if (showSplash) return;
     if (showModelDialog || showCommandsDialog) return;
@@ -2317,7 +2398,8 @@ function App() {
         contextMax,
         phase,
         cols,
-        sessionId: agent_default.sessionId || ""
+        sessionId: agent_default.sessionId || "",
+        mcp: mcpSummary(mcp)
       }
     ),
     /* @__PURE__ */ jsxs17(Box16, { flexDirection: "column", height: outputHeight + 1, width: cols, overflow: "hidden", children: [
@@ -2520,5 +2602,7 @@ function start() {
   render(/* @__PURE__ */ jsx17(App, {}));
 }
 export {
-  start
+  start,
+  fetchMcpStatus,
+  mcpSummary
 };

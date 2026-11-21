@@ -1,0 +1,173 @@
+{
+ "plans": [
+  {
+   "id": "free",
+   "name": "HaksterAI Free",
+   "description": "Free users get 5 AI calls and 5 web lookups across chat, agents, scripts, and generation, then must upgrade.",
+   "features": [
+    "5 free AI calls + 5 free web lookups",
+    "Upgrade required after the free allowance",
+    "Local Ollama support",
+    "Basic chat and terminal tools"
+   ],
+   "prices": [
+    {
+     "id": "free",
+     "name": "Free",
+     "billingCycle": "monthly",
+     "amount": 0,
+     "currency": "usd",
+     "oneTime": false
+    }
+   ]
+  },
+  {
+   "id": "try_me",
+   "name": "Try Me Now",
+   "description": "One payment, no subscription: 50 AI calls to try HaksterAI at full power.",
+   "features": [
+    "50 AI calls",
+    "One payment — nothing renews",
+    "Account from your checkout email",
+    "Upgrade to a plan any time"
+   ],
+   "prices": [
+    {
+     "id": "try_me_once",
+     "name": "Try Me Now",
+     "billingCycle": "one_time",
+     "amount": 145,
+     "currency": "usd",
+     "priceId": "price_SIM_try_me_once",
+     "oneTime": true,
+     "tokens": 50
+    }
+   ]
+  },
+  {
+   "id": "token_pack_500",
+   "name": "Token Pack — 500 Calls",
+   "description": "One payment: 500 AI calls banked on your account. They never expire and nothing renews.",
+   "features": [
+    "500 AI calls",
+    "One payment — nothing renews",
+    "Credits never expire",
+    "Drawn after your plan allowance"
+   ],
+   "prices": [
+    {
+     "id": "token_pack_500_once",
+     "name": "Token Pack 500",
+     "billingCycle": "one_time",
+     "amount": 645,
+     "currency": "usd",
+     "priceId": "price_SIM_token_pack_500_once",
+     "oneTime": true,
+     "tokens": 500
+    }
+   ]
+  },
+  {
+   "id": "lite",
+   "name": "HaksterAI Lite",
+   "description": "30 AI calls and 10 web lookups per month at the lowest paid price.",
+   "features": [
+    "30 AI calls / month",
+    "10 web lookups / month",
+    "Cloud model routing",
+    "Upgrade to Starter for unlimited"
+   ],
+   "prices": [
+    {
+     "id": "lite_monthly",
+     "name": "Lite Monthly",
+     "billingCycle": "monthly",
+     "amount": 345,
+     "currency": "usd",
+     "priceId": "price_1UdxxOA0UrVsJMzeKh22sWDy",
+     "oneTime": false
+    }
+   ]
+  },
+  {
+   "id": "starter",
+   "name": "HaksterAI Starter",
+   "description": "Unlimited personal access at the entry price.",
+   "features": [
+    "Unlimited app usage",
+    "Cloud model routing",
+    "Agent tools",
+    "Memory and task history"
+   ],
+   "prices": []
+  },
+  {
+   "id": "starter_plus",
+   "name": "HaksterAI Starter Plus",
+   "description": "Monthly: $6.44 for the first month, then $11.44/month. Annual plan: $110.44/year.",
+   "features": [
+    "Everything in Starter",
+    "$6.44 first month",
+    "Then $11.44/month",
+    "Cancel anytime"
+   ],
+   "prices": [
+    {
+     "id": "starter_plus_monthly",
+     "name": "Starter Plus Monthly",
+     "billingCycle": "monthly",
+     "amount": 1144,
+     "currency": "usd",
+     "priceId": "price_1UdxxPA0UrVsJMze3cRPHBpN",
+     "oneTime": false,
+     "introAmount": 644,
+     "introLabel": "First month $6.44, then $11.44/mo"
+    },
+    {
+     "id": "starter_plus_yearly",
+     "name": "Starter Plus Yearly",
+     "billingCycle": "yearly",
+     "amount": 11044,
+     "currency": "usd",
+     "priceId": "price_1UdxxPA0UrVsJMzeygh4cJcZ",
+     "oneTime": false
+    }
+   ]
+  },
+  {
+   "id": "pro",
+   "name": "HaksterAI Pro",
+   "description": "Unlimited personal access for builders and operators.",
+   "features": [
+    "Unlimited app usage",
+    "Cloud model routing",
+    "Agent tools",
+    "Memory and task history"
+   ],
+   "prices": []
+  },
+  {
+   "id": "enterprise",
+   "name": "HaksterAI Enterprise",
+   "description": "Team access, higher limits, and custom deployment support.",
+   "features": [
+    "Team seats",
+    "Higher limits",
+    "Priority support"
+   ],
+   "prices": [
+    {
+     "id": "enterprise_seat_monthly",
+     "name": "Extra Seat",
+     "billingCycle": "monthly",
+     "amount": 1085,
+     "currency": "usd",
+     "priceId": "price_SIM_enterprise_seat_monthly",
+     "oneTime": false,
+     "perSeat": true,
+     "seatsIncluded": 1000
+    }
+   ]
+  }
+ ]
+}

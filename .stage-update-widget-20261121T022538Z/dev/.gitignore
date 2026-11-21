@@ -1,0 +1,9 @@
+# dev-only runtime state — never committed
+# The isolated preview server writes these on this host; they hold credentials,
+# tokens and recorded telemetry, so they stay out of git entirely.
+data/
+out/
+logs/
+shots/
+*.bak.*
+*.tmp

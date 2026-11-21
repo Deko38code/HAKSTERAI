@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 haksterAi Discord
+    url: https://discord.gg/haksterai
+    about: Join the community to discuss features, share feedback, and connect with other users.
+  - name: 📚 haksterAi Documentation
+    url: https://github.com/ghoststack/haksterAi/blob/main/README.md
+    about: Check the README and project docs for setup guides and troubleshooting.

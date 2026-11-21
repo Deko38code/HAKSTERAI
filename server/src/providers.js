@@ -239,6 +239,19 @@ Object.assign(PROVIDERS, {
     apiKey: 'ollama',
     type: 'openai-compat',
   },
+  // Second Ollama Cloud account. Owner 2026-11-21: "keep 1 we been using and
+  // new for the other 2" — account 1 serves junkalot.co, this one serves
+  // haksterai.com and phantomide. Same tag the owner's Claude CLI runs
+  // (deepseek-v4.1-flash:cloud), called straight at ollama.com so HaksterAI
+  // never spends the local account's quota. Codex Pro CLI is its backup.
+  'deepseek-key2': {
+    name: 'DeepSeek V4.1 Flash (Ollama Cloud 2)',
+    baseURL: 'https://ollama.com/v1',
+    defaultModel: process.env.OLLAMA_CLOUD_MODEL_2 || 'deepseek-v4.1-flash:cloud',
+    apiKey: process.env.OLLAMA_CLOUD_KEY_2 || '',
+    apiKeyEnv: 'OLLAMA_CLOUD_KEY_2',
+    type: 'openai-compat',
+  },
   // Kiro gateway (local, free Claude via Kiro/AWS)
   'kiro-gateway': { name: 'Kiro Gateway (Claude)', baseURL: 'http://127.0.0.1:8000/v1', defaultModel: 'claude-haiku-4.5', apiKey: 'my-super-secret-password-123', type: 'openai-compat' },
 });
@@ -250,7 +263,7 @@ Object.assign(PROVIDERS, {
 // ~1.6s, codex-cli ~7-9s, the local ollama model varies 1.5-17s, and the old hackbot
 // entry sits behind a proxy chain whose first hop times out at 45s — so it is the last
 // resort, not the primary brain. Nothing is removed; every lane is still reachable.
-const WATERFALL_ORDER = ['deepseek','groq6','groq3','groq4','groq','groq5','cohere','ollama-cloud2','gpt-oss','codex-cli','claude-cli','ollama','groq7','ollama-cloud3','sambanova','cerebras','gemini','gemini-flash','mistral','mistral2','nvidia-nim','nvidia-nim2','llm7','llm7-2','llm7-3','llm7-4','llm7-5','pollinations','puter-sonnet','puter-4o','openrouter','kiro-gateway','hackbot'];
+const WATERFALL_ORDER = ['deepseek-key2','codex-cli','deepseek','groq6','groq3','groq4','groq','groq5','cohere','ollama-cloud2','gpt-oss','claude-cli','ollama','groq7','ollama-cloud3','sambanova','cerebras','gemini','gemini-flash','mistral','mistral2','nvidia-nim','nvidia-nim2','llm7','llm7-2','llm7-3','llm7-4','llm7-5','pollinations','puter-sonnet','puter-4o','openrouter','kiro-gateway','hackbot'];
 const _rateLimited = new Map(); // provider -> until ms
 // A lane that answers correctly but takes a very long time (a local proxy chaining
 // into a big model, say) is a bad pick for the next call. Cooling it keeps responses
@@ -2462,6 +2475,17 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
     const projectList = KNOWN_PROJECTS.map(p => `- ${p.name}: ${p.path} — ${p.desc}`).join('\n');
     prompt += `\n\n═══ KNOWN PROJECTS ON THIS SERVER ═══\n${projectList}\nUse absolute paths when calling file and shell tools.\n═══ END PROJECTS ═══`;
   }
+
+  // Win-back promo — every agent always has the current offer in front of it,
+  // so a lapsed user hears the real deal instead of an invented discount
+  // (owner 2026-11-21: "always have agents have promo deal to suck users back
+  // in"). Empty when no promo is live, and then nothing is mentioned at all.
+  try {
+    const promoLine = require('./promos').promoLine();
+    if (promoLine) {
+      prompt += `\n\n═══ CURRENT PROMO ═══\n${promoLine}\nOffer this plainly to anyone who has stopped using the product. Quote only these terms — never invent a different code, discount, credit amount or deadline.\n═══ END PROMO ═══`;
+    }
+  } catch (_) { /* promos are best-effort; a missing file must not break a prompt */ }
 
   // Inject AGENTS.md (walks up from cwd)
   try {

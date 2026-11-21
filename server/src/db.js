@@ -299,6 +299,7 @@ function initSchema(db) {
       provider_id     TEXT,  -- Stripe charge/sub ID, PayPal txn ID, etc.
       description     TEXT,
       metadata        TEXT,  -- JSON blob for extra context
+      duplicate_of    TEXT,  -- receipt id this row duplicates; excluded from revenue
       created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at      INTEGER NOT NULL DEFAULT (unixepoch()),
       completed_at    INTEGER
@@ -395,6 +396,18 @@ function initSchema(db) {
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code_unique ON users(referral_code) WHERE referral_code IS NOT NULL").run();
     db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)").run();
     db.prepare("CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by)").run();
+  } catch (e) { /* table may not exist yet */ }
+
+  // ── Migrate payments.duplicate_of ──
+  // A payment row that repeats an earlier one (the initial subscription
+  // invoice after checkout already recorded it) is flagged here instead of
+  // being deleted: history stays, revenue queries ignore it.
+  try {
+    const payCols = db.prepare("PRAGMA table_info(payments)").all().map(c => c.name);
+    if (!payCols.includes('duplicate_of')) {
+      db.prepare("ALTER TABLE payments ADD COLUMN duplicate_of TEXT").run();
+      console.log('  [migration] Added duplicate_of column to payments');
+    }
   } catch (e) { /* table may not exist yet */ }
 
   // ── Migrate users.plan CHECK ──
@@ -521,6 +534,16 @@ function initSchema(db) {
       }
     }
   } catch (e) { /* table may not exist yet */ }
+
+  // Team cards store an exact monthly call entitlement here (seats x 1,000).
+  // 0 means "use the plan's normal cap", so every existing account is unchanged.
+  try {
+    const userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+    if (!userCols.includes('call_limit_override')) {
+      db.prepare('ALTER TABLE users ADD COLUMN call_limit_override INTEGER NOT NULL DEFAULT 0').run();
+      console.log('  [migration] Added call_limit_override column to users');
+    }
+  } catch (e) { /* users table missing: nothing to migrate */ }
 
   // Seed admin user if no users exist
   const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;

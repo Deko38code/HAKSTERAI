@@ -1,0 +1,269 @@
+<aside class="network-ads" aria-label="Shared sponsored ads popup">
+  <div class="network-ads-heading">
+    <span>Sponsored ads · Phantom IDE + HaksterAI</span>
+    <button class="ad-collapse" type="button" data-ad-collapse aria-expanded="true" aria-controls="network-ad-content" aria-label="Minimize sponsored ad">−</button>
+  </div>
+  <div id="network-ad-content">
+  <div class="ad-card" data-network-ad-card>
+    <a class="creative" data-ad-link href="https://junkalot.co/portfolio" target="_blank" rel="noopener noreferrer sponsored">
+      <img class="art" data-ad-image src="/ad-fallback-pool-cleanup.png" alt="Junkalot pool cleanup" fetchpriority="high">
+      <div class="copy">
+        <div class="eyebrow" data-ad-kind>JUNKALOT</div>
+        <div class="title" data-ad-title>Before &amp; after: pool cleanup</div>
+        <div class="support" data-ad-support>A real completed job in Contra Costa County. See more Junkalot work.</div>
+        <div class="domain" data-ad-domain>junkalot.co</div>
+        <span class="cta" data-ad-cta>SEE REAL JOBS →</span>
+        <div class="dots" data-ad-dots aria-hidden="true"><i class="dot on"></i></div>
+      </div>
+    </a>
+    <div class="social-actions">
+      <a class="social-button" data-facebook href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fjunkalot.co%2Fportfolio" target="_blank" rel="noopener noreferrer">f&nbsp; Facebook</a>
+      <button class="social-button" data-instagram type="button">◎&nbsp; Instagram</button>
+    </div>
+  </div>
+  </div>
+  <div class="ad-spinner" aria-hidden="true"><i></i></div>
+</aside>
+
+<script>
+  const adsAside = document.querySelector('.network-ads');
+  const collapseButton = adsAside?.querySelector('[data-ad-collapse]');
+  const telegramWebApp = Boolean((window as Window & { Telegram?: { WebApp?: unknown } }).Telegram?.WebApp || /Telegram/i.test(navigator.userAgent));
+  const renderCollapsed = (collapsed: boolean) => {
+    adsAside?.classList.toggle('is-collapsed', collapsed);
+    collapseButton?.setAttribute('aria-expanded', String(!collapsed));
+    collapseButton?.setAttribute('aria-label', collapsed ? 'Expand sponsored ad' : 'Minimize sponsored ad');
+    if (collapseButton) collapseButton.textContent = collapsed ? '+' : '−';
+  };
+  if (telegramWebApp && adsAside) {
+    adsAside.classList.add('telegram-miniapp');
+    renderCollapsed(true);
+  }
+
+  const FEED_URL = 'https://rmt.haksterai.com/api/public/cards';
+  const FALLBACK_AD = {
+    id: 'network-fallback-junkalot', title: 'Junkalot · Pool Cleanup', kind: 'JUNKALOT',
+    headline: 'Before & after: pool cleanup', support: 'A real completed job in Contra Costa County. See more Junkalot work.',
+    image: '/ad-fallback-pool-cleanup.png',
+    href: 'https://junkalot.co/portfolio', cta: 'SEE REAL JOBS'
+  };
+  const root = document.querySelector('[data-network-ad-card]');
+  if (root) {
+    const link = root.querySelector('[data-ad-link]');
+    const image = root.querySelector('[data-ad-image]');
+    const kind = root.querySelector('[data-ad-kind]');
+    const title = root.querySelector('[data-ad-title]');
+    const support = root.querySelector('[data-ad-support]');
+    const domain = root.querySelector('[data-ad-domain]');
+    const cta = root.querySelector('[data-ad-cta]');
+    const dots = root.querySelector('[data-ad-dots]');
+    const facebook = root.querySelector('[data-facebook]');
+    const instagram = root.querySelector('[data-instagram]');
+    let ads = [FALLBACK_AD];
+    let index = 0;
+    let rotationMs = 8000;
+
+    // Show the card on arrival, then tuck it away — after 20 seconds, or as soon
+    // as every ad has been shown once, whichever comes first. The hide always
+    // lands on an ad boundary, so a sponsor is never cut off mid-display. Once it
+    // is away it waits on its compact pill and opens again on a click; opening or
+    // closing it by hand turns the auto-hide off for the rest of this page view.
+    const AUTO_HIDE_MS = 20000;
+    let autoHideTimer = 0;
+    let autoHideOff = false;
+    let hidePending = false;
+    let hidden = false;
+    let shown = 0;
+    // Where an expanded card would cover the hero's sign-in row there is no
+    // honest place for it, so it arrives as its pill and opens only when asked.
+    const compactStart = !telegramWebApp
+      && window.matchMedia('(min-width:721px) and (max-width:1479px)').matches;
+    if (compactStart) { renderCollapsed(true); hidden = true; }
+    const hideCard = () => {
+      if (hidden || autoHideOff || !adsAside) return;
+      hidden = true;
+      hidePending = false;
+      if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = 0; }
+      renderCollapsed(true);
+    };
+    const armAutoHide = () => {
+      if (autoHideTimer || hidden || autoHideOff || telegramWebApp) return;
+      autoHideTimer = window.setTimeout(() => {
+        autoHideTimer = 0;
+        // One ad (or a feed that never rotates): there is no boundary to wait for.
+        if (ads.length <= 1) hideCard();
+        else hidePending = true;
+      }, AUTO_HIDE_MS);
+    };
+    collapseButton?.addEventListener('click', () => {
+      autoHideOff = true;
+      if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = 0; }
+      hidePending = false;
+      const wasCollapsed = adsAside?.classList.contains('is-collapsed') || false;
+      renderCollapsed(!wasCollapsed);
+      if (wasCollapsed) {
+        // Opening: spinner covers the card until this ad's artwork is ready, held
+        // for a beat so the feedback is visible even when the image is cached.
+        hidden = false;
+        showSpinner();
+        render(index, Date.now() + 320);
+      } else {
+        hidden = true;
+      }
+    });
+    armAutoHide();
+
+    let spinnerTimer = 0;
+    const clearSpinner = () => {
+      if (spinnerTimer) { clearTimeout(spinnerTimer); spinnerTimer = 0; }
+      adsAside?.classList.remove('is-loading');
+    };
+    // Shown when the card is opened from its pill. A hard 4 s fallback guarantees
+    // a slow or broken image can never leave the card spinning.
+    const showSpinner = () => {
+      adsAside?.classList.add('is-loading');
+      if (spinnerTimer) clearTimeout(spinnerTimer);
+      spinnerTimer = window.setTimeout(clearSpinner, 4000);
+    };
+    const safeUrl = (value) => {
+      try {
+        const parsed = new URL(value);
+        return /^https?:$/.test(parsed.protocol) ? parsed.href : '';
+      } catch { return ''; }
+    };
+    const render = (nextIndex, spinnerUntil = 0) => {
+      if (!ads.length) return;
+      const ad = ads[nextIndex % ads.length];
+      // Only the render that owns the spinner may clear it, so a background
+      // rotation preload can't wipe the overlay while the card is opening.
+      const doneSpinner = () => {
+        if (!spinnerUntil) return;
+        const wait = Math.max(0, spinnerUntil - Date.now());
+        if (wait) window.setTimeout(clearSpinner, wait);
+        else clearSpinner();
+      };
+      const href = safeUrl(ad.href) || safeUrl(FALLBACK_AD.href);
+      const imageUrl = ad.image === FALLBACK_AD.image ? FALLBACK_AD.image : safeUrl(ad.image) || FALLBACK_AD.image;
+      const preloaded = new Image();
+      preloaded.onload = () => {
+        doneSpinner();
+        index = nextIndex % ads.length;
+        link.href = href;
+        image.src = imageUrl;
+        image.alt = ad.title || 'Sponsored campaign';
+        kind.textContent = ad.kind || 'SPONSORED';
+        title.textContent = ad.headline || ad.title || 'Explore';
+        support.textContent = ad.support || '';
+        try { domain.textContent = ad.host || new URL(href).hostname.replace(/^www\./i, ''); }
+        catch { domain.textContent = ''; }
+        cta.textContent = `${ad.cta || 'LEARN MORE'} →`;
+        facebook.href = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(href)}`;
+        dots.replaceChildren(...ads.map((_, dotIndex) => {
+          const dot = document.createElement('i');
+          dot.className = `dot${dotIndex === index ? ' on' : ''}`;
+          return dot;
+        }));
+        instagram.onclick = async () => {
+          try {
+            if (navigator.share) await navigator.share({ title: ad.title || 'Sponsored offer', text: ad.headline || '', url: href });
+            else if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(href);
+              instagram.textContent = 'Link copied';
+              setTimeout(() => { instagram.textContent = '◎ Instagram'; }, 1800);
+            }
+          } catch {}
+        };
+      };
+      preloaded.onerror = () => {
+        doneSpinner();
+        if (ad.id !== FALLBACK_AD.id) renderFallback();
+      };
+      preloaded.src = imageUrl;
+    };
+    const renderFallback = () => {
+      ads = [FALLBACK_AD];
+      render(0);
+    };
+
+    const loadAds = async () => {
+      if (hidden) return;
+      try {
+        const response = await fetch(FEED_URL, { cache: 'no-store', mode: 'cors' });
+        if (!response.ok) throw new Error(`Ad feed returned ${response.status}`);
+        const feed = await response.json();
+        const activeAds = (feed.templates || []).filter(ad => ad.status === 'active' && safeUrl(ad.href));
+        if (activeAds.length) {
+          ads = activeAds;
+          shown = 0;
+          rotationMs = Math.max(4000, Number(feed.rotation_seconds || 8) * 1000);
+          render(0);
+        }
+      } catch (error) {
+        console.warn('[sponsored-ads] live feed unavailable; showing the built-in ad', error);
+      }
+    };
+
+    setInterval(() => {
+      if (hidden) return;
+      render((index + 1) % ads.length);
+      shown += 1;
+      if (hidePending) hideCard();
+      // shown counts rotations; the arrival ad is the first of the set, so every
+      // ad has had its turn once shown reaches length - 1.
+      else if (shown >= ads.length - 1) hideCard();
+    }, rotationMs);
+    setInterval(loadAds, 30000);
+    loadAds();
+  }
+</script>
+
+<style>
+  /* Bottom-LEFT: the Phantom server applet owns the bottom-right corner on every
+     site. Keeping the sponsored card right-aligned buried the applet underneath it. */
+  /* Width follows the free left margin. The home hero's call-to-action row
+     starts at 50vw - 453px, so a fixed 420px card reached across it between
+     roughly 1400 and 1770px and sat on top of "Sign in with Google". The card
+     now stops short of that row; under 1480px there is no free margin, so it
+     waits on its pill instead (below) and opens on a click. */
+  .network-ads{display:block;position:fixed;left:14px;right:auto;bottom:14px;z-index:70;width:clamp(260px,calc(50vw - 480px),420px);max-height:min(62vh,560px);overflow:auto;overscroll-behavior:contain;margin:0;padding:clamp(12px,2vw,20px);border:1px solid #7c3aed88;border-radius:14px;background:#0a0a0ff5;box-shadow:0 18px 55px #000b}
+  .network-ads-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 4px 9px;color:#e9d5ff;font-size:12px;font-weight:800}
+  .ad-collapse{flex:0 0 28px;width:28px;height:28px;border:1px solid #ffffff35;border-radius:50%;background:#171327;color:#fff;font:700 18px/1 system-ui,sans-serif;cursor:pointer}
+  .ad-collapse:hover,.ad-collapse:focus-visible{border-color:#c084fc;outline:2px solid #c084fc55;outline-offset:1px}
+  .network-ads.is-collapsed{width:min(220px,calc(100vw - 20px));max-height:42px;overflow:hidden;padding:7px 10px;border-radius:999px}
+  .network-ads.is-collapsed .network-ads-heading{padding:0;font-size:11px;white-space:nowrap}
+  .network-ads.is-collapsed .network-ads-heading span{overflow:hidden;text-overflow:ellipsis}
+  .network-ads.is-collapsed #network-ad-content{display:none}
+  .network-ads.telegram-miniapp{left:max(10px,env(safe-area-inset-left));right:auto;bottom:max(10px,env(safe-area-inset-bottom));z-index:20}
+  .network-ads.telegram-miniapp.is-collapsed{display:grid;place-items:center;width:38px;height:38px;min-height:38px;max-height:38px;padding:4px;overflow:hidden;border-radius:50%}
+  .network-ads.telegram-miniapp.is-collapsed .network-ads-heading{justify-content:center;padding:0}
+  .network-ads.telegram-miniapp.is-collapsed .network-ads-heading span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  /* Opening the card from its pill shows a spinner until the ad's artwork is ready. */
+  .ad-spinner{display:none;position:absolute;inset:0;align-items:center;justify-content:center;border-radius:14px;background:#0a0a0ff2;z-index:3}
+  .network-ads.is-loading .ad-spinner{display:flex}
+  .ad-spinner i{width:26px;height:26px;border-radius:50%;border:3px solid #c084fc55;border-top-color:#c084fc;animation:ad-spin .8s linear infinite}
+  @keyframes ad-spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion: reduce){.ad-spinner i{animation-duration:3s}}
+  .ad-card{display:flex;flex-direction:column;gap:8px;width:100%;min-height:0}
+  .creative{min-width:0;display:flex;flex-direction:column;gap:12px;align-items:stretch;width:100%;padding:clamp(10px,2vw,16px);color:inherit;text-decoration:none;border:1px solid #a78bfa70;border-radius:12px;background:linear-gradient(130deg,#171327,#0d111a)}
+  .art{display:block;width:100%;height:clamp(96px,16vh,150px);max-height:150px;object-fit:contain;border-radius:8px;background:#171b24}
+  .copy{min-width:0;display:flex;flex-direction:column;gap:6px}
+  .eyebrow{font-size:clamp(8px,2vw,10px);letter-spacing:.12em;color:#c4b5fd;font-weight:800;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:clamp(14px,4vw,21px);font-weight:900;margin:2px 0;line-height:1.12}
+  .support{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:clamp(10px,2.6vw,12px);color:#c1c8d4;line-height:1.3}
+  .domain{overflow:hidden;color:#e9d5ff;font-size:clamp(9px,2.2vw,11px);font-weight:700;line-height:1.2;text-overflow:ellipsis;white-space:nowrap}
+  .cta{display:inline-block;align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px;border-radius:20px;background:#f5b325;color:#15171a;padding:6px 10px;font-size:9px;font-weight:900;letter-spacing:.05em}
+  .dots{display:flex;gap:4px;margin-top:3px;overflow:hidden}
+  .dot{flex:0 0 5px;width:5px;height:5px;background:#535866;border-radius:50%}
+  .dot.on{background:#f5b325}
+  .social-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:2px}
+  .social-button{display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:6px 12px;border:1px solid #ffffff2c;border-radius:999px;background:#12131c;color:#e9d5ff;font:700 11px/1 system-ui,sans-serif;text-decoration:none;cursor:pointer}
+  .social-button:hover,.social-button:focus-visible{border-color:#c084fc;color:#fff;outline:2px solid #c084fc55;outline-offset:1px}
+  /* Phones: the panel and the applet are both full width, so the sponsored card
+     docks ABOVE the applet using the height the applet publishes. It can never
+     cover the applet, whatever mode it is in (card, chip or edge tab). */
+  @media(max-width:720px){
+    .network-ads{left:8px;right:8px;width:auto;bottom:calc(8px + var(--phantom-applet-h,0px));max-height:min(44vh,420px)}
+    .network-ads.telegram-miniapp{bottom:calc(8px + var(--phantom-applet-h,0px))}
+  }
+  @media(max-width:360px){.creative{gap:8px;padding:8px}.title{font-size:14px}.support{-webkit-line-clamp:2}.cta{font-size:8px;padding:5px 8px}.social-button{min-height:28px;padding:5px 9px;font-size:10px}}
+</style>

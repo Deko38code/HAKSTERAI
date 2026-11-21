@@ -1,0 +1,130 @@
+---
+/**
+ * Referral Program section — landing page.
+ * Anonymous: explains the rewards. Signed-in: shows the user's own link,
+ * token balance, and referral history from GET /api/referrals.
+ */
+---
+<section id="referral" class="mx-auto max-w-6xl px-6 py-16">
+  <div class="rounded-2xl border border-[#7c3aed]/30 bg-gradient-to-b from-[#1a1030]/60 to-[#0d0d14] p-8 md:p-10">
+    <div class="flex flex-col md:flex-row md:items-center gap-6 md:gap-10">
+      <div class="md:w-1/2">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="rounded-full border border-[#7c3aed]/30 bg-[#7c3aed]/10 px-3 py-1 text-xs font-semibold text-[#a855f7]">🎁 REFERRAL PROGRAM</span>
+        </div>
+        <h2 class="text-2xl md:text-3xl font-bold text-[#e2e8f0] leading-tight tracking-tight">Invite friends. Both get free tokens.</h2>
+        <p class="mt-3 text-sm md:text-base text-[#94a3b8] leading-relaxed">
+          Share your personal link. When a friend signs in with Google through it,
+          <span class="text-[#00ff88] font-semibold">they get <span id="ref-signup-tokens" class="num">2,500</span> tokens</span>
+          instantly, and
+          <span class="text-[#a855f7] font-semibold">you get <span id="ref-reward-tokens" class="num">10,000</span> tokens</span>
+          per signup — stackable, no caps.
+        </p>
+        <div class="mt-4 text-[11px] text-[#64748b]">Tokens spend on agent runs, image generation, and terminal time.</div>
+      </div>
+
+      <div class="md:w-1/2 rounded-xl border border-[#1e1e2e] bg-[#0a0a0f] p-5">
+        <!-- Signed-in view -->
+        <div id="ref-user-view" class="hidden">
+          <div class="text-[10px] uppercase tracking-widest text-[#64748b] mb-2">Your referral link</div>
+          <div class="flex gap-2">
+            <input id="ref-link-input" readonly class="flex-1 rounded-lg border border-[#1e1e2e] bg-[#111118] px-3 py-2 text-xs font-mono text-[#a855f7] outline-none focus:border-[#7c3aed]/60" />
+            <button id="ref-copy-btn" class="rounded-lg bg-[#7c3aed] hover:bg-[#6d28d9] px-4 py-2 text-xs font-semibold text-white transition-colors">Copy</button>
+          </div>
+          <div class="mt-4 grid grid-cols-3 gap-2 text-center">
+            <div class="rounded-lg border border-[#1e1e2e] bg-[#111118] px-2 py-3">
+              <div id="ref-total" class="text-lg font-bold text-[#e2e8f0]">0</div>
+              <div class="text-[10px] text-[#64748b] uppercase tracking-wider">Signups</div>
+            </div>
+            <div class="rounded-lg border border-[#1e1e2e] bg-[#111118] px-2 py-3">
+              <div id="ref-earned" class="text-lg font-bold text-[#00ff88]">0</div>
+              <div class="text-[10px] text-[#64748b] uppercase tracking-wider">Tokens earned</div>
+            </div>
+            <div class="rounded-lg border border-[#1e1e2e] bg-[#111118] px-2 py-3">
+              <div id="ref-balance" class="text-lg font-bold text-[#a855f7]">0</div>
+              <div class="text-[10px] text-[#64748b] uppercase tracking-wider">Balance</div>
+            </div>
+          </div>
+          <div id="ref-recent" class="mt-4 hidden">
+            <div class="text-[10px] uppercase tracking-widest text-[#64748b] mb-2">Recent referrals</div>
+            <div id="ref-recent-list" class="space-y-1 max-h-36 overflow-y-auto text-xs text-[#94a3b8] font-mono"></div>
+          </div>
+        </div>
+
+        <!-- Anonymous view -->
+        <div id="ref-cta-view">
+          <div class="flex items-start gap-3 mb-4">
+            <span class="text-2xl">💬</span>
+            <div>
+              <div class="text-sm font-semibold text-[#e2e8f0]">1. Sign in with Google</div>
+              <div class="text-xs text-[#64748b]">Your referral link is generated automatically.</div>
+            </div>
+          </div>
+          <div class="flex items-start gap-3 mb-4">
+            <span class="text-2xl">📤</span>
+            <div>
+              <div class="text-sm font-semibold text-[#e2e8f0]">2. Share your link</div>
+              <div class="text-xs text-[#64748b]">Post it anywhere — Telegram, X, Discord.</div>
+            </div>
+          </div>
+          <a id="ref-cta-btn" href="/api/auth/google/redirect" class="inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#6d28d9] transition-colors">
+            <span>🔐</span> Sign in &amp; get my link
+          </a>
+        </div>
+        <div id="ref-error" class="hidden mt-3 text-xs text-[#ef4444]"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  (async function initReferralSection() {
+    const fmt = (n: number) => Number(n || 0).toLocaleString();
+  (() => { const el = document.getElementById('ref-signup-tokens'); if (el) el.textContent = fmt(2500); })();
+  (() => { const el = document.getElementById('ref-reward-tokens'); if (el) el.textContent = fmt(10000); })();
+    const token = localStorage.getItem('hakster_google_token');
+    if (!token) {
+      // Carry any pending ?ref into the sign-in redirect
+      const pendingRef = (localStorage.getItem('hakster_referral_code') || '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 24);
+      const btn = document.getElementById('ref-cta-btn');
+      if (btn && pendingRef) btn.setAttribute('href', '/api/auth/google/redirect?ref=' + encodeURIComponent(pendingRef));
+      return;
+    }
+    document.getElementById('ref-cta-view')?.classList.add('hidden');
+    const userView = document.getElementById('ref-user-view');
+    userView?.classList.remove('hidden');
+    const API = window.location.port === '4321' ? 'http://localhost:3579' : '';
+    try {
+      const res = await fetch(API + '/api/referrals', { headers: { 'x-api-key': token } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const input = document.getElementById('ref-link-input') as HTMLInputElement | null;
+      if (input) input.value = data.referralLink || '';
+  for (const [id, val] of [['ref-total', data.totalReferrals], ['ref-earned', data.totalEarned], ['ref-balance', data.tokenBalance], ['ref-signup-tokens', data.signupTokens], ['ref-reward-tokens', data.rewardTokens]] as [string, number][]) {
+    const el = document.getElementById(id); if (el) el.textContent = fmt(val);
+  }
+      const list = document.getElementById('ref-recent-list');
+      if (list && Array.isArray(data.referrals) && data.referrals.length) {
+        document.getElementById('ref-recent')?.classList.remove('hidden');
+        list.innerHTML = data.referrals.slice(0, 6).map((r: any) => {
+          const who = '@' + (r.username || r.email || 'user');
+          return `<div class="flex justify-between gap-3 rounded border border-[#1e1e2e] bg-[#111118] px-2 py-1">
+            <span class="truncate text-[#94a3b8]">${who.replace(/</g, '&lt;')}</span>
+            <span class="text-[#00ff88] whitespace-nowrap">+${fmt(r.reward_tokens || r.rewardTokens)}</span></div>`;
+        }).join('');
+      }
+      document.getElementById('ref-copy-btn')?.addEventListener('click', async () => {
+        const value = input?.value || '';
+        if (!value) return;
+        try { await navigator.clipboard.writeText(value); } catch {
+          input?.select(); document.execCommand('copy');
+        }
+        const btn = document.getElementById('ref-copy-btn');
+        if (btn) { btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = 'Copy'; }, 1600); }
+      });
+    } catch (e: any) {
+      const err = document.getElementById('ref-error');
+      if (err) { err.textContent = 'Could not load referral data: ' + (e?.message || 'unknown'); err.classList.remove('hidden'); }
+    }
+  })();
+</script>

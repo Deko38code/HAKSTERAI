@@ -150,13 +150,25 @@ function realSignupSummary(db) {
   if (!db) return empty;
   try {
     const rows = db.prepare("SELECT id, username, email, role, plan, telegram_id, created_at FROM users").all();
+    // Owner, 2026-11-21: "if they paid they sign up". A paying account is a
+    // customer even if its address is on the house list (a house address that
+    // actually buys a plan is a paying customer, not a freebie). Read the
+    // billing tables defensively so an older DB without them still answers.
+    const paid = new Set();
+    for (const q of [
+      "SELECT DISTINCT user_id FROM payments WHERE status = 'completed' AND COALESCE(duplicate_of, '') = ''",
+      "SELECT DISTINCT user_id FROM subscriptions WHERE status IN ('active', 'trialing')",
+    ]) {
+      try { for (const p of db.prepare(q).all()) if (p.user_id) paid.add(String(p.user_id)); } catch (_) { /* table absent */ }
+    }
     const real = [];
     let systemCount = 0;
     let telegramCount = 0;
     for (const r of rows) {
       const kind = classify(r);
+      const isPaid = paid.has(String(r.id));
       if (kind === 'system') systemCount++;
-      else if (kind === 'real') {
+      else if (kind === 'real' || isPaid) {
         real.push(r);
         if (!norm(r.email) && r.telegram_id) telegramCount++;
       }

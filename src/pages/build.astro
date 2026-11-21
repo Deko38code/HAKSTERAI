@@ -3818,7 +3818,7 @@ import Layout from '../layouts/Layout.astro';
         if (!hadResults || err.message?.includes('limit')) {
           let errorContent = `Error: ${err.message || String(err)}`;
           if (err.status === 402 || (err.message && err.message.includes('limit'))) {
-            errorContent = '⚠️ **Free usage limit reached**\n\nFree accounts get 5 AI calls and 5 web lookups across chat, agents, scripts, and generation. **Upgrade to a paid plan to continue.**\n\n→ Choose a plan below to subscribe via Stripe.';
+            errorContent = '⚠️ **Usage limit reached**\n\nYour plan allowance is used up and there are no bought calls left. **Buy a call pack or pick a plan below** — the smallest step is a one-time pack, and nothing renews.\n\n→ Options below open Stripe checkout.';
             // Show upgrade modal
             showUpgradeModal();
           }
@@ -3974,6 +3974,40 @@ import Layout from '../layouts/Layout.astro';
       }
     }
 
+    // The account chip shows the plan the buyer is actually on, with the price
+    // checkout charges for it (e.g. "lite · $3.45/mo"). Prices come from the
+    // live catalog, so a price change never leaves a stale number in the
+    // profile, and a plan flip shows its new price straight away.
+    let planCatalogCache: any[] | null = null;
+    // Bought call credits (Try Me Now / Token Pack). The balance lives on the
+    // account, so the profile chip and the usage line both read it from
+    // /api/usage — a purchase shows up here without a reload of the page.
+    let accountTokenCredits = 0;
+    function withCredits(label: string): string {
+      return accountTokenCredits > 0 ? label + ' + ' + accountTokenCredits.toLocaleString() + ' credits' : label;
+    }
+
+    async function planChipLabel(planId: any): Promise<string> {
+      const id = String(planId || 'free').toLowerCase();
+      if (!id || id === 'free') return 'free';
+      try {
+        if (!planCatalogCache) {
+          const res = await fetch(`${API}/api/pricing`, { cache: 'no-store' });
+          const data = await res.json();
+          planCatalogCache = Array.isArray(data.plans) ? data.plans : null;
+        }
+        const plan = (planCatalogCache || []).find((p: any) => String(p.id).toLowerCase() === id);
+        const prices = (plan && plan.prices) || [];
+        const price = prices.find((p: any) => Number(p.amount) > 0 && p.billingCycle === 'monthly')
+          || prices.find((p: any) => Number(p.amount) > 0);
+        if (price) {
+          const cycle = price.billingCycle === 'yearly' ? 'yr' : 'mo';
+          return `${id} · $${(Number(price.amount) / 100).toFixed(2)}/${cycle}`;
+        }
+      } catch {}
+      return id;
+    }
+
     function showGoogleUserBadge(user: any) {
       // Hero area badge
       const badge = document.getElementById('google-user-badge');
@@ -4011,7 +4045,7 @@ import Layout from '../layouts/Layout.astro';
         if (accountEmail) accountEmail.textContent = user.email || '—';
         if (accountAvatar && user.picture) accountAvatar.src = user.picture;
         if (accountRole) accountRole.textContent = user.role || 'user';
-        if (accountPlan) accountPlan.textContent = user.plan || 'free';
+        if (accountPlan) planChipLabel(user.plan).then((label) => { accountPlan.textContent = withCredits(label); });
         if (accountKey && googleToken) {
           const short = googleToken.slice(0, 12) + '...' + googleToken.slice(-4);
           accountKey.textContent = short;
@@ -4048,14 +4082,25 @@ import Layout from '../layouts/Layout.astro';
         el.title = usedTokens
           ? `${wired.calls || 0} measured calls · ${wired.agentCalls || 0} agent loops${usedCost > 0 ? ` · $${usedCost.toFixed(6)}` : ''}`
           : '';
+        // Bought calls (Try Me Now / Token Pack). Read on every refresh, so a
+        // purchase shows on the profile the moment checkout returns here.
+        const credits = Math.max(0, Number(data.tokenBalance || 0));
+        accountTokenCredits = credits;
+        const creditText = credits > 0 ? ` · ${credits.toLocaleString()} bought calls` : '';
+        const planEl = document.getElementById('sidebar-account-plan') as HTMLSpanElement | null;
+        if (planEl) planChipLabel(data.plan).then((label) => { planEl.textContent = withCredits(label); });
         if (data.remaining === -1) {
-          el.textContent = `✦ Unlimited · ${tokenLabel}`;
+          el.textContent = `✦ Unlimited · ${tokenLabel}${creditText}`;
           el.style.color = '#a855f7';
         } else if (data.limitEnabled) {
-          el.textContent = `${data.remaining}/${data.limit} free uses left`;
-          el.style.color = data.remaining <= 1 ? '#ef4444' : '#64748b';
+          // Out of allowance: spent credits keep the account working, and the
+          // line says exactly how many calls are left.
+          el.textContent = data.remaining > 0
+            ? `${data.remaining}/${data.limit} plan uses left${creditText}`
+            : (credits > 0 ? `${credits.toLocaleString()} bought calls left` : 'No plan uses left — buy calls or a plan');
+          el.style.color = (data.remaining <= 1 && credits <= 0) ? '#ef4444' : '#64748b';
         } else {
-          el.textContent = `${data.used} uses · ${data.plan} plan`;
+          el.textContent = `${data.used} uses · ${data.plan} plan${creditText}`;
           el.style.color = '#64748b';
         }
       } catch {}
@@ -4141,13 +4186,22 @@ import Layout from '../layouts/Layout.astro';
           const litePlan = allPlans.find((p) => p.id === 'lite');
           const liteMonthly = (litePlan?.prices || []).find((p) => p.billingCycle === 'monthly' && p.amount > 0 && p.stripePriceId);
           const paidPlans = allPlans.filter((p) => p.id !== 'free' && p.id !== currentPlan);
+          // Cheapest way to continue first: call packs before subscriptions.
+          paidPlans.sort((a, b) => {
+            const aPack = (a.prices || []).some((p: any) => p.oneTime) ? 0 : 1;
+            const bPack = (b.prices || []).some((p: any) => p.oneTime) ? 0 : 1;
+            return aPack - bPack;
+          });
+          const hasPack = allPlans.some((p: any) => (p.prices || []).some((pr: any) => pr.oneTime));
           if (currentPlan === 'free') {
-            paidPlans.sort((a, b) => (a.id === 'lite' ? -1 : b.id === 'lite' ? 1 : 0));
-            if (titleEl) titleEl.textContent = liteMonthly ? `Upgrade to Lite — ${moneyLabel(liteMonthly.amount)}/mo` : 'Upgrade to Lite';
-            if (copyEl) copyEl.textContent = 'You’ve reached a free usage limit. Lite includes 30 AI calls and 10 web lookups each month.';
+            if (titleEl) titleEl.textContent = hasPack ? 'Out of free uses — keep going'
+              : (liteMonthly ? `Upgrade to Lite — ${moneyLabel(liteMonthly.amount)}/mo` : 'Upgrade to Lite');
+            if (copyEl) copyEl.textContent = hasPack
+              ? 'Free accounts get 5 AI calls and 5 web lookups. A one-time call pack keeps you going and nothing renews — Lite adds 30 AI calls and 10 web lookups a month.'
+              : 'You’ve reached a free usage limit. Lite includes 30 AI calls and 10 web lookups each month.';
           } else if (currentPlan === 'lite') {
             if (titleEl) titleEl.textContent = 'Lite monthly limit reached';
-            if (copyEl) copyEl.textContent = 'Your Lite plan includes 30 AI calls and 10 web lookups each month. Choose another plan to continue.';
+            if (copyEl) copyEl.textContent = 'Your Lite plan includes 30 AI calls and 10 web lookups each month. A one-time call pack tops it up without changing the plan.';
           } else {
             if (titleEl) titleEl.textContent = 'Usage limit reached';
             if (copyEl) copyEl.textContent = 'Choose another plan to continue.';
@@ -4156,17 +4210,24 @@ import Layout from '../layouts/Layout.astro';
           let shown = 0;
           paidPlans.forEach((plan) => {
             (plan.prices || []).forEach((price) => {
-              if (!price.stripePriceId || !price.amount) return;
+              // One-time packs and the per-seat add-on are sold with price_data,
+              // so they have no Stripe price id and used to be skipped here.
+              // They are the cheapest way out of a spent allowance, so they are
+              // listed alongside the plans (§19: prices come from the catalog).
+              if ((!price.stripePriceId && !price.oneTime && !price.perSeat) || !price.amount) return;
               const btn = document.createElement('button');
               btn.style.cssText = 'background:#7c3aed;color:white;border:none;border-radius:10px;padding:16px 20px;font-size:15px;font-weight:bold;cursor:pointer;display:flex;justify-content:space-between;align-items:center;text-align:left;gap:12px;';
               const label = document.createElement('span');
-              label.textContent = `${String(plan.name || plan.id).replace('HaksterAI ', '')} — ${moneyLabel(price.amount)}/${price.billingCycle === 'yearly' ? 'yr' : 'mo'}`;
+              const suffix = price.oneTime ? ' once' : price.perSeat ? '/seat/mo' : '/' + (price.billingCycle === 'yearly' ? 'yr' : 'mo');
+              label.textContent = `${String(plan.name || plan.id).replace('HaksterAI ', '')} — ${moneyLabel(price.amount)}${suffix}`;
               btn.appendChild(label);
               const note = document.createElement('span');
               note.style.cssText = 'font-size:12px;opacity:0.8;white-space:nowrap;';
-              note.textContent = price.introLabel || (price.billingCycle === 'yearly' ? 'Yearly' : 'Monthly');
+              note.textContent = price.oneTime ? `${price.tokens || 0} calls`
+                : price.perSeat ? 'per member'
+                : (price.introLabel || (price.billingCycle === 'yearly' ? 'Yearly' : 'Monthly'));
               btn.appendChild(note);
-              btn.addEventListener('click', () => startCheckout(price.stripePriceId, plan.id, btn));
+              btn.addEventListener('click', () => startCheckout(price.priceId || price.id, plan.id, btn));
               planWrap.appendChild(btn);
               shown++;
             });
@@ -4300,7 +4361,8 @@ import Layout from '../layouts/Layout.astro';
             const data = await res.json();
             if (data.user) {
               const accountPlan = document.getElementById('sidebar-account-plan') as HTMLSpanElement | null;
-              if (accountPlan) accountPlan.textContent = data.user.plan || 'free';
+              planCatalogCache = null;
+              if (accountPlan) planChipLabel(data.user.plan).then((label) => { accountPlan.textContent = withCredits(label); });
             }
           } catch {}
         }

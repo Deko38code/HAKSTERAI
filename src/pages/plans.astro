@@ -5,7 +5,7 @@ import Layout from '../layouts/Layout.astro';
 <Layout title="Plans & pricing — HaksterAI">
   <!-- The applet keeps the bottom-right corner (§18); this padding lets the last
        plan row scroll clear of it instead of sitting underneath the Subscribe buttons. -->
-  <div class="min-h-screen pt-[72px] bg-[#0a0a0f] text-[#e2e8f0] px-4" style="padding-bottom: calc(4rem + var(--phantom-applet-h, 0px));">
+  <div class="min-h-screen pt-[72px] bg-[#0a0a0f] text-[#e2e8f0] px-5" style="padding-bottom: calc(4rem + var(--phantom-applet-h, 0px));">
     <div class="mx-auto max-w-5xl">
 
       <nav class="flex items-center gap-2 text-xs text-[#64748b] mb-6">
@@ -15,11 +15,51 @@ import Layout from '../layouts/Layout.astro';
       </nav>
 
       <h1 class="text-2xl sm:text-3xl font-bold mb-2">Plans &amp; pricing</h1>
+
+      <!-- First thing on the page (owner 2026-11-21: "advertise our 20-mcp
+           servers list name top 1st" and "claude codex kiro omp qwen etc"). The
+           server names are read live from /api/mcp/servers, which reads the same
+           .hakster/mcp.json the agent loads, so the list cannot drift. -->
+      <section id="mcp-belt" class="mb-8 rounded-2xl border border-[#00ff41]/35 bg-[#00ff41]/[0.04] p-5 shadow-[0_0_40px_rgba(0,255,65,0.10)]">
+        <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h2 class="text-sm font-extrabold uppercase tracking-[.22em] text-[#00ff41]"><span id="mcp-count">—</span> MCP servers · <span id="skill-count">—</span> skills · live on every plan</h2>
+          <span class="text-[11px] text-[#94a3b8]">the same tool belt at every price — never an add-on</span>
+        </div>
+        <div id="mcp-list" class="mt-3 flex flex-wrap gap-1.5" aria-live="polite">
+          <span class="text-xs text-[#64748b]">Loading servers…</span>
+        </div>
+        <details id="skill-cat" class="mt-3" hidden>
+          <summary class="w-fit cursor-pointer select-none text-[11px] font-semibold text-[#00ff41] hover:underline">See the skill catalogue ▾</summary>
+          <div class="mt-2 max-h-40 overflow-y-auto rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] p-2">
+            <ul id="skill-list" class="flex flex-wrap gap-1.5 text-[11px] font-mono text-[#c9f7d6]"></ul>
+          </div>
+        </details>
+        <ul class="mt-4 grid gap-1.5 text-xs text-[#94a3b8] sm:grid-cols-2">
+          <li>⚡ Streaming agent loop with 24 loop-break guardrails</li>
+          <li>🧠 Persistent memory, lessons and skill extraction</li>
+          <li>🛠 Every tool belt above, on every plan — no add-on</li>
+          <li>⌨️ HaksterAI CLI + API on every plan over $20/month</li>
+          <li>🎁 Enterprise includes the <a href="https://phantomide.com/" target="_blank" rel="noopener noreferrer" class="text-[#00ff41] hover:underline">PhantomIDE site builder</a></li>
+        </ul>
+        <p class="mt-4 text-xs leading-5 text-[#c4b5fd]">
+          One agent loop drives every brain we run — Claude, Codex, Kiro, OMP, Qwen, DeepSeek and more.
+          <span class="font-semibold text-[#e2e8f0]">Every plan over $20/month includes the HaksterAI CLI and its API.</span>
+        </p>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <code class="min-w-0 break-all rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2.5 py-1.5 text-[11px] text-[#a7f3d0]">curl -fsSL https://haksterai.com/install.sh | sh</code>
+          <button type="button" id="copy-install" class="min-h-9 rounded-lg border border-[#00ff41]/40 px-2.5 py-1 text-[11px] font-semibold text-[#00ff41] hover:bg-[#00ff41]/10">Copy</button>
+        </div>
+      </section>
       <p class="text-sm text-[#94a3b8] mb-8 max-w-2xl">
         Every plan is billed through Stripe. Prices below are read live from Stripe, so what you
         see here is exactly what checkout charges. No account needed to pay — we create one from
         the email you use at checkout. Cancel any time from the
         <a href="https://billing.stripe.com/p/login/fZu3cv4lqaqncMIauIbMQ00" target="_blank" rel="noopener" class="text-[#a855f7] hover:underline">billing portal</a>.
+      </p>
+
+      <p class="text-sm text-[#c4b5fd] mb-8 max-w-2xl font-medium">
+        Prices for every range and every user: one-off packs from 65¢ up to 3,000 calls, a $1.45
+        low-budget monthly plan, and team seats. Pick the rung that fits — no account needed to buy.
       </p>
 
       <div id="msg" class="hidden mb-6 rounded-xl border px-4 py-3 text-sm"></div>
@@ -38,7 +78,7 @@ import Layout from '../layouts/Layout.astro';
           </p>
         </div>
         <a href="https://billing.stripe.com/p/login/fZu3cv4lqaqncMIauIbMQ00" target="_blank" rel="noopener"
-           class="inline-flex items-center justify-center gap-2 rounded-lg border border-[#7c3aed]/60 px-4 py-2.5 text-sm font-semibold text-[#e2e8f0] hover:bg-[#7c3aed]/15 transition-colors whitespace-nowrap">
+           class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#7c3aed]/60 px-4 py-2.5 text-sm font-semibold text-[#e2e8f0] hover:bg-[#7c3aed]/15 transition-colors whitespace-nowrap">
           Open the billing portal →
         </a>
       </div>
@@ -51,10 +91,70 @@ import Layout from '../layouts/Layout.astro';
     </div>
   </div>
 
-  <script is:inline>
+  <!-- data-cfasync="false" keeps Cloudflare Rocket Loader from deferring this
+       script: when rocket-loader.min.js fails to load (ad-blockers, DNS filters)
+       every button on this page disappears with it. Verified 2026-11-21. -->
+  <script is:inline data-cfasync="false">
     const API = location.port === '4321' ? 'http://localhost:3579' : '';
     const msg = document.getElementById('msg');
     const grid = document.getElementById('plan-grid');
+    // The MCP belt is advertised first, so it loads first and never blocks the
+    // price grid. Names come from the server's own config; nothing is invented.
+    (function loadMcpBelt() {
+      const list = document.getElementById('mcp-list');
+      const count = document.getElementById('mcp-count');
+      const copy = document.getElementById('copy-install');
+      if (copy) copy.addEventListener('click', async function () {
+        const cmd = 'curl -fsSL https://haksterai.com/install.sh | sh';
+        try { await navigator.clipboard.writeText(cmd); copy.textContent = 'Copied'; }
+        catch (_) { copy.textContent = 'Select it'; }
+        setTimeout(function () { copy.textContent = 'Copy'; }, 1800);
+      });
+      if (!list) return;
+      // Skills come from the same skills_paths Crush is configured with, so the
+      // advertised count is the real catalogue, not a marketing round number.
+      fetch(API + '/api/skills/catalog', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          const skills = data && Array.isArray(data.skills) ? data.skills : [];
+          if (!skills.length) return;
+          const skillCount = document.getElementById('skill-count');
+          const cat = document.getElementById('skill-cat');
+          const skillList = document.getElementById('skill-list');
+          if (skillCount) skillCount.textContent = String(data.count || skills.length);
+          if (cat) cat.hidden = false;
+          if (skillList) {
+            skillList.textContent = '';
+            skills.forEach(function (name) {
+              const li = document.createElement('li');
+              li.className = 'rounded-full border border-[#1e1e2e] px-2 py-0.5';
+              li.textContent = name;
+              skillList.appendChild(li);
+            });
+          }
+        })
+        .catch(function () { /* no count, nothing invented */ });
+      fetch(API + '/api/mcp/servers', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          const servers = data && Array.isArray(data.servers) ? data.servers : [];
+          if (!servers.length) throw new Error('empty');
+          if (count) count.textContent = String(data.count || servers.length);
+          list.textContent = '';
+          servers.forEach(function (srv) {
+            const chip = document.createElement('span');
+            chip.className = 'rounded-full border border-[#00ff41]/30 bg-[#0f1a12] px-2.5 py-1 text-[11px] font-mono text-[#c9f7d6]';
+            chip.textContent = srv.name;
+            list.appendChild(chip);
+          });
+        })
+        .catch(function () {
+          // Honest fallback: no count, no invented names.
+          if (count) count.textContent = '';
+          list.textContent = 'Server list unavailable right now.';
+          list.className = 'mt-3 text-xs text-[#64748b]';
+        });
+    })();
 
     function money(cents) {
       return '$' + (cents / 100).toFixed(2).replace(/\.00$/, '');
@@ -76,7 +176,7 @@ import Layout from '../layouts/Layout.astro';
     // signed-out buyers go straight to Stripe, which collects the email, and the
     // paid webhook creates the account. claimCheckout() hands that account back
     // on the return trip so they land signed in.
-    async function startCheckout(priceId, planId, btn) {
+    async function startCheckout(priceId, planId, btn, seats) {
       const token = authToken();
       btn.disabled = true;
       say('Redirecting to Stripe...', 'ok');
@@ -84,7 +184,7 @@ import Layout from '../layouts/Layout.astro';
         const res = await fetch(API + '/api/stripe/checkout', {
           method: 'POST',
           headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { 'x-api-key': token } : {}),
-          body: JSON.stringify({ priceId: priceId, planId: planId, returnTo: '/plans' }),
+          body: JSON.stringify({ priceId: priceId, planId: planId, seats: seats || 1, returnTo: '/plans' }),
         });
         const data = await res.json();
         if (data.url) { window.location.href = data.url; return; }
@@ -152,18 +252,28 @@ import Layout from '../layouts/Layout.astro';
     function planCard(plan) {
       const card = document.createElement('div');
       card.className = 'rounded-2xl border border-[#1e1e2e] bg-[#111118] p-5 flex flex-col';
-      const isOffer = (plan.prices || []).some(function (p) { return p.introAmount; });
-      if (isOffer) card.className = 'rounded-2xl border border-[#7c3aed]/60 bg-[#111118] p-5 flex flex-col shadow-[0_0_40px_rgba(124,58,237,0.18)]';
+      // Team cards get the site's green accent so the team range stands out
+      // from the individual cards (owner 2026-11-21: "make our stand out").
+      const isTeam = /^team_/.test(plan.id || '');
+      const isTrial = (plan.prices || []).some(function (p) { return p.trialDays; });
+      const isOffer = (plan.prices || []).some(function (p) { return p.introAmount || p.trialDays; });
+      if (isTeam) card.className = 'rounded-2xl border border-[#00ff41]/50 bg-[#111118] p-5 flex flex-col shadow-[0_0_40px_rgba(0,255,65,0.16)]';
+      else if (isOffer) card.className = 'rounded-2xl border border-[#7c3aed]/60 bg-[#111118] p-5 flex flex-col shadow-[0_0_40px_rgba(124,58,237,0.18)]';
 
       const h = document.createElement('h2');
       h.className = 'text-lg font-semibold';
       h.textContent = plan.name || plan.id;
       card.appendChild(h);
 
-      if (isOffer) {
+      if (isTeam) {
+        const badge = document.createElement('div');
+        badge.className = 'mt-1 inline-block rounded-full bg-[#00ff41]/15 px-2 py-0.5 text-[11px] font-semibold text-[#00ff41] w-fit';
+        badge.textContent = 'TEAM';
+        card.appendChild(badge);
+      } else if (isOffer) {
         const badge = document.createElement('div');
         badge.className = 'mt-1 inline-block rounded-full bg-[#7c3aed]/20 px-2 py-0.5 text-[11px] font-semibold text-[#c084fc] w-fit';
-        badge.textContent = 'Intro offer';
+        badge.textContent = isTrial ? 'First month free' : 'Intro offer';
         card.appendChild(badge);
       }
 
@@ -174,26 +284,82 @@ import Layout from '../layouts/Layout.astro';
         card.appendChild(d);
       }
 
-      const prices = (plan.prices || []).filter(function (p) { return p.amount === 0 || p.priceId; });
+      // Included perks come from the server's catalog, never from this page.
+      (plan.perks || []).forEach(function (perk) {
+        const perkEl = document.createElement('div');
+        perkEl.className = 'mt-1 text-[11px] font-semibold text-[#00ff41]';
+        perkEl.textContent = '🎁 ' + perk;
+        card.appendChild(perkEl);
+      });
+
+      const prices = (plan.prices || []).filter(function (p) { return p.amount === 0 || p.priceId || p.oneTime || p.perSeat || p.inlineRecurring; });
       const priceBox = document.createElement('div');
       priceBox.className = 'mt-4 space-y-2';
       prices.forEach(function (p) {
         const row = document.createElement('div');
-        row.className = 'flex items-baseline justify-between gap-3';
+        row.className = 'flex flex-wrap items-center justify-between gap-2 sm:gap-3';
 
         const amount = document.createElement('div');
-        amount.className = 'text-xl font-bold';
-        amount.textContent = p.amount === 0 ? 'Free' : money(p.amount) + perCycle(p.billingCycle);
+        amount.className = 'text-xl font-bold whitespace-nowrap';
+        amount.textContent = p.amount === 0 ? 'Free'
+          : p.oneTime ? money(p.amount) + ' once'
+          : p.perSeat ? money(p.amount) + '/seat/mo'
+          : money(p.amount) + perCycle(p.billingCycle);
         row.appendChild(amount);
+
+        // Seats are per member and the team is optional, so the buyer picks the
+        // count here instead of paying for a team they do not have.
+        let seatInput = null;
+        if (p.amount > 0 && p.perSeat) {
+          seatInput = document.createElement('input');
+          seatInput.type = 'number';
+          seatInput.min = '1';
+          seatInput.max = '100';
+          seatInput.value = '1';
+          seatInput.setAttribute('aria-label', 'Number of seats (members)');
+          seatInput.className = 'h-11 w-16 rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2 text-center text-sm text-[#e2e8f0]';
+          row.appendChild(seatInput);
+        }
 
         if (p.amount > 0) {
           const btn = document.createElement('button');
-          btn.className = 'rounded-lg bg-[#7c3aed] px-3 py-2 text-xs font-semibold text-white hover:bg-[#6d28d9] transition-colors disabled:opacity-50';
-          btn.textContent = 'Subscribe';
-          btn.addEventListener('click', function () { startCheckout(p.priceId, plan.id, btn); });
+          btn.className = 'min-h-11 rounded-lg bg-[#7c3aed] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#6d28d9] transition-colors disabled:opacity-50';
+          btn.textContent = p.oneTime ? 'Buy now' : p.perSeat ? 'Add seats' : 'Subscribe';
+          const priceKey = p.priceId || p.id;
+          btn.addEventListener('click', function () {
+            const seats = seatInput ? Math.max(1, Math.min(100, Math.round(Number(seatInput.value) || 1))) : 1;
+            startCheckout(priceKey, plan.id, btn, seats);
+          });
           row.appendChild(btn);
         }
         priceBox.appendChild(row);
+
+        if (p.oneTime && p.tokens) {
+          const note = document.createElement('div');
+          note.className = 'text-[11px] text-[#94a3b8]';
+          note.textContent = p.tokens + ' AI calls · one payment, nothing renews';
+          priceBox.appendChild(note);
+        }
+        if (p.inlineRecurring) {
+          const note = document.createElement('div');
+          note.className = 'text-[11px] text-[#94a3b8]';
+          note.textContent = (p.tokens ? p.tokens + ' AI calls a month · ' : '') + 'capped monthly plan, cancel anytime';
+          priceBox.appendChild(note);
+        }
+        // Over $20/month includes the CLI and its API (server decides this from
+        // the catalog price, so the card can never promise what it does not grant).
+        if (p.cliIncluded) {
+          const cliNote = document.createElement('div');
+          cliNote.className = 'text-[11px] font-semibold text-[#00ff41]';
+          cliNote.textContent = '+ HaksterAI CLI + API access';
+          priceBox.appendChild(cliNote);
+        }
+        if (p.perSeat) {
+          const note = document.createElement('div');
+          note.className = 'text-[11px] text-[#94a3b8]';
+          note.textContent = (p.seatsIncluded || 1000).toLocaleString('en-US') + ' AI calls a month per member · per member, team optional';
+          priceBox.appendChild(note);
+        }
 
         if (p.introLabel) {
           const intro = document.createElement('div');
@@ -219,7 +385,7 @@ import Layout from '../layouts/Layout.astro';
       if (plan.id === 'free') {
         const a = document.createElement('a');
         a.href = '/build';
-        a.className = 'mt-4 rounded-lg border border-[#1e1e2e] px-3 py-2 text-center text-xs font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/60 transition-colors';
+        a.className = 'mt-4 inline-flex min-h-11 items-center justify-center rounded-lg border border-[#1e1e2e] px-3 py-2 text-center text-xs font-semibold text-[#e2e8f0] hover:border-[#7c3aed]/60 transition-colors';
         a.textContent = 'Start free';
         card.appendChild(a);
       }
@@ -227,17 +393,31 @@ import Layout from '../layouts/Layout.astro';
       return card;
     }
 
-    fetch(API + '/api/stripe/plans', { headers: { accept: 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function (data) {
-        const plans = (data && data.plans) || [];
-        if (!plans.length) throw new Error('empty catalog');
-        grid.textContent = '';
-        plans.forEach(function (plan) { grid.appendChild(planCard(plan)); });
-      })
-      .catch(function (err) {
-        grid.innerHTML = '';
-        say('Live prices could not be loaded (' + String(err.message || 'network').replace(/[<>&]/g, '') + '). Please refresh in a moment.', 'bad');
-      });
+    // The first call after a server restart can take ~20 s while prices refresh
+    // from Stripe. One slow first attempt must not leave the page buttonless, so
+    // retry a few times before showing an error.
+    function loadPlans(attempt) {
+      return fetch(API + '/api/stripe/plans', { headers: { accept: 'application/json' } })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (data) {
+          const plans = (data && data.plans) || [];
+          if (!plans.length) throw new Error('empty catalog');
+          grid.textContent = '';
+          plans.forEach(function (plan) { grid.appendChild(planCard(plan)); });
+        })
+        .catch(function (err) {
+          if (attempt < 4) {
+            grid.textContent = '';
+            const wait = document.createElement('div');
+            wait.className = 'rounded-2xl border border-[#1e1e2e] bg-[#111118] p-5 text-sm text-[#94a3b8]';
+            wait.textContent = 'Loading live prices... (retry ' + attempt + ')';
+            grid.appendChild(wait);
+            return new Promise(function (res) { setTimeout(res, 2500); }).then(function () { return loadPlans(attempt + 1); });
+          }
+          grid.innerHTML = '';
+          say('Live prices could not be loaded (' + String(err.message || 'network').replace(/[<>&]/g, '') + '). Please refresh in a moment.', 'bad');
+        });
+    }
+    loadPlans(1);
   </script>
 </Layout>

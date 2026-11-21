@@ -1,0 +1,111 @@
+name: Bug Report
+description: File a bug report for haksterAi
+labels: ["pending-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## ⚠️ Before you open this issue
+
+        **Please ensure you're using the latest version of haksterAi.** If you're an existing user, pull the latest from `main` and restart the server.
+
+        **Check if your issue is already known.** If so, **subscribe and comment** on the existing issue instead of opening a new one.
+
+        Thank you for helping us keep our issue tracker organized.
+        ---
+  - type: markdown
+    attributes:
+      value: |
+        **Tip:** Include the server logs, terminal output, and any relevant configuration when reporting bugs.
+  - type: checkboxes
+    attributes:
+      label: |
+        Before opening, please confirm:
+      options:
+        - label: I have [searched for duplicate or closed issues](https://github.com/ghoststack/haksterAi/issues?q=is%3Aissue+)
+          required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Your operating system and version
+      placeholder: "e.g., Ubuntu 22.04, macOS 14.2, Windows 11"
+    validations:
+      required: true
+
+  - type: input
+    id: hakster-version
+    attributes:
+      label: haksterAi Version
+      description: The version of haksterAi you're running
+      placeholder: "e.g., v2.1.0 or commit hash"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which component has the bug?
+      options:
+        - Agent / LLM Loop
+        - TUI / Terminal UI
+        - MCP Server Integration
+        - Shell Execution
+        - WebSocket API
+        - GitHub Automation
+        - Pentest Agents
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: Describe the issue you encountered
+      placeholder: "Describe the bug clearly and concisely. State which feature you used, your intended task, and how the bug affected your workflow."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Provide steps to reproduce the issue
+      placeholder: |
+        1. Start haksterAi with `hakster`
+        2. Enter a prompt like "..."
+        3. Observe the agent loop / output
+        4. Error occurs: [describe]
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: Describe what you expected to happen
+      placeholder: "Explain what haksterAi should have done when you performed the actions above."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any relevant server logs, terminal output, or error traces
+      placeholder: "Paste logs between triple backticks (```)"
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Include supporting information (config, environment, workarounds attempted)
+      placeholder: "Add screenshots, environment details (Node version, RAM, CPU), or workarounds you tried."
+    validations:
+      required: false

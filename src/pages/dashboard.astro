@@ -3,7 +3,26 @@ import Layout from '../layouts/Layout.astro';
 ---
 
 <Layout title="haksterAi Dashboard">
-  <div class="min-h-screen pt-[60px] bg-[#0a0a0f] text-[#e2e8f0] px-4 py-6 max-w-7xl mx-auto">
+  <style is:global>
+    /* Owner (2026-11-21): "every thing mouse hovers over drags it" — moving the
+       mouse across the dashboard was selecting cards and text as if the button
+       were held. The dashboard chrome is an interface, not a document: nothing
+       here may be selected or dragged as a ghost. Real text the owner may want
+       to copy (inputs, logs, code, values) opts back in below. */
+    #dash-root, #dash-root * {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    #dash-root input, #dash-root textarea, #dash-root select,
+    #dash-root pre, #dash-root code,
+    #dash-root .selectable, #dash-root [data-selectable] {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    #dash-root img, #dash-root a { -webkit-user-drag: none; }
+  </style>
+  <div id="dash-root" class="min-h-screen pt-[60px] bg-[#0a0a0f] text-[#e2e8f0] px-4 py-6 max-w-7xl mx-auto">
     <!-- Breadcrumb nav -->
     <nav class="flex items-center gap-2 text-xs text-[#64748b] mb-4">
       <a href="/" class="hover:text-[#7c3aed] transition-colors">🏠 Home</a>
@@ -11,7 +30,10 @@ import Layout from '../layouts/Layout.astro';
       <span class="text-[#7c3aed] font-medium">📊 Dashboard</span>
     </nav>
 
-    <div class="flex items-center gap-3 mb-6">
+    <!-- Owner, 2026-11-21 (§18): the owner-only header buttons made this row
+         433 px wide on a 360 px phone, so the whole dashboard scrolled
+         sideways. flex-wrap keeps every button inside the phone viewport. -->
+    <div class="flex flex-wrap items-center gap-3 mb-6">
       <div class="w-2 h-8 bg-[#7c3aed] rounded-full"></div>
       <h1 class="text-2xl font-bold tracking-tight">📊 Dashboard</h1>
       <span class="text-xs text-[#64748b] bg-[#111118] px-2 py-1 rounded-full border border-[#1e1e2e]" id="status-badge">connecting...</span>
@@ -37,24 +59,53 @@ import Layout from '../layouts/Layout.astro';
       </button>
     </div>
 
-    <!-- Quick nav tabs. Horizontal scroll with a visible bar (data-scroll-hint) so
-         the tabs past the right edge are discoverable instead of invisible. -->
-    <div class="flex gap-2 mb-6 overflow-x-auto pb-2" data-scroll-hint="x">
-      <button onclick="document.getElementById('usage-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">📊 Usage &amp; Resets</button>
-      <button onclick="document.getElementById('billing-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">💰 Payments</button>
-      <button onclick="document.getElementById('hakster-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#7c3aed]/10 text-[#7c3aed] border border-[#7c3aed]/30 px-3 py-1.5 rounded-lg hover:bg-[#7c3aed]/20 transition-colors whitespace-nowrap">🧠 haksterAi Stats</button>
-      <button onclick="document.getElementById('tools-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🔧 Tool Breakdown</button>
-      <button onclick="document.getElementById('system-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">💻 System Info</button>
- <button onclick="document.getElementById('license-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🔑 Licenses</button>
-      <button onclick="document.getElementById('services-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">📡 Services</button>
-      <button onclick="document.getElementById('providers-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🧪 Providers</button>
-      <button onclick="document.getElementById('skills-tools-section').scrollIntoView({behavior:'smooth',block:'start'})" class="text-xs bg-[#111118] text-[#64748b] border border-[#1e1e2e] px-3 py-1.5 rounded-lg hover:bg-[#1e1e2e] transition-colors whitespace-nowrap">🧩 Skills &amp; Tools</button>
+    <!-- Compact dashboard tabs stay at the right edge; native select works on
+         keyboard, touch and narrow screens without a horizontal tab strip. -->
+    <div class="flex justify-end mb-4">
+      <label class="sr-only" for="dash-jump">Dashboard sections</label>
+      <select id="dash-jump" onchange="window.jumpDashSection(this.value);this.value=''" class="max-w-full bg-[#111118] text-[#cbd5e1] border border-[#7c3aed]/35 px-3 py-2 rounded-lg text-xs focus:outline-none focus:border-[#a855f7]">
+        <option value="">Jump to section…</option>
+        <option value="site-analytics-section">🌐 Visitor analytics</option>
+        <option value="server-section">🖥️ Server health</option>
+        <option value="billing-section">💰 Payments &amp; customers</option>
+        <option value="usage-section">📊 Usage &amp; billing accounts</option>
+        <option value="stripehook-section">🔔 Stripe events</option>
+        <option value="autoagent-section">🤖 Auto Agent</option>
+        <option value="autoheal-section">♻️ Auto Heal</option>
+        <option value="cliguard-section">🔐 CLI Provenance</option>
+        <option value="stripecli-section">💳 Stripe controls</option>
+        <option value="services-section">📡 Services</option>
+        <option value="providers-section">🧪 AI providers</option>
+        <option value="license-section">🔑 Licenses</option>
+      </select>
     </div>
+
+    <section id="site-analytics-section" class="bg-[#111118] border border-[#00bfff]/30 rounded-xl p-4 mb-5">
+      <div class="flex items-center gap-2 mb-3 flex-wrap">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-[#00bfff]">🌐 Traffic analytics</h2>
+        <span id="site-analytics-state" class="text-[10px] text-[#64748b]">loading…</span>
+        <span id="site-analytics-updated" class="ml-auto text-[10px] text-[#64748b] tabular-nums"></span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <div class="rounded-lg bg-[#0a0a0f] border border-[#1e1e2e] px-3 py-2"><div class="text-[10px] text-[#64748b]">Active visitors · 5m</div><div id="analytics-visitors" class="text-lg font-bold text-[#00ff88] tabular-nums">—</div></div>
+        <div class="rounded-lg bg-[#0a0a0f] border border-[#1e1e2e] px-3 py-2"><div class="text-[10px] text-[#64748b]">Page views · 24h</div><div id="analytics-views" class="text-lg font-bold text-[#00bfff] tabular-nums">—</div></div>
+        <div class="rounded-lg bg-[#0a0a0f] border border-[#1e1e2e] px-3 py-2"><div class="text-[10px] text-[#64748b]">Clicks · 24h</div><div id="analytics-clicks" class="text-lg font-bold text-[#c084fc] tabular-nums">—</div></div>
+        <div class="rounded-lg bg-[#0a0a0f] border border-[#1e1e2e] px-3 py-2"><div class="text-[10px] text-[#64748b]">Unique IPs · 24h</div><div id="analytics-ips" class="text-lg font-bold text-[#fbbf24] tabular-nums">—</div></div>
+        <div class="rounded-lg bg-[#0a0a0f] border border-[#1e1e2e] px-3 py-2"><div class="text-[10px] text-[#64748b]">Cloudflare visits · 15m</div><div id="analytics-cf-visits" class="text-lg font-bold text-[#fb923c] tabular-nums">—</div></div>
+        <div class="rounded-lg bg-[#0a0a0f] border border-[#1e1e2e] px-3 py-2"><div class="text-[10px] text-[#64748b]">Cloudflare requests · 15m</div><div id="analytics-cf-requests" class="text-lg font-bold text-[#fb923c] tabular-nums">—</div></div>
+      </div>
+      <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-[#64748b]">
+        <span id="analytics-cf-state">Cloudflare: checking server-side connection…</span>
+        <span>Cloudflare values are edge visits/requests; clicks and hashed-IP counts use first-party page events.</span>
+      </div>
+      <div id="analytics-top-pages" class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] text-[#94a3b8]"></div>
+      <p class="mt-2 text-[10px] text-[#475569]">First-party counts start after deploy and reset with a server restart. IP addresses are not stored; unique-IP counts use a temporary salted hash.</p>
+    </section>
 
     <!-- ── Dell Server status strip (owner-only, live) ─────────────────────
          Same four-card shape as the Junkalot console on Parrot, but this reports
          the Dell (ghost-Inspiron-7348) because haksterai.com always runs here.
-         Data: owner-only /api/admin/server-status. Read-only, refreshes every 30s. -->
+         Data: owner-only /api/admin/server-status. Read-only, refreshes every 8s. -->
     <section id="server-section" class="mb-6">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-xs font-semibold uppercase tracking-wider text-[#7c3aed]">🖥️ Dell Server</span>
@@ -368,6 +419,103 @@ import Layout from '../layouts/Layout.astro';
       </div>
     </section>
 
+    <!-- ── Auto Heal (owner request 2026-11-22) ────────────────────────────
+         The same bounded loop Junkalot runs, fed by this box's own tables:
+         10 s cycle, 24 h window, capped and reversible actions only, every
+         action in an append-only log. GET /api/health/auto-heal is owner-only
+         (the log names source IPs). -->
+    <section id="autoheal-section" class="max-sm:mx-1 bg-[#111118] border border-[#00ff88]/30 rounded-xl p-4 mb-5">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-[#00ff88]">♻️ Auto Heal</h2>
+        <span class="text-[10px] text-[#64748b]">10s cycle · 24h window · bounded &amp; reversible</span>
+        <span id="ah-state" class="text-[10px] font-bold uppercase tracking-wider rounded-full px-2 py-0.5 border border-[#1e1e2e] bg-[#111118] text-[#64748b]">idle</span>
+        <span id="ah-updated" class="ml-auto text-[10px] text-[#64748b] tabular-nums"></span>
+        <button id="ah-toggle" type="button" class="text-[11px] font-semibold bg-[#00ff88]/10 text-[#00ff88] hover:bg-[#00ff88]/20 border border-[#00ff88]/30 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50">Pause</button>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5 col-span-2 sm:col-span-1">
+          <div class="text-[10px] text-[#64748b] uppercase">Exposure</div>
+          <div id="ah-score" class="text-sm font-bold text-[#e2e8f0]">—</div>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Blocked 24h</div><div id="ah-blocks" class="text-sm font-bold text-[#e2e8f0]">—</div></div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Released 24h</div><div id="ah-releases" class="text-sm font-bold text-[#e2e8f0]">—</div></div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Resolved 24h</div><div id="ah-resolves" class="text-sm font-bold text-[#e2e8f0]">—</div></div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Cycles</div><div id="ah-cycles" class="text-sm font-bold text-[#e2e8f0]">—</div></div>
+      </div>
+
+      <div class="mb-3">
+        <div class="flex justify-between text-[10px] text-[#64748b] mb-1"><span>Exposure score (higher = more still reachable)</span><span id="ah-score-label">—</span></div>
+        <div class="w-full h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+          <div id="ah-score-bar" class="h-full bg-gradient-to-r from-[#00ff88] to-[#7c3aed] rounded-full transition-all duration-500" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3">
+          <div class="text-[10px] uppercase tracking-wider text-[#00ff88] mb-2">Improvements</div>
+          <ul id="ah-improvements" aria-live="polite" class="space-y-1 text-[11px] text-[#cbd5e1]"><li class="text-[#64748b]">waiting for first cycle…</li></ul>
+        </div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3">
+          <div class="text-[10px] uppercase tracking-wider text-[#fbbf24] mb-2">Recommendations</div>
+          <ul id="ah-recommendations" aria-live="polite" class="space-y-1 text-[11px] text-[#cbd5e1]"><li class="text-[#64748b]">waiting for first cycle…</li></ul>
+        </div>
+      </div>
+
+      <div id="ah-patterns" class="mt-3 flex flex-wrap gap-1.5 text-[10px]"></div>
+
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full text-[11px]">
+          <thead>
+            <tr class="text-[#64748b] uppercase tracking-wider text-[10px]">
+              <th class="text-left font-medium px-2 py-1">When</th>
+              <th class="text-left font-medium px-2 py-1">Action</th>
+              <th class="text-left font-medium px-2 py-1">Target</th>
+              <th class="text-left font-medium px-2 py-1">Detail</th>
+            </tr>
+          </thead>
+          <tbody id="ah-log"></tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-[10px] text-[#64748b]">Reversible actions only · log is append-only · <span class="font-mono">HK_AUTO_HEAL=off</span> is a hard kill switch</div>
+    </section>
+
+    <section id="cliguard-section" class="max-sm:mx-1 bg-[#111118] border border-[#ffd166]/30 rounded-xl p-4 mb-5">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-[#ffd166]">🔐 CLI Provenance</h2>
+        <span class="text-[10px] text-[#64748b]">our scripts · who launched them · foreign-launcher alerts</span>
+        <span id="cg-state" class="text-[10px] font-bold uppercase tracking-wider rounded-full px-2 py-0.5 border border-[#1e1e2e] bg-[#111118] text-[#64748b]">idle</span>
+        <span id="cg-updated" class="ml-auto text-[10px] text-[#64748b] tabular-nums"></span>
+        <button id="cg-scan" type="button" class="text-[11px] font-semibold bg-[#ffd166]/10 text-[#ffd166] hover:bg-[#ffd166]/20 border border-[#ffd166]/30 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50">Scan now</button>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Ours 24h</div><div id="cg-ours" class="text-sm font-bold text-[#00ff88]">—</div></div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Shell 24h</div><div id="cg-shell" class="text-sm font-bold text-[#e2e8f0]">—</div></div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Foreign 24h</div><div id="cg-foreign" class="text-sm font-bold text-[#ff4444]">—</div></div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Patterns</div><div id="cg-patterns" class="text-sm font-bold text-[#e2e8f0]">—</div></div>
+        <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-2 py-1.5"><div class="text-[10px] text-[#64748b] uppercase">Tracked</div><div id="cg-total" class="text-sm font-bold text-[#e2e8f0]">—</div></div>
+      </div>
+
+      <div id="cg-alerts" aria-live="polite" class="space-y-1.5 mb-3 text-[11px]"></div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-[11px]">
+          <thead>
+            <tr class="text-[#64748b] uppercase tracking-wider text-[10px]">
+              <th class="text-left font-medium px-2 py-1">When</th>
+              <th class="text-left font-medium px-2 py-1">Script</th>
+              <th class="text-left font-medium px-2 py-1">Launched by</th>
+              <th class="text-left font-medium px-2 py-1">User</th>
+              <th class="text-left font-medium px-2 py-1">Source</th>
+            </tr>
+          </thead>
+          <tbody id="cg-log"></tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-[10px] text-[#64748b]">Detection only — nothing is blocked · log is append-only · <span class="font-mono">HK_CLI_GUARD=off</span> is a hard kill switch</div>
+    </section>
+
     <!-- Top Stats Grid -->
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6" id="top-stats">
       <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 hover:border-[#7c3aed]/40 transition-colors">
@@ -433,7 +581,7 @@ import Layout from '../layouts/Layout.astro';
       <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h2 class="text-sm font-semibold text-[#00ff9c] uppercase tracking-wider">🎁 Referral Program</h2>
         <div class="flex gap-4 text-xs text-[#64748b]">
-          <span>Total signups: <b class="text-[#e2e8f0]" id="ref-rt-total">—</b></span>
+          <span>Referral signups: <b class="text-[#e2e8f0]" id="ref-rt-total">—</b></span>
           <span>Tokens paid out: <b class="text-[#00ff88]" id="ref-rt-tokens">—</b></span>
           <span>Users with link: <b class="text-[#00bfff]" id="ref-rt-withcode">—</b></span>
         </div>
@@ -471,7 +619,7 @@ import Layout from '../layouts/Layout.astro';
           <div class="truncate text-[#e2e8f0]" style="font:600 26px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.02em;font-variant-numeric:tabular-nums;text-shadow:0 0 18px rgba(226,232,240,.25)" id="bill-count">—</div>
         </div>
         <div class="rounded-lg border border-[#00bfff]/30 px-4 py-3" style="background:linear-gradient(180deg,rgba(0,191,255,.09),rgba(0,191,255,.02))">
-          <div class="text-[10px] uppercase tracking-[.14em] text-[#4a6f80]">New signups · 7d</div>
+          <div class="text-[10px] uppercase tracking-[.14em] text-[#4a6f80]">Signups · 7d + paid</div>
           <div class="truncate text-[#00bfff]" style="font:600 26px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.02em;font-variant-numeric:tabular-nums;text-shadow:0 0 18px rgba(0,191,255,.4)" id="bill-signups">—</div>
         </div>
       </div>
@@ -571,7 +719,7 @@ import Layout from '../layouts/Layout.astro';
       <!-- Customers by plan — one card per plan, straight from the accounts table -->
       <div class="mb-4">
         <div class="flex items-center justify-between text-[10px] text-[#64748b] uppercase tracking-wider mb-2">
-          <span>Customers by plan</span>
+          <span>Billing accounts by plan · account records, not agent usage</span>
           <span id="usage-plans-total">—</span>
         </div>
         <div id="usage-plan-cards" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"></div>
@@ -1113,19 +1261,71 @@ import Layout from '../layouts/Layout.astro';
     }
     function setText(id, value) {
       const el = document.getElementById(id);
-      if (el) el.textContent = value;
+      if (el && el.textContent !== String(value)) {
+        el.textContent = value;
+        el.classList.add('hk-value-updated');
+        requestAnimationFrame(() => { el.classList.remove('hk-value-updated'); });
+      }
     }
 
-    // ── live cards: one refresh per second ───────────────────────────────
-    // Every card on this page refreshes on a 1s beat. The wrapper makes an
+    // Keep the long diagnostic area compact while leaving billing and server
+    // health visible. Native details keeps the controls keyboard/touch friendly.
+    (() => {
+      const style = document.createElement('style');
+      style.textContent = '.hk-dash-details{margin:0 0 10px;border:1px solid rgba(124,58,237,.2);border-radius:12px;background:rgba(17,17,24,.45);overflow:hidden}.hk-dash-details>summary{display:flex;align-items:center;gap:8px;min-height:42px;padding:10px 14px;color:#c4b5fd;font-size:12px;font-weight:700;cursor:pointer;list-style:none}.hk-dash-details>summary::-webkit-details-marker{display:none}.hk-dash-details>summary::after{content:"＋";margin-left:auto;color:#64748b}.hk-dash-details[open]>summary::after{content:"−"}.hk-dash-details[open]>summary{border-bottom:1px solid rgba(124,58,237,.16)}.hk-dash-details>[data-dash-panel]{padding:10px 0 0}.hk-value-updated{opacity:.62;transition:opacity .32s ease}.hk-value-updated:not(:empty){opacity:1}';
+      document.head.appendChild(style);
+      const groups = [
+        ['stripecli-section', '💳 Stripe tools & price controls'],
+        ['autoagent-section', '🤖 Automated security and IP audit'],
+        ['autoheal-section', '♻️ Automatic self-heal (bounded, append-only log)'],
+        ['cliguard-section', '🔐 CLI provenance (our scripts must run through our CLI)'],
+        ['referrals-section', '🎁 Referral details'],
+        ['stripehook-section', '🔔 Stripe webhook event log'],
+        ['usage-section', '📊 Usage records & billing accounts · separate from agent activity'],
+        ['skills-tools-section', '🧩 Skills, tools & saved clusters'],
+        ['system-section', '💻 System information'],
+        ['terminal-section', '🖥️ haksterAi terminal details'],
+        ['services-section', '📡 Services and ports'],
+        ['providers-section', '🧪 AI provider status'],
+        ['secagents-section', '🛡️ Infrastructure security agent reports'],
+        ['license-section', '🔑 License management'],
+      ];
+      for (const [id, label] of groups) {
+        const panel = document.getElementById(id);
+        if (!panel || panel.parentElement?.classList.contains('hk-dash-details')) continue;
+        const details = document.createElement('details');
+        details.className = 'hk-dash-details';
+        const summary = document.createElement('summary');
+        summary.textContent = label;
+        details.append(summary);
+        panel.before(details);
+        details.append(panel);
+        panel.setAttribute('data-dash-panel', '1');
+      }
+      window.jumpDashSection = (id) => {
+        const target = document.getElementById(String(id || ''));
+        if (!target) return;
+        for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+          if (parent.tagName === 'DETAILS') parent.open = true;
+        }
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+    })();
+
+    // ── live cards: one refresh every 8 seconds by default ───────────────
+    // Default live cards refresh on an 8s beat. The wrapper makes an
     // in-flight refresh a no-op (a slow endpoint can never stack up requests),
     // pauses every tick while the tab is hidden, and staggers start offsets so
-    // ten cards do not all fire in the same millisecond.
+    // the cards do not all fire in the same millisecond.
+    // 2026-11-21 (owner: "admin dash is lagging freezing"): the old 85 ms
+    // stagger still put ~18 requests and ~18 DOM rewrites inside one second,
+    // and that churn also re-triggered the scrollbar rescan. A 420 ms step
+    // spreads them across the whole 8 s window instead.
     window.hkLiveEvery = window.hkLiveEvery || (function () {
       let seq = 0;
       return function hkLiveEvery(fn, ms) {
-        const period = Number(ms) > 0 ? Number(ms) : 1000;
-        const offset = (seq++ * 85) % 1000;
+        const period = Number(ms) > 0 ? Number(ms) : 8000;
+        const offset = (seq++ * 420) % 7000;
         let inflight = false;
         const tick = async () => {
           if (document.visibilityState !== 'visible' || inflight) return;
@@ -1203,6 +1403,7 @@ import Layout from '../layouts/Layout.astro';
     // requests, tokens, recorded cost, and when it resets. One shared tooltip
     // element, delegated from [data-tip] so re-rendered bars/rows keep working.
     let hkTipEl = null;
+    let hkTipTimer = 0;
     function hkTipGet() {
       if (hkTipEl && hkTipEl.isConnected) return hkTipEl;
       hkTipEl = document.createElement('div');
@@ -1231,9 +1432,8 @@ import Layout from '../layouts/Layout.astro';
       tip.style.top = Math.max(8, y) + 'px';
     }
     function hkTipShow(target, ev) {
-      const text = target.dataset.tip || target.getAttribute('title') || '';
+      const text = target.dataset.tip || '';
       if (!text) return;
-      if (target.hasAttribute('title')) { target.dataset.tipTitle = target.getAttribute('title'); target.removeAttribute('title'); }
       const tip = hkTipGet();
       tip.textContent = text;
       tip.style.opacity = '1';
@@ -1242,23 +1442,27 @@ import Layout from '../layouts/Layout.astro';
     function hkTipHide(target) {
       const tip = hkTipGet();
       tip.style.opacity = '0';
-      if (target && target.dataset.tipTitle && !target.hasAttribute('title')) {
-        target.setAttribute('title', target.dataset.tipTitle);
-      }
     }
     document.addEventListener('pointerover', (ev) => {
-      const t = ev.target && ev.target.closest ? ev.target.closest('[data-tip],[title]') : null;
-      if (t && (t.dataset.tip || t.getAttribute('title'))) hkTipShow(t, ev);
+      // Only elements that opt in with data-tip. Owner, 2026-11-21: "every thing
+      // mouse hovers over drags it" — matching [title] made a box chase the
+      // cursor over the whole dashboard. Native titles are left to the browser.
+      const t = ev.target && ev.target.closest ? ev.target.closest('[data-tip]') : null;
+      if (!t) { if (hkTipEl) hkTipEl.style.opacity = '0'; return; }
+      if (ev.buttons) return;   // never during a click-drag or a text selection
+      clearTimeout(hkTipTimer);
+      hkTipTimer = setTimeout(() => hkTipShow(t, ev), 320);
     });
     document.addEventListener('pointermove', (ev) => {
       const tip = hkTipEl;
       if (!tip || tip.style.opacity !== '1') return;
+      if (ev.buttons) { tip.style.opacity = '0'; return; }
       hkTipMove(ev);
     }, { passive: true });
     document.addEventListener('pointerout', (ev) => {
-      const t = ev.target && ev.target.closest ? ev.target.closest('[data-tip],[title]') : null;
-      const to = ev.relatedTarget && ev.relatedTarget.closest ? ev.relatedTarget.closest('[data-tip],[title]') : null;
-      if (t && t !== to) hkTipHide(t);
+      const t = ev.target && ev.target.closest ? ev.target.closest('[data-tip]') : null;
+      const to = ev.relatedTarget && ev.relatedTarget.closest ? ev.relatedTarget.closest('[data-tip]') : null;
+      if (t && t !== to) { clearTimeout(hkTipTimer); hkTipHide(t); }
     });
     window.addEventListener('scroll', () => { if (hkTipEl) hkTipEl.style.opacity = '0'; }, { passive: true, capture: true });
 
@@ -1528,6 +1732,46 @@ import Layout from '../layouts/Layout.astro';
       }
       try { res.hkCache = { ...hkCacheFacts(res), cleared, firstCached: first.cached }; } catch {}
       return res;
+    }
+
+    async function loadSiteAnalytics() {
+      try {
+        const res = await liveFetch('/api/admin/site-analytics');
+        if (!res.ok) throw new Error('analytics ' + res.status);
+        const data = await res.json();
+        const local = data.local || {};
+        const cf = data.cloudflare || {};
+        setText('analytics-visitors', fmtNum(local.visitors5m));
+        setText('analytics-views', fmtNum(local.pageViews24h));
+        setText('analytics-clicks', fmtNum(local.clicks24h));
+        setText('analytics-ips', fmtNum(local.uniqueIps24h));
+        setText('analytics-cf-visits', cf.connected ? fmtNum(cf.visits15m) : '—');
+        setText('analytics-cf-requests', cf.connected ? fmtNum(cf.requests15m) : '—');
+        setText('site-analytics-state', 'First-party · rolling 5m/24h · process-local');
+        setText('analytics-cf-state', cf.connected
+          ? 'Cloudflare Analytics connected · ' + (cf.window || 'rolling 15m')
+          : (cf.configured ? 'Cloudflare needs setup: ' : 'Cloudflare setup required: ') + (cf.message || 'server-side token and zone ID are not configured'));
+        setText('site-analytics-updated', 'updated ' + new Date().toLocaleTimeString());
+        const list = document.getElementById('analytics-top-pages');
+        if (list) {
+          list.replaceChildren();
+          const pages = cf.connected ? (cf.topPages || []) : (local.topPages || []);
+          for (const page of pages.slice(0, 4)) {
+            const row = document.createElement('div');
+            row.className = 'truncate rounded-md border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1';
+            row.textContent = String(page.path || '/') + ' · ' + fmtNum(page.requests ?? page.views ?? 0) + (cf.connected ? ' req' : ' views');
+            list.append(row);
+          }
+          if (!pages.length) {
+            const note = document.createElement('span');
+            note.className = 'col-span-full';
+            note.textContent = 'Page and click counters begin after the analytics update is live.';
+            list.append(note);
+          }
+        }
+      } catch (error) {
+        setText('site-analytics-state', 'analytics unavailable · ' + String(error.message || 'retrying'));
+      }
     }
     // Small per-card cache pill: live · cache cleared · stale.
     function hkCachePill(id, state, note) {
@@ -2047,7 +2291,7 @@ import Layout from '../layouts/Layout.astro';
         setWidth('app-fan-bar', fanRpm == null ? '0%' : Math.min(100, Math.round((fanRpm / 7021) * 100)) + '%');
         setText('app-fan-detail', 'RPM · max 7021');
 
-        setServerLive(true, 'live · 1s');
+        setServerLive(true, 'live · 8s');
       } catch {
         setServerLive(false, 'offline');
         cachePill('stale', 'retrying');
@@ -2179,11 +2423,10 @@ import Layout from '../layouts/Layout.astro';
     }
     const ipgBtn = document.getElementById('ipg-apply');
     if (ipgBtn) ipgBtn.addEventListener('click', applyIpGuardAction);
-    // Explicit one-second cadence: the guard is the owner's early-warning panel,
-    // so it refreshes every second while the tab is visible (hkLiveEvery is
-    // visibility-gated and single-flight, so the cost stays sub-millisecond).
+    // Share the dashboard's 8-second cadence so the server is not polled every
+    // second for a read-only IP summary.
     loadIpGuard();
-    window.hkLiveEvery(loadIpGuard, 1000);
+    window.hkLiveEvery(loadIpGuard, 30000);
 
     // ── Stripe CLI bridge card ────────────────────────────────────────
     // Read-only console over an allowlist, plus real price tools. Every write
@@ -2337,7 +2580,7 @@ import Layout from '../layouts/Layout.astro';
       scliSetResult('catalog refreshed from Stripe', 'good');
     });
     loadStripeCli();
-    window.hkLiveEvery(loadStripeCli);
+    window.hkLiveEvery(loadStripeCli, 30000);
 
     // ── Dell Auto Agent panel ─────────────────────────────────────────
     // Opens → POST run (trigger=panel, server throttles 60s). Button → POST
@@ -2440,14 +2683,190 @@ import Layout from '../layouts/Layout.astro';
     }
     document.getElementById('aa-run-btn')?.addEventListener('click', runAutoAgentNow);
 
+    // ── Auto Heal panel (owner 2026-11-22) ───────────────────────────
+    // GET every 10 s to match the server cycle. Owner-only: the log names
+    // source IPs, so an anonymous poll gets "owner sign-in required".
+    const AH_CLASS = {
+      critical: 'bg-[#ff4444]/10 text-[#ff4444] border-[#ff4444]/30',
+      warning: 'bg-[#fbbf24]/10 text-[#fbbf24] border-[#fbbf24]/30',
+      info: 'bg-[#00ff88]/10 text-[#00ff88] border-[#00ff88]/30',
+    };
+    let ahEnabled = null;
+    function renderAutoHeal(v) {
+      if (!v) return;
+      ahEnabled = Boolean(v.enabled);
+      const badge = document.getElementById('ah-state');
+      if (badge) {
+        badge.textContent = v.hardOff ? 'killed' : (v.enabled ? 'watching' : 'paused');
+        badge.className = 'text-[10px] font-bold uppercase tracking-wider rounded-full px-2 py-0.5 border ' +
+          (v.hardOff ? AH_CLASS.critical : v.enabled ? AH_CLASS.info : AH_CLASS.warning);
+      }
+      const toggle = document.getElementById('ah-toggle');
+      if (toggle) {
+        toggle.textContent = v.enabled ? 'Pause' : 'Resume';
+        toggle.disabled = Boolean(v.hardOff);
+        toggle.title = v.hardOff ? 'HK_AUTO_HEAL=off is set in the environment' : '';
+      }
+      const score = typeof v.score === 'number' ? v.score : null;
+      setText('ah-score', score === null ? '—' : score + '/100');
+      setText('ah-score-label', score === null ? 'no cycle yet' : `${v.severity} · ${v.summary || ''}`);
+      const bar = document.getElementById('ah-score-bar');
+      if (bar) {
+        bar.style.width = score === null ? '0%' : Math.max(2, score) + '%';
+        bar.className = 'h-full rounded-full transition-all duration-500 ' +
+          (v.severity === 'critical' ? 'bg-[#ff4444]' : v.severity === 'warning' ? 'bg-[#fbbf24]' : 'bg-gradient-to-r from-[#00ff88] to-[#7c3aed]');
+      }
+      const t = v.actionsToday || {};
+      setText('ah-blocks', `${t.blocks || 0} / 10`);
+      setText('ah-releases', String(t.unblocks || 0));
+      setText('ah-resolves', String(t.resolves || 0));
+      setText('ah-cycles', String(v.cycles || 0));
+      const when = v.lastCycleAt ? new Date(v.lastCycleAt).toLocaleTimeString() : '—';
+      setText('ah-updated', `${v.lastAction || 'watching'} · cycle ${when}`);
+
+      const imp = document.getElementById('ah-improvements');
+      if (imp) {
+        const lines = Array.isArray(v.improvements) ? v.improvements : [];
+        imp.innerHTML = lines.length
+          ? lines.map((x) => `<li class="flex gap-1.5"><span class="text-[#00ff88] shrink-0">·</span><span>${escapeHtml(x)}</span></li>`).join('')
+          : '<li class="text-[#64748b]">waiting for first cycle…</li>';
+      }
+      const rec = document.getElementById('ah-recommendations');
+      if (rec) {
+        const lines = Array.isArray(v.recommendations) ? v.recommendations : [];
+        rec.innerHTML = lines.length
+          ? lines.map((x) => `<li class="flex gap-1.5"><span class="text-[#fbbf24] shrink-0">→</span><span>${escapeHtml(x)}</span></li>`).join('')
+          : '<li class="text-[#64748b]">nothing open</li>';
+      }
+      const pat = document.getElementById('ah-patterns');
+      if (pat) {
+        const patterns = Array.isArray(v.patterns) ? v.patterns : [];
+        pat.innerHTML = patterns.length
+          ? patterns.slice(0, 6).map((p) => {
+              const colour = p.status === 'blocked' ? 'text-[#ff4444] border-[#ff4444]/30 bg-[#ff4444]/5'
+                : p.status === 'local' ? 'text-[#64748b] border-[#1e1e2e] bg-[#111118]'
+                : 'text-[#00bfff] border-[#00bfff]/30 bg-[#00bfff]/5';
+              return `<span class="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 ${colour}"><span class="truncate">${escapeHtml(p.label || p.key)}</span><span class="font-mono shrink-0">${Number(p.occurrences || 0)}</span></span>`;
+            }).join('')
+          : '<span class="text-[#64748b]">patterns appear after a week of events</span>';
+      }
+      const log = document.getElementById('ah-log');
+      if (log) {
+        const rows = Array.isArray(v.log) ? v.log : [];
+        log.innerHTML = rows.length
+          ? rows.map((r) => `<tr class="border-t border-[#1e1e2e]">
+              <td class="px-2 py-1 text-[#64748b] font-mono whitespace-nowrap">${escapeHtml(String(r.at || '').slice(11, 19))}</td>
+              <td class="px-2 py-1 ${r.action === 'block_ip' ? 'text-[#ff4444]' : r.action === 'resolve_report' ? 'text-[#00ff88]' : 'text-[#cbd5e1]'}">${escapeHtml(String(r.action || 'watch').replace(/_/g, ' '))}</td>
+              <td class="px-2 py-1 font-mono text-[#e2e8f0] truncate max-w-[140px]">${escapeHtml(r.target || '—')}</td>
+              <td class="px-2 py-1 text-[#94a3b8]">${escapeHtml(r.detail || '')}</td>
+            </tr>`).join('')
+          : '<tr><td colspan="4" class="px-2 py-2 text-center text-[#64748b]">no actions yet — the loop only logs what it actually does</td></tr>';
+      }
+    }
+    async function loadAutoHeal() {
+      try {
+        const res = await liveFetch('/api/health/auto-heal', { headers: authHeaders() });
+        if (res.status === 401 || res.status === 403) { setText('ah-updated', 'owner sign-in required'); return; }
+        if (!res.ok) throw new Error('auto-heal ' + res.status);
+        renderAutoHeal(await res.json());
+      } catch {
+        setText('ah-updated', 'auto heal unreachable');
+      }
+    }
+    async function toggleAutoHeal() {
+      if (ahEnabled === null) return;
+      const btn = document.getElementById('ah-toggle');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await liveFetch('/api/health/auto-heal/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ enabled: !ahEnabled }),
+        });
+        if (res.ok) renderAutoHeal(await res.json());
+      } catch {}
+      if (btn) btn.disabled = false;
+    }
+    document.getElementById('ah-toggle')?.addEventListener('click', toggleAutoHeal);
+    loadAutoHeal();
+    window.hkLiveEvery(loadAutoHeal, 10000);
+
+    // ── CLI provenance (2026-11-22): flags when our scripts are launched by
+    //    a CLI that is not ours. Detection only; the list is append-only. ──
+    const CG_COLOURS = { ours: 'text-[#00ff88]', shell: 'text-[#e2e8f0]', service: 'text-[#94a3b8]', ssh: 'text-[#00bfff]', unknown: 'text-[#fbbf24]', foreign: 'text-[#ff4444]' };
+    function renderCliGuard(v) {
+      if (!v) return;
+      const badge = document.getElementById('cg-state');
+      if (badge) {
+        badge.textContent = v.hardOff ? 'killed' : v.enabled ? 'watching' : 'paused';
+        badge.className = 'text-[10px] font-bold uppercase tracking-wider rounded-full px-2 py-0.5 border ' +
+          (v.hardOff ? 'bg-[#ff4444]/10 text-[#ff4444] border-[#ff4444]/30' : 'bg-[#00ff88]/10 text-[#00ff88] border-[#00ff88]/30');
+      }
+      const c = v.counts24h || {};
+      setText('cg-ours', String(c.ours || 0));
+      setText('cg-shell', String(c.shell || 0));
+      setText('cg-foreign', String(c.foreign || 0));
+      setText('cg-patterns', String((v.patterns || []).length));
+      setText('cg-total', String(v.totalAll || 0));
+      setText('cg-updated', v.lastScanAt ? 'scan ' + new Date(v.lastScanAt).toLocaleTimeString() : 'no scan yet');
+      const alerts = document.getElementById('cg-alerts');
+      if (alerts) {
+        const rows = Array.isArray(v.alerts) ? v.alerts : [];
+        alerts.innerHTML = rows.length
+          ? rows.slice(0, 5).map((a) => {
+              const tone = a.severity === 'critical' ? 'border-[#ff4444]/40 bg-[#ff4444]/5 text-[#ff8a8a]'
+                : a.severity === 'warning' ? 'border-[#fbbf24]/40 bg-[#fbbf24]/5 text-[#fbbf24]'
+                : 'border-[#1e1e2e] bg-[#0a0a0f] text-[#94a3b8]';
+              return `<div class="border rounded-lg px-2.5 py-1.5 ${tone}"><span class="font-semibold uppercase text-[9px] tracking-wider mr-1.5">${escapeHtml(a.severity || 'info')}</span>${escapeHtml(a.title || a.key)}<span class="block text-[10px] opacity-70">${escapeHtml(String(a.detail || '').slice(0, 160))}</span></div>`;
+            }).join('')
+          : '<div class="text-[#64748b]">No foreign-launcher alerts — our scripts are running through our own CLI.</div>';
+      }
+      const log = document.getElementById('cg-log');
+      if (log) {
+        const rows = Array.isArray(v.recent) ? v.recent : [];
+        log.innerHTML = rows.length
+          ? rows.map((r) => `<tr class="border-t border-[#1e1e2e]">
+              <td class="px-2 py-1 text-[#64748b] font-mono whitespace-nowrap">${escapeHtml(String(r.created_at || '').slice(11, 19))}</td>
+              <td class="px-2 py-1 font-mono text-[#e2e8f0]">${escapeHtml(r.script || '')}</td>
+              <td class="px-2 py-1 ${CG_COLOURS[r.kind] || 'text-[#94a3b8]'} truncate max-w-[160px]">${escapeHtml(String(r.launcher || '').replace(/^foreign:/, ''))}</td>
+              <td class="px-2 py-1 text-[#94a3b8]">${escapeHtml(r.user || '—')}</td>
+              <td class="px-2 py-1 text-[#64748b]">${escapeHtml(r.source || '')}</td>
+            </tr>`).join('')
+          : '<tr><td colspan="5" class="px-2 py-2 text-center text-[#64748b]">no launches recorded yet</td></tr>';
+      }
+    }
+    async function loadCliGuard() {
+      try {
+        const res = await liveFetch('/api/health/cli-guard', { headers: authHeaders() });
+        if (res.status === 401 || res.status === 403) { setText('cg-updated', 'owner sign-in required'); return; }
+        if (!res.ok) throw new Error('cli-guard ' + res.status);
+        renderCliGuard(await res.json());
+      } catch {
+        setText('cg-updated', 'cli guard unreachable');
+      }
+    }
+    document.getElementById('cg-scan')?.addEventListener('click', async () => {
+      const btn = document.getElementById('cg-scan');
+      if (btn) btn.disabled = true;
+      try {
+        await liveFetch('/api/health/cli-guard/scan', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: '{}' });
+        await loadCliGuard();
+      } catch {}
+      if (btn) btn.disabled = false;
+    });
+    loadCliGuard();
+    window.hkLiveEvery(loadCliGuard, 15000);
+
     loadDashboard();
     loadServerStatus();
+    loadSiteAnalytics();
     loadAutoAgent(true);   // panel opened → run the audit (server throttles)
-    // 1s live cards everywhere. WebSocket events below still trigger immediate
+    // 8s live cards by default. WebSocket events below still trigger immediate
     // refreshes on top of this beat.
-    window.hkLiveEvery(() => loadAutoAgent(false));
+    window.hkLiveEvery(() => loadAutoAgent(false), 20000);
     window.hkLiveEvery(loadDashboard);
     window.hkLiveEvery(loadServerStatus);
+    window.hkLiveEvery(loadSiteAnalytics, 15000);
 
 
     // Memory bank stats
@@ -2473,7 +2892,7 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     loadMemoryStats();
-    window.hkLiveEvery(loadMemoryStats);
+    window.hkLiveEvery(loadMemoryStats, 30000);
 
     // Autocompact clock
     let compactNextTime = null;
@@ -2532,7 +2951,7 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     loadSecuritySummary();
-    window.hkLiveEvery(loadSecuritySummary);
+    window.hkLiveEvery(loadSecuritySummary, 30000);
 
     // Recent users with IP tracking
     async function loadRecentUsers() {
@@ -2589,7 +3008,7 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     loadRecentUsers();
-    window.hkLiveEvery(loadRecentUsers);
+    window.hkLiveEvery(loadRecentUsers, 20000);
 
     // Activity log
     async function loadActivityLog() {
@@ -2671,8 +3090,8 @@ import Layout from '../layouts/Layout.astro';
       } catch (e) { /* endpoint gated to owners — ignore on public dashboards */ }
     }
     loadReferralOverview();
-    window.hkLiveEvery(loadReferralOverview);
-    window.hkLiveEvery(loadActivityLog);
+    window.hkLiveEvery(loadReferralOverview, 30000);
+    window.hkLiveEvery(loadActivityLog, 15000);
 
     // ── Infrastructure security agents (Codex + DeepSeek) ────────────────
     // Owner-only. Each agent card keeps its last real rundown: a failed poll
@@ -2910,7 +3329,7 @@ import Layout from '../layouts/Layout.astro';
     const anomBtn = document.getElementById('anom-run');
     if (anomBtn) anomBtn.addEventListener('click', runAnomalyNow);
     loadAnomaly();
-    window.hkLiveEvery(loadAnomaly, 5000);
+    window.hkLiveEvery(loadAnomaly, 30000);
 
     // ── Update log: every build seen, all three sites, date + time ────────
     const updLogSiteColor = { haksterai: '#00bfff', junkalot: '#00ff88', phantomide: '#a855f7' };
@@ -2952,10 +3371,10 @@ import Layout from '../layouts/Layout.astro';
       } catch (e) { setText('updlog-state', 'retrying'); }
     }
     loadUpdateLog();
-    window.hkLiveEvery(loadUpdateLog, 5000);
+    window.hkLiveEvery(loadUpdateLog, 30000);
 
     // ── Junkalot update progress: the pill's phase and %, same numbers ────
-    // One read every 4s (the endpoint itself caches for 5s). The bar, the label
+    // One read every 8s (the endpoint caches briefly). The bar, the label
     // and the percentage come straight from the site, so this card and the pill
     // on junkalot.co always agree; only a silent site changes the story, and it
     // then says restarting or not answering rather than guessing an ETA.
@@ -2998,7 +3417,7 @@ import Layout from '../layouts/Layout.astro';
       } catch (e) { setText('jupd-state', 'retrying'); }
     }
     loadJunkalotUpdate();
-    window.hkLiveEvery(loadJunkalotUpdate, 4000);
+    window.hkLiveEvery(loadJunkalotUpdate, 20000);
 
     // ── Fleet ops: every bot and agent row the server records ────────────
     // Read-only. The server merges its own delivery log with junkalot and
@@ -3052,7 +3471,7 @@ import Layout from '../layouts/Layout.astro';
       } catch (e) { setText("fleet-sources", "retrying"); }
     }
     loadFleet();
-    window.hkLiveEvery(loadFleet, 15000);
+    window.hkLiveEvery(loadFleet, 60000);
 
     // ── Hosting lock: carrier-style, from the real payoff ledger ─────────
     // Read-only unless the owner presses Arm. The lock never stops the
@@ -3168,7 +3587,7 @@ import Layout from '../layouts/Layout.astro';
       });
     }
     loadSecurityAgents();
-    window.hkLiveEvery(loadSecurityAgents);
+    window.hkLiveEvery(loadSecurityAgents, 30000);
 
     // ── Stripe webhook log card ────────────────────────────────────────────
     // Renders what the payment webhook actually did, newest first, with the
@@ -3233,7 +3652,7 @@ import Layout from '../layouts/Layout.astro';
       }
     }
     loadStripeWebhookLog();
-    window.hkLiveEvery(loadStripeWebhookLog);
+    window.hkLiveEvery(loadStripeWebhookLog, 30000);
 
     // Live cards catch up the moment the tab is visible again — a hidden tab
     // throttles timers, so returning to it should not show a stale feed.
@@ -3483,9 +3902,9 @@ import Layout from '../layouts/Layout.astro';
  <div class="flex flex-col sm:flex-row gap-3">
  <input id="manual-email" type="email" placeholder="customer@email.com" class="flex-1 bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] focus:border-[#22d3ee] outline-none" />
  <select id="manual-plan" class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] focus:border-[#22d3ee] outline-none">
- <option value="starter">Starter ($9.99)</option>
- <option value="pro">Pro ($29.99)</option>
- <option value="enterprise">Enterprise ($99.99)</option>
+ <option value="starter">Starter ($10.44)</option>
+ <option value="pro">Pro ($30.44)</option>
+ <option value="enterprise">Enterprise ($100.44)</option>
  </select>
  <button onclick="generateManualLicense()" class="bg-[#0891b2] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#0e7490] transition-colors whitespace-nowrap">Generate Key</button>
  </div>

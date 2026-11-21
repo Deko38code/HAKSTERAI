@@ -1,0 +1,253 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - navigation [ref=e4]:
+      - link "«SolveCaptcha» logo" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - img "«SolveCaptcha» logo" [ref=e6]
+      - generic [ref=e7]:
+        - list [ref=e8]:
+          - listitem [ref=e9]:
+            - link "Captcha solver" [ref=e10] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e11]:
+            - link "Captcha typing job" [ref=e12] [cursor=pointer]:
+              - /url: /captcha-typing-job
+          - listitem [ref=e13]:
+            - link "API" [ref=e14] [cursor=pointer]:
+              - /url: /captcha-solver-api
+          - listitem [ref=e15]:
+            - link "Extension" [ref=e16] [cursor=pointer]:
+              - /url: /captcha-solver-extension
+          - listitem [ref=e17]:
+            - link "SDKs" [ref=e18] [cursor=pointer]:
+              - /url: /captcha-solver
+          - listitem [ref=e19]:
+            - link "Demo" [ref=e20] [cursor=pointer]:
+              - /url: /demo
+          - listitem [ref=e21]:
+            - link "Pricing" [ref=e22] [cursor=pointer]:
+              - /url: /#pricing
+        - list [ref=e24]:
+          - listitem [ref=e25]:
+            - link "Sign up" [ref=e26] [cursor=pointer]:
+              - /url: /auth/register
+          - listitem [ref=e27]:
+            - link "Log in" [ref=e28] [cursor=pointer]:
+              - /url: /auth
+              - img [ref=e30]
+              - text: Log in
+  - main [ref=e32]:
+    - generic [ref=e35]:
+      - list [ref=e38]:
+        - listitem [ref=e39]:
+          - link "Captchas demo" [ref=e40] [cursor=pointer]:
+            - /url: /demo
+        - listitem [ref=e41]:
+          - link "Image CAPTCHA" [ref=e42] [cursor=pointer]:
+            - /url: /demo/image-captcha
+        - listitem [ref=e43]:
+          - link "reCAPTCHA v2" [ref=e44] [cursor=pointer]:
+            - /url: /demo/recaptcha-v2
+        - listitem [ref=e45]:
+          - link "reCAPTCHA v3" [ref=e46] [cursor=pointer]:
+            - /url: /demo/recaptcha-v3
+        - listitem [ref=e47]:
+          - link "reCAPTCHA v2 Callback" [ref=e48] [cursor=pointer]:
+            - /url: /demo/recaptcha-v2-callback
+        - listitem [ref=e49]:
+          - link "reCAPTCHA v2 Invisible" [ref=e50] [cursor=pointer]:
+            - /url: /demo/recaptcha-v2-invisible
+        - listitem [ref=e51]:
+          - link "Cloudflare Turnstile" [ref=e52] [cursor=pointer]:
+            - /url: /demo/cloudflare-turnstile
+        - listitem [ref=e53]:
+          - link "GeeTest CAPTCHA" [ref=e54] [cursor=pointer]:
+            - /url: /demo/geetest
+        - listitem [ref=e55]:
+          - link "Text captcha" [ref=e56] [cursor=pointer]:
+            - /url: /demo/text-captcha
+        - listitem [ref=e57]:
+          - link "Lemin" [ref=e58] [cursor=pointer]:
+            - /url: /demo/lemin
+      - generic [ref=e59]:
+        - generic [ref=e60]:
+          - heading "image-captcha logo Image Captcha demo" [level=1] [ref=e61]:
+            - img "image-captcha logo" [ref=e62]
+            - text: Image Captcha demo
+          - paragraph [ref=e63]: Normal Captcha is an image that contains distorted but human-readable text. To solve the captcha user has to type the text from the image.
+          - generic [ref=e64]:
+            - img "image captcha" [ref=e65]
+            - generic [ref=e66]: Enter text from the image
+            - textbox "Enter text from the image" [ref=e67]:
+              - /placeholder: Enter answer here...
+          - generic [ref=e69]:
+            - button "Check" [ref=e70] [cursor=pointer]
+            - button "Reset" [ref=e71] [cursor=pointer]
+        - generic [ref=e73]:
+          - img "Captcha example" [ref=e75]
+          - generic [ref=e76]:
+            - paragraph [ref=e77]: Image pictures CAPTCHAs frequently interfere with development workflows — blocking automated tests, and CI pipelines. The practical solution is to outsource image recognition to a dedicated solver service exposed via an API and integrate that service into your test and deployment pipelines.
+            - generic [ref=e78]:
+              - link "Image captcha solver" [ref=e79] [cursor=pointer]:
+                - /url: /captcha-solver/image-captcha-solver-bypass
+                - text: Image captcha solver
+                - img [ref=e81]
+              - link "API" [ref=e83] [cursor=pointer]:
+                - /url: /captcha-solver-api
+                - text: API
+                - img [ref=e85]
+        - generic [ref=e87]:
+          - heading "How to bypass image Captcha" [level=4] [ref=e88]
+          - paragraph [ref=e89]: Download the captcha image. Send image to our API.
+          - heading "With SDK (recommended):" [level=4] [ref=e90]
+          - group [ref=e91]:
+            - generic "PHP" [ref=e92] [cursor=pointer]:
+              - generic [ref=e93]:
+                - generic [ref=e94]: PHP
+                - img [ref=e96]
+          - group [ref=e98]:
+            - generic "Python" [ref=e99] [cursor=pointer]:
+              - generic [ref=e100]:
+                - generic [ref=e101]: Python
+                - img [ref=e103]
+          - group [ref=e105]:
+            - generic "Java" [ref=e106] [cursor=pointer]:
+              - generic [ref=e107]:
+                - generic [ref=e108]: Java
+                - img [ref=e110]
+          - group [ref=e112]:
+            - generic "C#" [ref=e113] [cursor=pointer]:
+              - generic [ref=e114]:
+                - generic [ref=e115]: C#
+                - img [ref=e117]
+          - group [ref=e119]:
+            - generic "Go" [ref=e120] [cursor=pointer]:
+              - generic [ref=e121]:
+                - generic [ref=e122]: Go
+                - img [ref=e124]
+          - group [ref=e126]:
+            - generic "C++" [ref=e127] [cursor=pointer]:
+              - generic [ref=e128]:
+                - generic [ref=e129]: C++
+                - img [ref=e131]
+          - group [ref=e133]:
+            - generic "Ruby" [ref=e134] [cursor=pointer]:
+              - generic [ref=e135]:
+                - generic [ref=e136]: Ruby
+                - img [ref=e138]
+          - generic [ref=e140]:
+            - heading "Manually:" [level=4] [ref=e141]
+            - paragraph [ref=e142]: "Multipart sample form:"
+            - generic [ref=e144]: "<form method=\"post\" action=\"https://solvecaptcha.com/in.php\" enctype=\"multipart/form-data\"> <input type=\"hidden\" name=\"method\" value=\"post\" /> Your key: <input type=\"text\" name=\"key\" value=\"YOUR_APIKEY\" /> The CAPTCHA file: <input type=\"file\" name=\"file\" /> <input type=\"submit\" value=\"Upload and get the ID\" /> </form>"
+            - paragraph [ref=e145]: "If everything is fine server will return the ID of your captcha:"
+            - paragraph [ref=e146]: OK|2122988149
+            - paragraph [ref=e147]: "Otherwise server will return an error code. After 15-20 seconds send GET request to get the result:"
+            - generic [ref=e149]: GET https://solvecaptcha.com/res.php?key=YOUR_API_KEY&action=get&id=2122988149
+            - paragraph [ref=e150]: "If captcha is already solved server will respond with the answer token:"
+            - paragraph [ref=e151]:
+              - strong [ref=e152]: OK|W9H5K
+            - paragraph [ref=e153]:
+              - text: If captcha is not solved yet server will return
+              - strong [ref=e154]: CAPCHA_NOT_READY
+              - text: result. Repeat your request in 5 seconds. If something went wrong server will return an error code. Paste received code into the field. Then, submit the form.
+  - contentinfo [ref=e157]:
+    - generic [ref=e158]:
+      - img "up" [ref=e159]
+      - generic [ref=e160]: Scale up your business with SolveCaptcha
+      - button "Contact sales" [ref=e161] [cursor=pointer]
+      - generic:
+        - dialog:
+          - heading [level=2]: Contact our sales team
+          - generic:
+            - paragraph:
+              - generic: First name
+              - textbox:
+                - /placeholder: First name
+            - paragraph:
+              - generic: Last name
+              - textbox:
+                - /placeholder: Last name
+            - paragraph:
+              - generic: Work e-mail
+              - textbox:
+                - /placeholder: Work e-mail
+            - paragraph:
+              - generic: Phone number
+              - textbox:
+                - /placeholder: Phone number
+            - paragraph:
+              - generic: Message
+              - textbox:
+                - /placeholder: Can you share more about your business needs and challenges?
+            - button [disabled]: Send
+    - generic [ref=e162]:
+      - generic [ref=e163]:
+        - generic [ref=e164]:
+          - list [ref=e165]:
+            - listitem [ref=e166]:
+              - link "Captcha solver" [ref=e167] [cursor=pointer]:
+                - /url: /
+            - listitem [ref=e168]:
+              - link "Captcha typing job" [ref=e169] [cursor=pointer]:
+                - /url: /captcha-typing-job
+            - listitem [ref=e170]:
+              - link "API" [ref=e171] [cursor=pointer]:
+                - /url: /captcha-solver-api
+            - listitem [ref=e172]:
+              - link "Extension" [ref=e173] [cursor=pointer]:
+                - /url: /captcha-solver-extension
+            - listitem [ref=e174]:
+              - link "SDKs" [ref=e175] [cursor=pointer]:
+                - /url: /captcha-solver
+            - listitem [ref=e176]:
+              - link "Demo" [ref=e177] [cursor=pointer]:
+                - /url: /demo
+            - listitem [ref=e178]:
+              - link "Pricing" [ref=e179] [cursor=pointer]:
+                - /url: /pricing
+            - listitem [ref=e180]:
+              - link "Affiliate program" [ref=e181] [cursor=pointer]:
+                - /url: /affiliate-program
+          - button "us flag English" [ref=e183] [cursor=pointer]:
+            - img "us flag" [ref=e184]
+            - generic [ref=e185]: English
+            - img [ref=e187]
+        - generic [ref=e189]:
+          - link "«SolveCaptcha» logo" [ref=e190] [cursor=pointer]:
+            - /url: /
+            - img "«SolveCaptcha» logo" [ref=e191]
+          - paragraph [ref=e192]: Copying any part of this website without the explicit permission of the website owner is illegal.
+          - list [ref=e193]:
+            - listitem [ref=e194]:
+              - img "«GDPR» logo" [ref=e195]
+            - listitem [ref=e196]:
+              - img "«SSL secured» logo" [ref=e197]
+            - listitem [ref=e198]:
+              - img "«Google privacy policy» logo" [ref=e199]
+            - listitem [ref=e200]:
+              - img "«S/MIME» logo" [ref=e201]
+            - listitem [ref=e202]:
+              - img "«CCPA» logo" [ref=e203]
+          - link "#2 In the monitoring service rating «CaptchaTheCat» logo" [ref=e204] [cursor=pointer]:
+            - /url: https://captchathecat.com/service/solvecaptcha
+            - img "#2" [ref=e205]
+            - generic [ref=e206]:
+              - generic [ref=e207]: In the monitoring service rating
+              - img "«CaptchaTheCat» logo" [ref=e208]
+          - generic [ref=e209]:
+            - generic [ref=e210]: Contact us
+            - generic [ref=e211]:
+              - img [ref=e212]
+              - text: info@solvecaptcha.com
+      - generic [ref=e215]:
+        - img "We support Visa, Mastercard, Airtm, PayPal, Alipay, BTC, USDT payment methods" [ref=e216]
+        - list [ref=e217]:
+          - listitem [ref=e218]:
+            - link "Terms of service" [ref=e219] [cursor=pointer]:
+              - /url: /terms-of-service
+          - listitem [ref=e221]:
+            - link "Payment policy" [ref=e222] [cursor=pointer]:
+              - /url: /refund-and-payment-policy
+          - listitem [ref=e224]:
+            - link "Privacy policy" [ref=e225] [cursor=pointer]:
+              - /url: /privacy-policy

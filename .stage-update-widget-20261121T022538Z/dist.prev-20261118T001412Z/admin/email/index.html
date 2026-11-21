@@ -1,0 +1,1041 @@
+<!DOCTYPE html><html lang="en" data-admin-page="pending" data-hakster-build="2026-11-18T00:08:26.366Z" data-astro-cid-ju4pidww><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="Owner-only Gmail inbox and sending monitor."><link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#00ff41"><meta name="application-name" content="HaksterAI"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="HaksterAI"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta property="og:image" content="/haksterai-logo.png"><meta property="og:title" content="Admin — Email Monitor | haksterAi"><meta property="og:description" content="Owner-only Gmail inbox and sending monitor."><title>Admin — Email Monitor | haksterAi</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="/css/xterm.css"><meta name="haksterai-build" content="2026-11-18T00:08:26.366Z"><link rel="stylesheet" href="/_astro/Layout.DW85aQbn.css"></head><body data-astro-cid-ju4pidww><!-- Navbar --><header id="navbar" class="fixed top-0 left-0 right-0 z-50 border-b border-[#1e1e2e] bg-[#0a0a0f]/80 backdrop-blur-md transition-shadow duration-300" data-astro-cid-ju4pidww><nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4" data-astro-cid-ju4pidww><!-- Logo --><a href="/" class="flex items-center gap-3 group" data-astro-cid-ju4pidww><span class="text-[#e2e8f0] font-bold text-2xl md:text-3xl tracking-tight" data-astro-cid-ju4pidww>hakster<span class="text-[#7c3aed]" data-astro-cid-ju4pidww>Ai</span></span></a><!-- Desktop nav links --><div class="hidden md:flex items-center gap-2 bg-[#111118]/80 border border-[#1e1e2e] rounded-full px-2 py-1.5 backdrop-blur-sm" data-astro-cid-ju4pidww><div id="admin-tools" data-owner-only="true" class="relative hidden items-center" data-astro-cid-ju4pidww><button id="admin-tools-btn" type="button" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#fbbf24] hover:bg-[#fbbf24]/10 transition-all flex items-center gap-1.5" aria-expanded="false" aria-haspopup="true" aria-controls="admin-tools-menu" data-astro-cid-ju4pidww>🔐 Admin <span class="text-[10px]" data-astro-cid-ju4pidww>▾</span></button><div id="admin-tools-menu" class="hidden absolute right-0 top-[calc(100%+10px)] w-56 rounded-xl border border-[#fbbf24]/30 bg-[#111118] p-2 shadow-2xl z-[60]" data-astro-cid-ju4pidww><a href="/labs" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🧪 Labs</a><a href="/portal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🌐 Portal</a><a href="/dashboard" data-admin-only="true" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>📊 Dashboard</a><a href="/admin/email" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>📧 Email Monitor</a><a href="/admin/mail" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>📬 Mail</a><a href="/admin/skills" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🧠 Skills & Brain</a><a href="/miniforge/app/?view=admin" title="Owner only — bot skills, memory clusters and gram-bot sync" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🛡️ Bots Admin</a><a href="/hack" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>⚡ Hack Lab</a><a href="/terminal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>⌨️ Terminal</a><a href="/hakterm/" title="Open HakTerm" class="hakterm-admin-link group my-1 flex items-center gap-2 rounded-xl border border-[#00ff88]/80 bg-gradient-to-r from-[#064527] via-[#075333] to-[#064b3d] px-3 py-2.5 text-[#baffd6] shadow-[0_0_16px_rgba(0,255,100,0.28)] transition-all hover:-translate-y-0.5 hover:border-[#b5ffd2] hover:shadow-[0_0_25px_rgba(0,255,100,0.48)]" data-astro-cid-ju4pidww><span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#00ff88]/60 bg-[#00ff88]/20 text-base text-[#24ff91]" data-astro-cid-ju4pidww>⚡</span><span class="min-w-0 flex-1" data-astro-cid-ju4pidww><span class="block text-sm font-extrabold tracking-wide" data-astro-cid-ju4pidww>HakTerm :8099</span><span class="block text-[9px] font-medium uppercase tracking-[0.14em] text-[#8fffc0]" data-astro-cid-ju4pidww>Agent terminal</span></span><span class="rounded-md border border-[#00ff88]/45 bg-[#00ff88]/10 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[#a5ffca]" data-astro-cid-ju4pidww>OPEN ↗</span></a><a href="/hakterm/?brain=claude" title="Open HakTerm on the Claude CLI — same DeepSeek route the owner already runs" class="group my-1 flex items-center gap-2 rounded-xl border border-[#f0b46a]/70 bg-gradient-to-r from-[#2a1c0c] via-[#24170a] to-[#1d1408] px-3 py-2.5 text-[#ffdca8] shadow-[0_0_14px_rgba(240,180,106,0.22)] transition-all hover:-translate-y-0.5 hover:border-[#ffd7a1] hover:shadow-[0_0_22px_rgba(240,180,106,0.4)]" data-astro-cid-ju4pidww><span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#f0b46a]/60 bg-[#f0b46a]/15 text-base text-[#ffd7a1]" data-astro-cid-ju4pidww>🧠</span><span class="min-w-0 flex-1" data-astro-cid-ju4pidww><span class="block text-sm font-extrabold tracking-wide" data-astro-cid-ju4pidww>Claude CLI</span><span class="block text-[9px] font-medium uppercase tracking-[0.14em] text-[#e7b77c]" data-astro-cid-ju4pidww>DeepSeek route · HakTerm</span></span><span class="rounded-md border border-[#f0b46a]/45 bg-[#f0b46a]/10 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[#ffd7a1]" data-astro-cid-ju4pidww>OPEN ↗</span></a><a href="/commands" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5" data-astro-cid-ju4pidww>🎛️ Command Center</a></div></div><a href="/miniforge/" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5" title="Open Chat" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>💬</span> Chat</a></div><!-- Desktop CTA + user badge + GitHub --><div class="hidden md:flex items-center gap-3" data-astro-cid-ju4pidww><div id="nav-user-badge" class="hidden items-center gap-2.5 px-3 py-1.5 rounded-lg border border-[#1e1e2e] bg-[#111118]" data-astro-cid-ju4pidww><div id="nav-user-avatar" class="w-7 h-7 rounded-full bg-[#7c3aed]/20 border border-[#7c3aed]/30 flex items-center justify-center text-xs font-bold text-[#a855f7]" data-astro-cid-ju4pidww></div><span id="nav-user-name" class="text-sm text-[#e2e8f0] font-medium max-w-[100px] truncate" data-astro-cid-ju4pidww></span><span id="nav-user-id" class="hidden rounded bg-[#7c3aed]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#c084fc]" data-astro-cid-ju4pidww></span><button id="nav-logout-btn" class="text-[#ef4444] hover:text-red-400 transition-colors text-xs" title="Sign out" data-astro-cid-ju4pidww>⏻</button></div><div id="nav-signin-btn" class="hidden" data-astro-cid-ju4pidww><a href="/api/auth/google/redirect" class="inline-flex items-center gap-2 rounded-lg bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6d28d9] transition-colors" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>🔐</span> Sign In</a></div><a id="nav-passkey-btn" href="/passkey" class="inline-flex items-center gap-1.5 rounded-lg border border-[#7c3aed]/40 bg-[#7c3aed]/10 px-3 py-2 text-sm font-semibold text-[#c084fc] hover:bg-[#7c3aed]/20 transition-colors" title="Sign in with a passkey — Windows Hello, Touch ID or your phone" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>🔑</span> Passkey</a><a href="https://github.com" target="_blank" rel="noopener noreferrer" class="text-[#64748b] hover:text-[#e2e8f0] transition-colors" aria-label="GitHub" data-astro-cid-ju4pidww><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-ju4pidww><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z" data-astro-cid-ju4pidww></path></svg></a></div><!-- Mobile hamburger + quick logout --><div class="md:hidden flex items-center gap-2" data-astro-cid-ju4pidww><button id="mobile-logout-btn" class="hidden flex items-center justify-center w-9 h-9 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 text-[#ef4444] transition-colors hover:bg-[#ef4444]/20" aria-label="Sign out" title="Sign out" data-astro-cid-ju4pidww><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-astro-cid-ju4pidww><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" data-astro-cid-ju4pidww></path></svg></button><button id="menu-btn" class="md:hidden flex flex-col justify-center items-center w-9 h-9 gap-1.5 rounded-lg border border-[#1e1e2e] bg-[#111118] hover:border-[#7c3aed]/50 transition-colors" aria-label="Toggle menu" aria-expanded="false" data-astro-cid-ju4pidww><span id="bar1" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300 origin-center" data-astro-cid-ju4pidww></span><span id="bar2" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300" data-astro-cid-ju4pidww></span><span id="bar3" class="block w-5 h-0.5 bg-[#e2e8f0] transition-all duration-300 origin-center" data-astro-cid-ju4pidww></span></button></div></nav><!-- Mobile menu (hidden by default) --><div id="mobile-menu" class="md:hidden hidden border-t border-[#1e1e2e] bg-[#0a0a0f]/95 backdrop-blur-md" data-astro-cid-ju4pidww><div class="mx-auto max-w-6xl px-6 py-4 flex flex-col gap-4" data-astro-cid-ju4pidww><div id="mobile-admin-tools" data-owner-only="true" class="hidden flex-col gap-2" data-astro-cid-ju4pidww><button id="mobile-admin-tools-btn" type="button" class="w-full flex items-center justify-between rounded-lg border border-[#fbbf24]/30 bg-[#fbbf24]/5 px-3 py-2.5 text-sm font-semibold text-[#fbbf24]" aria-expanded="false" aria-controls="mobile-admin-tools-menu" data-astro-cid-ju4pidww>🔐 Admin <span data-astro-cid-ju4pidww>▾</span></button><div id="mobile-admin-tools-menu" class="hidden flex-col gap-1 rounded-xl border border-[#fbbf24]/20 bg-[#111118]/80 p-2" data-astro-cid-ju4pidww><a href="/labs" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🧪 Labs</a><a href="/portal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🌐 Portal</a><a href="/dashboard" data-admin-only="true" class="hidden rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>📊 Dashboard</a><a href="/admin/email" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>📧 Email Monitor</a><a href="/admin/mail" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>📬 Mail</a><a href="/admin/skills" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🧠 Skills & Brain</a><a href="/miniforge/app/?view=admin" title="Owner only — bot skills, memory clusters and gram-bot sync" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🛡️ Bots Admin</a><a href="/hack" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>⚡ Hack Lab</a><a href="/terminal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>⌨️ Terminal</a><a href="/hakterm/" title="Open HakTerm" class="hakterm-admin-link flex items-center gap-3 rounded-xl border border-[#00ff88]/80 bg-gradient-to-r from-[#064527] via-[#075333] to-[#064b3d] px-3 py-2.5 text-sm font-bold text-[#baffd6] shadow-[0_0_16px_rgba(0,255,100,0.28)]" data-astro-cid-ju4pidww><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#00ff88]/60 bg-[#00ff88]/20 text-lg text-[#24ff91]" data-astro-cid-ju4pidww>⚡</span><span class="flex-1" data-astro-cid-ju4pidww>HakTerm :8099 <span class="ml-1 text-[10px] font-medium uppercase tracking-wider text-[#8fffc0]" data-astro-cid-ju4pidww>Agent terminal</span></span><span class="text-xs text-[#75ffbd]" data-astro-cid-ju4pidww>↗</span></a><a href="/hakterm/?brain=claude" title="Open HakTerm on the Claude CLI — same DeepSeek route the owner already runs" class="flex items-center gap-3 rounded-xl border border-[#f0b46a]/70 bg-gradient-to-r from-[#2a1c0c] via-[#24170a] to-[#1d1408] px-3 py-2.5 text-sm font-bold text-[#ffdca8] shadow-[0_0_14px_rgba(240,180,106,0.22)]" data-astro-cid-ju4pidww><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#f0b46a]/60 bg-[#f0b46a]/15 text-lg text-[#ffd7a1]" data-astro-cid-ju4pidww>🧠</span><span class="flex-1" data-astro-cid-ju4pidww>Claude CLI <span class="ml-1 text-[10px] font-medium uppercase tracking-wider text-[#e7b77c]" data-astro-cid-ju4pidww>DeepSeek · HakTerm</span></span><span class="text-xs text-[#ffd7a1]" data-astro-cid-ju4pidww>↗</span></a><a href="/commands" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]" data-astro-cid-ju4pidww>🎛️ Command Center</a></div></div><a href="/miniforge/" class="mobile-nav-link text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2" title="Open Chat" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>💬</span> Chat</a><!-- Mobile user badge + logout --><div id="mobile-user-section" class="hidden pt-3" data-astro-cid-ju4pidww><div class="flex items-center gap-2.5 px-1 pb-3 border-b border-[#1e1e2e]" data-astro-cid-ju4pidww><div id="mobile-user-avatar" class="w-8 h-8 rounded-full bg-[#7c3aed]/20 border border-[#7c3aed]/30 flex items-center justify-center text-sm font-bold text-[#a855f7]" data-astro-cid-ju4pidww></div><div class="flex-1 min-w-0" data-astro-cid-ju4pidww><div id="mobile-user-name" class="text-sm text-[#e2e8f0] font-medium truncate" data-astro-cid-ju4pidww></div><div id="mobile-user-email" class="text-xs text-[#64748b] truncate" data-astro-cid-ju4pidww></div><div id="mobile-user-id" class="text-[10px] font-bold text-[#a855f7] truncate" data-astro-cid-ju4pidww></div></div></div><button id="mobile-menu-logout" class="w-full mt-3 flex items-center justify-center gap-2 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 hover:bg-[#ef4444]/20 text-[#ef4444] text-sm font-semibold py-2.5 transition" data-astro-cid-ju4pidww><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-astro-cid-ju4pidww><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" data-astro-cid-ju4pidww></path></svg>Sign Out</button></div><div class="flex items-center gap-3 pt-2" data-astro-cid-ju4pidww><a href="https://github.com" target="_blank" rel="noopener noreferrer" class="text-[#64748b] hover:text-[#e2e8f0] transition-colors" aria-label="GitHub" data-astro-cid-ju4pidww><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-ju4pidww><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z" data-astro-cid-ju4pidww></path></svg></a></div></div></div></header><button type="button" id="global-fullscreen-btn" class="global-fullscreen-btn" title="Fullscreen" aria-label="Fullscreen" aria-pressed="false" data-astro-cid-ju4pidww><svg class="fullscreen-enter" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-astro-cid-ju4pidww><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5" data-astro-cid-ju4pidww></path></svg><svg class="fullscreen-exit" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-astro-cid-ju4pidww><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6" data-astro-cid-ju4pidww></path></svg></button><!-- Page content --><main data-astro-cid-ju4pidww><script>(function(){
+/* Redirect to Freebuff only when its session check explicitly rejects the request. */
+if (window.__fbGate) return; window.__fbGate = 1;
+try {
+  var fbKey = ''; try { fbKey = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch (e) {}
+  fetch('/api/auth/freebuff/me', { credentials: 'same-origin', headers: fbKey ? { 'x-api-key': fbKey } : {} })
+    .then(function (r) {
+      if (r.status === 401) { var n = location.pathname + location.search; location.replace('/auth/freebuff?next=' + encodeURIComponent(n)); return; }
+      if (!r.ok) document.dispatchEvent(new CustomEvent('hakster-freebuff-auth-error'));
+    })
+    .catch(function () { document.dispatchEvent(new CustomEvent('hakster-freebuff-auth-error')); });
+} catch (e) {}
+})();</script><main class="mx-auto min-h-screen max-w-6xl px-5 pb-16 pt-28 text-slate-100"><nav class="mb-5 text-sm text-slate-500"><a href="/" class="hover:text-violet-300">Home</a> <span class="px-2">›</span><span class="text-amber-300">Admin</span> <span class="px-2">›</span><span class="text-slate-300">Email Monitor</span></nav><section class="rounded-3xl border border-violet-300/20 bg-gradient-to-br from-[#17151f] to-[#0c0c12] p-6 sm:p-9"><div class="flex flex-wrap items-start justify-between gap-4"><div><p class="mb-2 text-xs font-bold uppercase tracking-[.25em] text-violet-300">Owner admin tool</p><h1 class="text-3xl font-bold">📧 Gmail Monitor</h1><p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Connect one Gmail inbox to view recent incoming messages and send email from that account.</p></div><span id="gmail-auth-status" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400">Checking owner access…</span></div><div class="mt-7 grid gap-4 md:grid-cols-3"><article class="rounded-2xl border border-white/10 bg-black/20 p-5"><p class="text-xs uppercase tracking-wider text-slate-500">Permission</p><h2 class="mt-2 font-semibold">Read and send</h2><p class="mt-2 text-sm text-slate-400">Google grants <code class="text-violet-200">gmail.readonly</code> and <code class="text-violet-200">gmail.send</code>. The monitor cannot delete or modify messages.</p></article><article class="rounded-2xl border border-white/10 bg-black/20 p-5"><p class="text-xs uppercase tracking-wider text-slate-500">Token storage</p><h2 class="mt-2 font-semibold">Encrypted on the server</h2><p class="mt-2 text-sm text-slate-400">The refresh token is encrypted at rest and is never returned to this page. Message previews are fetched when you refresh and are not saved.</p></article><article class="rounded-2xl border border-amber-300/15 bg-amber-300/5 p-5"><p class="text-xs uppercase tracking-wider text-amber-200/70">Google setup</p><h2 class="mt-2 font-semibold text-amber-100">One-time configuration</h2><p class="mt-2 text-sm text-amber-100/70">Enable the Gmail API and register <code class="break-all text-xs">https://haksterai.com/api/admin/gmail/callback</code> in the Google OAuth client. Inbox access uses a restricted scope; Google may require test-user access or OAuth verification.</p></article></div><div id="freebuff-auth-error" role="status" aria-live="polite" class="mt-5 hidden rounded-xl border border-rose-300/20 bg-rose-300/5 px-4 py-3 text-sm text-rose-200">Freebuff sign-in could not be verified. Reload this page or <a class="underline" href="/auth/freebuff">sign in again</a>.</div><div class="mt-7 flex flex-wrap items-center gap-3"><button id="gmail-connect" type="button" class="rounded-xl bg-violet-400 px-5 py-3 font-bold text-black transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">Connect Gmail · inbox + send</button><button id="gmail-refresh" type="button" disabled class="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">↻ Refresh inbox</button><button id="gmail-disconnect" type="button" disabled class="rounded-xl border border-rose-300/20 px-4 py-3 text-sm font-semibold text-rose-200 transition hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-40">Disconnect Gmail</button><span id="gmail-status" role="status" aria-live="polite" class="text-sm text-slate-400">Checking Gmail connection…</span></div><div id="gmail-address" class="mt-4 hidden text-sm text-violet-200"></div><form id="gmail-compose" class="mt-6 hidden rounded-2xl border border-white/10 bg-black/20 p-4 sm:p-5"><h2 class="mb-4 text-lg font-semibold">Send an email</h2><div class="grid gap-3"><label class="grid gap-1.5 text-sm text-slate-300">To<input id="gmail-to" type="email" autocomplete="email" maxlength="254" required class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-slate-100 outline-none focus:border-violet-300/50"></label><label class="grid gap-1.5 text-sm text-slate-300">Subject<input id="gmail-subject" type="text" maxlength="200" required class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-slate-100 outline-none focus:border-violet-300/50"></label><label class="grid gap-1.5 text-sm text-slate-300">Message<textarea id="gmail-body" rows="6" maxlength="20000" required class="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-slate-100 outline-none focus:border-violet-300/50"></textarea></label><div class="flex flex-wrap items-center gap-3"><button id="gmail-send" type="submit" class="rounded-xl bg-violet-400 px-5 py-2.5 font-bold text-black transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">Send email</button><span id="gmail-send-status" role="status" aria-live="polite" class="text-sm text-slate-400"></span></div></div></form><div id="gmail-messages" class="mt-6 grid gap-3"></div></section></main><script>
+    (() => {
+      const apiBase = location.port === '4321' ? 'http://localhost:3579' : '';
+      document.addEventListener('hakster-freebuff-auth-error', () => {
+        document.getElementById('freebuff-auth-error')?.classList.remove('hidden');
+      });
+      const headers = {};
+      const ownerKeys = [localStorage.getItem('hakster_google_token'), localStorage.getItem('hakster_api_key')]
+        .filter((key, index, all) => key && all.indexOf(key) === index);
+      const authBadge = document.getElementById('gmail-auth-status');
+      const status = document.getElementById('gmail-status');
+      const connectButton = document.getElementById('gmail-connect');
+      const refreshButton = document.getElementById('gmail-refresh');
+      const disconnectButton = document.getElementById('gmail-disconnect');
+      const address = document.getElementById('gmail-address');
+      const messages = document.getElementById('gmail-messages');
+      const compose = document.getElementById('gmail-compose');
+      const sendButton = document.getElementById('gmail-send');
+      const sendStatus = document.getElementById('gmail-send-status');
+      const params = new URLSearchParams(location.search);
+      const POPUP_FLAG = 'haksterai_gmail_popup_pending';
+      const POPUP_CHANNEL = 'haksterai-gmail-monitor';
+      let gmailChannel = null;
+      let popupPoll = 0;
+      try { gmailChannel = new BroadcastChannel(POPUP_CHANNEL); } catch (_) { gmailChannel = null; }
+      const errorText = {
+        state: 'The Google authorization expired or could not be verified. Start again.',
+        denied: 'Google access was declined. No Gmail connection was saved.',
+        code: 'Google did not return an authorization code. Start again.',
+        token: 'Google could not complete the authorization exchange.',
+        scope: 'Gmail inbox and send permissions were not both granted. No connection was saved.',
+        profile: 'HaksterAI could not verify the connected Gmail inbox.',
+        refresh_token: 'Google did not provide offline access. Reconnect and approve the requested access.',
+        connection: 'Gmail could not be connected. Check Google API and OAuth setup.',
+        owner: 'The HaksterAI owner account changed during authorization. Sign in again and retry.'
+      };
+      // Return leg of the secure OAuth window. Google consent always opens in its own popup,
+      // so this page is what that popup lands on. It hands the result to the admin panel over
+      // a same-origin channel and then closes; the panel itself never navigates away.
+      const popupFlagAt = Number(localStorage.getItem(POPUP_FLAG) || 0);
+      const popupReturn = Boolean(popupFlagAt) && Date.now() - popupFlagAt < 15 * 60 * 1000
+        && (params.get('gmail') === 'connected' || params.has('gmail_error'));
+      if (popupReturn) {
+        localStorage.removeItem(POPUP_FLAG);
+        const popupOk = params.get('gmail') === 'connected';
+        const popupCode = params.get('gmail_error') || '';
+        try { gmailChannel?.postMessage({ type: 'haksterai-gmail-result', ok: popupOk, error: popupCode }); } catch (_) {}
+        try { window.close(); } catch (_) {}
+        setTimeout(() => {
+          try {
+            document.body.innerHTML = '<main style="font:15px/1.6 system-ui,sans-serif;color:#e2e8f0;background:#0c0c12;min-height:100vh;display:grid;place-items:center;margin:0;padding:24px;text-align:center"><div><h1 style="font-size:18px;margin:0 0 8px">' + (popupOk ? 'Gmail connected' : 'Gmail connection incomplete') + '</h1><p style="margin:0;color:#94a3b8">' + (popupOk ? 'You can close this window.' : 'You can close this window and try again from the admin panel.') + '</p></div></main>';
+          } catch (_) {}
+        }, 150);
+        return;
+      }
+
+      if (params.has('gmail_error')) status.textContent = errorText[params.get('gmail_error')] || 'Gmail setup did not complete.';
+      else if (params.get('gmail') === 'connected') status.textContent = 'Gmail connected. Checking the inbox…';
+
+      function setBadge(text, good = false) {
+        authBadge.textContent = text;
+        authBadge.className = good
+          ? 'rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1.5 text-xs text-emerald-300'
+          : 'rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400';
+      }
+
+      function makeMessageCard(message, email) {
+        const card = document.createElement('article');
+        card.className = 'rounded-2xl border border-white/10 bg-black/20 p-4 sm:p-5';
+        const top = document.createElement('div');
+        top.className = 'flex flex-wrap items-start justify-between gap-2';
+        const subject = document.createElement('h2');
+        subject.className = 'font-semibold text-slate-100';
+        subject.textContent = message.subject || '(no subject)';
+        const date = document.createElement('time');
+        date.className = 'text-xs text-slate-500';
+        if (message.date) {
+          date.dateTime = message.date;
+          const parsed = new Date(message.date);
+          date.textContent = Number.isNaN(parsed.getTime()) ? message.date : parsed.toLocaleString();
+        }
+        top.append(subject, date);
+        const from = document.createElement('p');
+        from.className = 'mt-1 break-all text-xs text-violet-200/80';
+        from.textContent = message.from || 'Unknown sender';
+        const snippet = document.createElement('p');
+        snippet.className = 'mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-400';
+        snippet.textContent = message.snippet || 'No preview available.';
+        const open = document.createElement('a');
+        open.className = 'mt-3 inline-flex text-xs font-semibold text-violet-300 hover:text-violet-200';
+        open.href = `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(email || '')}#all/${encodeURIComponent(message.id || '')}`;
+        open.target = '_blank';
+        open.rel = 'noopener noreferrer';
+        open.textContent = 'Open in Gmail ↗';
+        card.append(top, from, snippet, open);
+        if (message.unread) card.classList.add('border-violet-300/30');
+        return card;
+      }
+
+      async function loadMessages() {
+        refreshButton.disabled = true;
+        status.textContent = 'Loading the latest inbox messages…';
+        try {
+          const response = await fetch(apiBase + '/api/admin/gmail/messages', { headers, cache: 'no-store' });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || `Gmail request failed (${response.status})`);
+          messages.replaceChildren();
+          (data.messages || []).forEach((message) => messages.appendChild(makeMessageCard(message, data.email)));
+          if (!data.messages?.length) {
+            const empty = document.createElement('p');
+            empty.className = 'rounded-xl border border-white/10 bg-black/20 p-5 text-sm text-slate-400';
+            empty.textContent = 'No messages were returned for the inbox.';
+            messages.appendChild(empty);
+          }
+          status.textContent = `Showing ${data.messages?.length || 0} recent inbox messages.`;
+          address.textContent = `Connected inbox: ${data.email}`;
+          address.classList.remove('hidden');
+          compose.classList.remove('hidden');
+          refreshButton.disabled = false;
+          disconnectButton.disabled = false;
+        } catch (error) {
+          status.textContent = error.message || 'Could not load Gmail.';
+          if (error.message?.includes('Reconnect')) connectButton.disabled = false;
+        }
+      }
+
+      async function initialize() {
+        connectButton.disabled = true;
+        refreshButton.disabled = true;
+        if (!ownerKeys.length) {
+          setBadge('Sign in as owner');
+          status.textContent = 'Sign in to HaksterAI with the owner account to use the Gmail monitor.';
+          return;
+        }
+        try {
+          let ownerKey = '';
+          for (const key of ownerKeys) {
+            const ownerResponse = await fetch(apiBase + '/api/auth/me', { headers: { 'x-api-key': key }, cache: 'no-store' });
+            if (ownerResponse.status === 401) {
+              for (const name of ['hakster_google_token', 'hakster_api_key']) {
+                if (localStorage.getItem(name) === key) localStorage.removeItem(name);
+              }
+              continue;
+            }
+            if (!ownerResponse.ok) continue;
+            const ownerData = await ownerResponse.json().catch(() => null);
+            if (ownerData?.user?.is_owner) { ownerKey = key; break; }
+          }
+          if (!ownerKey) throw new Error('Owner access required. Sign in to HaksterAI with the owner account.');
+          headers['x-api-key'] = ownerKey;
+          setBadge('Owner verified', true);
+          const response = await fetch(apiBase + '/api/admin/gmail/status', { headers, cache: 'no-store' });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || 'Could not check Gmail setup.');
+          if (!data.configured) {
+            status.textContent = 'Gmail setup required: set GMAIL_MONITOR_REDIRECT_URI to the callback shown above, register it in Google Cloud, and enable the Gmail API.';
+            return;
+          }
+          connectButton.disabled = false;
+          if (data.connected) {
+            address.textContent = `Connected inbox: ${data.email}`;
+            address.classList.remove('hidden');
+            disconnectButton.disabled = false;
+            if (data.sendEnabled) {
+              connectButton.textContent = 'Reconnect Gmail';
+              compose.classList.remove('hidden');
+            } else {
+              connectButton.textContent = 'Grant Gmail send access';
+              status.textContent = 'Inbox is connected. Approve the requested Google send permission to enable composing and sending.';
+            }
+            await loadMessages();
+          } else {
+            status.textContent = 'Connect an authorized Gmail inbox to begin. Google API and callback setup must be complete first.';
+          }
+        } catch (error) {
+          setBadge('Owner verification required');
+          status.textContent = error.message || 'Could not verify owner access.';
+        }
+      }
+
+      connectButton.addEventListener('click', async () => {
+        connectButton.disabled = true;
+        status.textContent = 'Preparing Google consent for inbox and send access…';
+        try {
+          const response = await fetch(apiBase + '/api/admin/gmail/connect', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: '{}' });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.authorizationUrl) throw new Error(data.error || 'Google OAuth setup is incomplete.');
+          // Google consent always runs in its own secure window. Open a same-origin blank first so
+          // a blocked popup is detectable (noopener would return null either way), then sever the
+          // opener link and send that window to Google. This panel is never navigated away.
+          localStorage.setItem(POPUP_FLAG, String(Date.now()));
+          const popup = window.open('', 'haksterai-gmail-oauth', 'popup=yes,width=520,height=760');
+          if (!popup) {
+            localStorage.removeItem(POPUP_FLAG);
+            throw new Error('Your browser blocked the secure Google window. Allow popups for haksterai.com, then press Connect Gmail again.');
+          }
+          try { popup.opener = null; } catch (_) {}
+          try { popup.location.replace(data.authorizationUrl); } catch (_) { popup.location.href = data.authorizationUrl; }
+          status.textContent = 'Finish Google sign-in in the secure window. This panel stays here.';
+          watchSecureWindow();
+        } catch (error) {
+          status.textContent = error.message || 'Could not start Google consent.';
+          connectButton.disabled = false;
+        }
+      });
+
+      // Fallback for browsers where the popup cannot reach the channel: wait for the server-side
+      // connection to appear and refresh the panel in place. Never navigates this page.
+      function watchSecureWindow() {
+        clearInterval(popupPoll);
+        const startedAt = Date.now();
+        popupPoll = setInterval(async () => {
+          if (!localStorage.getItem(POPUP_FLAG)) { clearInterval(popupPoll); return; }
+          if (Date.now() - startedAt > 180000) {
+            clearInterval(popupPoll);
+            localStorage.removeItem(POPUP_FLAG);
+            connectButton.disabled = false;
+            status.textContent = 'Still waiting for Google. If the secure window was closed, press Connect Gmail again.';
+            return;
+          }
+          try {
+            const check = await fetch(apiBase + '/api/admin/gmail/status', { headers, cache: 'no-store' });
+            const state = await check.json().catch(() => ({}));
+            if (check.ok && state.connected && state.sendEnabled) {
+              clearInterval(popupPoll);
+              localStorage.removeItem(POPUP_FLAG);
+              status.textContent = 'Gmail connected. Refreshing the inbox…';
+              initialize();
+            }
+          } catch (_) {}
+        }, 4000);
+      }
+
+      if (gmailChannel) {
+        gmailChannel.addEventListener('message', (event) => {
+          const message = event.data || {};
+          if (message.type !== 'haksterai-gmail-result') return;
+          clearInterval(popupPoll);
+          localStorage.removeItem(POPUP_FLAG);
+          if (message.ok) {
+            status.textContent = 'Gmail connected. Refreshing the inbox…';
+            initialize();
+          } else {
+            status.textContent = errorText[message.error] || 'Gmail setup did not complete.';
+            connectButton.disabled = false;
+          }
+        });
+      }
+      refreshButton.addEventListener('click', loadMessages);
+      compose.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        sendButton.disabled = true;
+        sendStatus.textContent = 'Sending…';
+        try {
+          const response = await fetch(apiBase + '/api/admin/gmail/send', {
+            method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, cache: 'no-store',
+            body: JSON.stringify({ to: document.getElementById('gmail-to').value, subject: document.getElementById('gmail-subject').value, body: document.getElementById('gmail-body').value })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.ok) throw new Error(data.error || 'Gmail could not confirm the send.');
+          compose.reset();
+          sendStatus.textContent = `Sent to ${data.to}.`;
+        } catch (error) {
+          sendStatus.textContent = error.message || 'Could not send the email.';
+        } finally {
+          sendButton.disabled = false;
+        }
+      });
+      disconnectButton.addEventListener('click', async () => {
+        if (!window.confirm('Revoke HaksterAI’s Gmail inbox and send access?')) return;
+        disconnectButton.disabled = true;
+        status.textContent = 'Revoking Gmail access…';
+        try {
+          const response = await fetch(apiBase + '/api/admin/gmail/disconnect', { method: 'POST', headers, cache: 'no-store' });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.ok) throw new Error(data.error || 'Could not disconnect Gmail.');
+          messages.replaceChildren();
+          address.textContent = '';
+          address.classList.add('hidden');
+          compose.classList.add('hidden');
+          refreshButton.disabled = true;
+          connectButton.disabled = false;
+          status.textContent = 'Gmail access revoked. The saved refresh token was cleared from the active connection.';
+        } catch (error) {
+          status.textContent = error.message || 'Could not disconnect Gmail.';
+          disconnectButton.disabled = false;
+        }
+      });
+      initialize();
+    })();
+  </script></main><!-- Footer --><footer class="border-t border-[#1e1e2e] bg-[#0a0a0f] py-12 mt-24" data-astro-cid-ju4pidww><div class="mx-auto max-w-6xl px-6" data-astro-cid-ju4pidww><div class="flex flex-col md:flex-row items-center justify-between gap-6" data-astro-cid-ju4pidww><div class="flex items-center gap-2" data-astro-cid-ju4pidww><span class="text-[#e2e8f0] font-bold" data-astro-cid-ju4pidww>hakster<span class="text-[#7c3aed]" data-astro-cid-ju4pidww>Ai</span></span></div><div class="flex items-center gap-6 text-sm text-[#64748b]" data-astro-cid-ju4pidww><a href="/hack" data-owner-only="true" class="hidden hover:text-[#00ff88] transition-colors text-[#00ff88] font-semibold" data-astro-cid-ju4pidww>⚡ Hack Lab</a><a href="/terminal" data-owner-only="true" class="hidden hover:text-[#a855f7] transition-colors" data-astro-cid-ju4pidww>⌨️ Terminal</a><a href="/portal" data-owner-only="true" class="hidden hover:text-[#e2e8f0] transition-colors" data-astro-cid-ju4pidww>🌐 Portal</a><a href="/miniforge/" class="hover:text-[#e2e8f0] transition-colors" data-astro-cid-ju4pidww>💬 Chat</a><a href="https://github.com" target="_blank" rel="noopener noreferrer" class="hover:text-[#e2e8f0] transition-colors" data-astro-cid-ju4pidww>GitHub</a></div><p class="text-xs text-[#64748b]" data-astro-cid-ju4pidww>© 2026 haksterAi. Built for the terminal.</p></div></div></footer><div id="admin-pin-gate" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="admin-pin-title" style="display:none; position:fixed; inset:0; z-index:1000; place-items:center; padding:16px; background:rgba(0,0,0,.88);" data-astro-cid-ju4pidww><section class="w-full max-w-xs rounded-2xl border border-amber-300/30 bg-[#111118] p-6 text-center text-white shadow-2xl" data-astro-cid-ju4pidww><div id="admin-pin-title" class="text-lg font-bold text-amber-300" data-astro-cid-ju4pidww>Admin PIN</div><p id="admin-pin-subtitle" class="mt-2 text-xs tracking-wider text-slate-400" data-astro-cid-ju4pidww>ENTER PIN TO ACCESS ADMIN</p><div class="my-5 flex justify-center gap-2" aria-hidden="true" data-astro-cid-ju4pidww><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span><span data-admin-pin-dot class="h-3 w-3 rounded-full border border-amber-300" data-astro-cid-ju4pidww></span></div><div class="grid grid-cols-3 gap-2" data-astro-cid-ju4pidww><button type="button" data-admin-pin-key="1" aria-label="Digit 1" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>1</button><button type="button" data-admin-pin-key="2" aria-label="Digit 2" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>2</button><button type="button" data-admin-pin-key="3" aria-label="Digit 3" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>3</button><button type="button" data-admin-pin-key="4" aria-label="Digit 4" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>4</button><button type="button" data-admin-pin-key="5" aria-label="Digit 5" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>5</button><button type="button" data-admin-pin-key="6" aria-label="Digit 6" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>6</button><button type="button" data-admin-pin-key="7" aria-label="Digit 7" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>7</button><button type="button" data-admin-pin-key="8" aria-label="Digit 8" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>8</button><button type="button" data-admin-pin-key="9" aria-label="Digit 9" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>9</button><button type="button" data-admin-pin-key="clear" aria-label="Clear PIN" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>CLR</button><button type="button" data-admin-pin-key="0" aria-label="Digit 0" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>0</button><button type="button" data-admin-pin-key="back" aria-label="Delete last digit" class="rounded-xl border border-white/10 bg-black/30 py-3 font-semibold text-amber-200 transition hover:bg-amber-300/10 active:scale-95" data-astro-cid-ju4pidww>⌫</button></div><p id="admin-pin-error" class="mt-3 min-h-5 text-sm text-rose-400" role="status" aria-live="polite" data-astro-cid-ju4pidww></p><button type="button" data-admin-pin-close class="mt-2 rounded-lg px-4 py-2 text-sm text-slate-400 hover:bg-white/5" data-astro-cid-ju4pidww>Cancel</button></section></div><aside id="haksterai-problem-toast" role="alert" aria-live="assertive" hidden style="position:fixed;right:18px;bottom:18px;z-index:2000;width:min(440px,calc(100vw - 36px));border:1px solid rgba(248,113,113,.45);border-radius:16px;background:#111118;color:#e2e8f0;box-shadow:0 12px 42px rgba(0,0,0,.55);padding:16px;font:14px/1.45 system-ui,sans-serif" data-astro-cid-ju4pidww><div style="display:flex;align-items:center;gap:8px;color:#fca5a5;font-weight:800" data-astro-cid-ju4pidww><span aria-hidden="true" data-astro-cid-ju4pidww>⚠</span><span data-astro-cid-ju4pidww>HaksterAI noticed a problem</span><button id="haksterai-problem-close" type="button" aria-label="Dismiss problem" style="margin-left:auto;background:transparent;color:#94a3b8;border:0;font-size:20px;cursor:pointer" data-astro-cid-ju4pidww>×</button></div><p id="haksterai-problem-message" style="margin:10px 0;color:#cbd5e1;overflow-wrap:anywhere" data-astro-cid-ju4pidww></p><div style="display:flex;gap:8px" data-astro-cid-ju4pidww><button id="haksterai-problem-copy" type="button" style="border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:9px;padding:7px 11px;cursor:pointer" data-astro-cid-ju4pidww>Copy</button><button id="haksterai-problem-popout" type="button" style="border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:9px;padding:7px 11px;cursor:pointer" data-astro-cid-ju4pidww>Pop out</button></div></aside><aside id="haksterai-update-toast" role="status" aria-live="polite" hidden style="position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:1999;width:min(560px,calc(100vw - 28px));border:1px solid rgba(124,58,237,.55);border-radius:14px;background:#111118;color:#e2e8f0;box-shadow:0 12px 42px rgba(0,0,0,.5);padding:12px 14px;font:14px/1.45 system-ui,sans-serif" data-astro-cid-ju4pidww><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap" data-astro-cid-ju4pidww><span style="flex:1;min-width:190px" data-astro-cid-ju4pidww><strong style="color:#c4b5fd" data-astro-cid-ju4pidww>HaksterAI update ready</strong><br data-astro-cid-ju4pidww><span id="haksterai-update-detail" style="color:#94a3b8;font-size:12px" data-astro-cid-ju4pidww>A newer version is available.</span></span><button id="haksterai-update-now" type="button" style="border:0;background:#7c3aed;color:white;border-radius:9px;padding:8px 12px;font-weight:700;cursor:pointer" data-astro-cid-ju4pidww>Update</button><button id="haksterai-update-later" type="button" style="border:1px solid #334155;background:#1e293b;color:#cbd5e1;border-radius:9px;padding:8px 12px;cursor:pointer" data-astro-cid-ju4pidww>Later</button></div></aside><!-- Phantom server applet — the same widget junkalot.co runs, ported whole:
+         bottom-right card, docks to a chip after 10 s of "up to date", tucks into
+         a slim edge tab 20 s later, and comes back out the moment a build is
+         pushed. Only the site name and the data differ: every figure is read
+         from haksterai.com's own /api/version, and there is no percentage unless
+         the server reports measured progress. --><aside id="phantom-server-applet" data-mode="card" data-state="checking" role="status" aria-live="polite" data-astro-cid-ju4pidww><div class="psa-card" data-astro-cid-ju4pidww><div class="psa-head" data-astro-cid-ju4pidww><span class="psa-brand" data-astro-cid-ju4pidww><span id="psa-ghost" aria-hidden="true" data-astro-cid-ju4pidww>👻</span> PHANTOM IDE</span><span class="psa-sub" data-astro-cid-ju4pidww>Update from PhantomIDE server</span></div><div class="psa-state" data-astro-cid-ju4pidww><span id="psa-icon" aria-hidden="true" data-astro-cid-ju4pidww>●</span><span id="psa-title" data-astro-cid-ju4pidww>haksterai.com — checking</span></div><div class="psa-detail" id="psa-detail" data-astro-cid-ju4pidww>Reading the site build…</div><div class="psa-live" id="psa-live" hidden data-astro-cid-ju4pidww><div class="psa-live-head" data-astro-cid-ju4pidww><span id="psa-stage" data-astro-cid-ju4pidww>—</span><span id="psa-clock" data-astro-cid-ju4pidww>—</span></div><div class="psa-live-sub" data-astro-cid-ju4pidww><span id="psa-elapsed" data-astro-cid-ju4pidww>elapsed —</span><span id="psa-eta" data-astro-cid-ju4pidww>ETA unknown</span></div><ol class="psa-updates" id="psa-updates" aria-label="Timestamped build updates" data-astro-cid-ju4pidww></ol><pre class="psa-error" id="psa-error" hidden data-astro-cid-ju4pidww></pre></div><div class="psa-stab" id="psa-stab" hidden data-state="UNKNOWN" data-astro-cid-ju4pidww>Stability <b id="psa-stab-state" data-astro-cid-ju4pidww>UNKNOWN</b> <span id="psa-stab-detail" data-astro-cid-ju4pidww>—</span></div><div class="psa-grid" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>Site build <b id="psa-site-build" data-astro-cid-ju4pidww>—</b></span><span data-astro-cid-ju4pidww>Server <b id="psa-server" data-astro-cid-ju4pidww>—</b></span><span data-astro-cid-ju4pidww>Pending <b id="psa-pending" data-astro-cid-ju4pidww>—</b></span><span data-astro-cid-ju4pidww>Checked <b id="psa-checked" data-astro-cid-ju4pidww>—</b></span></div><div class="psa-bar" id="psa-bar" hidden role="progressbar" aria-label="Update progress" aria-valuetext="Applying — the server reports no measured percentage" data-astro-cid-ju4pidww><span class="psa-fill" data-astro-cid-ju4pidww></span></div><div class="psa-actions" id="psa-actions" hidden data-astro-cid-ju4pidww><button type="button" class="psa-primary" id="psa-update-now" data-astro-cid-ju4pidww>Update now</button><button type="button" id="psa-later" data-astro-cid-ju4pidww>Later</button></div><div class="psa-foot" data-astro-cid-ju4pidww><span data-astro-cid-ju4pidww>HaksterAI · Powered by <a href="https://phantomide.com" target="_blank" rel="noopener noreferrer" data-astro-cid-ju4pidww>PhantomIDE.com</a></span></div></div><button type="button" class="psa-chip psa-spin" id="psa-chip" data-active="0" data-failed="0" title="haksterai.com is up to date. Show the full update status." data-astro-cid-ju4pidww><span class="psa-ring" aria-hidden="true" id="psa-chip-ring" data-astro-cid-ju4pidww></span><b id="psa-chip-title" data-astro-cid-ju4pidww>Up to date</b><span class="psa-code" id="psa-chip-code" data-astro-cid-ju4pidww></span><span aria-hidden="true" style="color:#0f7a33" data-astro-cid-ju4pidww>▴</span></button><button type="button" class="psa-tab psa-spin" id="psa-tab" data-active="0" data-failed="0" title="haksterai.com is up to date. Open the update status." aria-label="haksterai.com is up to date. Open the update status." data-astro-cid-ju4pidww><span class="psa-ring" aria-hidden="true" id="psa-tab-ring" data-astro-cid-ju4pidww></span><span id="psa-tab-pct" aria-hidden="true" style="color:#64748b;font-size:10px" data-astro-cid-ju4pidww>◂</span></button></aside><script data-cfasync="false">
+      (() => {
+        const root = document.getElementById('phantom-server-applet');
+        if (!root) return;
+        const el = (id) => document.getElementById(id);
+        const iconEl = el('psa-icon');
+        const titleEl = el('psa-title');
+        const detailEl = el('psa-detail');
+        const siteBuildEl = el('psa-site-build');
+        const serverEl = el('psa-server');
+        const pendingEl = el('psa-pending');
+        const checkedEl = el('psa-checked');
+        const actionsEl = el('psa-actions');
+        const updateBtn = el('psa-update-now');
+        const laterBtn = el('psa-later');
+        const barEl = el('psa-bar');
+        const chipTitleEl = el('psa-chip-title');
+        const chipCodeEl = el('psa-chip-code');
+        // Live build feed (spinner / progress / stability). Same measured data
+        // the isolated preview streams — nothing here is simulated.
+        const liveEl = el('psa-live');
+        const stageEl = el('psa-stage');
+        const clockEl = el('psa-clock');
+        const elapsedEl = el('psa-elapsed');
+        const etaEl = el('psa-eta');
+        const updatesEl = el('psa-updates');
+        const errorEl = el('psa-error');
+        const stabEl = el('psa-stab');
+        const stabStateEl = el('psa-stab-state');
+        const stabDetailEl = el('psa-stab-detail');
+        const tabPctEl = el('psa-tab-pct');
+        const live = { job: null, stability: null, at: 0, connected: false, audited: {}, lastStage: '', lastState: '' };
+
+        // Same timings junkalot.co runs, so both sites behave identically.
+        const POLL_MS = 2000;          // visible-tab poll: a pushed build shows within ~2 s
+        const OFFLINE_AFTER = 2;       // two misses (~4 s) means the site really is not answering
+        const AUTO_SECS = 8;           // visible countdown before a ready update reloads the tab
+        const DOCK_AFTER_MS = 10000;   // up-to-date card stays 10 s, then docks to a chip
+        const HIDE_AFTER_MS = 20000;   // chip stays 20 s, then tucks into the edge tab
+        const LATER_MS = 30 * 60 * 1000;
+        const LATER_KEY = 'phantom-applet-later';
+
+        let state = 'checking';
+        let misses = 0;
+        let wasOffline = false;
+        let lastCheck = 0;
+        let countdown = 0;
+        let countdownTimer = 0;
+        let dockTimer = 0;
+        let hideTimer = 0;
+        let readyBuild = '';
+        let busy = false;
+        let pollTimer = 0;
+
+        const pageBuildNow = () => document.documentElement.dataset.haksterBuild || '';
+        const short = (v) => {
+          const s = String(v || '');
+          return s.length > 18 ? s.slice(0, 8) + '…' + s.slice(-6) : (s || '—');
+        };
+        const ago = (ts) => {
+          const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+          if (secs < 60) return secs + 's ago';
+          if (secs < 3600) return Math.round(secs / 60) + 'm ago';
+          return Math.round(secs / 3600) + 'h ago';
+        };
+
+        const readLater = () => {
+          try {
+            const raw = JSON.parse(localStorage.getItem(LATER_KEY) || 'null');
+            return raw && Number.isFinite(raw.until) && raw.until > Date.now() ? raw : null;
+          } catch { return null; }
+        };
+        const setLater = (build) => {
+          try { localStorage.setItem(LATER_KEY, JSON.stringify({ until: Date.now() + LATER_MS, build })); } catch {}
+        };
+        const clearLater = () => { try { localStorage.removeItem(LATER_KEY); } catch {} };
+
+        // Publish how much room the applet takes from the bottom of the screen, so
+        // other fixed panels (the sponsored ads card) can dock ABOVE it on phones
+        // instead of being buried underneath it. Measured from the visible mode's
+        // own box, so it follows the card -> chip -> tab transitions.
+        const publishHeight = () => {
+          try {
+            const mode = root.dataset.mode || 'card';
+            const visible = root.querySelector(mode === 'chip' ? '.psa-chip' : mode === 'tab' ? '.psa-tab' : '.psa-card');
+            const rect = visible ? visible.getBoundingClientRect() : null;
+            const gap = rect && rect.height ? Math.max(0, Math.round(window.innerHeight - rect.top)) : 0;
+            document.documentElement.style.setProperty('--phantom-applet-h', gap + 'px');
+          } catch {}
+        };
+        const setMode = (mode) => { root.dataset.mode = mode; publishHeight(); };
+        const expand = () => {
+          setMode('card');
+          clearTimeout(dockTimer); clearTimeout(hideTimer);
+          scheduleDock();
+        };
+
+        const paintState = (next) => {
+          state = next;
+          root.dataset.state = next;
+          const icon = { checking: '●', live: '✓', restored: '✓', ready: '▲', applying: '⚙', offline: '⚠', building: '⚙', failed: '✗' }[next] || '●';
+          const title = {
+            checking: 'haksterai.com — checking',
+            live: 'haksterai.com is up to date',
+            restored: 'haksterai.com is answering again',
+            ready: 'Update available',
+            applying: 'Update applying on the server',
+            offline: 'haksterai.com is not answering',
+            building: 'Build running',
+            failed: 'Build failed',
+          }[next] || 'haksterai.com';
+          if (iconEl) iconEl.textContent = icon;
+          if (titleEl) titleEl.textContent = title;
+          if (chipTitleEl) chipTitleEl.textContent = next === 'ready' ? 'Update ready' : 'Up to date';
+          publishHeight();
+        };
+
+        const clearCountdown = () => { if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = 0; } countdown = 0; };
+
+        const scheduleDock = () => {
+          clearTimeout(dockTimer); clearTimeout(hideTimer);
+          dockTimer = window.setTimeout(() => {
+            if (root.dataset.mode !== 'card') return;
+            if (state !== 'live' && state !== 'restored') return;
+            // Never dock away while a build is actually running — the spinner
+            // belongs on screen for the whole build, not after it.
+            if (live.job && (live.job.state === 'RUNNING' || live.job.state === 'QUEUED')) return;
+            setMode('chip');
+            audit('applet.collapse', { buildId: live.job && live.job.buildId });
+            hideTimer = window.setTimeout(() => {
+              if (root.dataset.mode === 'chip' && (state === 'live' || state === 'restored')) setMode('tab');
+            }, HIDE_AFTER_MS);
+          }, DOCK_AFTER_MS);
+        };
+
+        const apiApply = async () => {
+          if (busy) return;
+          busy = true;
+          clearCountdown();
+          clearLater();
+          if (updateBtn) { updateBtn.disabled = true; updateBtn.textContent = 'Updating…'; }
+          if (detailEl) detailEl.textContent = 'Checking that the server is answering before this tab reloads…';
+          let ok = true;
+          try { ok = typeof window.haksterServerHealthy === 'function' ? await window.haksterServerHealthy() : true; } catch { ok = false; }
+          if (ok) { location.reload(); return; }
+          if (typeof window.haksterUpdateWhenReady === 'function') {
+            if (detailEl) detailEl.textContent = 'The server is restarting — this tab reloads by itself as soon as the new build answers.';
+            window.haksterUpdateWhenReady();
+            return;
+          }
+          if (detailEl) detailEl.textContent = 'The server is restarting — reloading in a few seconds.';
+          window.setTimeout(() => location.reload(), 4000);
+        };
+
+        // A ready build is announced, then applied after a visible countdown —
+        // never a blind reload, so the tab cannot land in a restart.
+        // A new page build needs no forced reload: the server, the API and the
+        // applet are already on the new code, and reloading the tab is exactly
+        // the screen flash the applet exists to avoid. Say the new build is
+        // ready; Update now opens it, otherwise the next natural page load does.
+        const armCountdown = (build) => {
+          if (countdownTimer) return;
+          if (detailEl) {
+            detailEl.textContent = 'New page build ' + short(build) + ' is live — this tab is on ' + short(pageBuildNow())
+              + '. Nothing was reloaded; Update now opens it, or it applies on your next page load.';
+          }
+        };
+
+        const check = async () => {
+          try {
+            const res = await fetch('/api/version?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' });
+            if (!res.ok) throw new Error('status ' + res.status);
+            const data = await res.json();
+            const server = (data && data.server) || {};
+            lastCheck = Date.now();
+            misses = 0;
+            if (siteBuildEl) siteBuildEl.textContent = short(data && data.build);
+            if (pendingEl) pendingEl.textContent = Number.isFinite(Number(server.pending)) ? Number(server.pending) + ' files' : '—';
+            if (checkedEl) checkedEl.textContent = ago(lastCheck);
+            if (chipCodeEl) chipCodeEl.textContent = short(data && data.build);
+
+            const pageBuild = pageBuildNow();
+            const newerBuild = !!(data && data.build && pageBuild && data.build !== pageBuild);
+            // While a build owns the card, the version poll must not overwrite
+            // the measured stage/percent with "up to date" — but it keeps the
+            // build ids and checked timestamp fresh underneath.
+            if (liveOwns()) { if (checkedEl) checkedEl.textContent = ago(lastCheck); return; }
+            if (server.error) {
+              if (serverEl) serverEl.textContent = 'unavailable';
+            } else {
+              if (serverEl) serverEl.textContent = short(server.build) + (server.stale ? ' · behind disk' : ' · current');
+            }
+
+            if (server.applying) {
+              clearCountdown();
+              setMode('card');
+              paintState('applying');
+              if (actionsEl) actionsEl.hidden = true;
+              if (barEl) barEl.hidden = false;
+              if (detailEl) detailEl.textContent = 'The server is applying a new build. This tab reloads when the new one is answering.';
+            } else if (newerBuild) {
+              readyBuild = String(data.build);
+              const postponed = readLater();
+              if (postponed && postponed.build === readyBuild) {
+                paintState('ready');
+                if (barEl) barEl.hidden = true;
+                if (actionsEl) actionsEl.hidden = false;
+                if (detailEl) detailEl.textContent = 'New build ' + short(readyBuild) + ' is live — this tab is on ' + short(pageBuild) + '. Postponed — Update now applies it.';
+              } else {
+                paintState('ready');
+                if (barEl) barEl.hidden = true;
+                if (actionsEl) actionsEl.hidden = false;
+                armCountdown(readyBuild);
+              }
+              setMode('card');
+              clearTimeout(dockTimer); clearTimeout(hideTimer);
+            } else {
+              clearCountdown();
+              readyBuild = '';
+              if (barEl) barEl.hidden = true;
+              if (actionsEl) actionsEl.hidden = true;
+              if (wasOffline) {
+                paintState('restored');
+                if (detailEl) detailEl.textContent = 'haksterai.com is answering again — site build ' + short(data && data.build) + '.';
+                wasOffline = false;
+                window.setTimeout(() => { if (state === 'restored') { paintState('live'); scheduleDock(); } }, 6000);
+                setMode('card');
+              } else if (state !== 'live') {
+                paintState('live');
+                if (detailEl) detailEl.textContent = 'haksterai.com is up to date — site build ' + short(data && data.build)
+                  + (server.stale ? ', server applying changes when idle.' : ', server current.');
+                scheduleDock();
+              } else {
+                if (detailEl) detailEl.textContent = 'haksterai.com is up to date — site build ' + short(data && data.build)
+                  + (server.stale ? ', server applying changes when idle.' : ', server current.');
+              }
+            }
+            if (!busy && updateBtn) { updateBtn.disabled = false; updateBtn.textContent = 'Update now'; }
+          } catch {
+            misses += 1;
+            if (misses >= OFFLINE_AFTER) {
+              wasOffline = true;
+              clearCountdown();
+              paintState('offline');
+              setMode('card');
+              clearTimeout(dockTimer); clearTimeout(hideTimer);
+              if (barEl) barEl.hidden = true;
+              if (actionsEl) actionsEl.hidden = true;
+              if (serverEl) serverEl.textContent = 'no response';
+              if (detailEl) detailEl.textContent = 'haksterai.com has not answered — the server is restarting, or the tunnel is not routing.';
+            }
+          }
+          if (checkedEl && lastCheck) checkedEl.textContent = ago(lastCheck);
+        };
+
+        updateBtn?.addEventListener('click', (event) => { event.stopPropagation(); apiApply(); });
+        laterBtn?.addEventListener('click', () => {
+          clearCountdown();
+          setLater(readyBuild);
+          if (barEl) barEl.hidden = true;
+          if (actionsEl) actionsEl.hidden = false;
+          if (detailEl) detailEl.textContent = 'Postponed for 30 minutes — Update now applies it sooner.';
+          scheduleDock();
+        });
+        el('psa-chip')?.addEventListener('click', expand);
+        el('psa-tab')?.addEventListener('click', expand);
+
+        const startPolling = () => {
+          if (pollTimer) return;
+          pollTimer = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            check();
+          }, POLL_MS);
+        };
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') check();
+        });
+        // Keep the published height honest as the card's text reflows or the
+        // window changes size.
+        window.addEventListener('resize', publishHeight);
+        window.addEventListener('orientationchange', publishHeight);
+        if (typeof ResizeObserver === 'function') {
+          const cardBox = root.querySelector('.psa-card');
+          if (cardBox) new ResizeObserver(publishHeight).observe(cardBox);
+        }
+        publishHeight();
+
+        // Exposed after check() exists, for the headless runtime check and for a
+        // manual re-check from the console. Read-only: it only re-runs the poll.
+        // ── Live build feed ────────────────────────────────────────────────
+        // Server-sent events carry the same measured snapshot the isolated
+        // preview uses. Auth is header-only: EventSource cannot send headers,
+        // so this uses fetch + a stream reader and never puts the key in a URL.
+        // A build that stops reporting is aged out to DISCONNECTED/UNKNOWN —
+        // there is no path here that shows success without a fresh frame.
+
+        const audit = (event, extra) => {
+          try {
+            let key = '';
+            try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+            if (!key) return; // public visitors cannot write the audit log
+            const now = Date.now();
+            const dedupe = event + '|' + ((extra && extra.buildId) || '');
+            if (live.audited[dedupe] && now - live.audited[dedupe] < 3000) return;
+            live.audited[dedupe] = now;
+            fetch('/api/applet/event', {
+              method: 'POST',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+              body: JSON.stringify(Object.assign({ event }, extra || {})),
+              keepalive: true,
+            }).catch(() => {});
+          } catch {}
+        };
+
+        const liveOwns = () => {
+          const j = live.job;
+          if (!j) return false;
+          if (j.state === 'RUNNING' || j.state === 'QUEUED') return true;
+          if (j.state === 'VERIFYING' || j.state === 'FAILED' || j.state === 'UNKNOWN') {
+            return !!(j.startedAt && Date.now() - Date.parse(j.startedAt) < 15 * 60 * 1000);
+          }
+          return false;
+        };
+        const fmtSecs = (s) => {
+          if (!Number.isFinite(s) || s < 0) return '—';
+          const m = Math.floor(s / 60);
+          const r = Math.round(s % 60);
+          return m ? m + 'm ' + String(r).padStart(2, '0') + 's' : r + 's';
+        };
+        const utcClock = (iso) => {
+          const t = Date.parse(iso || '');
+          if (!Number.isFinite(t)) return '';
+          const d = new Date(t);
+          return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0')
+            + ':' + String(d.getUTCSeconds()).padStart(2, '0');
+        };
+        const paintLive = (stateName, title, detail) => {
+          paintState(stateName);
+          if (titleEl) titleEl.textContent = title;
+          if (detailEl) detailEl.textContent = detail;
+        };
+        const setSpinner = (mode, failed) => {
+          [el('psa-chip'), el('psa-tab')].forEach((b) => {
+            if (!b) return;
+            b.dataset.active = mode ? '1' : '0';
+            b.dataset.failed = failed ? '1' : '0';
+          });
+        };
+
+        const renderLive = (snap) => {
+          if (!snap || typeof snap !== 'object') return;
+          const firstFrame = !live.at;
+          live.at = Date.now();
+          const job = snap.job || {};
+          const prevState = live.job && live.job.state;
+          live.job = job;
+
+          const running = job.state === 'RUNNING' || job.state === 'QUEUED';
+          const verifying = job.state === 'VERIFYING';
+          const failed = job.state === 'FAILED';
+          const unknown = job.state === 'UNKNOWN';
+          const work = running || verifying || failed || unknown;
+
+          setSpinner(running || verifying, failed);
+          if (tabPctEl) {
+            tabPctEl.textContent = failed ? '✗' : Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : '·';
+            tabPctEl.style.color = failed ? '#f87171' : '#00ff41';
+          }
+
+          // Expand once work exists; a panel the user already opened is only
+          // re-rendered, never reset — the state comes straight from the frame.
+          if ((running || verifying) && root.dataset.mode !== 'card') {
+            expand();
+            audit('applet.expand', { buildId: job.buildId, stage: job.stage && job.stage.id });
+          }
+          if (running || verifying) { clearTimeout(dockTimer); clearTimeout(hideTimer); }
+
+          if (liveEl) liveEl.hidden = !work;
+          if (stageEl) stageEl.textContent = job.stage && job.stage.label ? job.stage.label : (unknown ? 'UNKNOWN' : (job.label || '—'));
+          if (clockEl) clockEl.textContent = unknown ? 'UNKNOWN' : Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : 'in progress';
+          if (elapsedEl) elapsedEl.textContent = unknown ? 'elapsed UNKNOWN' : 'elapsed ' + fmtSecs(job.elapsedSec);
+          if (etaEl) etaEl.textContent = Number.isFinite(job.etaSec) ? 'ETA ~' + fmtSecs(job.etaSec) : 'ETA unknown';
+          if (updatesEl) {
+            const rows = Array.isArray(job.updates) ? job.updates.slice(-6) : [];
+            updatesEl.replaceChildren(...rows.map((u) => {
+              const li = document.createElement('li');
+              const t = document.createElement('span');
+              t.className = 't';
+              t.textContent = utcClock(u.at);
+              const x = document.createElement('span');
+              x.textContent = String(u.text || '');
+              li.append(t, x);
+              return li;
+            }));
+            updatesEl.hidden = rows.length === 0;
+          }
+          if (errorEl) {
+            const tail = Array.isArray(job.errorTail) && job.errorTail.length ? job.errorTail.join('\n') : String(job.error || '');
+            errorEl.textContent = failed ? tail.slice(-1200) : '';
+            errorEl.hidden = !(failed && errorEl.textContent);
+          }
+
+          if (running) {
+            paintLive('building',
+              'Building — ' + (Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : 'in progress'),
+              (job.stage && job.stage.label ? job.stage.label + ' · ' : '')
+                + 'elapsed ' + fmtSecs(job.elapsedSec) + ' · ' + (Number.isFinite(job.etaSec) ? 'ETA ~' + fmtSecs(job.etaSec) : 'ETA unknown'));
+            if (prevState !== 'RUNNING' && prevState !== 'QUEUED') audit('spinner.activate', { buildId: job.buildId, stage: job.stage && job.stage.id, percent: job.percent });
+            const stageId = job.stage && job.stage.id;
+            if (stageId && stageId !== live.lastStage) {
+              live.lastStage = stageId;
+              if (prevState === 'RUNNING' || prevState === 'QUEUED') audit('job.stage', { buildId: job.buildId, stage: stageId, percent: job.percent });
+            }
+          } else if (verifying) {
+            paintLive('applying', 'Build complete — verifying health',
+              (job.label || 'Health verification running') + ' · stability window is separate');
+            if (prevState === 'RUNNING' || prevState === 'QUEUED') audit('job.complete', { buildId: job.buildId, percent: job.percent });
+          } else if (failed) {
+            paintLive('failed', 'Build failed', job.error || job.label || 'The build failed — log preserved below.');
+            if (prevState !== 'FAILED') audit('job.failed', { buildId: job.buildId, stage: job.stage && job.stage.id });
+          } else if (unknown) {
+            paintLive('offline', 'Build telemetry lost — state UNKNOWN', job.label || 'No frame from the build for over 3 minutes.');
+            if (prevState !== 'UNKNOWN') audit('telemetry.lost', { buildId: job.buildId });
+          } else if (!firstFrame && live.connected === false) {
+            // back from a disconnect with an idle job: say so, don't fake success
+            paintLive('restored', 'Telemetry restored', 'Build ' + short(job.buildId || '') + ' state: ' + (job.state || 'IDLE'));
+            scheduleDock();
+          }
+
+          // Stability is its own countdown, after the build is done.
+          const st = snap.stability;
+          if (st && stabEl) {
+            const state = String(st.state || 'UNKNOWN');
+            const win = st.window || {};
+            stabEl.hidden = false;
+            stabEl.dataset.state = state;
+            if (stabStateEl) stabStateEl.textContent = state === 'STABLE' ? '✓ STABLE' : state;
+            let detail = '';
+            if (state === 'VERIFYING' && Number.isFinite(win.remainingSec)) detail = '· ' + fmtSecs(win.remainingSec) + ' left of ' + fmtSecs(win.configuredSec) + ' window';
+            else if (state === 'STABLE') detail = '· ' + fmtSecs(st.timestamps && st.timestamps.stableForSec) + ' stable';
+            else detail = '· ' + String(st.reason || 'no reason reported');
+            if (stabDetailEl) stabDetailEl.textContent = detail;
+            if (state === 'STABLE' && live.lastState !== 'STABLE') {
+              live.lastState = 'STABLE';
+              audit('stability.verified', { buildId: job.buildId });
+            }
+          }
+
+          if (firstFrame && (running || verifying)) audit('spinner.activate', { buildId: job.buildId, stage: job.stage && job.stage.id, percent: job.percent });
+          live.connected = true;
+        };
+
+        let liveTimer = 0;
+        const pollLive = async () => {
+          try {
+            let key = '';
+            try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+            const res = await fetch('/api/applet/status?t=' + Date.now(), {
+              headers: key ? { 'x-api-key': key } : {},
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
+            if (!res.ok) throw new Error('status ' + res.status);
+            renderLive(await res.json());
+          } catch {}
+          scheduleLivePoll();
+        };
+        const scheduleLivePoll = () => {
+          clearTimeout(liveTimer);
+          liveTimer = window.setTimeout(pollLive, 5000);
+        };
+        const connectLive = async () => {
+          let key = '';
+          try { key = localStorage.getItem('hakster_api_key') || ''; } catch {}
+          try {
+            const res = await fetch('/api/applet/stream?t=' + Date.now(), {
+              headers: key ? { 'x-api-key': key } : {},
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
+            if (!res.ok || !res.body || !res.body.getReader) throw new Error('stream ' + res.status);
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              let cut = buf.indexOf('\n\n');
+              while (cut >= 0) {
+                const frame = buf.slice(0, cut);
+                buf = buf.slice(cut + 2);
+                const data = frame.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+                if (data) {
+                  try {
+                    const msg = JSON.parse(data);
+                    if (msg && msg.type === 'snapshot') renderLive(msg);
+                  } catch {}
+                }
+                cut = buf.indexOf('\n\n');
+              }
+            }
+          } catch {}
+          clearTimeout(liveTimer);
+          pollLive();
+        };
+
+        // A frame older than 30 s means the telemetry path is gone. Everything
+        // on screen becomes UNKNOWN — never the last percentage, never success.
+        window.setInterval(() => {
+          if (!live.at) return;
+          if (Date.now() - live.at <= 30000) return;
+          if (!live.connected) return;
+          live.connected = false;
+          setSpinner(false, true);
+          if (tabPctEl) { tabPctEl.textContent = '?'; tabPctEl.style.color = '#f87171'; }
+          if (liveEl) liveEl.hidden = false;
+          if (stageEl) stageEl.textContent = 'UNKNOWN';
+          if (clockEl) clockEl.textContent = 'UNKNOWN';
+          if (elapsedEl) elapsedEl.textContent = 'elapsed UNKNOWN';
+          if (etaEl) etaEl.textContent = 'ETA unknown';
+          if (updatesEl) updatesEl.replaceChildren();
+          if (errorEl) errorEl.hidden = true;
+          if (stabEl) {
+            stabEl.hidden = false;
+            stabEl.dataset.state = 'UNKNOWN';
+            if (stabStateEl) stabStateEl.textContent = 'UNKNOWN';
+            if (stabDetailEl) stabDetailEl.textContent = '· no telemetry';
+          }
+          paintLive('offline', 'DISCONNECTED — state UNKNOWN',
+            'No frame from the server for ' + Math.round((Date.now() - live.at) / 1000) + 's. Nothing here is being reported as success.');
+          audit('telemetry.lost', { buildId: live.job && live.job.buildId });
+        }, 1000);
+
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') { pollLive(); }
+        });
+        el('psa-chip')?.addEventListener('click', () => audit('applet.expand', { buildId: live.job && live.job.buildId }));
+        el('psa-tab')?.addEventListener('click', () => audit('applet.expand', { buildId: live.job && live.job.buildId }));
+
+        window.__phantomApplet = { check, renderLive };
+        check();
+        startPolling();
+        connectLive();
+      })();
+    </script><script data-cfasync="false">
+      (() => {
+        const problem = document.getElementById('haksterai-problem-toast');
+        const message = document.getElementById('haksterai-problem-message');
+        let lastProblem = '';
+        const showProblem = (value) => {
+          const text = String(value || 'An unexpected error occurred.').replace(/[\\r\\n\\t]+/g, ' ').slice(0, 900);
+          if (!problem || !message || !text || text === lastProblem) return;
+          lastProblem = text;
+          message.textContent = text;
+          problem.hidden = false;
+        };
+        window.addEventListener('error', (event) => showProblem(event.message || 'A page script failed to load.'));
+        window.addEventListener('unhandledrejection', (event) => showProblem(event.reason?.message || event.reason || 'A background request failed.'));
+        window.addEventListener('haksterai:problem', (event) => showProblem(event.detail?.message || event.detail));
+        document.getElementById('haksterai-problem-close')?.addEventListener('click', () => { problem.hidden = true; });
+        document.getElementById('haksterai-problem-copy')?.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(message.textContent || ''); } catch { showProblem('Clipboard access was blocked by this browser.'); }
+        });
+        document.getElementById('haksterai-problem-popout')?.addEventListener('click', () => {
+          const win = window.open('', '_blank');
+          if (!win) return showProblem('The browser blocked the pop-out window.');
+          win.opener = null;
+          const title = win.document.createElement('title'); title.textContent = 'HaksterAI problem details';
+          const heading = win.document.createElement('h1'); heading.textContent = 'HaksterAI noticed a problem';
+          const body = win.document.createElement('pre'); body.textContent = message.textContent || '';
+          win.document.head.append(title); win.document.body.append(heading, body);
+        });
+
+        const update = document.getElementById('haksterai-update-toast');
+        const updateDetail = document.getElementById('haksterai-update-detail');
+        const currentBuild = document.documentElement.dataset.haksterBuild || '';
+        const laterKey = 'haksterai-update-later-until';
+        // How old the new build is, in plain words, from its build timestamp.
+        const ago = (iso) => {
+          const t = Date.parse(iso || '');
+          if (!Number.isFinite(t)) return '';
+          const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+          if (secs < 60) return secs + 's ago';
+          if (secs < 3600) return Math.round(secs / 60) + 'm ago';
+          if (secs < 86400) return Math.round(secs / 3600) + 'h ago';
+          return Math.round(secs / 86400) + 'd ago';
+        };
+        // Every update the widget surfaces is stamped and written to the server's
+        // update log, so we can always see when each build went out and who saw it.
+        const logUpdateSeen = (build, from) => {
+          try {
+            fetch('/api/version/seen', {
+              method: 'POST',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ build, from, path: location.pathname, at: new Date().toISOString() }),
+              keepalive: true,
+            }).catch(() => {});
+          } catch {}
+        };
+        // Runs for every signed-in user (owner and customers), every two minutes
+        // while the tab is visible. Primary check: the tiny /api/version endpoint,
+        // which reports the build id actually deployed. Fallback: re-fetch this
+        // page and read its own build meta, for older servers without the endpoint.
+        const remoteBuildId = async () => {
+          try {
+            const res = await fetch('/api/version?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' });
+            if (res.ok) {
+              const data = await res.json();
+              if (data && data.build) return String(data.build);
+            }
+          } catch { /* fall through to the page check */ }
+          const url = new URL(location.pathname, location.origin);
+          url.searchParams.set('_hakster_version_check', String(Date.now()));
+          const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', headers: { 'x-hakster-version-check': '1' } });
+          if (!response.ok) return '';
+          const html = await response.text();
+          const match = html.match(/<meta\s+name=["']haksterai-build["']\s+content=["']([^"']+)/i);
+          return match ? match[1] : '';
+        };
+        let announcedBuild = '';
+        const checkUpdate = async () => {
+          if (!currentBuild || document.visibilityState !== 'visible') return;
+          try {
+            const latest = await remoteBuildId();
+            if (!latest || latest === currentBuild) return;
+            // The Phantom server applet in the bottom-right corner owns the update
+            // UI on every page that carries it (the same widget as junkalot.co).
+            // This top banner stays as the fallback for pages without the applet,
+            // and the "seen" log keeps recording either way.
+            if (document.getElementById('phantom-server-applet')) {
+              if (update && !update.hidden) { update.hidden = true; cancelAutoApply(); }
+              if (announcedBuild !== latest) {
+                announcedBuild = latest;
+                logUpdateSeen(latest, currentBuild);
+              }
+              return;
+            }
+            const deferredUntil = Number(localStorage.getItem(laterKey) || 0);
+            if (updateDetail) {
+              const built = Number.isFinite(Date.parse(latest)) ? new Date(latest).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : latest;
+              updateDetail.textContent = 'New build ' + built + (ago(latest) ? ' · ' + ago(latest) : '') + '.';
+            }
+            if (Date.now() >= deferredUntil && update) {
+              update.hidden = false;
+              armAutoApply();
+            }
+            if (announcedBuild !== latest) {
+              announcedBuild = latest;
+              logUpdateSeen(latest, currentBuild);
+            }
+          } catch { /* Offline checks are quiet; retry on the next interval. */ }
+        };
+        // Update never reloads blind. A blind reload can land in the half-second a
+        // deploy restarts the server, which shows a dead page instead of the site.
+        // So: ask the server first, and if it is restarting, keep this page alive
+        // and let hakster-resume.js reload the moment it answers again.
+        const updateNow = document.getElementById('haksterai-update-now');
+        const applyUpdate = async () => {
+          cancelAutoApply();
+          localStorage.removeItem(laterKey);
+          if (updateNow?.dataset.busy) return;
+          if (updateNow) {
+            updateNow.dataset.busy = '1';
+            updateNow.textContent = 'Updating…';
+            updateNow.style.opacity = '0.8';
+          }
+          let ok = false;
+          try { ok = typeof window.haksterServerHealthy === 'function' ? await window.haksterServerHealthy() : true; } catch { ok = false; }
+          if (ok) { location.reload(); return; }
+          // Server is mid-restart: hand off to the resume helper, which retries and
+          // reloads automatically when the new build is serving.
+          if (typeof window.haksterUpdateWhenReady === 'function') {
+            window.haksterUpdateWhenReady();
+            if (updateNow) updateNow.textContent = 'Waiting…';
+            return;
+          }
+          window.setTimeout(() => location.reload(), 4000);
+        };
+        updateNow?.addEventListener('click', applyUpdate);
+
+        // 2026-11-16 (owner): if the banner is shown and neither Update nor Later
+        // is clicked within a minute, apply it automatically — deploys should
+        // land on their own. Same safe path as the button; the countdown is
+        // visible in the banner's detail line so it is never a surprise.
+        const AUTO_APPLY_MS = 60000;
+        let autoApplyTimer = 0;
+        let autoApplyTick = 0;
+        function cancelAutoApply() {
+          if (autoApplyTimer) { clearTimeout(autoApplyTimer); autoApplyTimer = 0; }
+          if (autoApplyTick) { clearInterval(autoApplyTick); autoApplyTick = 0; }
+        }
+        function armAutoApply() {
+          if (autoApplyTimer || !update || update.hidden) return;
+          // Owner decision (2026-11-18): no timed reload. A build that lands
+          // while a tab is open must not flash the screen — the banner waits
+          // for Update, and the next natural page load picks the build up.
+          if (updateDetail) {
+            updateDetail.textContent = (updateDetail.textContent || '').replace(/\s*·\s*applies automatically in \d+s$/, '')
+              + ' · Update opens the new build; nothing reloads by itself.';
+          }
+        }
+        document.getElementById('haksterai-update-later')?.addEventListener('click', () => {
+          // "Later" is a deliberate choice, so it cancels the one-minute auto-apply
+          // and defers the banner for 30 minutes.
+          cancelAutoApply();
+          localStorage.setItem(laterKey, String(Date.now() + 30 * 60 * 1000));
+          if (update) update.hidden = true;
+        });
+        window.setTimeout(checkUpdate, 15000);
+        window.setInterval(checkUpdate, 120000);
+        // Coming back to the tab counts as a fresh moment to check — no waiting
+        // for the next two-minute tick.
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') checkUpdate();
+        });
+      })();
+    </script><script data-cfasync="false" src="/js/session-timeout.js"></script><!-- Always-visible scrollbars. Firefox already draws real bars from the rules in
+         global.css; Chrome/Chromium on Linux uses overlay scrollbars that ignore
+         scrollbar styling, so this fills in a real bar on the page, the dashboard
+         tab strip, tables, logs and every other scrollable box. Layout-safe. --><script data-cfasync="false" src="/js/hakster-scrollbars.js" defer></script><!-- Smooth updates + auto-resume for every user. If the server restarts or
+         hiccups while a tab is open, the tab shows a small "reconnecting" line and
+         picks itself back up on the same page instead of going dead; the Update
+         button reloads only once the server is confirmed answering. --><script data-cfasync="false" src="/js/hakster-resume.js" defer></script><!-- Global JS: mobile menu + scroll shadow + smooth scroll + user badge + logout --><script type="module" src="/_astro/Layout.astro_astro_type_script_index_0_lang.udiFaE-G.js"></script><script data-cfasync="false">
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+      });
+    }
+  </script></body></html>

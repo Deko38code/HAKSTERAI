@@ -1,0 +1,124 @@
+---
+// Real card captures from the live bot catalog (Miniforge). Each card opens that
+// bot's live page through the catalog's ?ompBot= deep link, so the snaps are
+// never a dead end and never show a bot that isn't actually running.
+// The PNGs live in public/img/bots/ and were captured from the running catalog,
+// not drawn by hand — if a bot's card changes, re-capture rather than re-styling.
+const BOTS = [
+  {
+    slug: 'chatgpt',
+    name: 'ChatGPT',
+    blurb: 'The general-purpose workhorse, 3M conversations deep.',
+    img: '/img/bots/chatgpt.png',
+  },
+  {
+    slug: 'claude-3-5-sonnet',
+    name: 'Claude 3.5 Sonnet',
+    blurb: 'Writing and code that reads like a human wrote it.',
+    img: '/img/bots/claude-3-5-sonnet.png',
+  },
+  {
+    slug: 'gemini-experimental-2-5',
+    name: 'Gemini 2.5 Pro',
+    blurb: "Google's long-context model, handy for big pasted documents.",
+    img: '/img/bots/gemini-experimental-2-5.png',
+  },
+  {
+    slug: 'grok-4',
+    name: 'Grok 4',
+    blurb: "xAI's model, current-events aware and blunt about it.",
+    img: '/img/bots/grok-4.png',
+  },
+  {
+    slug: 'deepseek-r1',
+    name: 'DeepSeek R1',
+    blurb: 'Open reasoning model. Same class of answer, a fraction of the bill.',
+    img: '/img/bots/deepseek-r1.png',
+  },
+  {
+    slug: 'pentest-forge',
+    name: 'PenTest Forge',
+    blurb: 'Ethical-hacking academy: 18 modules, live terminal, tool lab.',
+    img: '/img/bots/pentest-forge.png',
+  },
+  {
+    slug: 'flux-schnell-image-generator',
+    name: 'Flux Schnell',
+    blurb: 'Text prompt to realistic image in a couple of seconds.',
+    img: '/img/bots/flux-schnell-image-generator.png',
+  },
+  {
+    slug: 'finisher',
+    name: 'Text Finisher',
+    blurb: 'Paste a half-written paragraph, get it carried to the end.',
+    img: '/img/bots/finisher.png',
+  },
+];
+---
+
+<section id="bots" class="relative border-t border-[#1e1e2e] bg-[#0a0a0f] px-6 py-20">
+  <div class="mx-auto max-w-6xl">
+    <div class="mb-10 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <div>
+        <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-[#a855f7]">The bot catalog</p>
+        <h2 class="text-3xl font-bold text-[#f8fafc] md:text-4xl">Meet the bots</h2>
+        <p class="mt-3 max-w-2xl text-sm text-[#94a3b8] md:text-base">
+          Every name you already know, running inside one console — no API keys, no per-token billing.
+          Pick a bot, talk to it, keep the thread.
+        </p>
+      </div>
+      <a
+        href="/miniforge/app/"
+        class="shrink-0 rounded-xl border border-[#7c3aed]/60 bg-[#7c3aed]/10 px-4 py-2.5 text-sm font-semibold text-[#c084fc] transition-colors hover:bg-[#7c3aed]/20"
+      >Browse all 10,000+ bots →</a>
+    </div>
+
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      {BOTS.map((bot) => (
+        <a
+          href={`/miniforge/app/?ompBot=${bot.slug}`}
+          class="group flex flex-col overflow-hidden rounded-2xl border border-[#1e1e2e] bg-[#111118] transition-all duration-200 hover:-translate-y-1 hover:border-[#7c3aed]/60 hover:shadow-[0_10px_40px_rgba(124,58,237,0.22)]"
+          aria-label={`Open ${bot.name}`}
+        >
+          <img
+            src={bot.img}
+            alt={`${bot.name} card in the HaksterAI bot catalog`}
+            width="749"
+            height="608"
+            loading="lazy"
+            decoding="async"
+            class="block w-full bg-white"
+          />
+          <div class="flex flex-1 flex-col justify-between gap-2 px-4 py-4">
+            <p class="text-sm text-[#94a3b8]">{bot.blurb}</p>
+            <span class="text-xs font-semibold text-[#c084fc] transition-colors group-hover:text-[#e9d5ff]">
+              Open bot →
+            </span>
+          </div>
+        </a>
+      ))}
+    </div>
+
+    <!-- The cheap-engine pitch: the honest reason the catalog can undercut the
+         big-name subscriptions. Only claims the setup that actually exists. -->
+    <div class="mt-10 overflow-hidden rounded-2xl border border-[#7c3aed]/40 bg-gradient-to-r from-[#161022] to-[#0f0b16] p-6 md:p-8">
+      <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div class="max-w-2xl">
+          <h3 class="text-xl font-bold text-[#f8fafc]">Why it stays cheap</h3>
+          <p class="mt-2 text-sm text-[#94a3b8]">
+            Most of these bots don't call the expensive closed APIs. They run on open models through
+            our own endpoint — DeepSeek above all — so a conversation costs us cents instead of
+            dollars, and the catalog runs without a per-token meter attached to your account.
+            Big-model names are still there when the job needs one; the default route is the cheap
+            one, on purpose.
+          </p>
+        </div>
+        <div class="shrink-0 rounded-xl border border-[#1e1e2e] bg-[#0a0a0f] px-5 py-4 font-mono text-xs text-[#94a3b8]">
+          <div><span class="text-[#7c3aed]">$</span> default engine&nbsp;&nbsp;<span class="text-[#e2e8f0]">DeepSeek</span></div>
+          <div class="mt-1"><span class="text-[#7c3aed]">$</span> routing&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#e2e8f0]">our own endpoint</span></div>
+          <div class="mt-1"><span class="text-[#7c3aed]">$</span> per-token meter <span class="text-[#e2e8f0]">off</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

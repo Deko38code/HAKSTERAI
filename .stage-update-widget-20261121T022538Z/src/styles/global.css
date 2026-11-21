@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  background: #0a0a0f;
+  color: #e2e8f0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: #0a0a0f;
+}
+
+/* ── Visible scrollbars everywhere ──────────────────────────────────────────
+   Linux Chrome/Firefox draw overlay scrollbars that stay hidden until you hover
+   them, so a long list looks clipped and a tab row scrolled past the edge looks
+   like the tabs do not exist. These rules give every scrollable surface — the
+   page itself, the dashboard tab strip, admin tables, logs, skills/tools panes,
+   the auto-agent IP lists, terminal panes and every overflow-auto box — a real,
+   themed bar on both axes. Class-based styles (xterm, mail) still win on
+   specificity, so nothing that already draws its own bar is changed. */
+html {
+  scrollbar-width: thin;            /* Firefox */
+  scrollbar-color: #7c3aed #14141d;
+  scrollbar-gutter: stable;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4c1d95 #14141d;
+}
+
+html::-webkit-scrollbar { width: 12px; height: 12px; }
+html::-webkit-scrollbar-track { background: #14141d; }
+html::-webkit-scrollbar-thumb {
+  background: #4c1d95;
+  border: 2px solid #14141d;
+  border-radius: 999px;
+}
+html::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+html::-webkit-scrollbar-corner { background: #14141d; }
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: #14141d; }
+*::-webkit-scrollbar-thumb {
+  background: #3b2a63;
+  border: 2px solid #14141d;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+*::-webkit-scrollbar-corner { background: #14141d; }
+
+/* A short row of tabs that scrolls sideways (dashboard quick-nav) gets a brighter,
+   obviously horizontal bar so the off-screen tabs are discoverable. */
+[data-scroll-hint="x"] {
+  scrollbar-color: #7c3aed #14141d;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: .4rem;
+}
+[data-scroll-hint="x"]::-webkit-scrollbar { height: 8px; }
+[data-scroll-hint="x"]::-webkit-scrollbar-thumb { background: #7c3aed; border-width: 0; }
