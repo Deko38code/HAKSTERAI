@@ -20,8 +20,11 @@ const ownerAdminPath = Astro.url.pathname.replace(/\/+$/, '');
 const ownerAdminPage = ownerAdminPath.startsWith('/admin') || ownerAdminPath === '/dashboard';
 // ONE build id for the whole build, injected by astro.config.mjs. Calling
 // new Date() here would stamp each page milliseconds apart, which made the
-// update toast fire falsely the moment a deploy landed.
-const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_BUILD_ID__ : new Date().toISOString();
+// update toast fire falsely the moment a deploy landed. With no injected id the
+// page carries none at all and every update check stands down — a page must
+// always match the server's build id or stay quiet, never invent one (owner,
+// 2026-11-22: "should always match never mismatch").
+const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_BUILD_ID__ : '';
 ---
 
 <!doctype html>
@@ -32,6 +35,25 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
     <meta name="description" content={description} />
     <link rel="icon" type="image/png" sizes="32x32" href="/haksterai-logo.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Owner (2026-11-22): "pwa haksterai still aint working its popping up but make me click install
+         up top but nothing". Capture Chrome's install event here, in the head, before any body script
+         can run, so a prompt is never lost to script timing. The card below calls it only from a real
+         click (CLAUDE.md 18). -->
+    <script is:inline data-cfasync="false">
+      window.__haksterInstall = { evt: null, installed: false };
+      window.addEventListener('beforeinstallprompt', function (event) {
+        // Owner (2026-11-22): "junkalots pwa and phantomide works" / "need hakstersai pwa working".
+        // We keep the event so our own card can call prompt(), but we never preventDefault(): Chrome's
+        // own install control must keep working exactly as it does on junkalot.co and phantomide.com.
+        window.__haksterInstall.evt = event;
+        window.dispatchEvent(new Event('hakster-install-ready'));
+      });
+      window.addEventListener('appinstalled', function () {
+        window.__haksterInstall.installed = true;
+        window.__haksterInstall.evt = null;
+        window.dispatchEvent(new Event('hakster-install-done'));
+      });
+    </script>
     <meta name="theme-color" content="#00ff41" />
     <meta name="application-name" content="HaksterAI" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -58,6 +80,46 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
       }
       .hakterm-admin-link { animation: hakterm-admin-pulse 1.8s ease-in-out infinite; }
       @media (prefers-reduced-motion: reduce) { .hakterm-admin-link { animation: none; } }
+      /* Admin menu (owner, 2026-11-22: "in admin tab need scrollbars arrows
+         etc"): 15 entries can run past a short window, and the bottom ones were
+         unreachable. The list scrolls inside the menu — visible scrollbar,
+         ▲/▼ arrows while there is more to reach, native arrow keys once the
+         menu has focus — instead of clipping. */
+      #admin-tools-menu,
+      #mobile-admin-tools-menu {
+        max-height: min(70vh, 560px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(251, 191, 36, .55) rgba(255, 255, 255, .07);
+      }
+      #mobile-admin-tools-menu { max-height: min(60vh, 460px); }
+      #admin-tools-menu::-webkit-scrollbar,
+      #mobile-admin-tools-menu::-webkit-scrollbar { width: 9px; }
+      #admin-tools-menu::-webkit-scrollbar-track,
+      #mobile-admin-tools-menu::-webkit-scrollbar-track { background: rgba(255, 255, 255, .06); border-radius: 999px; }
+      #admin-tools-menu::-webkit-scrollbar-thumb,
+      #mobile-admin-tools-menu::-webkit-scrollbar-thumb { background: rgba(251, 191, 36, .55); border-radius: 999px; border: 2px solid #111118; }
+      #admin-tools-menu::-webkit-scrollbar-thumb:hover,
+      #mobile-admin-tools-menu::-webkit-scrollbar-thumb:hover { background: rgba(251, 191, 36, .85); }
+      .admin-menu-arrow {
+        position: sticky;
+        display: block;
+        width: 100%;
+        z-index: 2;
+        border: 1px solid rgba(251, 191, 36, .28);
+        border-radius: 8px;
+        background: #17161f;
+        color: #fbbf24;
+        font: 700 11px/1 system-ui, sans-serif;
+        padding: 6px 0;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, .55);
+      }
+      .admin-menu-arrow:hover { background: #221f2b; color: #fcd34d; }
+      .admin-menu-arrow[hidden] { display: none; }
+      #admin-tools-up, #mobile-admin-tools-up { top: 0; }
+      #admin-tools-down, #mobile-admin-tools-down { bottom: 0; }
       #admin-pin-gate[aria-hidden="false"] { display: grid !important; }
       html[data-admin-page="pending"] body > :not(#admin-pin-gate),
       html[data-admin-page="pin"] body > :not(#admin-pin-gate),
@@ -82,7 +144,8 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         <div class="hidden md:flex items-center gap-2 bg-[#111118]/80 border border-[#1e1e2e] rounded-full px-2 py-1.5 backdrop-blur-sm">
           <div id="admin-tools" data-owner-only="true" class="relative hidden items-center">
             <button id="admin-tools-btn" type="button" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#fbbf24] hover:bg-[#fbbf24]/10 transition-all flex items-center gap-1.5" aria-expanded="false" aria-haspopup="true" aria-controls="admin-tools-menu">🔐 Admin <span class="text-[10px]">▾</span></button>
-            <div id="admin-tools-menu" class="hidden absolute right-0 top-[calc(100%+10px)] w-56 rounded-xl border border-[#fbbf24]/30 bg-[#111118] p-2 shadow-2xl z-[60]">
+            <div id="admin-tools-menu" tabindex="0" class="hidden absolute right-0 top-[calc(100%+10px)] w-56 rounded-xl border border-[#fbbf24]/30 bg-[#111118] p-2 shadow-2xl z-[60] focus:outline-none focus:border-[#fbbf24]/70">
+              <button type="button" id="admin-tools-up" class="admin-menu-arrow" aria-label="Scroll admin menu up" hidden>▲</button>
               <a href="/labs" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🧪 Labs</a>
               <a href="/portal" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🌐 Portal</a>
               <a href="/dashboard" data-admin-only="true" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">📊 Dashboard</a>
@@ -104,6 +167,7 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
                 <span class="rounded-md border border-[#f0b46a]/45 bg-[#f0b46a]/10 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[#ffd7a1]">OPEN ↗</span>
               </a>
               <a href="/commands" class="block rounded-lg px-3 py-2 text-sm text-[#e2e8f0] hover:bg-white/5">🎛️ Command Center</a>
+              <button type="button" id="admin-tools-down" class="admin-menu-arrow mt-1" aria-label="Scroll admin menu down" hidden>▼</button>
             </div>
           </div>
           <a href="/miniforge/" class="nav-link px-3 py-1.5 rounded-full text-sm font-semibold text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#7c3aed]/20 transition-all flex items-center gap-1.5" title="Open Chat"><span>💬</span> Chat</a>
@@ -164,7 +228,8 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
       <div class="mx-auto max-w-6xl px-6 py-4 flex flex-col gap-4">
         <div id="mobile-admin-tools" data-owner-only="true" class="hidden flex-col gap-2">
           <button id="mobile-admin-tools-btn" type="button" class="w-full flex items-center justify-between rounded-lg border border-[#fbbf24]/30 bg-[#fbbf24]/5 px-3 py-2.5 text-sm font-semibold text-[#fbbf24]" aria-expanded="false" aria-controls="mobile-admin-tools-menu">🔐 Admin <span>▾</span></button>
-          <div id="mobile-admin-tools-menu" class="hidden flex-col gap-1 rounded-xl border border-[#fbbf24]/20 bg-[#111118]/80 p-2">
+          <div id="mobile-admin-tools-menu" tabindex="0" class="hidden flex-col gap-1 rounded-xl border border-[#fbbf24]/20 bg-[#111118]/80 p-2 focus:outline-none focus:border-[#fbbf24]/60">
+            <button type="button" id="mobile-admin-tools-up" class="admin-menu-arrow" aria-label="Scroll admin menu up" hidden>▲</button>
             <a href="/labs" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🧪 Labs</a>
             <a href="/portal" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🌐 Portal</a>
             <a href="/dashboard" data-admin-only="true" class="hidden rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">📊 Dashboard</a>
@@ -186,6 +251,7 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
               <span class="text-xs text-[#ffd7a1]">↗</span>
             </a>
             <a href="/commands" class="rounded-lg px-3 py-2 text-sm text-[#e2e8f0]">🎛️ Command Center</a>
+            <button type="button" id="mobile-admin-tools-down" class="admin-menu-arrow" aria-label="Scroll admin menu down" hidden>▼</button>
           </div>
         </div>
         <a href="/miniforge/" class="mobile-nav-link text-sm font-medium text-[#64748b] hover:text-[#e2e8f0] transition-colors py-2 border-b border-[#1e1e2e] flex items-center gap-2" title="Open Chat"><span>💬</span> Chat</a>
@@ -306,15 +372,19 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
 
     <!-- Phantom server applet — the same widget junkalot.co runs, ported whole:
          bottom-right card, docks to a chip after 10 s of "up to date", tucks into
-         a slim edge tab 20 s later, and comes back out the moment a build is
-         pushed. Only the site name and the data differ: every figure is read
-         from haksterai.com's own /api/version, and there is no percentage unless
-         the server reports measured progress. -->
-    <!-- Owner, 2026-11-21: "only opens when updating ever" — the applet starts
-         fully closed (hidden) on every page load. The old "ring" start painted a
-         spinner in the corner on every hard refresh even when nothing was
-         running; the chip/tab/card are now only entered by a real update event. -->
-    <aside id="phantom-server-applet" data-mode="hidden" data-state="checking" role="status" aria-live="polite">
+         a slim edge tab 20 s later. Only the site name and the data differ: every
+         figure is read from haksterai.com's own /api/version, and there is no
+         percentage unless the server reports measured progress. -->
+    <!-- Owner, 2026-11-22: "junkalots only opens on updates or if its clicked."
+         Junkalot's toast has no hidden mode — its resting state is the slim edge
+         tab pressed against the right edge, and the full card opens only for an
+         available update or a click on that tab. This applet rests the same way:
+         `tab` is the resting mode (idle, checking, or a build in progress with
+         its live ring), and the card opens by itself only when an update is
+         available (Update now / Later) or when the visitor taps the tab. A hard
+         refresh with nothing new never pops the card open, and it never covers
+         the payment flow. -->
+    <aside id="phantom-server-applet" data-mode="tab" data-state="checking" role="status" aria-live="polite">
       <!-- is:global: the log lines are created at runtime, so Astro's scoped
            [data-astro-cid-…] selectors never reached them (they did not carry
            the attribute). Every selector here is already prefixed with the
@@ -333,12 +403,14 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
            125 px tall terminal hugging the corner. It never grows past these
            bounds — the full build history lives in the admin dashboard. */
         #phantom-server-applet .psa-card{position:relative;border:1px solid var(--psa-line);border-radius:10px;background:#0d0d0d;box-shadow:0 12px 32px rgba(0,0,0,.6);padding:7px 8px;box-sizing:border-box;width:min(215px,calc(100vw - 16px));max-height:125px;overflow:hidden;contain:layout paint}
+        #phantom-server-applet .psa-x{position:absolute;top:3px;right:3px;z-index:3;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid #2f2f2f;border-radius:6px;background:#171717;color:#cfcfcf;font:700 13px/1 system-ui,sans-serif;cursor:pointer}
+        #phantom-server-applet .psa-x:hover,#phantom-server-applet .psa-x:focus-visible{background:#262626;color:#fff;border-color:#3a3a3a;outline:none}
         #phantom-server-applet[data-state="offline"] .psa-card,#phantom-server-applet[data-state="failed"] .psa-card{border-color:rgba(248,113,113,.5)}
         #phantom-server-applet .psa-head{display:none}
         #phantom-server-applet .psa-badge{width:16px;height:16px;border-radius:5px;border:1px solid var(--psa-line);background:var(--psa-inner);display:grid;place-items:center;font-size:9px;line-height:1;flex:0 0 16px}
         #phantom-server-applet .psa-brand{color:#ececec;font-size:9px;font-weight:700;letter-spacing:.14em}
         #phantom-server-applet .psa-sub{display:none}
-        #phantom-server-applet .psa-state{display:inline-flex;align-items:center;gap:4px;align-self:flex-start;border-radius:9999px;padding:1px 7px;font-size:9px;font-weight:500;background:#151515;border:1px solid #2f2f2f;color:#cfcfcf;margin-bottom:4px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #phantom-server-applet .psa-state{display:inline-flex;align-items:center;gap:4px;align-self:flex-start;border-radius:9999px;padding:1px 7px;font-size:9px;font-weight:500;background:#151515;border:1px solid #2f2f2f;color:#cfcfcf;margin-bottom:4px;max-width:calc(100% - 20px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         #phantom-server-applet[data-state="failed"] .psa-state{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.5);color:#ff9b9b}
         #phantom-server-applet[data-state="ready"] .psa-state,#phantom-server-applet[data-state="applying"] .psa-state{background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.45);color:#f5cf7a}
         #phantom-server-applet[data-state="offline"] .psa-state{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.5);color:#ff9b9b}
@@ -347,6 +419,11 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         #phantom-server-applet .psa-grid b{color:#ececec;font-weight:600}
         #phantom-server-applet .psa-actions{display:none}
         #phantom-server-applet .psa-actions[hidden],#phantom-server-applet .psa-bar[hidden]{display:none}
+        /* Owner, 2026-11-22: the Update now / Later choice must actually be on
+           screen. .psa-actions was display:none with no rule for its visible
+           state, so the buttons were hidden even when the card opened for an
+           available update. */
+        #phantom-server-applet .psa-actions:not([hidden]){display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
         #phantom-server-applet .psa-actions button{border:1px solid #3a3a3a;background:#1f1f1f;color:#ececec;border-radius:9999px;padding:8px 14px;font-size:12px;font-weight:600;line-height:1;cursor:pointer}
         #phantom-server-applet .psa-actions button:hover{background:#2a2a2a}
         #phantom-server-applet .psa-actions button.psa-primary{background:var(--psa-accent);border-color:var(--psa-accent);color:#04120a;font-weight:700}
@@ -401,10 +478,11 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         /* Startup: a bare ring in the corner, nothing else. */
         #phantom-server-applet .psa-start{display:none}
         #phantom-server-applet[data-mode="ring"] .psa-start{display:inline-flex;position:fixed;right:16px;bottom:16px;align-items:center;justify-content:center;padding:6px;z-index:1}
-        /* Nothing queued, nothing running: the applet leaves the corner
-           entirely (owner, 2026-11-21: "the applet is suppose to hide when no
-           update are que"). It comes back the moment an update is queued, a
-           build runs, the site fails, or the page reloads for an applied build. */
+        /* Resting (Junkalot parity, owner 2026-11-22): the idle applet is not
+           gone — it is the slim edge tab at the right (see [data-mode="tab"]
+           below), the same way junkalot's toast always keeps its corner tab.
+           Hidden is kept only as a fade-out helper for transitions; it is no
+           longer the resting state. */
         /* Hidden means faded out, NOT display:none (owner spec 2026-11-21,
            §7 "smooth CSS transitions … never flicker"). Opening and closing
            both animate instead of popping. While hidden it is out of the
@@ -545,6 +623,7 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         }
       </style>
       <div class="psa-card">
+        <button type="button" class="psa-x" id="psa-x" aria-label="Close update panel" title="Close">×</button>
         <div class="psa-head">
           <span class="psa-badge" aria-hidden="true"><span id="psa-ghost">👻</span></span>
           <span class="psa-brand">PHANTOM IDE</span>
@@ -668,6 +747,12 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         const FEED_MS = 5000;          // live applet feed re-poll cadence
         const OFFLINE_AFTER = 3;       // three misses (~6 s) means the site really is not answering
         const DOCK_AFTER_MS = 10000;   // up-to-date card stays 10 s, then docks to a chip
+        // Owner, 2026-11-22: "the widget is showing when it builds but real fast
+        // is why cant see it". An update card now stays up long enough to read
+        // and to watch its measured bar, then docks to the chip that keeps the
+        // ▲ until the tab applies it.
+        const UPDATE_CARD_DWELL_MS = 20000;
+        const NO_UPDATE_CLOSE_MS = 4000; // nothing pending: tuck away fast (owner, 2026-11-22)
         const HIDE_AFTER_MS = 20000;   // chip stays 20 s, then tucks into the edge tab
         const CLOSE_AFTER_UPDATE_MS = 5000; // junkalot's done-hide: a finished update closes its card in 5 s
         // Owner spec (2026-11-21, "FIX LIVE UPDATE APPLET, HARD REFRESH, QUEUE
@@ -719,6 +804,19 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         let autoApplyTimer = 0;
         let lastInputAt = 0;   // 0 = nobody has touched this page yet
         let readySinceAt = 0;  // when this tab first saw the build as newer
+        // Owner, 2026-11-22: "fix the widget to open on live updates with
+        // progress 1-100". While a new build is being verified, the applet
+        // shows the monitor's own window (configuredSec / remainingSec) as a
+        // measured 1-100 bar instead of an empty panel. null = not verifying.
+        let verifyWindow = null;
+        // Owner, 2026-11-22: "bra its not staying closed on hard refreshes".
+        // A page that nobody has touched cannot have the card opened on it
+        // automatically. The flag flips on the first real pointer, touch or key
+        // on this page; a click on the tab opens it regardless (expand()).
+        // openReason records which path opened the card, for the debug strip
+        // and the headless checks — it never changes what is displayed.
+        let pageEngaged = false;
+        let openReason = '';
         // A tab that reloaded itself for an update shows the finished line once,
         // on the build it landed on. sessionStorage survives the reload and the
         // marker is removed the moment it is read, so it never repeats.
@@ -969,6 +1067,10 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           row('scope', snap ? String(snap.scope || 'public') : 'no frame yet');
           row('frames', dbg.frames + ' received · ' + (dbg.lastFrameAt ? Math.max(0, Math.round((Date.now() - dbg.lastFrameAt) / 1000)) + 's ago' : 'none'));
           row('poll', 'check ' + Math.round(CHECK_MS / 1000) + 's · feed ' + Math.round(FEED_MS / 1000) + 's · errors ' + dbg.errors + ' · misses ' + misses);
+          // Why the card is open, and whether this page has been touched yet.
+          // Owner, 2026-11-22: if a refresh ever opens the card again, this row
+          // names the path that did it and whether the page had been used.
+          row('open', (openReason || 'shut') + ' · engaged ' + (pageEngaged ? 'yes' : 'no') + ' · load ' + (firstVersionCheck ? 'pending' : 'done'));
           // Watch CPU: the server's own measured load and heap, when this scope
           // carries them (public view does not — it says so instead of guessing).
           if (snap && snap.server && Number.isFinite(Number(snap.server.load1))) {
@@ -1071,10 +1173,16 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           // track can never be mistaken for invented 100% progress.
           const running = !!(job && (job.state === 'RUNNING'
             || (job.state === 'VERIFYING' && String(job.status || '') !== 'completed')));
-          const visible = applying || running || (readyish && !!autoApplyAt);
-          // Junkalot spins the card's ghost while the deploy is working
-          // (queued through verifying); once it is done the ghost stands still.
-          if (ghostEl) ghostEl.classList.toggle('phantom-spin', applying || running || readyish);
+          // A build sitting in the stability window is real, measured work: the
+          // monitor publishes how far through its window it is, so the card can
+          // count 1→100 instead of showing nothing while it waits.
+          const verifying = !!(readyish && verifyWindow && verifyWindow.totalSec > 0);
+          const visible = applying || running || (readyish && !!autoApplyAt) || verifying;
+          // Junkalot spins the card's ghost while the deploy is working —
+          // its DEPLOY_WORKING list starts at "queued" and runs through
+          // "verifying"; once it is done the ghost stands still
+          // (src/components/UpdateToast.tsx, copied 2026-11-22).
+          if (ghostEl) ghostEl.classList.toggle('phantom-spin', applying || running || readyish || state === 'queued');
           barEl.hidden = !visible;
           if (!visible) return;
           let value = 0;
@@ -1086,6 +1194,12 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             indeterminate = pct == null;
             value = pct == null ? 0 : pct;
             label = (job && job.stage && job.stage.label) || 'Applying update';
+          } else if (verifying) {
+            // Measured: elapsed part of the stability monitor's own window.
+            const { totalSec, leftSec } = verifyWindow;
+            value = Math.max(1, Math.min(99, Math.round(((totalSec - leftSec) / totalSec) * 100)));
+            indeterminate = false;
+            label = 'Verifying build — ' + leftSec + 's left';
           } else {
             // readyish: the verified-update reload countdown — a measured
             // number of seconds to a real reload, never a build percentage.
@@ -1173,10 +1287,13 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           // A docked/closed applet always leaves the compact card behind, so the
           // next open shows the small terminal, never a stale expanded one.
           if (mode !== 'card' && termExpanded) setTermExpanded(false);
+          if (mode !== 'card') { openReason = ''; root.dataset.openReason = ''; }
           publishHeight();
         };
         const expand = () => {
           setMode('card');
+          pageEngaged = true;
+          openReason = 'click'; root.dataset.openReason = openReason;
           clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
           const activeJob = live.job && ['RUNNING', 'QUEUED', 'VERIFYING'].includes(live.job.state);
           if (!activeJob && state !== 'failed' && state !== 'offline' && !serverApplying) scheduleDock();
@@ -1185,16 +1302,18 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         const paintState = (next) => {
           state = next;
           root.dataset.state = next;
-          // Something running or broken: never leave the corner empty while
-          // there is real work or news to show (owner, 2026-11-21: "the applet
-          // is suppose to hide when no update are que"). A QUEUED deployment
-          // is neither — the spec makes queued hidden, so it never forces the
-          // chip back into the corner.
-          const currentJob = live.job || {};
-          const updateActive = serverApplying || currentJob.state === 'RUNNING'
-            || (currentJob.state === 'VERIFYING' && String(currentJob.status || '') !== 'completed');
-          if ((root.dataset.mode === 'hidden' || root.dataset.mode === 'ring') && updateActive) {
-            setMode('chip');
+          // Owner, 2026-11-22: "stay closed to edge when idle and pop open only
+          // when updates are available", then "junkalots only opens on updates
+          // or if its clicked". Junkalot's toast has no hidden mode: its
+          // resting state is the slim edge tab, and the card opens only for an
+          // available update or a click. Match it exactly: the tab is the
+          // resting mode for idle, checking and work in progress (its ring
+          // carries live progress); the card is opened only by check()'s
+          // newerBuild branch or by expand(). Nothing in paintState opens or
+          // hides the applet any more.
+          if (root.dataset.mode !== 'card' && root.dataset.mode !== 'chip'
+            && root.dataset.mode !== 'tab') {
+            setMode('tab');
           }
           const icon = { checking: '●', live: '✓', restored: '✓', ready: '▲', queued: '▲', applying: '⚙', offline: '⚠', building: '⚙', failed: '✗' }[next] || '●';
           const title = {
@@ -1210,6 +1329,27 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           }[next] || 'haksterai.com';
           if (iconEl) iconEl.textContent = icon;
           if (titleEl) titleEl.textContent = title;
+          // The resting edge tab carries the same truth as the panel, so an
+          // update found while the card stays shut can never be missed (owner,
+          // 2026-11-22: "its still opening on hard refreshes" — the card stays
+          // shut on a load, so the tab has to say an update is waiting).
+          const tabEl = el('psa-tab');
+          if (tabEl) {
+            const tabLabel = {
+              ready: 'Update ready — open to update',
+              queued: 'Update queued on the server — open for details',
+              applying: 'Update applying on the server — open for details',
+              building: 'Build running — open for progress',
+              failed: 'Build failed — open for the log',
+              offline: 'haksterai.com is not answering — open for status',
+              checking: 'haksterai.com — checking for updates',
+            }[next] || 'haksterai.com is up to date. Open the update status.';
+            tabEl.title = tabLabel;
+            tabEl.setAttribute('aria-label', tabLabel);
+          }
+          // A waiting update is marked ▲ in accent green on the tab itself; any
+          // real build frame repaints its measured percentage in renderLive.
+          if (tabPctEl && next === 'ready') { tabPctEl.textContent = '▲'; tabPctEl.style.color = '#00ff41'; }
           if (chipTitleEl) {
             // The docked chip carries the same truth as the panel — an offline
             // or failing site never reads "Up to date".
@@ -1232,7 +1372,9 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           // close out forever, so a pending close is never restarted by an equal
           // or longer one — only a sooner close may replace it (the 10 s close a
           // freshly opened card arms is cut to 5 s the moment the build is done).
-          const wanted = Number.isFinite(delayMs) ? delayMs : DOCK_AFTER_MS;
+          const pendingUpdate = state === 'ready' || state === 'applying';
+          const fallbackDock = pendingUpdate ? UPDATE_CARD_DWELL_MS : NO_UPDATE_CLOSE_MS;
+          const wanted = Number.isFinite(delayMs) ? delayMs : fallbackDock;
           if (dockPending) {
             if (!Number.isFinite(delayMs)) return;
             const pending = dockDelay || DOCK_AFTER_MS;
@@ -1263,11 +1405,11 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             live.closedBuild = (live.job && live.job.buildId) || live.closedBuild;
             audit('applet.collapse', { buildId: live.job && live.job.buildId });
             hideTimer = window.setTimeout(() => {
-              // Idle after an update: the applet leaves the corner completely
-              // rather than parking an edge tab there forever (owner,
-              // 2026-11-21: "the applet is suppose to hide when no update are
-              // que"). The live poll brings it back on the next real event.
-              if (root.dataset.mode === 'chip' && (state === 'live' || state === 'restored')) setMode('hidden');
+              // Idle after an update: the chip tucks back into the slim edge
+              // tab — the same resting state junkalot's toast keeps (owner,
+              // 2026-11-22: "stay closed to edge when idle"). It never
+              // disappears entirely.
+              if (root.dataset.mode === 'chip' && (state === 'live' || state === 'restored')) setMode('tab');
             }, HIDE_AFTER_MS);
           }, wanted);
         };
@@ -1294,7 +1436,9 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             audit('applet.collapse', { buildId: j.buildId, reason: 'failed' });
             hideTimer = window.setTimeout(() => {
               const jj = live.job || {};
-              if (root.dataset.mode === 'chip' && (jj.state === 'FAILED' || state === 'failed')) setMode('hidden');
+              // A failed build's chip also retires to the resting edge tab,
+              // never to nothing (Junkalot parity, 2026-11-22).
+              if (root.dataset.mode === 'chip' && (jj.state === 'FAILED' || state === 'failed')) setMode('tab');
             }, HIDE_AFTER_MS);
           }, FAILED_CLOSE_MS);
         };
@@ -1304,6 +1448,10 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           busy = true;
           cancelAutoApply();
           clearLater();
+          // Show the card and its bar while the tab applies the update — the
+          // owner wants to watch the update, not see the page blink (§ owner
+          // 2026-11-22: "need live progress bar when updating … on widget card").
+          if (root.dataset.mode !== 'card') setMode('card');
           if (updateBtn) { updateBtn.disabled = true; updateBtn.textContent = 'Updating…'; }
           if (detailEl) detailEl.textContent = 'Checking that the server is answering before this tab reloads…';
           // Leave a one-shot note for the reloaded page: it shows "Update
@@ -1338,7 +1486,8 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             + (count ? count + ' file' + (count === 1 ? '' : 's') : 'server changes')
             + ' waiting to be applied; it applies itself when the server is idle.';
           // Kept for the "just finished applying" retraction in check(); the
-          // card itself stays exactly where it is (hidden on a fresh load).
+          // card itself stays exactly where it is (the resting edge tab — a
+          // queued update never opens the card, Junkalot parity 2026-11-22).
           queuedShown = 'queued';
         };
 
@@ -1399,14 +1548,11 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             // applied stable"). Nothing is called stable until the monitor says so.
             const appliedText = () => appliedTextFor(data && data.build);
             if (!queuedUpdate) queuedShown = '';
-            // The live build feed can own the card and return from this poll
-            // below. Still surface the applet if the version endpoint reports
-            // that an update has started while the user has it tucked away.
-            if (server.applying && root.dataset.mode !== 'card') {
-              setMode('card');
-              clearTimeout(dockTimer); clearTimeout(hideTimer);
-              dockPending = false; dockDelay = 0;
-            }
+            // Owner, 2026-11-22: an update that is applying on the server must
+            // not force the card open either. If the visitor already has it
+            // open (their own click, or the Update now card) it stays open and
+            // keeps showing real progress; otherwise the slim edge tab carries
+            // the state. Only "an update is available" opens the card.
             if (liveOwns() && !buildDone) { if (checkedEl) checkedEl.textContent = ago(lastCheck); return; }
             if (server.error) {
               if (serverEl) serverEl.textContent = 'unavailable';
@@ -1415,14 +1561,26 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             }
 
             if (server.applying) {
-              setMode('card');
-              // The update is running: hold the card until it reports done.
+              // The update is running: hold an already-open card until it
+              // reports done. Never open one for it (see the note above).
+              verifyWindow = null;
               clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
               queuedShown = 'queued';
               paintState('applying');
               if (actionsEl) actionsEl.hidden = true;
               if (barEl) barEl.hidden = false;
               if (detailEl) detailEl.textContent = 'The server is applying a new build. This tab reloads when the new one is answering.';
+              // Owner, 2026-11-22: "need live progress bar when updating … on
+              // widget card" and "the page refreshes but no widget opens".
+              // While a build is actually being applied the card opens so the
+              // measured bar (never an invented percentage, §10) is visible,
+              // and it stays open until the finished build closes it.
+              if (root.dataset.mode !== 'card') {
+                setMode('card');
+                openReason = 'update'; root.dataset.openReason = openReason;
+                audit('applet.expand', { stage: 'applying' });
+              }
+              clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
             } else if (newerBuild) {
               serverApplying = false;
               // A ready build fires the card once; the 2 s poll must not keep
@@ -1436,6 +1594,7 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
                 // A person clicked Later: that is a real answer, so the
                 // apply waits for the 30-minute deferral or Update now.
                 cancelAutoApply();
+                verifyWindow = null;
                 paintState('ready');
                 if (barEl) barEl.hidden = true;
                 if (actionsEl) actionsEl.hidden = false;
@@ -1451,33 +1610,71 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
                 // If verification never reports (feed down), do not park the
                 // update forever: apply after a bounded wait and say so.
                 const verifyOverrun = readySinceAt > 0 && Date.now() - readySinceAt > 180000;
+                // Owner, 2026-11-22: an available update is the one and only
+                // event that opens the card by itself ("pop open only when
+                // updates are available so i or users can choose to update now
+                // or later"). It opens once per new build; the 2 s poll cannot
+                // reopen it after a Later deferral or after it has docked.
+                if (newlyReady) {
+                  // Owner, 2026-11-22: "its still opening on hard refreshes".
+                  // A page load is not an event. The first version answer this
+                  // page receives (freshLoad) always rests on the edge tab and
+                  // marks it ▲ — even when the server is already ahead of the
+                  // page — so a hard refresh can never pop the card open. The
+                  // card opens by itself only when a new build appears while
+                  // the page is already open: a real update during the session.
+                  if (!freshLoad && pageEngaged) {
+                    clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+                    setMode('card');
+                    openReason = 'session-update'; root.dataset.openReason = openReason;
+                    audit('applet.expand', { buildId: readyBuild, stage: 'update-available' });
+                    // Owner, 2026-11-22: "the widget still is open" on separate
+                    // pages — the update-available card announced itself and then
+                    // never closed, because this open path armed no dock timer
+                    // (unlike every other self-open in the applet). Announce it,
+                    // then tuck back to the edge tab like junkalot's toast: the
+                    // chip carries "Update ready" and the ▲ survives on the tab,
+                    // so Update now / Later stay one click away. Auto-apply is
+                    // unaffected — it still reloads when the build verifies.
+                    scheduleDock(UPDATE_CARD_DWELL_MS);
+                  } else {
+                    // Load time, or a page nobody has touched yet: the tab
+                    // carries the update and the card stays shut.
+                    openReason = freshLoad ? 'load-tab' : 'untouched-tab';
+                    root.dataset.openReason = openReason;
+                  }
+                }
                 paintState('ready');
                 if (barEl) barEl.hidden = true;
                 if (actionsEl) actionsEl.hidden = false;
                 if (verified || verifyOverrun) {
                   // Owner: "no updates waiting always need to auto apply".
+                  verifyWindow = null;
                   armAutoApply(readyBuild);
                   paintReadyDetail();
                 } else {
                   cancelAutoApply();
-                  const left = st.window && Number.isFinite(Number(st.window.remainingSec))
-                    ? Math.max(0, Math.round(Number(st.window.remainingSec))) : null;
+                  const win = st.window || {};
+                  const totalSec = Number(win.configuredSec) || 0;
+                  const left = win.remainingSec != null && Number.isFinite(Number(win.remainingSec))
+                    ? Math.max(0, Math.round(Number(win.remainingSec))) : null;
+                  // Measured window, not a guess: the card counts 1→100 through
+                  // the monitor's own verification clock.
+                  verifyWindow = totalSec > 0 && left != null ? { totalSec, leftSec: left } : null;
                   if (detailEl) detailEl.textContent = 'New page build ' + short(readyBuild) + ' is live — verifying stability before it is called ready'
                     + (left != null ? ' (' + left + 's left)' : '') + '. It applies automatically once verified.';
                 }
+                paintBar();
               }
-              // A ready build opens the card once and then auto-hides through the
-              // normal dock timer (owner, 2026-11-21: "should open then only
-              // autohides til thren"). The exception kept from the earlier rule
-              // is the page load that merely lands on an already-ready build —
-              // that stays on the chip ("not to open on every refresh only when
-              // updating"). A card the owner opened themselves still retracts on
-              // its dock timer; new work opens it again through the live feed.
-              // A ready build is not running work. The applet opens only after
-              // applying/live telemetry confirms that an update has started.
+              // An available update opens the card once (above) so the visitor
+              // can pick Update now or Later; the apply clock closes it after
+              // the reload, and Later docks it back to the edge. Running work
+              // never opens it — that lives on the edge tab until the update is
+              // actually available (owner, 2026-11-22).
             } else {
               readyBuild = '';
               readySinceAt = 0;
+              verifyWindow = null;
               cancelAutoApply();
               if (barEl) barEl.hidden = true;
               if (actionsEl) actionsEl.hidden = true;
@@ -1520,11 +1717,12 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
                   if (justFinished && root.dataset.mode === 'card') scheduleDock(SUCCESS_CLOSE_MS);
                 }
               }
-              // Startup finished: only the ring was shown while checking — now
-              // it leaves too, whether or not anything is queued (owner,
-              // 2026-11-21: "only ring and progress on startup", "hide when no
-              // update are que"; spec: QUEUED = HIDDEN).
-              if (root.dataset.mode === 'ring' || root.dataset.mode === 'tab') setMode('hidden');
+              // Idle after the check: the edge tab is the resting state now
+              // (Junkalot parity, 2026-11-22), so a legacy startup ring or a
+              // stale hidden frame is retired to it — with or without a build
+              // running. Nothing is hidden here any more (codex review,
+              // 2026-11-22: this block used to hide a live tab).
+              if (root.dataset.mode === 'ring' || root.dataset.mode === 'hidden') setMode('tab');
             }
             if (!busy && updateBtn) { updateBtn.disabled = false; updateBtn.textContent = 'Update now'; }
           } catch {
@@ -1555,16 +1753,28 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           if (detailEl) detailEl.textContent = 'Postponed for 30 minutes — Update now applies it sooner.';
           scheduleDock();
         });
-        // Any real interaction counts as "someone is here" for the quiet window.
-        const noteInput = () => { lastInputAt = Date.now(); };
-        document.addEventListener('pointerdown', noteInput, { passive: true });
-        document.addEventListener('keydown', noteInput, { passive: true });
+        // Any real interaction counts as "someone is here" for the quiet window,
+        // and the first one on the page also arms automatic card opens (see
+        // pageEngaged). Capture phase so a handler that stops propagation still
+        // counts as real contact.
+        const noteInput = () => { lastInputAt = Date.now(); pageEngaged = true; };
+        document.addEventListener('pointerdown', noteInput, { passive: true, capture: true });
+        document.addEventListener('keydown', noteInput, { passive: true, capture: true });
+        document.addEventListener('touchstart', noteInput, { passive: true, capture: true });
         // Focusing a field also starts the quiet clock, so a form nobody types
         // in is released after AUTO_APPLY_FOCUS_MAX_MS instead of blocking forever.
         document.addEventListener('focusin', (event) => {
           const t = event.target;
           if (t && t.matches && t.matches('input,textarea,select,[contenteditable=""],[contenteditable="true"]')) noteInput();
         }, true);
+        el('psa-x')?.addEventListener('click', (event) => {
+          event.stopPropagation();
+          clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
+          // The user's own close: tuck to the "Update ready" chip when an update
+          // is waiting, otherwise to the slim edge tab. Update state untouched.
+          setMode(state === 'ready' ? 'chip' : 'tab');
+          audit('applet.close', { buildId: live.job && live.job.buildId });
+        });
         el('psa-chip')?.addEventListener('click', expand);
         el('psa-tab')?.addEventListener('click', expand);
         stabEl?.addEventListener('click', toggleDebug);
@@ -1874,6 +2084,12 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           // open forever; ignoring them entirely meant an update could pass
           // without the applet ever showing. One open per build, then closed.
           const doneBuild = verifying && String(job.status || '') === 'completed';
+          // An update this tab has not applied yet, still on offer. While one
+          // is offered, a finished-build frame must not take the card over or
+          // close it: that is exactly what made the update card flash for ~2 s
+          // and hide ("the widget is showing when it builds but real fast is
+          // why cant see it", owner 2026-11-22).
+          const updateOffered = !!(readyBuild && pageBuildNow() && String(readyBuild) !== pageBuildNow());
           const alreadyClosed = doneBuild && !!job.buildId && live.closedBuild === job.buildId;
           const verifyingLive = verifying && !alreadyClosed;
           const failed = job.state === 'FAILED';
@@ -1886,40 +2102,33 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           // Queued has no progress to show, so the ring is not handed a number.
           paintRingProgress(failed || queued ? null : job.percent, failed);
           if (tabPctEl) {
-            tabPctEl.textContent = failed ? '✗' : queued ? '·' : Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : '·';
+            // A waiting update keeps its ▲ on the tab for as long as the card
+            // is shut — an idle telemetry frame must not wipe the one marker
+            // that says an update is available (owner, 2026-11-22).
+            const waitingUpdate = !running && !verifyingLive && !failed && !unknown && !queued
+              && root.dataset.state === 'ready' && !!readyBuild;
+            tabPctEl.textContent = failed ? '✗'
+              : waitingUpdate ? '▲'
+              : queued ? '·'
+              : Number.isFinite(job.percent) ? Math.round(job.percent) + '%' : '·';
             tabPctEl.style.color = failed ? '#f87171' : '#00ff41';
           }
 
-          // Let the ring paint its progress for a beat before the panel opens;
-          // while docked the ring is the only place a running build shows.
-          // A build that has already FINISHED is news, not work: it must never
-          // open the panel by itself. Owner, 2026-11-21: "fix applet stays open
-          // on haksterai ... need to stay hidden until updates starts". Without
-          // !doneBuild a page load that landed on a completed-but-verifying job
-          // opened the card and then pinned it forever.
-          if ((running || verifyingLive) && !doneBuild && root.dataset.mode !== 'card' && !live.openTimer) {
-            live.openTimer = window.setTimeout(() => {
-              live.openTimer = 0;
-              if (root.dataset.mode === 'card') return;
-              const current = live.job || {};
-              const stillActive = serverApplying || current.state === 'RUNNING'
-                || (current.state === 'VERIFYING' && String(current.status || '') !== 'completed');
-              if (!stillActive) {
-                if (root.dataset.mode !== 'card') setMode('hidden');
-                return;
-              }
-              expand();
-              audit('applet.expand', { buildId: live.job && live.job.buildId, stage: live.job && live.job.stage && live.job.stage.id });
-            }, 900);
-          }
+          // Owner, 2026-11-22: a build that is running must never pop the card
+          // open by itself — not on a push, and not on a hard refresh that lands
+          // mid-build. Progress stays on the slim edge tab (paintState above
+          // moves hidden -> tab while work is active and tab -> hidden when it
+          // ends). The card is opened only by check() when an update is
+          // available, so the visitor gets the Update now / Later choice.
           // A failure only opens the card if this tab watched the build fail.
           // On a hard refresh the first frame may already say FAILED for a build
           // that died minutes ago — that is history, not an update in progress,
           // so the applet stays shut (owner, 2026-11-21: "only opens when
           // updating ever"). prevState is undefined on the first frame.
           const failedLive = failed && (prevState === 'RUNNING' || prevState === 'QUEUED' || prevState === 'VERIFYING');
-          if (failedLive) {
+          if (failedLive && pageEngaged) {
             setMode('card');
+            openReason = 'watched-failure'; root.dataset.openReason = openReason;
             live.failedAt = Date.now();
             clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
             // Spec (owner 2026-11-21): failed/cancelled shows its error briefly,
@@ -1962,8 +2171,13 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
               if (prevState === 'RUNNING' || prevState === 'QUEUED') audit('job.stage', { buildId: job.buildId, stage: stageId, percent: job.percent });
             }
           } else if (verifyingLive) {
-            paintLive('applying', 'Build complete — verifying health',
-              (job.label || 'Health verification running') + ' · stability window is separate');
+            // The card that already offers this update keeps its own state and
+            // its measured bar; only a card with nothing on offer flips to
+            // "build complete" here.
+            if (!updateOffered) {
+              paintLive('applying', 'Build complete — verifying health',
+                (job.label || 'Health verification running') + ' · stability window is separate');
+            }
             if (prevState === 'RUNNING' || prevState === 'QUEUED') audit('job.complete', { buildId: job.buildId, percent: job.percent });
           } else if (failed) {
             paintLive('failed', 'Build failed', job.error || job.label || 'The build failed — log preserved below.');
@@ -1980,8 +2194,9 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           // A finished build closes on the verified-completion clock (owner
           // spec 2026-11-21: success shows for about two seconds, then fades
           // and closes), armed straight from the telemetry frame instead of
-          // waiting out the version poll.
-          if (doneBuild && root.dataset.mode === 'card') scheduleDock(SUCCESS_CLOSE_MS);
+          // waiting out the version poll — but never on top of a card that is
+          // still offering an un-applied update.
+          if (doneBuild && root.dataset.mode === 'card' && !updateOffered) scheduleDock(SUCCESS_CLOSE_MS);
 
           // Stability is independent of the server update lifecycle.
           const st = snap.stability;
@@ -2255,6 +2470,7 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             mode: root.dataset.mode, state, dockPending, dockDelay,
             hasDockTimer: Boolean(dockTimer), closedBuild: live.closedBuild,
             jobState: live.job ? live.job.state : null,
+            openReason, pageEngaged,
           }),
         };
         check();
@@ -3146,6 +3362,9 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           menu?.classList.remove('hidden');
           if (menu === mobileAdminToolsMenu) menu?.classList.add('flex');
           button?.setAttribute('aria-expanded', 'true');
+          if (menu) menu.scrollTop = 0;
+          // Let layout settle, then decide whether the ▲/▼ arrows are needed.
+          requestAnimationFrame(() => { try { menu?.dispatchEvent(new Event('scroll')); } catch {} });
         });
       }
       function closeAdminTools() {
@@ -3180,6 +3399,29 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
       document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') closeAdminTools();
       });
+
+      // ── Admin menu scrolling (owner, 2026-11-22: "in admin tab need
+      // scrollbars arrows etc") ─────────────────────────────────────
+      // The admin list is long enough to run past a short window. It scrolls
+      // inside the menu now, with a visible scrollbar and ▲/▼ arrows that show
+      // only while there is more to reach. The menu also takes focus
+      // (tabindex="0"), so native arrow keys scroll it once it has focus.
+      function wireAdminMenuScroll(menu, up, down) {
+        if (!menu) return;
+        const sync = () => {
+          const more = menu.scrollHeight - menu.clientHeight > 2;
+          if (up) up.hidden = !more || menu.scrollTop <= 2;
+          if (down) down.hidden = !more || menu.scrollTop + menu.clientHeight >= menu.scrollHeight - 2;
+        };
+        const step = (delta) => { try { menu.scrollBy({ top: delta, behavior: 'smooth' }); } catch { menu.scrollTop += delta; } };
+        up?.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); step(-160); });
+        down?.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); step(160); });
+        menu.addEventListener('scroll', sync, { passive: true });
+        window.addEventListener('resize', sync);
+        sync();
+      }
+      wireAdminMenuScroll(adminToolsMenu, document.getElementById('admin-tools-up'), document.getElementById('admin-tools-down'));
+      wireAdminMenuScroll(mobileAdminToolsMenu, document.getElementById('mobile-admin-tools-up'), document.getElementById('mobile-admin-tools-down'));
 
       // ── Mobile menu toggle ──────────────────────────────────────
       const menuBtn = document.getElementById('menu-btn');
@@ -3279,12 +3521,192 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         }
       });
     </script>
+    <!-- Install affordance (owner, 2026-11-22: "the pwa for haksterai aint working and make sure it has
+         hero logo aswell", then "pwa haksterai still aint working its popping up but make me click
+         install up top but nothing"). A slim pill opens the card; the card's button calls the prompt
+         captured in the head and, if no dialog answers, states the exact manual steps instead of doing
+         nothing. Bottom-left, lifted above the Phantom applet footprint so it never covers it
+         (CLAUDE.md 18). -->
+    <style is:inline>
+      #hakster-install-pill{position:fixed;left:20px;bottom:calc(0.75rem + min(var(--phantom-applet-h,0px),45vh));z-index:900;display:inline-flex;align-items:center;gap:7px;width:auto;max-width:calc(100vw - 2.5rem);box-sizing:border-box;min-height:38px;padding:8px 12px;border:1px solid rgba(0,255,65,.35);border-radius:999px;background:rgba(17,17,24,.96);color:#7dffb3;font:700 11px/1 ui-monospace,monospace;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.5);backdrop-filter:blur(8px);touch-action:manipulation}
+      #hakster-install-pill[hidden]{display:none}
+      #hakster-install-pill img{width:18px;height:18px;flex:none;border-radius:5px;background:#010103}
+      #hakster-install{position:fixed;left:20px;bottom:calc(0.75rem + min(var(--phantom-applet-h,0px),45vh));z-index:901;display:flex;align-items:flex-start;gap:10px;max-width:calc(100vw - 2.5rem);max-height:calc(100vh - 1.5rem);overflow:auto;padding:10px 12px;border:1px solid rgba(0,255,65,.35);border-radius:14px;background:rgba(17,17,24,.96);color:#e7ffe9;box-shadow:0 10px 30px rgba(0,0,0,.55);backdrop-filter:blur(8px);font-family:'JetBrains Mono',ui-monospace,monospace}
+      #hakster-install[hidden]{display:none}
+      #hakster-install img{width:38px;height:38px;flex:none;border-radius:9px;background:#010103}
+      #hakster-install .hi-title{margin:0;font-size:12px;font-weight:700;line-height:17px;color:#7dffb3}
+      #hakster-install .hi-copy{margin:2px 0 0;font-size:11px;line-height:15px;color:rgba(231,255,233,.65)}
+      #hakster-install .hi-actions{display:flex;gap:8px;margin-top:8px}
+      #hakster-install button{font:inherit;font-size:11px;min-height:36px;padding:8px 12px;border-radius:9px;cursor:pointer}
+      #hakster-install .hi-go{border:0;background:#00ff41;color:#04140a;font-weight:700}
+      #hakster-install .hi-no{border:1px solid rgba(255,255,255,.2);background:transparent;color:rgba(231,255,233,.8)}
+      @media (max-width:480px){#hakster-install-pill{left:20px}#hakster-install{left:20px;right:20px;max-width:none}}
+    </style>
+    <button type="button" id="hakster-install-pill" hidden aria-label="Install HaksterAI">
+      <img src="/icons/icon-192.png" alt="" aria-hidden="true" /> Install app
+    </button>
+    <div id="hakster-install" hidden role="dialog" aria-label="Install HaksterAI">
+      <img src="/icons/icon-192.png" alt="" aria-hidden="true" />
+      <div>
+        <p class="hi-title" id="hakster-install-title">Install HaksterAI</p>
+        <p class="hi-copy" id="hakster-install-copy">One tap on your home screen, same site, no browser bar.</p>
+        <div class="hi-actions">
+          <button type="button" class="hi-go" id="hakster-install-go">Install</button>
+          <button type="button" class="hi-no" id="hakster-install-no">Not now</button>
+        </div>
+      </div>
+    </div>
+
     <script is:inline data-cfasync="false">
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
       });
     }
-  </script>
+    </script>
+
+    <script is:inline data-cfasync="false">
+    (function () {
+      var KEY = 'haksterai-pwa-dismissed';
+      var state = window.__haksterInstall || (window.__haksterInstall = { evt: null, installed: false });
+      var pill = document.getElementById('hakster-install-pill');
+      var box = document.getElementById('hakster-install');
+      if (!pill || !box) return;
+      var go = document.getElementById('hakster-install-go');
+      var no = document.getElementById('hakster-install-no');
+      var title = document.getElementById('hakster-install-title');
+      var copy = document.getElementById('hakster-install-copy');
+      // Dismissal expires: the old permanent '1' marker is treated as expired so a pill that was
+      // hidden once ("its not even showing pwa now") always comes back on its own. Owner (2026-11-22).
+      var DISMISS_DAYS = 7;
+      // Owner (2026-11-22): "the install shows with right lit but does nothing" / "not showing
+      // widget popup either to install only in bar". Once the app is installed Chrome never
+      // prompts again, so the pill used to come back and every tap after that dead-ended in
+      // the manual fallback. A real install is now remembered permanently and the pill stays
+      // gone; the '1' written under KEY used to mean "installed" but parsed as a 1 ms
+      // timestamp, which is why the pill kept reappearing.
+      var INSTALLED_KEY = 'haksterai-pwa-installed';
+      var raw = null;
+      try { raw = localStorage.getItem(KEY); } catch (e) {}
+      // The old build wrote the literal '1' here on a successful install. That is an
+      // install marker, not a timestamp: migrate it now, so a browser that installed
+      // the app before this fix stops being offered it again.
+      try { if (raw === '1') localStorage.setItem(INSTALLED_KEY, '1'); } catch (e) {}
+      var installedBefore = false;
+      try { installedBefore = localStorage.getItem(INSTALLED_KEY) === '1'; } catch (e) {}
+      var dismissed = false;
+      if (raw && raw !== '1') {
+        var at = /^\d+$/.test(raw) ? parseInt(raw, 10) : 0;   // a real dismissal timestamp
+        dismissed = at > 0 && (Date.now() - at) < DISMISS_DAYS * 86400000;
+      }
+      var standalone = false;
+      try {
+        standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+      } catch (e) {}
+      function hide() { pill.hidden = true; box.hidden = true; }
+      if (standalone || dismissed || state.installed || installedBefore) { hide(); return; }
+
+      // If Chrome itself installed the app, our done handler never ran. Ask the
+      // platform directly (the manifest lists this app as its own related
+      // application); an installed app must never be offered again.
+      try {
+        if (typeof navigator.getInstalledRelatedApps === 'function') {
+          navigator.getInstalledRelatedApps().then(function (apps) {
+            if (apps && apps.length) {
+              state.installed = true; state.evt = null;
+              try { localStorage.setItem(INSTALLED_KEY, '1'); } catch (e) {}
+              hide();
+            }
+          }).catch(function () {});
+        }
+      } catch (e) {}
+
+      // Owner (2026-11-22): "its not even showing pwa now". Hiding our pill and relying on Chrome's
+      // own control left nothing visible to click, so the pill is always shown (unless standalone,
+      // installed, or dismissed inside the last 7 days). We still never preventDefault(), so Chrome's
+      // install control keeps working alongside it — the path confirmed on junkalot.co/phantomide.com.
+      var ua = navigator.userAgent || '';
+      var ios = /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+      var android = /android/i.test(ua);
+      var fallbackCopy = ios
+        ? 'Open Share, then choose "Add to Home Screen".'
+        : android
+          ? 'Open the browser menu (⋮) and choose "Install app" or "Add to Home screen".'
+          : 'Click the install icon at the right of the address bar, or open the browser menu (⋮) → "Cast, save, and share" → "Install page as app".';
+      var showPill = function () { if (!dismissed && !state.installed) pill.hidden = false; };
+      showPill();
+      window.addEventListener('hakster-install-ready', showPill);
+      window.addEventListener('hakster-install-done', function () {
+        state.installed = true; state.evt = null;
+        try { localStorage.setItem(INSTALLED_KEY, '1'); localStorage.removeItem(KEY); } catch (e) {}
+        hide();
+      });
+
+      var manualMode = false;
+      function openCard() {
+        if (!state.evt) { manualFallback(); return; }   // no prompt to call → say what to click
+        manualMode = false;
+        pill.hidden = true;
+        box.hidden = false;
+        title.textContent = 'Install HaksterAI';
+        copy.textContent = 'One tap on your home screen, same site, no browser bar.';
+        go.hidden = false;
+        no.textContent = 'Not now';
+      }
+      function manualFallback() {
+        state.evt = null;
+        manualMode = true;
+        pill.hidden = true;
+        box.hidden = false;
+        title.textContent = 'Install HaksterAI';
+        copy.textContent = fallbackCopy;
+        go.hidden = true;
+        no.textContent = 'Got it';
+      }
+
+      // Owner (2026-11-22): "shows ... but does nothing". A tap that never becomes a
+      // 'click' (touch handler eating it, or a scroll starting on the pill) must still
+      // open the card, so pointerup opens it too and a click right after is ignored.
+      var openedAt = 0;
+      function onPillOpen(ev) {
+        if (openedAt && Date.now() - openedAt < 700) return;
+        openedAt = Date.now();
+        if (ev && ev.cancelable) { try { ev.preventDefault(); } catch (e) {} }
+        openCard();
+      }
+      pill.addEventListener('click', onPillOpen);
+      pill.addEventListener('pointerup', onPillOpen);
+      pill.addEventListener('touchend', onPillOpen, { passive: false });
+      no.addEventListener('click', function () {
+        // "Got it" on the manual-instructions card is not a dismissal — the pill comes
+        // straight back so the next tap can retry. Only "Not now" on the real card
+        // hides it for the 7-day window.
+        if (!manualMode) { try { localStorage.setItem(KEY, String(Date.now())); } catch (e) {} }
+        hide();
+      });
+      go.addEventListener('click', function () {
+        var evt = state.evt;
+        if (!evt || typeof evt.prompt !== 'function') { manualFallback(); return; }
+        state.evt = null;              // a prompt object is single-use
+        var answered = false;
+        var done = function (choice) {
+          if (answered) return;
+          answered = true;
+          if (choice && choice.outcome === 'accepted') {
+            state.installed = true;
+            try { localStorage.setItem(INSTALLED_KEY, '1'); localStorage.removeItem(KEY); } catch (e) {}
+          }
+          hide();
+        };
+        try {
+          var p = evt.prompt();
+          if (p && p.then) p.then(function () {}, function () { if (!answered) { answered = true; manualFallback(); } });
+        } catch (err) { answered = true; manualFallback(); return; }
+        if (evt.userChoice && evt.userChoice.then) evt.userChoice.then(done, function () { if (!answered) { answered = true; manualFallback(); } });
+        // No dialog ever answered: say what to click instead of leaving the click dead.
+        setTimeout(function () { if (!answered) { answered = true; manualFallback(); } }, 2500);
+      });
+    })();
+    </script>
 </body>
 </html>

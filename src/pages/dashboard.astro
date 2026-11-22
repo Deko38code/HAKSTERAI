@@ -99,7 +99,7 @@ import Layout from '../layouts/Layout.astro';
         <span>Cloudflare values are edge visits/requests; clicks and hashed-IP counts use first-party page events.</span>
       </div>
       <div id="analytics-top-pages" class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] text-[#94a3b8]"></div>
-      <p class="mt-2 text-[10px] text-[#475569]">First-party counts start after deploy and reset with a server restart. IP addresses are not stored; unique-IP counts use a temporary salted hash.</p>
+      <p class="mt-2 text-[10px] text-[#475569]">First-party counts are always on and persist across restarts (rolling 24h window). IP addresses are not stored; unique-IP counts use a salted hash. Cloudflare tiles fill in only when the server has a working token and zone ID — the first-party tiles never depend on it.</p>
     </section>
 
     <!-- ── Dell Server status strip (owner-only, live) ─────────────────────
@@ -1056,7 +1056,7 @@ import Layout from '../layouts/Layout.astro';
           <button id="recent-users-list-jump" type="button" hidden style="position:absolute;top:6px;left:50%;transform:translateX(-50%);z-index:3;border:1px solid rgba(124,58,237,.5);background:#1b1b26;color:#c4b5fd;border-radius:999px;padding:3px 10px;font:10px/1.4 system-ui,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.45)">↑ new</button>
         </div>
       </div>
-      <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+      <div id="activitylog-section" class="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
         <h2 class="text-sm font-semibold text-[#7c3aed] uppercase tracking-wider mb-4 flex items-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
           📋 Activity Log
@@ -1070,6 +1070,30 @@ import Layout from '../layouts/Layout.astro';
         </div>
       </div>
     </div>
+
+    <!-- 2026-11-22 (owner): "hide these logs if ok to ... all logs together in proper
+         section for declutter ... always use dropdown menu selectors". Every log card
+         now lives in this one collapsed section; the native select shows one log at a
+         time and remembers the choice per browser. Nothing is deleted: the polling code
+         still fills the same element ids, they are just moved here on load. -->
+    <details id="logs-section" class="hk-dash-details hk-logs-details">
+      <summary>🧾 Logs · updates, bots &amp; agents, activity, webhooks, self-heal</summary>
+      <div data-dash-panel="1" class="pt-1">
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <label class="sr-only" for="logs-picker">Choose a log</label>
+          <select id="logs-picker" class="max-w-full bg-[#111118] text-[#cbd5e1] border border-[#7c3aed]/35 px-3 py-2 rounded-lg text-xs focus:outline-none focus:border-[#a855f7]">
+            <option value="updlog-section">🔄 Update log · 3 sites</option>
+            <option value="fleet-section">🤖 Bots &amp; agents · fleet ops</option>
+            <option value="activitylog-section">📋 Activity log</option>
+            <option value="stripehook-section">🔔 Stripe webhook log</option>
+            <option value="autoheal-section">♻️ Auto-heal log</option>
+            <option value="cliguard-section">🔐 CLI provenance log</option>
+          </select>
+          <span id="logs-note" class="text-[10px] text-[#64748b]">one log at a time · the others stay hidden</span>
+        </div>
+        <div id="logs-panel"></div>
+      </div>
+    </details>
 
     <!-- ── Infrastructure Security Agents (Codex + DeepSeek) ───────────────
          Two independent agents review the same read-only sweep plus the
@@ -1145,7 +1169,7 @@ import Layout from '../layouts/Layout.astro';
            haksterai is read from this Dell box; junkalot and phantomide are read
            read-only from Parrot over SSH. Each row is stamped with its date and
            time in UTC and labelled with the site and box it came from. -->
-      <div class="mt-4 border-t border-[#1e1e2e] pt-4">
+      <div id="updlog-section" class="mt-4 border-t border-[#1e1e2e] pt-4">
         <div class="flex flex-wrap items-center gap-2 mb-2">
           <span class="text-xs font-semibold text-[#e2e8f0]">🔄 Update Log · 3 sites</span>
           <span class="text-[10px] text-[#64748b]">haksterai · junkalot · phantomide · full date + time UTC</span>
@@ -1184,7 +1208,7 @@ import Layout from '../layouts/Layout.astro';
            back to admin". One feed for every bot, build guard and agent:
            delivered Telegram reports, the junkalot update guard and selfcheck,
            phantomide ops rows. A source that cannot be read says so here. -->
-      <div class="mt-4 border-t border-[#1e1e2e] pt-4">
+      <div id="fleet-section" class="mt-4 border-t border-[#1e1e2e] pt-4">
         <div class="flex flex-wrap items-center gap-2 mb-2">
           <span class="text-xs font-semibold text-[#e2e8f0]">🤖 Bots &amp; agents · fleet ops</span>
           <span id="fleet-sources" class="text-[10px] text-[#64748b]">checking</span>
@@ -1272,7 +1296,7 @@ import Layout from '../layouts/Layout.astro';
     // health visible. Native details keeps the controls keyboard/touch friendly.
     (() => {
       const style = document.createElement('style');
-      style.textContent = '.hk-dash-details{margin:0 0 10px;border:1px solid rgba(124,58,237,.2);border-radius:12px;background:rgba(17,17,24,.45);overflow:hidden}.hk-dash-details>summary{display:flex;align-items:center;gap:8px;min-height:42px;padding:10px 14px;color:#c4b5fd;font-size:12px;font-weight:700;cursor:pointer;list-style:none}.hk-dash-details>summary::-webkit-details-marker{display:none}.hk-dash-details>summary::after{content:"＋";margin-left:auto;color:#64748b}.hk-dash-details[open]>summary::after{content:"−"}.hk-dash-details[open]>summary{border-bottom:1px solid rgba(124,58,237,.16)}.hk-dash-details>[data-dash-panel]{padding:10px 0 0}.hk-value-updated{opacity:.62;transition:opacity .32s ease}.hk-value-updated:not(:empty){opacity:1}';
+      style.textContent = '.hk-dash-details{margin:0 0 10px;border:1px solid rgba(124,58,237,.2);border-radius:12px;background:rgba(17,17,24,.45);overflow:hidden}.hk-dash-details>summary{display:flex;align-items:center;gap:8px;min-height:42px;padding:10px 14px;color:#c4b5fd;font-size:12px;font-weight:700;cursor:pointer;list-style:none}.hk-dash-details>summary::-webkit-details-marker{display:none}.hk-dash-details>summary::after{content:"＋";margin-left:auto;color:#64748b}.hk-dash-details[open]>summary::after{content:"−"}.hk-dash-details[open]>summary{border-bottom:1px solid rgba(124,58,237,.16)}.hk-dash-details>[data-dash-panel]{padding:10px 0 0}.hk-value-updated{opacity:.62;transition:opacity .32s ease}.hk-value-updated:not(:empty){opacity:1}.hk-log-hidden{display:none!important}.hk-logs-details>summary{color:#e2e8f0}.hk-logs-details #logs-panel>.mt-4{margin-top:0;border-top:0;padding-top:0}';
       document.head.appendChild(style);
       const groups = [
         ['stripecli-section', '💳 Stripe tools & price controls'],
@@ -1305,11 +1329,54 @@ import Layout from '../layouts/Layout.astro';
       window.jumpDashSection = (id) => {
         const target = document.getElementById(String(id || ''));
         if (!target) return;
+        // A log card lives inside the shared Logs section now: select it there.
+        if (typeof window.hkChooseLog === 'function') window.hkChooseLog(String(id || ''));
         for (let parent = target.parentElement; parent; parent = parent.parentElement) {
           if (parent.tagName === 'DETAILS') parent.open = true;
         }
         target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       };
+    })();
+
+    // 2026-11-22 (owner): one Logs section, one dropdown. Move every log card into
+    // #logs-panel and show only the selected one; the choice is remembered locally.
+    // The panels keep their ids, so their existing pollers keep writing to them.
+    (function setupLogsSection() {
+      const picker = document.getElementById('logs-picker');
+      const panel = document.getElementById('logs-panel');
+      if (!picker || !panel) return;
+      const ids = Array.from(picker.options).map((o) => o.value);
+      const moved = [];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (!el || panel.contains(el)) continue;
+        const wrapper = el.parentElement && el.parentElement.tagName === 'DETAILS' ? el.parentElement : null;
+        panel.appendChild(el);
+        if (wrapper && wrapper !== el && !wrapper.querySelector('[data-dash-panel]')) wrapper.remove();
+        moved.push(el);
+      }
+      if (!moved.length) return;
+      const choose = (id) => {
+        let hit = false;
+        for (const el of moved) {
+          const on = el.id === id;
+          if (on) hit = true;
+          el.classList.toggle('hk-log-hidden', !on);
+        }
+        if (!hit && moved[0]) { moved[0].classList.remove('hk-log-hidden'); picker.value = moved[0].id; }
+      };
+      window.hkChooseLog = (id) => {
+        if (!ids.includes(id)) return false;
+        picker.value = id;
+        choose(id);
+        try { localStorage.setItem('hakster:logs-picker', id); } catch (_) {}
+        return true;
+      };
+      picker.addEventListener('change', () => { window.hkChooseLog(picker.value); });
+      let saved = '';
+      try { saved = localStorage.getItem('hakster:logs-picker') || ''; } catch (_) {}
+      choose(ids.includes(saved) ? saved : picker.value);
+      if (ids.includes(saved)) picker.value = saved;
     })();
 
     // ── live cards: one refresh every 8 seconds by default ───────────────
@@ -1747,7 +1814,7 @@ import Layout from '../layouts/Layout.astro';
         setText('analytics-ips', fmtNum(local.uniqueIps24h));
         setText('analytics-cf-visits', cf.connected ? fmtNum(cf.visits15m) : '—');
         setText('analytics-cf-requests', cf.connected ? fmtNum(cf.requests15m) : '—');
-        setText('site-analytics-state', 'First-party · rolling 5m/24h · process-local');
+        setText('site-analytics-state', 'First-party · rolling 5m/24h · persists across restarts');
         setText('analytics-cf-state', cf.connected
           ? 'Cloudflare Analytics connected · ' + (cf.window || 'rolling 15m')
           : (cf.configured ? 'Cloudflare needs setup: ' : 'Cloudflare setup required: ') + (cf.message || 'server-side token and zone ID are not configured'));

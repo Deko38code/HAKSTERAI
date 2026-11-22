@@ -6,6 +6,7 @@
  */
 
 require('dotenv').config({ path: require('path').join(__dirname, '../.env'), override: true });
+const crypto = require('crypto');
 
 // Approval mode — bypass confirmation prompts in FULL_AUTO / AUTO_EDIT
 const { FULL_AUTO, shouldConfirm: shouldConfirmApproval } = require('./agent/approval');
@@ -288,6 +289,34 @@ function isLaneCooling(provider) {
 }
 function markProviderRateLimited(name, ms = 60000) { if (name) _rateLimited.set(name, Date.now() + ms); }
 function isProviderRateLimited(name) { const until = _rateLimited.get(name); if (!until) return false; if (Date.now() > until) { _rateLimited.delete(name); return false; } return true; }
+// ── Auth-dead lanes ────────────────────────────────────────────────────────
+// A provider whose key is missing or revoked answers 401/403 on every call.
+// Rather than spend a failed round trip on each pick, skip that lane for a
+// while and fall through the waterfall. Nothing about the provider definition,
+// its model, its URL or its place in WATERFALL_ORDER changes: the skip is keyed
+// to a hash of the current key, so putting a working key back re-enables the
+// lane automatically (owner, 2026-11-22: "fix dont break our config").
+const _authDead = new Map(); // provider -> { until, fp }
+function _keyFingerprint(name) {
+  const key = PROVIDERS[name] && PROVIDERS[name].apiKey;
+  if (!key) return '';
+  return crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
+}
+function isProviderAuthDead(name) {
+  const entry = _authDead.get(name);
+  if (!entry) return false;
+  if (Date.now() > entry.until || entry.fp !== _keyFingerprint(name)) { _authDead.delete(name); return false; }
+  return true;
+}
+function markProviderAuthDead(name, ms = 30 * 60 * 1000) {
+  if (!name || !PROVIDERS[name]) return;
+  if (isProviderAuthDead(name)) return;
+  _authDead.set(name, { until: Date.now() + ms, fp: _keyFingerprint(name) });
+  console.warn(`[providers] ${name} rejected its key (401/403) — skipping that lane for ${Math.round(ms / 60000)} min; provider config unchanged`);
+}
+function isAuthError(err) {
+  return /\b(401|403)\b|unauthoriz|invalid.?api.?key|authentication/i.test(String((err && err.message) || err || ''));
+}
 // A provider served by a process on this box (hackbot proxy, kiro gateway, ollama,
 // claude proxy) is only "available" when that port is actually listening. Reading the
 // kernel's socket table is synchronous and costs nothing, so the waterfall can skip a
@@ -330,6 +359,7 @@ function getWaterfallProvider(prefer) {
   for (const name of order) {
     if (!PROVIDERS[name]) continue;
     if (isProviderRateLimited(name)) continue;
+    if (isProviderAuthDead(name)) continue;
     if (isLaneCooling(name)) continue;
     if (!providerHasKey(name)) continue;
     return { provider: name, model: PROVIDERS[name].defaultModel };
@@ -1238,6 +1268,7 @@ function _nextWaterfallProvider(currentProvider) {
   for (let i = idx + 1; i < WATERFALL_ORDER.length; i++) {
     const name = WATERFALL_ORDER[i];
     if (isProviderRateLimited(name)) continue;
+    if (isProviderAuthDead(name)) continue;
     if (isLaneCooling(name)) continue;
     if (!providerHasKey(name)) continue;
     return { provider: name, model: PROVIDERS[name]?.defaultModel };
@@ -4129,18 +4160,54 @@ async function chatTimed(opts) {
     return result;
   } catch (err) {
     noteLaneLatency(opts && opts.provider, Date.now() - startedAt);
+    // Revoked or invalid key on the chosen lane: skip that lane and answer from
+    // the next healthy one in the same call, so a dead key never reaches a user.
+    if (opts && opts.provider && isAuthError(err)) {
+      markProviderAuthDead(opts.provider);
+      const next = _nextWaterfallProvider(opts.provider) || getWaterfallProvider();
+      if (next && next.provider !== opts.provider) {
+        try {
+          const retry = await _chatUnmeasured({ ...opts, provider: next.provider, model: next.model });
+          noteLaneLatency(next.provider, Date.now() - startedAt);
+          return { ...retry, fallback: true, fallbackFrom: opts.provider, authRetried: true };
+        } catch (e) {
+          console.warn(`[providers] ${opts.provider} key rejected and ${next.provider} failed too: ${e.message}`);
+        }
+      }
+    }
     throw err;
   }
 }
 async function* chatStreamTimed(opts) {
   const startedAt = Date.now();
   let finished = false;
+  let yieldedAny = false;
+  let servedBy = opts && opts.provider;
   try {
-    for await (const event of _chatStreamUnmeasured(opts)) yield event;
+    for await (const event of _chatStreamUnmeasured(opts)) { yieldedAny = true; yield event; }
     finished = true;
+  } catch (err) {
+    // Same rule as chatTimed, but only before the first byte has gone out —
+    // once a stream is flowing it cannot be restarted without duplicating text.
+    if (!yieldedAny && opts && opts.provider && isAuthError(err)) {
+      markProviderAuthDead(opts.provider);
+      const next = _nextWaterfallProvider(opts.provider) || getWaterfallProvider();
+      if (next && next.provider !== opts.provider) {
+        try {
+          servedBy = next.provider;
+          for await (const event of chatStreamTimed({ ...opts, provider: next.provider, model: next.model })) { yieldedAny = true; yield event; }
+          finished = true;
+          return;
+        } catch (e) {
+          console.warn(`[providers] ${opts.provider} key rejected and ${next.provider} stream failed too: ${e.message}`);
+          throw e;
+        }
+      }
+    }
+    throw err;
   } finally {
-    if (finished) noteLaneLatency((opts && opts.provider), Date.now() - startedAt);
+    if (finished) noteLaneLatency(servedBy, Date.now() - startedAt);
   }
 }
 
-module.exports = { chat: chatTimed, chatStream: chatStreamTimed, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv, isRefusal, GODMODE_PROMPT, UNRESTRICTED_SYSTEM_PROMPT, getOpenRouterKeys, nextOpenRouterKey };
+module.exports = { chat: chatTimed, chatStream: chatStreamTimed, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, markProviderAuthDead, isProviderAuthDead, WATERFALL_ORDER, claudeCliEnv, isRefusal, GODMODE_PROMPT, UNRESTRICTED_SYSTEM_PROMPT, getOpenRouterKeys, nextOpenRouterKey };

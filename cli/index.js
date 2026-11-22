@@ -414,6 +414,13 @@ async function offlineAgentLoop(history, sysPrompt, opts = {}) {
 
   let round = 0;
   let fullResponse = '';
+  // ── HakTerm thinking spinner for the offline/local loop ──
+  // The online path streams into a spinner; offline mode used to sit silent
+  // through every provider call and tool run. Start one per phase and stop it
+  // before writing text so the line never fights the answer.
+  let spin = null;
+  const spinStop = () => { if (spin) { try { spin.stop(); } catch {} spin = null; } };
+  const spinStart = (ph) => { try { spinStop(); spin = ui.thinkingAnimation('offline', ph); } catch { spin = null; } };
   // ── BUG FIX: Loop-detection state (was completely missing) ──
   // The offline agent loop had no loop detection at all — the model could
   // call the same tools with the same args repeatedly for 30 rounds.
@@ -433,7 +440,13 @@ async function offlineAgentLoop(history, sysPrompt, opts = {}) {
       ...history,
     ];
 
-    const aiResponse = await offlineLLMCall(messages, { maxTokens: 4096 });
+    spinStart('THINK');
+    let aiResponse;
+    try {
+      aiResponse = await offlineLLMCall(messages, { maxTokens: 4096 });
+    } finally {
+      spinStop();
+    }
     const parsed = tools.parseTools(aiResponse);
     const cleanedText = tools.stripTools(aiResponse);
 
@@ -493,7 +506,14 @@ async function offlineAgentLoop(history, sysPrompt, opts = {}) {
         ui.printScriptGrid(offlinePlanState.steps, null);
       }
     }
-    const { results } = await tools.execTools(parsed, trustCfg, null);
+    spinStart('ACT');
+    let toolRun;
+    try {
+      toolRun = await tools.execTools(parsed, trustCfg, null);
+    } finally {
+      spinStop();
+    }
+    const { results } = toolRun;
 
     // Feed tool results back into history
     let toolFeedback = '';
@@ -723,15 +743,23 @@ program
     try { await syncLocalMemoryToServer(server, apiKey); } catch (_) {}
 
     // ── Print banner via ui module ──
-    try {
-      const usbRoot = mem.findUSB();
-      ui.printBanner(usbRoot, trustCfg);
-    } catch {
-      // Fallback to simple banner if ui fails
-      console.log();
+    // `HAKSTER_NO_SPLASH=1` / `NO_SPLASH=1` skips the full splash for scripted
+    // or quick sessions. The one-line header still prints command hints.
+    const noSplash = process.env.HAKSTER_NO_SPLASH === '1' || process.env.NO_SPLASH === '1';
+    if (noSplash) {
       console.log(`${C.green}  👻 HAKSTERAI AGENT${C.reset}  ${C.gray}·${C.reset}  ${C.gray}autonomous mode${C.reset}`);
-      console.log(`${C.gray}  Commands: /help /tools /models /clear /exit${C.reset}`);
-      console.log();
+      console.log(`${C.gray}  Commands: /help /tools /models /clear /exit${C.reset}\n`);
+    } else {
+      try {
+        const usbRoot = mem.findUSB();
+        ui.printBanner(usbRoot, trustCfg);
+      } catch {
+        // Fallback to simple banner if ui fails
+        console.log();
+        console.log(`${C.green}  👻 HAKSTERAI AGENT${C.reset}  ${C.gray}·${C.reset}  ${C.gray}autonomous mode${C.reset}`);
+        console.log(`${C.gray}  Commands: /help /tools /models /clear /exit${C.reset}`);
+        console.log();
+      }
     }
 
     // ── Show offline mode status ──
@@ -796,17 +824,36 @@ program
           }
         } else if (server) {
           try {
-            const data = await fetchJson(`${server}/api/agent/mcp-status`, { headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {} });
-            const servers = data.servers || data || {};
+            const headers = apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {};
+            const data = await fetchJson(`${server}/api/agent/mcp-status`, { headers });
+            // The server answers an array of { name, initialized, lazy, toolCount, tools }.
+            // Older builds answered an object keyed by name — accept both, and never
+            // print a bare array index ("0", "1", …) as if it were a server name.
+            const raw = data.servers || data || [];
+            const list = Array.isArray(raw)
+              ? raw.map((s) => (s && typeof s === 'object' ? s : { name: String(s), tools: [] }))
+              : Object.entries(raw).map(([n, s]) => ({ name: n, ...(s && typeof s === 'object' ? s : { tools: [] }) }));
             let total = 0;
-            for (const [name, info] of Object.entries(servers)) {
-              const toolList = info.tools || info || [];
-              const count = Array.isArray(toolList) ? toolList.length : 0;
+            for (const info of list) {
+              const name = info.name || '?';
+              const toolList = Array.isArray(info.tools) ? info.tools : [];
+              const count = Number.isFinite(info.toolCount) ? info.toolCount : toolList.length;
               total += count;
-              console.log(`  ${C.green}${name}${C.reset} ${C.gray}(${count})${C.reset}`);
-              if (Array.isArray(toolList)) for (const t of toolList.slice(0, 5)) console.log(`    ${C.gray}•${C.reset} ${typeof t === 'string' ? t : t.name}`);
+              const state = info.initialized === false || info.lazy ? ' (lazy)' : '';
+              console.log(`  ${C.green}${name}${C.reset} ${C.gray}(${count} tools)${state}${C.reset}`);
+              for (const t of toolList.slice(0, 5)) console.log(`    ${C.gray}•${C.reset} ${typeof t === 'string' ? t : t.name}`);
             }
-            console.log(`  ${C.cyan}Total: ${total} tools${C.reset}`);
+            console.log(`  ${C.cyan}Total: ${total} tools from ${list.length} servers${C.reset}`);
+            // Configured but absent from the live list = a real gap, not laziness.
+            try {
+              const belt = await fetchJson(`${server}/api/mcp/servers`, { headers, timeoutMs: 8000 });
+              const configured = Array.isArray(belt && belt.servers) ? belt.servers : [];
+              const live = new Set(list.map((s) => String(s.name || '').toLowerCase()));
+              const missing = configured.filter((s) => s && s.name && !live.has(String(s.name).toLowerCase()));
+              if (missing.length) {
+                console.log(`  ${C.yellow}Configured but not connected:${C.reset} ${missing.map((s) => s.name).join(', ')}`);
+              }
+            } catch { /* optional */ }
           } catch (e) { console.log(`${C.red}${e.message}${C.reset}`); }
         }
         rl.prompt();

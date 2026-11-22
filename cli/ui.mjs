@@ -10,6 +10,9 @@ import { Box as Box16, Text as Text17, useInput as useInput5, useApp, useStdout 
 
 // src/agent.jsx
 import { EventEmitter } from "events";
+// Smartness + autolearn scoring and the services/ports inventory, ported from
+// the old CLI so the TUI shows the same two meters against live session events.
+import { createMeter, scanPorts, serviceStates, barCells, barColor, smartLabel } from "./smartness.mjs";
 var SERVER_URL = process.env.HAKSTER_URL || "ws://localhost:3579/ws";
 var API_URL = process.env.HAKSTER_API_URL || "http://localhost:3579";
 
@@ -94,6 +97,7 @@ var HaksterAgent = class extends EventEmitter {
     this._thinkingEndCb = null;
     this._toolStartCb = null;
     this._toolEndCb = null;
+    this._loopDetectedCb = null;
     this._planCb = null;
     this._diffCb = null;
     this._approvalCb = null;
@@ -125,6 +129,9 @@ var HaksterAgent = class extends EventEmitter {
   }
   onToolEnd(cb) {
     this._toolEndCb = cb;
+  }
+  onLoopDetected(cb) {
+    this._loopDetectedCb = cb;
   }
   onStatus(cb) {
     this._statusCb = cb;
@@ -277,12 +284,19 @@ var HaksterAgent = class extends EventEmitter {
       case "thinking_end":
         if (this._thinkingEndCb) this._thinkingEndCb();
         break;
+      // The server streams tool events as `tool_call_start` / `tool_call_result`;
+      // the older `tool_start` / `tool_result` spellings are kept as aliases.
+      case "tool_call_start":
       case "tool_start":
-        if (this._toolStartCb) this._toolStartCb(rest.tool || rest.name || content || "tool");
+        if (this._toolStartCb) this._toolStartCb(rest.tool_name || rest.tool || rest.name || content || "tool", rest.tool_args || rest.args || {});
         break;
+      case "tool_call_result":
       case "tool_end":
       case "tool_result":
-        if (this._toolEndCb) this._toolEndCb(rest.tool || rest.name || content || "tool", rest.result || content);
+        if (this._toolEndCb) this._toolEndCb(rest.tool_name || rest.tool || rest.name || content || "tool", rest.tool_result || rest.result || content || "", rest);
+        break;
+      case "loop_detected":
+        if (this._loopDetectedCb) this._loopDetectedCb(rest);
         break;
       case "status":
         if (this._statusCb) this._statusCb(content || rest);
@@ -482,12 +496,29 @@ function StatusBar({
   phase = "IDLE",
   cols = 80,
   sessionId = "",
-  mcp = null
+  mcp = null,
+  compact = false,
+  connected,
+  tokens
 }) {
+  if (compact) {
+    // One line only. The full StatusBar is already pinned at the top; rendering
+    // it a second time at the bottom looked like a duplicated output slot and
+    // pushed the transcript out of alignment.
+    const dot = connected === false ? "○" : "●";
+    return /* @__PURE__ */ jsx(Box, { width: cols, paddingX: 1, justifyContent: "space-between", children: [
+      /* @__PURE__ */ jsxs(Text, { key: "left", color: "gray", dim: true, children: [dot, " ", phase, " · ", model] }),
+      /* @__PURE__ */ jsxs(Text, { key: "right", color: "gray", dim: true, children: ["trust ", trustLevel, " · ", Number(tokens || 0).toLocaleString(), " tok"] })
+    ] });
+  }
   const trust = getTrustInfo(trustLevel);
   const ctxPct = Math.round(contextUsed / contextMax * 100);
   const ctxColor = ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green";
-  const ctxBar = "\u2588".repeat(Math.floor(ctxPct / 5)).padEnd(20, "\u2591");
+  // The ctx bar is the only flexible segment on the status row. At 60 cols a
+  // fixed 20-cell bar leaves zero gap, so the three sections render jammed
+  // together ("ctx 0%MCP 1/1 \u00b7 1[\u2591..."). Narrow terminals get half.
+  const ctxW = cols >= 70 ? 20 : 10;
+  const ctxBar = "\u2588".repeat(Math.floor(ctxPct / 100 * ctxW)).padEnd(ctxW, "\u2591");
   const mcpColor = !mcp ? "gray" : mcp.live >= mcp.total ? "green" : mcp.live > 0 ? "yellow" : "red";
   const left = `${model}\u2502${provider}`;
   const right = `${trust.label}\u2502${approvalMode}\u2502ctx ${ctxPct}%`;
@@ -495,17 +526,17 @@ function StatusBar({
   const phaseStr = `[${phase}]`;
   return /* @__PURE__ */ jsxs(Box, { flexDirection: "column", children: [
     /* @__PURE__ */ jsxs(Box, { width: cols, paddingX: 1, justifyContent: "space-between", children: [
-      /* @__PURE__ */ jsx(Text, { color: "cyan", bold: true, children: left }),
-      /* @__PURE__ */ jsx(Text, { color: "magenta", bold: true, children: phaseStr }),
-      /* @__PURE__ */ jsxs(Text, { color: "gray", dim: true, children: [
+      /* @__PURE__ */ jsx(Text, { key: "left", color: "cyan", bold: true, children: left }),
+      /* @__PURE__ */ jsx(Text, { key: "phase", color: "magenta", bold: true, children: phaseStr }),
+      /* @__PURE__ */ jsxs(Text, { key: "sid", color: "gray", dim: true, children: [
         "session:",
         sid
       ] })
     ] }),
     /* @__PURE__ */ jsxs(Box, { width: cols, paddingX: 1, justifyContent: "space-between", children: [
-      /* @__PURE__ */ jsx(Text, { color: trust.color, bold: true, children: right }),
-      mcp ? /* @__PURE__ */ jsx(Text, { color: mcpColor, bold: true, children: `MCP ${mcp.live}/${mcp.total} \u00b7 ${mcp.tools}` }) : null,
-      /* @__PURE__ */ jsxs(Text, { color: ctxColor, children: [
+      /* @__PURE__ */ jsx(Text, { key: "trust", color: trust.color, bold: true, children: right }),
+      mcp ? /* @__PURE__ */ jsx(Text, { key: "mcp", color: mcpColor, bold: true, children: `MCP ${mcp.live}/${mcp.total} \u00b7 ${mcp.tools}` }) : null,
+      /* @__PURE__ */ jsxs(Text, { key: "ctx", color: ctxColor, children: [
         "[",
         ctxBar,
         "]"
@@ -522,6 +553,7 @@ var COMMANDS = [
   "/help",
   "/status",
   "/mcp",
+  "/ports",
   "/model",
   "/provider",
   "/trust",
@@ -548,6 +580,7 @@ var DESCRIPTIONS = {
   "/help": "Show help overlay",
   "/status": "Server status",
   "/mcp": "MCP servers + tools",
+  "/ports": "Services + listening ports",
   "/model": "Switch model",
   "/provider": "Switch provider",
   "/trust": "Set trust level",
@@ -1457,7 +1490,7 @@ function QueueBox({ items = [], cols = 80 }) {
 import React11, { useState as useState5, useEffect as useEffect2 } from "react";
 import { Text as Text11 } from "ink";
 import { jsxs as jsxs11 } from "react/jsx-runtime";
-var FRAMES = ["❄", "✦", "✧", "✶", "✧", "✦"];
+var FRAMES = ["✳", "❄", "✦", "✧", "✶", "✧", "✦"];
 var FRAMES_DOTS = ["❅", "❄", "✧", "❄", "❅"];
 var SPINNER_COLORS = ["#58a6ff", "#80bfff", "#a8d5ff", "#c084fc", "#a8d5ff", "#80bfff"];
 function Spinner({ type = "braille", label = "", color }) {
@@ -1579,6 +1612,54 @@ function ThinkingBox({ thinking = "", phase = "", cols = 80, theme }) {
   ] });
 }
 
+// src/components/SystemPanel.jsx — the old CLI's two meters (smartness +
+// autolearn) and its services/ports line, in two fixed rows.
+function SystemPanel({ meters, services, scanOk, cols = 80 }) {
+  const barLen = cols >= 110 ? 20 : cols >= 90 ? 14 : 6;
+  // Narrow terminals: one truncating line instead of segments that would wrap
+  // into a second row and push the layout off the bottom of the screen.
+  const narrow = cols < 72;
+  const score = meters ? meters.score : 0;
+  const points = meters ? meters.points : 0;
+  const delta = meters ? meters.delta : 0;
+  const sc = barCells(score, 100, barLen);
+  const pc = barCells(points, 100, barLen);
+  const arrow = delta > 0 ? "▲" : delta < 0 ? "▼" : "◆";
+  const arrowColor = delta > 0 ? "#3fb950" : delta < 0 ? "#f85149" : "gray";
+  const up = services.filter((s) => s.up).length;
+  const svcLine = services.map((s) => `${s.up ? "●" : "○"} :${s.port} ${s.name}`).join("  ");
+  const svcColor = up === services.length ? "#3fb950" : up > 0 ? "#d29922" : "#f85149";
+  // Each row is ONE Text node with nested styled Text children. Sibling Texts
+  // in a row get their own Yoga columns, and when the row overflows Yoga
+  // narrows the first column — the label then wraps onto a second line and
+  // silently pushes `5` (and the row budget) out of view. As a single text
+  // node the row can only be one line: it truncates, it never wraps.
+  return /* @__PURE__ */ jsxs13(Box12, { flexDirection: "column", width: cols, paddingX: 1, flexShrink: 0, children: [
+    narrow
+      ? /* @__PURE__ */ jsx12(Text13, { key: "narrow", wrap: "truncate", children: `🧠 ${score}% ${arrow} ${smartLabel(score)}   ✦ ${points}p autolearn` })
+      : /* @__PURE__ */ jsxs13(Text13, { key: "bars", wrap: "truncate", children: [
+      /* @__PURE__ */ jsx12(Text13, { key: "b1", color: barColor("smart", score), bold: true, children: "🧠 " }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b2", color: barColor("smart", score), children: "█".repeat(sc.filled) }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b3", color: "gray", dim: true, children: "░".repeat(sc.empty) }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b4", bold: true, children: ` ${score}% ` }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b5", color: arrowColor, children: arrow }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b6", color: "gray", children: ` ${smartLabel(score)}` }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b7", children: "   " }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b8", color: barColor("points", points), bold: true, children: "✦ " }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b9", color: barColor("points", points), children: "█".repeat(pc.filled) }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b10", color: "gray", dim: true, children: "░".repeat(pc.empty) }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b11", bold: true, children: ` ${points}p` }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b12", color: "gray", children: " autolearn" })
+    ] }),
+    /* @__PURE__ */ jsxs13(Text13, { key: "svcs", wrap: "truncate", children: [
+      /* @__PURE__ */ jsx12(Text13, { key: "svc-label", color: "gray", dim: true, children: `services ${up}/${services.length}  ` }),
+      scanOk
+        ? /* @__PURE__ */ jsx12(Text13, { key: "svc-list", color: svcColor, children: svcLine })
+        : /* @__PURE__ */ jsx12(Text13, { key: "svc-scan", color: "yellow", children: "scan unavailable (ss not readable)" })
+    ] })
+  ] });
+}
+
 // src/components/InputBox.jsx
 import React14, { useState as useState8, useEffect as useEffect5, useRef as useRef2 } from "react";
 import { Box as Box13, Text as Text14, useInput as useInput4, useStdin } from "ink";
@@ -1591,42 +1672,27 @@ function InputBox({
   cols = 80,
   disabled = false,
   queueCount = 0,
+  thinking = "",
+  phase = "",
   theme
 }) {
-  const { isRawModeSupported } = useStdin();
   const cursorRef = useRef2(value.length);
-  useInput4((input, key) => {
-    if (disabled) return;
-    if (key.return && !key.shift) {
-      if (onSubmit) onSubmit(value);
-      return;
-    }
-    if (key.backspace || key.delete) {
-      const newVal = value.slice(0, -1);
-      if (onChange) onChange(newVal);
-      return;
-    }
-    if (key.ctrl && input === "u") {
-      if (onChange) onChange("");
-      return;
-    }
-    if (key.ctrl && input === "w") {
-      const parts = value.split(/\s+/);
-      parts.pop();
-      const newVal = parts.join(" ");
-      if (onChange) onChange(newVal);
-      return;
-    }
-    if (input && !key.ctrl && !key.meta && !key.escape && input.length === 1) {
-      const newVal = value + input;
-      if (onChange) onChange(newVal);
-      return;
-    }
-  });
+  // Keystrokes are handled once, by App's useInput. InputBox used to install a
+  // second useInput that appended the same character again and fired onSubmit
+  // alongside App's key.return — that is what produced duplicate input/output.
   const borderColor = disabled ? "gray" : theme?.primary || "green";
   const labelColor = disabled ? "gray" : theme?.primary || "green";
   const promptChar = disabled ? "\u25CB" : "\u25B6";
   const displayValue = value || "";
+  // The hint row is laid out here, not by space-between: two sibling Texts on a
+  // 60-col terminal collide ("/comma\u25CF ready") and a truncated child can
+  // overflow by the ellipsis, adding an empty row that blows the box budget.
+  // One computed string always fits innerW = cols - 4 (border + paddingX).
+  const hintFull = "\u21B5 send  \u21E7\u21B5 newline  \u2303U clear  \u2303W del-word  /commands  ?help";
+  const hintRight = disabled ? "\u23F8 busy" : "\u25CF ready";
+  const hintRoom = Math.max(4, cols - 4 - hintRight.length - 2);
+  const hintLeft = hintFull.length <= hintRoom ? hintFull.padEnd(hintRoom) : hintFull.slice(0, Math.max(0, hintRoom - 1)) + "\u2026";
+  const hintLine = hintLeft + " " + hintRight;
   const showCursor = !disabled;
   return /* @__PURE__ */ jsxs14(
     Box13,
@@ -1638,6 +1704,9 @@ function InputBox({
       width: cols,
       flexShrink: 0,
       children: [
+        // HakTerm-style thinking spinner sits in the input bar, not in a
+        // separate row above the transcript.
+        /* @__PURE__ */ jsx13(ThinkingBox, { thinking, phase, cols, theme }),
         queueCount > 0 && /* @__PURE__ */ jsxs14(Box13, { justifyContent: "space-between", children: [
           /* @__PURE__ */ jsxs14(Text14, { color: "cyan", bold: true, children: [
             "\u{1F4E8} ",
@@ -1653,14 +1722,11 @@ function InputBox({
             promptChar,
             " "
           ] }),
-          /* @__PURE__ */ jsx13(Text14, { color: disabled ? "gray" : "white", children: displayValue }),
+          /* @__PURE__ */ jsx13(Text14, { color: disabled ? "gray" : "white", wrap: "truncate", children: displayValue }),
           showCursor && displayValue.length < cols - 6 && /* @__PURE__ */ jsx13(Text14, { color: labelColor, children: "\u2588" }),
-          !displayValue && /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: placeholder })
+          !displayValue && /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, wrap: "truncate", children: placeholder })
         ] }),
-        /* @__PURE__ */ jsxs14(Box13, { justifyContent: "space-between", children: [
-          /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: "\u21B5 send  \u21E7\u21B5 newline  \u2303U clear  \u2303W del-word  /commands  ?help" }),
-          /* @__PURE__ */ jsx13(Text14, { color: "gray", dim: true, children: disabled ? "\u23F8 busy" : "\u25CF ready" })
-        ] })
+        /* @__PURE__ */ jsx13(Text14, { key: "hint", color: "gray", dim: true, wrap: "truncate", children: hintLine })
       ]
     }
   );
@@ -1883,8 +1949,8 @@ function App() {
   const { stdout } = useStdout();
   const cols = stdout?.columns || 80;
   const rows = stdout?.rows || 24;
-  const outputHeight = Math.max(5, rows - 10);
-  const [showSplash, setShowSplash] = useState9(true);
+  // `HAKSTER_NO_SPLASH=1` / `NO_SPLASH=1` boots straight into the TUI.
+  const [showSplash, setShowSplash] = useState9(!(process.env.HAKSTER_NO_SPLASH === "1" || process.env.NO_SPLASH === "1"));
   const [themeName, setThemeName] = useState9("default");
   const theme = useMemo4(() => THEMES[themeName] || THEMES.default, [themeName]);
   const [output, setOutput] = useState9([]);
@@ -1911,8 +1977,24 @@ function App() {
   const [contextMax, setContextMax] = useState9(128e3);
   const [contextChars, setContextChars] = useState9(0);
   const [mcp, setMcp] = useState9(null);
+  // ── Smartness + autolearn meters (same scoring as the old CLI) ──
+  const meterRef = useRef3(null);
+  if (!meterRef.current) meterRef.current = createMeter();
+  const [meters, setMeters] = useState9(() => meterRef.current.snapshot());
+  const [ports, setPorts] = useState9({ ok: false, ports: [], procs: {}, at: 0 });
+  const pendingToolArgs = useRef3(new Map());
+  const hadLoopBreakRef = useRef3(false);
+  const syncMeters = () => setMeters(meterRef.current.snapshot());
   const inputRef = useRef3("");
   const batchRef = useRef3({ timer: null, text: "" });
+  // Height budget: top StatusBar 2, system panel 2 (smartness/autolearn + services),
+  // InputBox 5 (border 2 + prompt + help, plus the spinner row when active),
+  // compact bottom bar 1, and one row each for the tool strip and queue. The old
+  // fixed `rows - 10` ignored those extras, so the bottom bars were pushed
+  // off-screen and the transcript clipped.
+  const spinnerActive = Boolean(thinkingText) || ["THINK", "PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE"].includes(String(status.phase || "").toUpperCase());
+  const chromeRows = 2 + 2 + 5 + 1 + (spinnerActive ? 1 : 0) + (tools.length > 0 ? 1 : 0) + (queue && queue.length ? 1 : 0);
+  const outputHeight = Math.max(3, rows - chromeRows);
   const maxScroll = Math.max(0, output.length - outputHeight);
   const effectiveOffset = Math.min(maxScroll, scrollOffset);
   const olderAbove = maxScroll - effectiveOffset;
@@ -1981,10 +2063,10 @@ function App() {
       }
       const parts = full.split("\n");
       for (let i = 0; i < parts.length - 1; i++) {
-        setOutput((prev) => {
-          const filtered = prev.filter((e) => e.type !== "thinking");
-          return [...filtered, { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT);
-        });
+        // Append each completed reasoning line once. This used to filter every
+        // earlier "thinking" entry first, so the transcript kept replacing the
+        // previous block and the same tail reappeared in several slots.
+        setOutput((prev) => [...prev, { type: "thinking", text: parts[i] }].slice(-MAX_OUTPUT));
       }
       liveThinkRef.current = parts[parts.length - 1];
       forceTick((n) => n + 1);
@@ -1994,7 +2076,14 @@ function App() {
       thinkBatchRef.current.timer = setTimeout(flushThinking, TOKEN_BATCH_MS);
     }
   }, [flushThinking]);
-  const _working = thinking || ["PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE", "THINK"].includes(phase);
+  const _working = thinking || ["PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE", "THINK"].includes(String(phase || "").toUpperCase());
+  // One switch for "the thinking is over". It must clear the text as well as
+  // the flag: ThinkingBox is active when it has any thinking text, so leaving
+  // the last tail behind kept the spinner running after the answer arrived.
+  const stopThinking = () => {
+    setThinking(false);
+    setThinkingText("");
+  };
   useEffect6(() => {
     const id = setInterval(() => setBlink((b) => !b), 480);
     return () => clearInterval(id);
@@ -2004,30 +2093,40 @@ function App() {
     agent_default.onToken((token) => appendToken(token));
     agent_default.onThinking((text) => {
       setThinking(true);
-      setThinkingText(text);
-      setOutput((prev) => {
-        const filtered = prev.filter((e) => e.type !== "thinking");
-        return [...filtered, { type: "thinking", text }].slice(-MAX_OUTPUT);
-      });
+      // `text` is a chunk, not the whole reasoning. It is buffered once by
+      // appendThinking below; pushing it into output here as well rendered every
+      // reasoning line twice (transcript + the live thinking tail).
+      const tail = String(text || "").split("\n").pop().trim();
+      if (tail) setThinkingText(tail.length > 160 ? tail.slice(-160) : tail);
       appendThinking(text);
     });
     agent_default.onThinkingEnd(() => {
-      setThinking(false);
-      setThinkingText("");
+      stopThinking();
       flushThinking();
       if (liveThinkRef.current) {
         const t2 = liveThinkRef.current;
         liveThinkRef.current = "";
-        setOutput((prev) => {
-          const filtered = prev.filter((e) => e.type !== "thinking");
-          return [...filtered, { type: "thinking", text: t2 }].slice(-MAX_OUTPUT);
-        });
+        // Append the unfinished tail of this reasoning block. Do not filter the
+        // earlier thinking lines out: that erased the block and made the next
+        // reasoning chunk look like a duplicate slot.
+        setOutput((prev) => [...prev, { type: "thinking", text: t2 }].slice(-MAX_OUTPUT));
       }
     });
-    agent_default.onToolStart((name) => {
+    agent_default.onToolStart((name, args) => {
+      pendingToolArgs.current.set(name, args || {});
       setTools((p) => [...p, { name, status: "running", start: Date.now(), result: "" }].slice(-MAX_TOOLS));
     });
-    agent_default.onToolEnd((name, result) => {
+    agent_default.onToolEnd((name, result, meta) => {
+      // Score the call with the old CLI's rules: the server tags failures as
+      // `Error:` / `❌`, so that is the same success test it uses upstream.
+      try {
+        const args = (meta && meta.tool_args) || pendingToolArgs.current.get(name) || {};
+        pendingToolArgs.current.delete(name);
+        const text = String(result == null ? "" : result);
+        const ok = !/^Error[:\n]|^❌/i.test(text.trim());
+        meterRef.current.tool(name, args, ok, text);
+        syncMeters();
+      } catch { /* metering must never break the tool strip */ }
       setTools((p) => {
         const idx = [...p].reverse().findIndex((t2) => t2.name === name && t2.status === "running");
         if (idx === -1) return [...p, { name, status: "done", result: String(result || "").slice(0, 80), start: Date.now() }].slice(-MAX_TOOLS);
@@ -2038,6 +2137,12 @@ function App() {
         next[real] = { name, status: "done", result: String(result || "").slice(0, 80), duration: dur };
         return next;
       });
+    });
+    // A loop break is a real penalty in the old CLI (-10); it also suppresses
+    // the clean-finish reward for the rest of this turn.
+    agent_default.onLoopDetected(() => {
+      hadLoopBreakRef.current = true;
+      try { meterRef.current.bump(-10); syncMeters(); } catch {}
     });
     agent_default.onStatus((s) => {
       setStatus((p) => ({ ...p, ...s }));
@@ -2089,11 +2194,20 @@ function App() {
         liveTextRef.current = "";
         setOutput((p) => [...p, { type: "assistant", text: t2 }].slice(-MAX_OUTPUT));
       }
-      // Drop the stale "thinking" line: the turn is over. (This block used
-      // an undefined `t`, which threw on every done/error and killed the TUI.)
-      setOutput((prev) => prev.filter((e) => e.type !== "thinking"));
+      // Keep the reasoning that actually streamed; only close the live tail.
+      if (liveThinkRef.current) {
+        const t2 = liveThinkRef.current;
+        liveThinkRef.current = "";
+        setOutput((p) => [...p, { type: "thinking", text: t2 }].slice(-MAX_OUTPUT));
+      }
       setOutput((p) => [...p, { type: "error", text: typeof err === "string" ? err : err?.message || "Unknown error" }].slice(-MAX_OUTPUT));
-      setThinking(false);
+      // A failed turn still has to end the spinner now — the error is final.
+      stopThinking();
+      setPhase("done");
+      setStatus((p) => ({ ...p, phase: "done" }));
+      // No clean-finish reward on a failed turn; the next turn starts fresh.
+      hadLoopBreakRef.current = false;
+      try { meterRef.current.resetTask(); syncMeters(); } catch {}
     });
     agent_default.onDone(() => {
       flushTokens();
@@ -2103,11 +2217,23 @@ function App() {
         liveTextRef.current = "";
         setOutput((p) => [...p, { type: "assistant", text: t2 }].slice(-MAX_OUTPUT));
       }
-      // Drop the stale "thinking" line: the turn is over. (This block used
-      // an undefined `t`, which threw on every done/error and killed the TUI.)
-      setOutput((prev) => prev.filter((e) => e.type !== "thinking"));
-      setThinking(false);
+      // Keep the reasoning that actually streamed; only close the live tail.
+      if (liveThinkRef.current) {
+        const t2 = liveThinkRef.current;
+        liveThinkRef.current = "";
+        setOutput((p) => [...p, { type: "thinking", text: t2 }].slice(-MAX_OUTPUT));
+      }
+      stopThinking();
+      setPhase("done");
       setStatus((p) => ({ ...p, phase: "done" }));
+      // clean-finish (+8) only when a real answer landed and no loop break fired
+      // during the turn — the old CLI's rule, same reward.
+      try {
+        if (!hadLoopBreakRef.current) meterRef.current.bump(8);
+        hadLoopBreakRef.current = false;
+        meterRef.current.resetTask();
+        syncMeters();
+      } catch {}
     });
     if (agent_default.contextMax) setContextMax(agent_default.contextMax);
     const ctxInterval = setInterval(() => {
@@ -2122,6 +2248,19 @@ function App() {
       clearInterval(ctxInterval);
     };
   }, [showSplash, appendToken]);
+  // Services/ports: one bounded `ss -tlnp` on boot and every 30s. Read-only,
+  // local, and independent of the agent turn.
+  useEffect6(() => {
+    if (showSplash) return;
+    let alive = true;
+    const run = async () => {
+      const scan = await scanPorts();
+      if (alive) setPorts(scan);
+    };
+    run();
+    const id = setInterval(run, 30000);
+    return () => { alive = false; clearInterval(id); };
+  }, [showSplash]);
   useEffect6(() => {
     if (showSplash) return;
     let alive = true;
@@ -2154,6 +2293,25 @@ function App() {
       case "/status":
         setOutput((p) => [...p, { type: "system", text: `Model: ${status.model} | Provider: ${status.provider || "ollama"} | Phase: ${phase} | Trust: ${status.trust} | Tokens: ${status.tokens} | Context chars: ${contextChars.toLocaleString()} | MCP: ${mcpSummary(mcp) ? `${mcpSummary(mcp).live}/${mcpSummary(mcp).total} servers, ${mcpSummary(mcp).tools} tools` : "unavailable"}` }].slice(-MAX_OUTPUT));
         break;
+      case "/ports": {
+        // Full old-CLI ONLINE PORTS panel: expected services, then every
+        // listening TCP port the scan saw. Read-only.
+        const scan = await scanPorts();
+        setPorts(scan);
+        const svc = serviceStates(scan);
+        const up = svc.filter((s) => s.up).length;
+        const lines = [];
+        if (!scan.ok) lines.push("ss unavailable — port scan could not run");
+        lines.push(`Tracked services online ${up}/${svc.length}`);
+        for (const s2 of svc) {
+          lines.push(`${s2.up ? "●" : "○"} :${s2.port} ${s2.name}${s2.proc ? ` (${s2.proc})` : ""}  ${s2.proto}://localhost:${s2.port}${s2.up ? "" : "  down"}`);
+        }
+        lines.push(`Listening TCP ports (${scan.ports.length}): ${scan.ports.map((n) => `:${n}`).join("  ") || "none"}`);
+        const m2 = meters;
+        lines.push(`Smartness ${m2.score}% ${m2.delta > 0 ? "▲" : m2.delta < 0 ? "▼" : "◆"} ${smartLabel(m2.score)}  ·  Autolearn ${m2.points}p  ·  ${m2.successes}W/${m2.failures}L`);
+        setOutput((p) => [...p, { type: "system", text: lines.join("\n") }].slice(-MAX_OUTPUT));
+        break;
+      }
       case "/model":
         if (arg) {
           agent_default.setModel?.(arg);
@@ -2279,7 +2437,7 @@ function App() {
       default:
         setOutput((p) => [...p, { type: "system", text: `Unknown command: ${command}` }].slice(-MAX_OUTPUT));
     }
-  }, [approval, status, phase, exit, mcp, contextChars]);
+  }, [approval, status, phase, exit, mcp, contextChars, meters]);
   useInput5((raw, key) => {
     if (showSplash) return;
     if (showModelDialog || showCommandsDialog) return;
@@ -2374,6 +2532,15 @@ function App() {
       setInput((p) => p.slice(0, -1));
       return;
     }
+    // These lived in InputBox's duplicate useInput before it was removed.
+    if (key.ctrl && raw === "u") {
+      setInput("");
+      return;
+    }
+    if (key.ctrl && raw === "w") {
+      setInput((p) => p.replace(/\s*\S+\s*$/, ""));
+      return;
+    }
     if (key.ctrl && raw === "c") {
       exit();
       return;
@@ -2402,7 +2569,7 @@ function App() {
         mcp: mcpSummary(mcp)
       }
     ),
-    /* @__PURE__ */ jsxs17(Box16, { flexDirection: "column", height: outputHeight + 1, width: cols, overflow: "hidden", children: [
+    /* @__PURE__ */ jsxs17(Box16, { flexDirection: "column", height: outputHeight, width: cols, flexShrink: 0, justifyContent: "flex-end", overflow: "hidden", children: [
       olderAbove > 0 && /* @__PURE__ */ jsxs17(Text17, { color: theme.primary, bold: true, reverse: true, children: [
         " \u2191 ",
         olderAbove,
@@ -2439,13 +2606,9 @@ function App() {
         " line(s) below (newer) \u2014 \u2193 to return to bottom "
       ] })
     ] }),
-    /* @__PURE__ */ jsx16(ThinkingBox, { thinking: thinkingText, phase: status.phase, cols, theme }),
-    output.length > 0 && /* @__PURE__ */ jsx16(MessageGrid, { messages: output.slice(-8).map((o) => ({
-      role: o.type === "user" ? "user" : o.type === "thinking" ? "thinking" : o.type === "tool" ? "tool" : "assistant",
-      content: o.text || o.content || "",
-      model: o.model,
-      timestamp: o.timestamp
-    })), cols, theme }),
+    // MessageGrid used to re-render the last 8 output entries as cards below
+    // the transcript, so every AI answer appeared in two slots. The transcript
+    // above is the single source; the thinking spinner now lives in InputBox.
     tools.length > 0 && /* @__PURE__ */ jsxs17(Box16, { width: cols, flexDirection: "row", overflow: "hidden", children: [
       /* @__PURE__ */ jsx16(Text17, { color: "gray", dim: true, children: "tools: " }),
       tools.slice(-6).map((t2, i) => /* @__PURE__ */ jsxs17(Text17, { color: t2.status === "running" ? "yellow" : theme.success, children: [
@@ -2457,6 +2620,8 @@ function App() {
     ] }),
     queue && queue.length > 0 && /* @__PURE__ */ jsx16(QueueBox, { items: queue, cols }),
     showPlan && plan && /* @__PURE__ */ jsx16(PlanDisplay, { plan, cols }),
+    // The old CLI's SMARTNESS / ONLINE PORTS panels, two rows above the input.
+    /* @__PURE__ */ jsx12(SystemPanel, { key: "system-panel", meters, services: serviceStates(ports), scanOk: ports.ok, cols, theme }),
     /* @__PURE__ */ jsx16(
       InputBox,
       {
@@ -2471,6 +2636,8 @@ function App() {
         cols,
         disabled: status.phase === "thinking" || status.phase === "working" || !!approval,
         queueCount: queue?.length || 0,
+        thinking: thinkingText,
+        phase: status.phase,
         theme
       }
     ),
@@ -2479,10 +2646,11 @@ function App() {
       {
         model: status.model,
         phase: status.phase,
-        trust: status.trust,
+        trustLevel: status.trust,
         cols,
         connected: status.connected,
-        tokens: status.tokens
+        tokens: status.tokens,
+        compact: true
       }
     ),
     showDiff && diffData && /* @__PURE__ */ jsx16(DiffPreview, { diff: diffData.text || diffData, cols, onApprove: diffData.onApprove, onDeny: diffData.onDeny }),
@@ -2579,17 +2747,6 @@ function App() {
         }
       }
     ),
-    /* @__PURE__ */ jsxs17(Box16, { width: cols, borderStyle: "bold", borderColor: _working ? blink ? theme.secondary : theme.primary : theme.primary, paddingX: 1, children: [
-      /* @__PURE__ */ jsxs17(Text17, { color: phase === "ACT" ? theme.warning : theme.primary, bold: true, reverse: true, children: [
-        _working ? blink ? "\u25C6" : "\u25C7" : phase === "ACT" ? "\u25C6" : ">",
-        " "
-      ] }),
-      /* @__PURE__ */ jsxs17(Text17, { color: "white", bold: true, children: [
-        input,
-        blink ? "\u258D" : " "
-      ] }),
-      /* @__PURE__ */ jsx16(Text17, { color: "gray", dim: true, children: showSlashMenu ? "" : "  (/help, Tab for commands, Ctrl+C to exit)" })
-    ] })
   ] });
 }
 

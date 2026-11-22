@@ -67,6 +67,13 @@ import Layout from '../../layouts/Layout.astro';
       </div>
       <div class="pl-status" id="pl-status" role="status" aria-live="polite">Loading live numbers…</div>
     </div>
+    <section class="pl-section">
+      <h2>Locked rate card &middot; live from junkalot.co</h2>
+      <div class="pl-card" id="pl-rates">
+        <p class="pl-empty">Reading the locked rate card from Junkalot&hellip;</p>
+      </div>
+    </section>
+
     <p class="pl-note">Every number here is read from what actually happened: the HaksterAI payment and usage ledgers on this box, and PhantomIDE's own profit ledger on Parrot. Nothing is estimated into a number that was not measured, nothing is billed, and no plan, model or route is changed by this page.</p>
 
     <section class="pl-section">
@@ -363,6 +370,37 @@ import Layout from '../../layouts/Layout.astro';
               : '');
         } else {
           jk.innerHTML = '<h3>Junkalot · Mr Ed coach <span class="pl-badge off">NO DATA</span></h3><p class="pl-empty">Junkalot\'s coach usage was not readable through PhantomIDE. Nothing was estimated in its place.</p>';
+        }
+
+        // Locked rate card, cloud quota, demand index and the per-client meter — read live from
+        // Junkalot on every poll (no cache). Owner only; never rendered on junkalot.co (2026-11-22).
+        var ratesEl = document.getElementById('pl-rates');
+        var rt = d.rates;
+        if (rt && rt.rateInPerMTok && rt.rateOutPerMTok) {
+          var q = rt.quota || null;
+          var idx = rt.index || null;
+          var mid = ' \u00b7 ';
+          ratesEl.innerHTML =
+            '<h3>Rates locked <span class="pl-badge ' + (d.ratesState === 'live' ? 'live' : 'off') + '">' +
+              (d.ratesState === 'live' ? 'LIVE' : 'STALE') + mid + 'source ' + (rt.source || 'junkalot.co') + '</span></h3>' +
+            '<p style="font:700 22px/1.25 ui-monospace,monospace;color:#f1f5f9;margin:2px 0 12px;font-variant-numeric:tabular-nums;">' +
+              '$' + Number(rt.rateInPerMTok).toFixed(2) + ' in' + mid + '$' + Number(rt.rateOutPerMTok).toFixed(2) + ' out <span style="font-size:12px;color:#94a3b8;">per Mtok</span></p>' +
+            row('Plan anchor', '$' + Number(rt.planUsdMonth || 0).toFixed(0) + '/mo' + mid + compact(rt.allowanceInTokensPerMonth || 0) + ' in + ' + compact(rt.allowanceOutTokensPerMonth || 0) + ' out tokens') +
+            row('Cost base', [rt.provider, rt.model].filter(Boolean).join(' ') + ' (quota plan)') +
+            row('Margin', rt.marginPct != null ? Number(rt.marginPct).toFixed(1) + '%' : 'quota-based, never a token price') +
+            (q ? row('Cloud quota ' + (q.asOf || ''), compact(q.weeklyRequests) + ' requests this week (' + Number(q.weeklyUsedPct).toFixed(1) + '% of ~' + compact(q.weeklyQuotaEstimate) + ')' + mid + 'headroom ~' + compact(q.headroomRequests)) : '') +
+            (q && Array.isArray(q.fallbacks) && q.fallbacks.length ? row('Behind it', q.fallbacks.join(', ')) : '') +
+            (idx ? row('Demand index', String(idx.label || '') + ' (' + String(idx.direction || '') + ')' + mid + Number(idx.recentPerDay || 0).toFixed(2) + ' req/day') : '') +
+            '<p class="pl-empty" style="margin:8px 0 2px;">Advice only. The index never changes a rate, a bill, a route or a model.</p>' +
+            '<h3 style="margin-top:14px;">Clients on the meter</h3>' +
+            ((rt.clients || []).length
+              ? (rt.clients || []).map(function (c) {
+                  return row(c.name, '$' + Number(c.meterUsd30d || 0).toFixed(2) + mid + Number(c.shareOfPlanPct || 0).toFixed(2) + '% of $' + Number(c.planUsdMonth || 0) + mid + compact(c.turns30d || 0) + ' turns');
+                }).join('')
+              : '<p class="pl-empty">No client rows on the meter yet.</p>') +
+            '<p class="pl-empty" style="margin-top:10px;">Read live from junkalot.co on every 30 s poll and never cached. Owner only: this card is not rendered anywhere on the client site. Meter, not an invoice, and nothing here charges anyone.</p>';
+        } else {
+          ratesEl.innerHTML = '<p class="pl-empty">The locked rate card could not be read live from junkalot.co just now (' + (d.ratesState || 'unavailable') + '), so no figure is shown rather than a stale one.</p>';
         }
 
         // Junkalot client value — owner record only, never rendered on junkalot.co.

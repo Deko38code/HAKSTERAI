@@ -1,0 +1,335 @@
+---
+// Shared update widget for every HaksterAI page that does not render
+// Layout.astro (the layout's Phantom applet owns its own pages).
+//
+// Behaviour is the /miniforge widget, owner-specified 2026-11-22:
+//   "i shouldnt have to click it myself should auto open widget to apply updates"
+// Closed on load; the moment /api/version reports a build newer than this
+// page's own data-hakster-build, it opens the card by itself, counts down and
+// refreshes the page itself. Reload now applies it at once; a distinctly newer
+// push reopens the card even after a dismiss. Auto-refresh is capped at two per
+// tab so a mismatched build id can never loop, and it never reloads while
+// someone is typing (same rule as the Phantom applet). §18: 20 px gutter under
+// 480 px; it publishes its measured height as --phantom-applet-h.
+//
+// The page must stamp <html data-hakster-build={haksterBuildId}>.
+---
+<aside id="phantom-update" data-mode="hidden" role="status" aria-live="polite" hidden>
+  <div class="wu-card">
+    <button class="wu-x" id="wu-x" type="button" aria-label="Dismiss update notice">✕</button>
+    <div class="wu-title"><span class="wu-badge" aria-hidden="true"><span class="wu-ghost" id="wu-ghost">👻</span></span> PhantomIDE update</div>
+    <p class="wu-text" id="wu-text">A new build has been pushed. Reload to pick it up.</p>
+    <div class="wu-bar" id="wu-bar" role="progressbar" aria-label="Update progress"
+         aria-valuemin="0" aria-valuemax="100"
+         aria-valuetext="Update ready — refreshing shortly."><span class="wu-fill" id="wu-fill"></span></div>
+    <div class="wu-bar-row" id="wu-bar-row"><span id="wu-bar-label">Update ready</span><span id="wu-bar-pct" hidden>0%</span></div>
+    <div class="wu-actions">
+      <button class="wu-reload" id="wu-reload" type="button">Update now</button>
+      <button class="wu-later" id="wu-later" type="button">Later</button>
+    </div>
+  </div>
+  <button class="wu-tab" id="wu-tab" type="button" title="Update ready — open">Update ready</button>
+</aside>
+
+<style>
+  #phantom-update {
+    position: fixed; right: max(8px, env(safe-area-inset-right)); bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 1998; font: 12px/1.4 Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; color: #e8e8e8;
+  }
+  #phantom-update[hidden] { display: none !important; }
+  #phantom-update .wu-card {
+    position: relative; width: min(420px, calc(100vw - 16px)); box-sizing: border-box;
+    border: 1px solid #2b2b2b; border-radius: 12px; background: #0d0d0d;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, .65); padding: 14px 16px 15px;
+  }
+  #phantom-update .wu-x {
+    position: absolute; top: 8px; right: 8px; width: 28px; height: 28px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid #2f2f2f; border-radius: 8px; background: #171717;
+    color: #cfcfcf; font: 700 15px/1 system-ui, sans-serif; cursor: pointer;
+  }
+  #phantom-update .wu-x:hover, #phantom-update .wu-x:focus-visible { background: #262626; color: #fff; border-color: #3a3a3a; outline: none; }
+  #phantom-update .wu-title { display: flex; align-items: center; gap: 8px; padding-right: 34px; font-weight: 800; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; }
+  /* The PhantomIDE ghost is the logo everywhere we show this widget. */
+  #phantom-update .wu-badge {
+    width: 26px; height: 26px; border-radius: 7px; flex: none;
+    border: 1px solid #2f2f2f; background: #151515;
+    display: grid; place-items: center; font-size: 16px; line-height: 1;
+  }
+  /* Copied word for word from Junkalot's update toast (owner, 2026-11-22:
+     "junkalot.co has same spinner / copy code") — src/app/globals.css:
+       @keyframes phantom-spin { to { transform: rotate(360deg); } }
+       .phantom-spin { animation: phantom-spin 1.1s linear infinite; }
+     and the card ghost's green glow from src/components/UpdateToast.tsx
+     (color #00ff41, text-shadow 0 0 18px rgba(0,255,65,.75)). The ghost turns
+     while this card is loading an update and stops when the work stops (docked
+     to Later or waiting for a click). */
+  @keyframes phantom-spin { to { transform: rotate(360deg); } }
+  #phantom-update .phantom-spin { animation: phantom-spin 1.1s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { #phantom-update .phantom-spin { animation: none !important; } }
+  #phantom-update .wu-ghost {
+    display: inline-block; line-height: 1;
+    color: #00ff41; text-shadow: 0 0 18px rgba(0, 255, 65, .75);
+  }
+  #phantom-update .wu-dot { width: 8px; height: 8px; border-radius: 50%; background: #00ff41; box-shadow: 0 0 9px rgba(0, 255, 65, .85); flex: none; }
+  #phantom-update .wu-text { margin: 9px 0 9px; color: #9aa0a6; font-size: 12.5px; line-height: 1.45; }
+  /* Work is real but not measurable from the page, so the bar runs
+     indeterminate — no invented percentage (§10). */
+  #phantom-update .wu-bar {
+    position: relative; height: 4px; border-radius: 999px; overflow: hidden;
+    background: #1f1f1f; margin: 0 0 7px;
+  }
+  #phantom-update .wu-fill {
+    position: absolute; top: 0; left: 0; height: 100%; width: 1%; border-radius: 999px;
+    background: #00ff41; box-shadow: 0 0 8px rgba(0, 255, 65, .7);
+    transition: width .18s linear;
+  }
+  /* No measured number available → sweep instead of a fake percentage. */
+  #phantom-update .wu-fill.wu-indet { width: 100% !important; animation: wu-slide 1.2s ease-in-out infinite; }
+  @keyframes wu-slide { 0% { left: -38%; } 100% { left: 100%; } }
+  #phantom-update .wu-bar-row {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    margin: 0 0 11px; font-size: 11.5px; color: #b4b4b4;
+  }
+  #phantom-update .wu-bar-row #wu-bar-label { color: #ececec; font-weight: 600; }
+  #phantom-update .wu-bar-row #wu-bar-pct { font-variant-numeric: tabular-nums; font-weight: 700; color: #00ff41; }
+  #phantom-update .wu-bar-row #wu-bar-pct[hidden] { display: none; }
+  #phantom-update[data-mode="tab"] .wu-bar,
+  #phantom-update[data-mode="tab"] .wu-bar-row { display: none; }
+  #phantom-update .wu-actions { display: flex; align-items: stretch; gap: 8px; }
+  #phantom-update .wu-reload {
+    flex: 1 1 auto; width: auto; min-height: 40px; padding: 10px 12px; border-radius: 9px;
+    border: 1px solid rgba(0, 255, 65, .4); background: rgba(0, 255, 65, .1);
+    color: #00ff41; font: 800 13px/1 Inter, system-ui, sans-serif; cursor: pointer;
+  }
+  #phantom-update .wu-reload:hover, #phantom-update .wu-reload:focus-visible { background: rgba(0, 255, 65, .2); border-color: rgba(0, 255, 65, .7); outline: none; }
+  /* Later: keep this tab exactly as it is. The edge tab keeps "Update ready"
+     so the update can be taken at any time. */
+  #phantom-update .wu-later {
+    flex: 0 0 auto; min-height: 40px; padding: 10px 14px; border-radius: 9px;
+    border: 1px solid #2f2f2f; background: #171717; color: #cfcfcf;
+    font: 800 13px/1 Inter, system-ui, sans-serif; cursor: pointer;
+  }
+  #phantom-update .wu-later:hover, #phantom-update .wu-later:focus-visible { background: #262626; color: #fff; border-color: #3a3a3a; outline: none; }
+  #phantom-update .wu-tab {
+    display: none; padding: 9px 14px; border-radius: 999px;
+    border: 1px solid rgba(0, 255, 65, .4); background: rgba(0, 255, 65, .1);
+    color: #00ff41; font: 800 12px/1 Inter, system-ui, sans-serif; cursor: pointer;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+  }
+  #phantom-update[data-mode="tab"] .wu-card { display: none; }
+  #phantom-update[data-mode="tab"] .wu-tab { display: inline-flex; align-items: center; gap: 6px; }
+  /* §18: under 480px wide a panel keeps a visible 20px gutter. */
+  @media (max-width: 479px) {
+    #phantom-update { right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); }
+    #phantom-update .wu-card { width: calc(100vw - 40px); }
+  }
+</style>
+
+<script>
+  const pageBuild = document.documentElement.dataset.haksterBuild || '';
+  const root = document.getElementById('phantom-update');
+  const wuText = document.getElementById('wu-text');
+  const RELOADS_KEY = 'phantom-update-reloads';
+  // The measured auto-refresh window. It used to be 8 s and the owner could
+  // not see the card before it reloaded ("the widget is showing when it builds
+  // but real fast is why cant see it", 2026-11-22). 20 s is still automatic —
+  // nobody has to click — and the 1→100 bar has time to be watched.
+  const AUTO_SECS = 20;
+  const QUIET_MS = 3000;
+  const clockOf = (iso) => {
+    const t = new Date(String(iso || ''));
+    return Number.isFinite(t.getTime()) ? t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  };
+  const reloadCount = () => { try { return Number(sessionStorage.getItem(RELOADS_KEY)) || 0; } catch { return 0; } };
+  const noteReload = () => { try { sessionStorage.setItem(RELOADS_KEY, String(reloadCount() + 1)); } catch {} };
+  const publishHeight = () => {
+    if (!root) return;
+    if (root.hidden) { document.documentElement.style.setProperty('--phantom-applet-h', '0px'); return; }
+    const shown = root.dataset.mode === 'tab' ? root.querySelector('.wu-tab') : root.querySelector('.wu-card');
+    const h = Math.round((shown || root).getBoundingClientRect().height);
+    if (h > 0) document.documentElement.style.setProperty('--phantom-applet-h', h + 'px');
+  };
+  // hidden → nothing; card → open card; tab → the slim edge tab after a dismiss.
+  const setWidget = (mode) => {
+    if (!root) return;
+    root.dataset.mode = mode;
+    root.hidden = mode === 'hidden';
+    publishHeight();
+    paintSpin();
+  };
+  let liveBuild = '';
+  let lastLiveBuild = '';
+  let dismissed = false;
+  let updateAnnounced = false;
+  let countdown = 0;
+  let countdownTimer = null;
+  let applyEndsAt = 0;
+  let lastTypedAt = 0;
+  const barEl = document.getElementById('wu-bar');
+  // Junkalot's rule, word for word: the ghost itself carries .phantom-spin, not
+  // the badge box around it (a rotating bordered box reads as a broken tile).
+  const ghostEl = document.getElementById('wu-ghost');
+  const fillEl = document.getElementById('wu-fill');
+  const rowEl = document.getElementById('wu-bar-row');
+  const labelEl = document.getElementById('wu-bar-label');
+  const pctEl = document.getElementById('wu-bar-pct');
+  document.addEventListener('input', () => { lastTypedAt = Date.now(); }, true);
+  const editableFocused = () => {
+    const a = document.activeElement;
+    if (!a) return false;
+    return a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable;
+  };
+  // Never reload under someone's hands — the Phantom applet's rule.
+  const quietEnough = () => !editableFocused() && Date.now() - lastTypedAt > QUIET_MS;
+  const stopCountdown = () => {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    countdown = 0;
+    applyEndsAt = 0;
+  };
+  // Owner, 2026-11-22: "add the spinning ghost while loading" then
+  // "junkalot.co has same spinner / copy code". The ghost turns while the card
+  // is working an update; it rests when the card is shut, docked to the Later
+  // tab, or waiting for a click (the reload cap reached).
+  const paintSpin = () => {
+    if (!ghostEl || !root) return;
+    ghostEl.classList.toggle('phantom-spin', !root.hidden && root.dataset.mode === 'card' && reloadCount() < 2);
+  };
+  // The bar counts 1→100 over the real auto-refresh window — a measured clock,
+  // not an invented build percentage (§10: only a real measurement may show a
+  // number). With no measured window left (reload cap reached) it sweeps and
+  // shows no number at all.
+  const paintBar = () => {
+    paintSpin();
+    if (!barEl || !fillEl) return;
+    if (!liveBuild) { barEl.hidden = true; if (rowEl) rowEl.hidden = true; return; }
+    if (!root || root.hidden || root.dataset.mode !== 'card') return;
+    barEl.hidden = false;
+    if (rowEl) rowEl.hidden = false;
+    const total = AUTO_SECS * 1000;
+    if (reloadCount() >= 2) {
+      barEl.removeAttribute('aria-valuenow');
+      barEl.setAttribute('aria-valuetext', 'Update ready — tap Reload to apply');
+      fillEl.classList.add('wu-indet');
+      fillEl.style.width = '100%';
+      if (labelEl) labelEl.textContent = 'Update ready';
+      if (pctEl) pctEl.hidden = true;
+      return;
+    }
+    const left = applyEndsAt ? Math.max(0, applyEndsAt - Date.now()) : total;
+    const value = Math.max(1, Math.min(99, Math.round(((total - left) / total) * 100)));
+    const label = left > 0 ? 'Auto-applies in ' + countdown + 's'
+      : (quietEnough() ? 'Applying now' : 'Waiting for a quiet moment');
+    barEl.setAttribute('aria-valuenow', String(value));
+    barEl.setAttribute('aria-valuetext', label + ' — ' + value + '%');
+    fillEl.classList.remove('wu-indet');
+    fillEl.style.width = value + '%';
+    if (labelEl) labelEl.textContent = label;
+    if (pctEl) { pctEl.hidden = false; pctEl.textContent = value + '%'; }
+  };
+  const paintText = () => {
+    if (!wuText || !liveBuild) return;
+    const live = clockOf(liveBuild), mine = clockOf(pageBuild);
+    let t = 'Build pushed at ' + (live || liveBuild) + ' — this tab is on ' + (mine || pageBuild) + '.';
+    if (countdown > 0) t += ' Auto-applies in ' + countdown + 's unless you choose Later…';
+    else if (reloadCount() >= 2) t += ' Choose Update now when you are ready.';
+    else if (!quietEnough()) t += ' Applying as soon as you are not typing…';
+    else t += ' Applying…';
+    wuText.textContent = t;
+    paintBar();
+    publishHeight();
+  };
+  const doReload = () => {
+    noteReload();
+    // The measured window is complete: paint the real 100% before leaving.
+    if (barEl) {
+      barEl.setAttribute('aria-valuenow', '100');
+      barEl.setAttribute('aria-valuetext', 'Update applied — reloading at 100%');
+    }
+    if (fillEl) { fillEl.classList.remove('wu-indet'); fillEl.style.width = '100%'; }
+    if (labelEl) labelEl.textContent = 'Applying now';
+    if (pctEl) { pctEl.hidden = false; pctEl.textContent = '100%'; }
+    window.setTimeout(() => location.reload(), 220);
+  };
+  const startCountdown = () => {
+    if (countdownTimer || reloadCount() >= 2) return;
+    if (!applyEndsAt) applyEndsAt = Date.now() + AUTO_SECS * 1000;
+    countdown = Math.max(1, Math.ceil((applyEndsAt - Date.now()) / 1000));
+    paintText();
+    countdownTimer = window.setInterval(() => {
+      const left = Math.max(0, applyEndsAt - Date.now());
+      const secs = Math.ceil(left / 1000);
+      if (secs !== countdown) { countdown = secs; paintText(); } else paintBar();
+      if (left > 0) return;
+      if (!quietEnough()) { paintText(); return; }
+      stopCountdown();
+      doReload();
+    }, 120);
+  };
+  const checkPageBuild = async () => {
+    if (!pageBuild || !root || document.visibilityState !== 'visible') return;
+    try {
+      const res = await fetch('/api/version?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const build = data && data.build ? String(data.build) : '';
+      if (!build) return;
+      if (build === pageBuild) {
+        // This tab is on the live build: the update is done.
+        stopCountdown();
+        liveBuild = '';
+        lastLiveBuild = '';
+        if (!root.hidden) setWidget('hidden');
+        try { sessionStorage.removeItem(RELOADS_KEY); } catch {}
+        return;
+      }
+      liveBuild = build;
+      root.title = 'This tab: ' + pageBuild + ' — live build: ' + build;
+      // A build this tab has not seen before is a new push: open the card and
+      // start a fresh measured window, even if the previous notice was
+      // dismissed to the edge tab.
+      if (build !== lastLiveBuild) {
+        lastLiveBuild = build;
+        stopCountdown();
+        if (root.hidden || root.dataset.mode !== 'card') { dismissed = false; setWidget('card'); }
+      }
+      paintText();
+      if (!dismissed) startCountdown();
+      if (updateAnnounced) return;
+      updateAnnounced = true;
+      try {
+        fetch('/api/version/seen', {
+          method: 'POST', cache: 'no-store', credentials: 'same-origin', keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ build, from: 'update-widget', path: location.pathname, at: new Date().toISOString() }),
+        }).catch(() => {});
+      } catch {}
+    } catch {}
+  };
+  if (root) {
+    const x = document.getElementById('wu-x');
+    const tab = document.getElementById('wu-tab');
+    const reload = document.getElementById('wu-reload');
+    const later = document.getElementById('wu-later');
+    if (x) x.addEventListener('click', () => { dismissed = true; stopCountdown(); setWidget('tab'); });
+    // Owner, 2026-11-22: "make it give option to click update now or later
+    // before it auto applies". Update now applies at once; Later stops the
+    // auto-apply for this build and leaves the "Update ready" edge tab, which
+    // reopens the card and restarts the clock when tapped.
+    if (later) later.addEventListener('click', () => {
+      dismissed = true;
+      stopCountdown();
+      setWidget('tab');
+    });
+    if (tab) tab.addEventListener('click', () => { dismissed = false; setWidget('card'); paintText(); startCountdown(); });
+    if (reload) reload.addEventListener('click', doReload);
+    checkPageBuild();
+    // 3 s: a push is picked up (and the card opened) within a breath of it
+    // landing, not seconds later.
+    window.setInterval(checkPageBuild, 3000);
+    window.addEventListener('focus', checkPageBuild);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') checkPageBuild();
+    });
+  }
+</script>

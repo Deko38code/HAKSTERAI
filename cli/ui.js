@@ -98,6 +98,13 @@ function thinkingAnimation(modelHint, phase) {
   // Ice spinner frames — cool-toned and readable in xterm.
   // ✳ is the HakTerm thinking spinner, shown first so the CLI reads the same.
   const FRAMES = ['✳', '❄', '✦', '✧', '✶', '✧', '✦'];
+  // No TTY (piped/CI): never paint control sequences into the stream. Return a
+  // matching no-op so callers can keep one code path.
+  if (!process.stdout.isTTY) {
+    return {
+      updateModel() {}, updatePhase() {}, updateActivity() {}, stop() {},
+    };
+  }
   const SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
   const GRAD = [51, 87, 117, 153, 117, 87];
   // Phase-specific colors
@@ -170,6 +177,9 @@ function thinkingAnimation(modelHint, phase) {
 
   render();
   const timer = setInterval(render, 50);
+  // The spinner must never be the reason the process stays alive: if a caller
+  // path misses stop(), Node can still exit. stop() clears it as usual.
+  if (typeof timer.unref === 'function') timer.unref();
   timer.updateModel = (m) => { currentModel = m; };
   timer.updatePhase = (p) => {
     currentPhase = p || 'DEFAULT';

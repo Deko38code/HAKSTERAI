@@ -140,6 +140,16 @@ class PersistentShell {
 
 const pshell = new PersistentShell();
 
+// Timeouts arrive from two callers with different units: the native tool
+// schema documents seconds ("timeout": 30) while internal callers pass
+// milliseconds. A bare 30 was read as 30 ms and every shell call died with
+// exit 124 before it started. Anything under 1000 is seconds.
+function normalizeTimeoutMs(value, fallbackMs = 60000) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallbackMs;
+  return n < 1000 ? Math.round(n * 1000) : Math.round(n);
+}
+
 // ── runCmd — execute via persistent shell ──────────────────────────────────
 function runCmd(cmd, cwd) {
   return pshell.run(cmd, { timeout: 30000 });
@@ -166,14 +176,22 @@ function runCmdStream(cmd, cwd) {
     const killGroup = (signal) => { try { process.kill(-child.pid, signal); } catch (_) { try { child.kill(signal); } catch {} } };
     child.stdout.on('data', d => { const s = d.toString(); stdout += s; process.stdout.write(s); });
     child.stderr.on('data', d => { const s = d.toString(); stderr += s; process.stderr.write(s); });
-    child.on('close', code => resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: code ?? 0 }));
-    child.on('error', e => resolve({ stdout: '', stderr: e.message, code: 1 }));
     // Hard backstop: group-kill (SIGTERM then SIGKILL) so descendants holding the
     // pipe can't keep the promise alive. Resolves regardless -> CLI never hangs.
-    setTimeout(() => {
+    // The timer MUST be cleared when the child closes: an uncleared 120s timer
+    // kept every non-interactive CLI process alive for two minutes after the
+    // command itself had already finished.
+    let backstop = null;
+    const settle = (result) => {
+      if (backstop) { clearTimeout(backstop); backstop = null; }
+      resolve(result);
+    };
+    child.on('close', code => settle({ stdout: stdout.trim(), stderr: stderr.trim(), code: code ?? 0 }));
+    child.on('error', e => settle({ stdout: '', stderr: e.message, code: 1 }));
+    backstop = setTimeout(() => {
       killGroup('SIGTERM');
       setTimeout(() => killGroup('SIGKILL'), 1000);
-      resolve({ stdout: stdout.trim(), stderr: 'timeout', code: 124 });
+      settle({ stdout: stdout.trim(), stderr: 'timeout', code: 124 });
     }, 120000);
   });
 }
@@ -615,14 +633,14 @@ const CLI_CLAUDE_TOOLS = [
     input_schema:{ type:'object', properties:{ pattern:{type:'string'}, dir:{type:'string',description:'Directory to search'}, ext:{type:'string',description:'File extension filter e.g. js'} }, required:['pattern'] } },
   { name:'glob', description:'Find files by name pattern.',
     input_schema:{ type:'object', properties:{ pattern:{type:'string',description:'e.g. *.js'}, dir:{type:'string'} }, required:['pattern'] } },
-  { name:'run_command', description:'Run a shell command. Returns stdout+stderr.',
-    input_schema:{ type:'object', properties:{ command:{type:'string'}, cwd:{type:'string'} }, required:['command'] } },
+  { name:'run_command', description:'Run a shell command. Returns stdout+stderr. timeout is in seconds (default 60, max 600).',
+    input_schema:{ type:'object', properties:{ command:{type:'string'}, cwd:{type:'string'}, timeout:{type:'number',description:'Seconds (default 60, max 600)'} }, required:['command'] } },
   { name:'list_dir', description:'List files in a directory.',
     input_schema:{ type:'object', properties:{ dir:{type:'string',description:'Directory path'} }, required:[] } },
-  { name:'fetch_url', description:'Fetch content from a URL.',
-    input_schema:{ type:'object', properties:{ url:{type:'string'} }, required:['url'] } },
-  { name:'search_web', description:'Search the web.',
-    input_schema:{ type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
+  { name:'fetch_url', description:'Fetch a URL (follows redirects, reports HTTP status). Default cap 60 KB.',
+    input_schema:{ type:'object', properties:{ url:{type:'string'}, method:{type:'string',description:'GET/POST/PUT/DELETE (default GET)'}, body:{type:'string'}, max_bytes:{type:'number',description:'Max body bytes (default 60000)'}, timeout:{type:'number',description:'Seconds (default 20)'} }, required:['url'] } },
+  { name:'search_web', description:'Search the web (DuckDuckGo). Returns titles, URLs and snippets.',
+    input_schema:{ type:'object', properties:{ query:{type:'string'}, max_results:{type:'number',description:'1-20, default 8'} }, required:['query'] } },
   { name:'diff_content', description:'Show line-by-line diff between proposed content and current file before editing.',
     input_schema:{ type:'object', properties:{ file:{type:'string'}, content:{type:'string'} }, required:['file','content'] } },
   { name:'multi_edit', description:'Apply multiple surgical old->new patches to one file in one pass.',
@@ -696,8 +714,8 @@ async function cliExecuteTool(name, args, trustCfg) {
         const command = args.command || args.cmd;
         if (!command) return { ok: false, output: '', error: 'Missing command' };
         console.log(`\n${C.gray}  $ ${command}${C.reset}`);
-        const timeoutMs = args.timeout_ms || args.timeout || 60000;
-        const timeoutS = Math.min(Math.ceil(timeoutMs / 1000), 600);
+        const timeoutMs = normalizeTimeoutMs(args.timeout_ms || args.timeout, 60000);
+        const timeoutS = Math.max(1, Math.min(Math.ceil(timeoutMs / 1000), 600));
         const { stdout, stderr, code } = await runCmdStream(`timeout ${timeoutS} nice -n10 bash -c ${JSON.stringify(command)}`, args.cwd || HOME);
         const out = (stdout + (stderr ? '\nSTDERR: ' + stderr : '')).trim() + (code ? `\nexit: ${code}` : '');
         return { ok: (!code || code === 0), output: out, error: code ? `exit: ${code}` : null };
@@ -773,21 +791,103 @@ async function cliExecuteTool(name, args, trustCfg) {
       case 'hak_fetch':
       case 'web_fetch': {
         if (!args.url) return { ok: false, output: '', error: 'Missing URL' };
-        const r = await runCmd(`curl -sL --max-time 15 ${JSON.stringify(args.url)} 2>/dev/null | head -c 8000`);
-        return { ok: true, output: r.stdout || 'No content', error: null };
+        const url = String(args.url).trim();
+        if (!/^https?:\/\//i.test(url)) return { ok: false, output: '', error: 'URL must start with http:// or https://' };
+        const maxBytes = Math.max(1000, Math.min(Number(args.max_bytes || args.maxBytes) || 60000, 500000));
+        const timeoutMs = normalizeTimeoutMs(args.timeout, 20000);
+        try {
+          const res = await fetch(url, {
+            method: String(args.method || 'GET').toUpperCase(),
+            redirect: 'follow',
+            headers: {
+              'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) HaksterAI-CLI/1.0',
+              'accept': 'text/html,application/json,text/plain,*/*',
+              ...(args.headers && typeof args.headers === 'object' ? args.headers : {}),
+              ...(args.body ? { 'content-type': 'application/json' } : {}),
+            },
+            ...(args.body ? { body: String(args.body) } : {}),
+            signal: AbortSignal.timeout(timeoutMs),
+          });
+          const body = await res.text();
+          const out = body.length > maxBytes ? body.slice(0, maxBytes) + `\n[... truncated at ${maxBytes} bytes of ${body.length} — pass max_bytes to read more]` : body;
+          const head = `HTTP ${res.status} ${res.statusText || ''} · ${res.headers.get('content-type') || 'unknown type'} · ${body.length} bytes`;
+          return { ok: res.ok, output: `${head}\n\n${out}`, error: res.ok ? null : `HTTP ${res.status}` };
+        } catch (e) {
+          const msg = e && e.name === 'TimeoutError' ? `timed out after ${Math.round(timeoutMs / 1000)}s` : (e && e.message) || 'fetch failed';
+          return { ok: false, output: '', error: `Fetch failed: ${msg}` };
+        }
       }
 
       case 'search_web':
       case 'hak_web':
       case 'web_search': {
-        const q = encodeURIComponent(args.query || '');
-        const r = await runCmd(`curl -sL "https://api.duckduckgo.com/?q=${q}&format=json" 2>/dev/null`);
+        const query = String(args.query || '').trim();
+        if (!query) return { ok: false, output: '', error: 'Missing search query' };
+        const maxResults = Math.max(1, Math.min(Number(args.max_results || args.maxResults) || 8, 20));
+        const timeoutMs = normalizeTimeoutMs(args.timeout, 15000);
+        const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36';
+        const decode = (s) => String(s || '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'")
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+          .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+          .replace(/\s+/g, ' ').trim();
         try {
-          const j = JSON.parse(r.stdout || '{}');
-          const results = (j.RelatedTopics || []).slice(0, 5).map(t => t.Text || '').filter(Boolean);
-          return { ok: true, output: (j.AbstractText || '') + (results.length ? '\n' + results.join('\n') : '') || 'No results', error: null };
-        } catch {
-          return { ok: true, output: (r.stdout || '').slice(0, 500) || 'No results', error: null };
+          // DuckDuckGo's HTML endpoint returns real results; the JSON instant-answer
+          // API answers "No results" for almost every query, which is what the CLI
+          // used to show. Try HTML, then the lite endpoint, then the instant answer.
+          const attempts = [
+            `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+            `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
+          ];
+          let results = [];
+          for (const url of attempts) {
+            if (results.length) break;
+            const res = await fetch(url, {
+              headers: { 'user-agent': UA, accept: 'text/html' },
+              redirect: 'follow',
+              signal: AbortSignal.timeout(timeoutMs),
+            });
+            if (!res.ok) continue;
+            const html = await res.text();
+            const re = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>)?/g;
+            let m;
+            while ((m = re.exec(html)) && results.length < maxResults) {
+              let link = m[1] || '';
+              const ddg = link.match(/[?&]uddg=([^&]+)/);
+              if (ddg) { try { link = decodeURIComponent(ddg[1]); } catch {} }
+              if (!/^https?:\/\//i.test(link)) continue;
+              const title = decode(m[2]);
+              if (!title) continue;
+              results.push({ title, url: link, snippet: decode(m[3] || '') });
+            }
+            if (!results.length) {
+              // lite endpoint: <a class="result-link" href="...">title</a> + <td class="result-snippet">
+              const re2 = /<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/g;
+              while ((m = re2.exec(html)) && results.length < maxResults) {
+                const link = m[1] || '';
+                if (!/^https?:\/\//i.test(link)) continue;
+                results.push({ title: decode(m[2]), url: link, snippet: decode(m[3]) });
+              }
+            }
+          }
+          if (!results.length) {
+            const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`, {
+              headers: { 'user-agent': UA }, signal: AbortSignal.timeout(timeoutMs),
+            });
+            const j = await res.json().catch(() => ({}));
+            const related = (j.RelatedTopics || []).flatMap(t => (t.Topics || [t]))
+              .map(t => t.Text).filter(Boolean).slice(0, maxResults);
+            if (j.AbstractText) results.push({ title: j.Heading || query, url: j.AbstractURL || '', snippet: j.AbstractText });
+            for (const text of related) results.push({ title: text.split(' - ')[0].slice(0, 90), url: '', snippet: text });
+          }
+          if (!results.length) return { ok: true, output: `No web results for "${query}"`, error: null };
+          const out = results.slice(0, maxResults).map((r, i) =>
+            `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ''}`).join('\n\n');
+          return { ok: true, output: out, error: null };
+        } catch (e) {
+          const msg = e && e.name === 'TimeoutError' ? `timed out after ${Math.round(timeoutMs / 1000)}s` : (e && e.message) || 'search failed';
+          return { ok: false, output: '', error: `Web search failed: ${msg}` };
         }
       }
 

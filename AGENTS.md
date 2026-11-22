@@ -405,3 +405,30 @@ FIXED:
 4. "progress: 0 segments written" for many cycles = ffmpeg can't open the stream
    -> stalkerhek CDN 401/503 (upstream, not fixable) or bad play_token
 5. paced playlist clock at 00 = renderPacedPlaylist floor not working, check line ~625
+
+
+## Profit rates — locked (see PROFIT-RATES.md)
+
+Owner (2026-11-22): this project **displays** the locked rate card; it never defines one. Read the
+read-only snapshot `Junkalot/data/profit-rates-snapshot.json` and label it "source: junkalot.co"
+(CLAUDE.md §16 project isolation, §19.6 read-only reads, §25 owner-internal, §26 locked rates).
+
+- Billed rate (locked): **$541.3043 in / $108.2609 out per 1M tokens**; $249 buys 450k in + 50k out tokens
+  a month, overage above it at the same rate. A Coach turn is metered by its own tokens.
+- Cost base: **`deepseek-v4.1-flash:1017` on Ollama cloud**, billed by **request quota, not tokens** —
+  26,511 requests = 83.5 % of a ~31,750 weekly quota (headroom ~5,239) at a heavy workload; a second Ollama
+  cloud account and Codex Pro (unlimited) sit behind it. Per-token cost stays `null`; margin is the quota
+  share, never an invented dollar figure.
+- The demand index is advice only and never moves a rate, bill, route, model or plan on its own.
+- Never write profit data into Junkalot or into another project.
+
+
+## Builds go through the server widget
+
+Owner (2026-11-22): "make sure all our builds and updates go threw server widget always to junkalot and
+haksterai" (CLAUDE.md §27). **`npm run build:update -- --label X --note Y` is the only deploy path** —
+`scripts/build-update.cjs` records the job in `dev/build-history/data/current-job.json` (the applet's only
+source of truth), builds into `dist-next`, rsyncs into `dist`, waits for `/api/version` to report the build
+id the served page carries, health-checks `:3579`, and only then marks it complete. A bare `astro build`
+into `dist` changes the live site without showing in the widget — never use it as a deploy. Never restart
+the server for a static deploy.

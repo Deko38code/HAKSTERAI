@@ -381,8 +381,8 @@ const PRICING_CATALOG = [
     id: 'free',
     name: 'HaksterAI Free',
     stripeProductName: 'HaksterAI Free',
-    description: 'Free users get 5 AI calls and 5 web lookups across chat, agents, scripts, and generation, then must upgrade.',
-    features: ['5 free AI calls + 5 free web lookups', 'Upgrade required after the free allowance', 'Local Ollama support', 'Basic chat and terminal tools'],
+    description: 'One free account for HaksterAI and Miniforge — 5 AI calls and 5 web lookups across chat, agents, scripts and generation, plus 10 Miniforge messages a day, then upgrade.',
+    features: ['5 free AI calls + 5 free web lookups', '10 free Miniforge messages/day', 'Upgrade required after the free allowance', 'Local Ollama support', 'Basic chat and terminal tools'],
     prices: [
       {
         id: 'free',
@@ -1376,6 +1376,32 @@ async function refreshPricesFromStripe() {
         }
         plan.prices.sort((a, b) => (a.amount || 0) - (b.amount || 0));
       });
+
+      // Low-budget cards (the one-time pack ladder, Try Me Now, Low Budget)
+      // carry a Stripe lookup key. Attach the real price id where one exists so
+      // checkout charges the Stripe price instead of building an inline one.
+      // Only a price whose amount matches the advertised amount is accepted —
+      // a drifted Stripe price must never quietly change what the card charges.
+      const byLookup = [];
+      merged.forEach(plan => plan.prices.forEach(pr => {
+        if (!pr.stripePriceId && pr.lookupKey && Number(pr.amount) > 0) byLookup.push(pr);
+      }));
+      await Promise.all(byLookup.map(async pr => {
+        try {
+          const found = (await stripe.prices.list({ lookup_keys: [pr.lookupKey], active: true, limit: 1 })).data[0];
+          if (!found) return;
+          // Per-seat cards advertise the whole-team shelf price but charge
+          // unitAmount for each seat, so the Stripe price is the per-seat one.
+          const expected = Number(pr.unitAmount || pr.amount);
+          if (Number(found.unit_amount) !== expected) {
+            console.warn(`[stripe] ${pr.lookupKey}: Stripe price ${found.unit_amount} does not match advertised ${expected}; keeping inline price`);
+            return;
+          }
+          pr.stripePriceId = found.id;
+        } catch (err) {
+          console.warn(`[stripe] lookup ${pr.lookupKey} failed: ${err.message}`);
+        }
+      }));
 
       priceRefreshCache = { at: now, catalog: merged, inflight: null };
       console.log(`[stripe] price catalog refreshed from Stripe (${matched.length} products)`);
@@ -9187,30 +9213,37 @@ app.post('/api/stripe/checkout', async (req, res) => {
             product_data: { name: `${plan.name} — ${priceObj.name}`, description: `${priceObj.name}: ${seats} teammate${seats === 1 ? '' : 's'}, ${priceObj.seatsIncluded || 1000} AI calls a month each.` },
           } };
     } else if (oneTime) {
-      lineItem = { quantity: 1, price_data: {
-        currency: priceObj.currency || 'usd',
-        unit_amount: priceObj.amount,
-        product_data: {
-          name: priceObj.name,
-          description: `${priceObj.tokens} AI calls, one payment, nothing renews`,
-        },
-      } };
+      // The pack ladder now has real Stripe prices (lookup key
+      // haksterai_<plan>); charge that price when it exists so the Stripe
+      // invoice matches the product. Inline price_data stays as the fallback.
+      lineItem = priceObj.stripePriceId
+        ? { price: priceObj.stripePriceId, quantity: 1 }
+        : { quantity: 1, price_data: {
+            currency: priceObj.currency || 'usd',
+            unit_amount: priceObj.amount,
+            product_data: {
+              name: priceObj.name,
+              description: `${priceObj.tokens} AI calls, one payment, nothing renews`,
+            },
+          } };
     } else if (priceObj.inlineRecurring) {
-      // A capped monthly plan sold without a Stripe product (the $1.45
-      // low-income card). Recurring price_data makes a real subscription that
-      // bills every month; the plan is resolved from metadata.planId when the
-      // webhook lands because Stripe invents the price id.
-      lineItem = { quantity: 1, price_data: {
-        currency: priceObj.currency || 'usd',
-        unit_amount: priceObj.amount,
-        recurring: { interval: priceObj.billingCycle === 'yearly' ? 'year' : 'month' },
-        product_data: {
-          name: `${plan.name} — ${priceObj.name}`,
-          description: Number.isFinite(planDailyCallLimit(plan.id))
-            ? `${planDailyCallLimit(plan.id)} AI calls every day for ${priceObj.amount / 100} ${String(priceObj.currency || 'usd').toUpperCase()} a month.`
-            : `${planCallLimit(plan.id)} AI calls a month at ${priceObj.amount / 100} ${String(priceObj.currency || 'usd').toUpperCase()} a month.`,
-        },
-      } };
+      // A capped monthly plan (Try Me Now, the $1.45 low-income card). Both
+      // now own a real Stripe price found by lookup key; charge it and fall
+      // back to recurring price_data if the lookup has not resolved yet. The
+      // plan is resolved from metadata.planId when the webhook lands either way.
+      lineItem = priceObj.stripePriceId
+        ? { price: priceObj.stripePriceId, quantity: 1 }
+        : { quantity: 1, price_data: {
+            currency: priceObj.currency || 'usd',
+            unit_amount: priceObj.amount,
+            recurring: { interval: priceObj.billingCycle === 'yearly' ? 'year' : 'month' },
+            product_data: {
+              name: `${plan.name} — ${priceObj.name}`,
+              description: Number.isFinite(planDailyCallLimit(plan.id))
+                ? `${planDailyCallLimit(plan.id)} AI calls every day for ${priceObj.amount / 100} ${String(priceObj.currency || 'usd').toUpperCase()} a month.`
+                : `${planCallLimit(plan.id)} AI calls a month at ${priceObj.amount / 100} ${String(priceObj.currency || 'usd').toUpperCase()} a month.`,
+            },
+          } };
     } else {
       lineItem = { price: priceObj.stripePriceId, quantity: 1 };
     }
@@ -10599,6 +10632,10 @@ app.get('/api/usage', (req, res) => {
 // the key is held in memory only, never logged and never echoed.
 const PROFIT_BRIDGE_KEY_FILE = '/home/ghost694/.config/junkalot-payoff-bridge.key';
 const PROFIT_PHANTOM_URL = process.env.PROFIT_PHANTOM_URL || 'https://phantomide.com/api/internal/profit-bridge';
+// Owner (2026-11-22): "only show that in haksterai.com admin dash and phantomide" / "stats are
+// always to be live from dash to dash". Junkalot recomputes its locked rate card on every call;
+// this server fetches that, live and uncached, and never writes anything back into Junkalot.
+const PROFIT_JUNKALOT_RATES_URL = process.env.PROFIT_JUNKALOT_RATES_URL || 'https://junkalot.co/api/internal/profit-rates';
 let _profitBridgeKey = { at: 0, key: '' };
 function readProfitBridgeKey() {
   if (_profitBridgeKey.key && Date.now() - _profitBridgeKey.at < 300000) return Promise.resolve(_profitBridgeKey.key);
@@ -10783,6 +10820,7 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
 
     let phantom = null;
     let junkalot = null;
+    let rates = null;
     let bridgeState = 'unavailable';
     try {
       const key = await readProfitBridgeKey();
@@ -10808,6 +10846,29 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
       }
     } catch { bridgeState = 'unavailable'; }
 
+    // Locked rate card, cloud quota basis, demand index and per-client meter — fetched live from
+    // Junkalot on every request (no cache), so this dashboard can never show a stale copy.
+    let ratesState = 'unavailable';
+    try {
+      const key = await readProfitBridgeKey();
+      const upstream = await fetch(PROFIT_JUNKALOT_RATES_URL, {
+        headers: { 'x-junkalot-payoff-bridge': key, accept: 'application/json' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(9000),
+      });
+      if (upstream.ok) {
+        const data = await upstream.json().catch(() => null);
+        if (data?.ok === true && data.profit && typeof data.profit === 'object') {
+          rates = Object.assign({}, data.profit, {
+            checkedAt: data.checkedAt || data.profit.checkedAt || null,
+            source: data.source || 'junkalot.co',
+            live: data.live === true,
+          });
+          ratesState = 'live';
+        }
+      }
+    } catch { ratesState = 'unavailable'; }
+
     // Junkalot's client value record: read over SSH, computed here, never written back.
     let junkalotValue = null;
     try {
@@ -10821,6 +10882,8 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
     return res.json({
       ok: true,
       generatedAt: new Date().toISOString(),
+      rates,
+      ratesState,
       hakster: {
         revenue: {
           allTimeCents: cents(real),
@@ -11829,7 +11892,8 @@ app.get('/api/media/files', requireSignedIn, (req, res) => {
 });
 
 // Public first-party page analytics. The collector stores salted IP hashes,
-// never raw addresses; admin totals stay owner-gated and process-local.
+// never raw addresses; events persist to data/site-analytics.jsonl so the
+// rolling-24h traffic survives restarts, and admin totals stay owner-gated.
 app.post('/api/analytics/track', express.text({ type: ['text/plain', 'application/json'], limit: '512b' }), (req, res) => {
   res.set('Cache-Control', 'no-store');
   const origin = req.get('origin');
@@ -11842,7 +11906,7 @@ app.post('/api/analytics/track', express.text({ type: ['text/plain', 'applicatio
   if (!body || typeof body !== 'object') return res.sendStatus(400);
   // The origin is served through Cloudflare Tunnel; prefer Cloudflare's
   // connecting address header when present, while storing only a salted hash.
-  siteAnalytics.record(req.get('cf-connecting-ip') || req.ip, body);
+  siteAnalytics.record(req.get('cf-connecting-ip') || req.ip || req.socket?.remoteAddress, body);
   res.sendStatus(204);
 });
 

@@ -41,6 +41,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
+    "build:update": "node scripts/build-update.cjs",
     "preview": "astro preview",
     "astro": "astro",
     "cli": "node cli/index.js",

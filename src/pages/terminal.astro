@@ -1,9 +1,15 @@
 ---
 import HaksterTerminal from '../components/HaksterTerminal.astro';
+// No update widget here: /terminal is an owner/admin surface, and the widget
+// lives on the main user-facing pages only (owner, 2026-11-22: "naw just main
+// pages users can use only not admin"). The site applet on Layout pages still
+// reports updates.
+// Stamped so the shared update widget can compare this tab with /api/version.
+const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_BUILD_ID__ : '';
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-hakster-build={haksterBuildId}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
