@@ -10,15 +10,52 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
+
+// Crush's own skill directories (owner 2026-11-23: "make sure all my crush
+// terminal skills are added to the ones we have in mcp"). Read from the same
+// `skills_paths` Crush loads — never invented, and only paths inside this
+// user's home. A missing or malformed config falls back to the default list
+// the server already writes, so the library is never smaller than before.
+const CRUSH_FALLBACK_PATHS = [
+  '/home/ghost/.agents/skills',
+  '/home/ghost/skills',
+  '/home/ghost/.hermes/hermes-agent/skills',
+  '/home/ghost/.hermes/skills',
+];
+function crushSkillPaths() {
+  const home = process.env.HOME || os.homedir();
+  const configs = [
+    path.join(home, '.crush.json'),
+    path.join(home, '.config', 'crush', 'crush.json'),
+    path.join(home, '.local', 'share', 'crush', 'crush.json'),
+  ];
+  let paths = null;
+  for (const cfgPath of configs) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      const list = (cfg.options && cfg.options.skills_paths) || cfg.skills_paths;
+      if (Array.isArray(list) && list.length) {
+        paths = list;
+        break;
+      }
+    } catch {
+      /* try the next config */
+    }
+  }
+  if (!paths) paths = CRUSH_FALLBACK_PATHS;
+  return paths.filter((p) => typeof p === 'string' && p.startsWith(home + path.sep) && !p.includes('..'));
+}
 
 const SKILL_ROOTS = [
   path.resolve(process.cwd(), '.hakster/skills'),
   path.resolve(process.cwd(), 'pentest-agents/skills'),
   path.resolve(process.cwd(), '.hakster'),
   path.resolve(process.cwd(), 'pentest-agents'),
-];
+  ...crushSkillPaths().filter((p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory(); } catch { return false; } }),
+].filter((root, i, all) => all.indexOf(root) === i);
 
 const events = new EventEmitter();
 let cache = [];          // [{ id, name, relPath, absPath, category, size, mtime }]
