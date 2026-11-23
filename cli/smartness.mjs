@@ -13,7 +13,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
+
+// cli/ — this file and both TUI bundles (ui.mjs, ui-fb.mjs) live here, so the
+// repository root is one level up however this module was loaded.
+const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // Same list and ports as the old CLI's ONLINE PORTS panel.
 export const EXPECTED_SERVICES = [
@@ -171,4 +176,62 @@ export function serviceStates(scan) {
     up: open.has(svc.port),
     proc: (scan && scan.procs && scan.procs[String(svc.port)]) || '',
   }));
+}
+
+// Everything else the scan saw listening, so the panel can say "all ports in
+// use" instead of only the services this harness knows by name. `proc` is the
+// command `ss` reported for the socket, empty when the process is not ours.
+export function otherListening(scan) {
+  const known = new Set(EXPECTED_SERVICES.map((svc) => svc.port));
+  const ports = (scan && scan.ports) || [];
+  return ports
+    .filter((port) => !known.has(port))
+    .map((port) => ({
+      port,
+      proc: (scan && scan.procs && scan.procs[String(port)]) || '',
+    }));
+}
+
+// The 13 code files the agent's own integrity check counts (server/src/agent/
+// index.js `IMPORTANT_FILES`). The CLI mirrors it read-only so a lost
+// guardrails script or brain file is never silent — the same 13/13 the
+// Miniforge card shows.
+export const IMPORTANT_FILES = [
+  'AGENTS.md',
+  'package.json',
+  'cli/index.js',
+  'cli/memory.js',
+  'server/src/index.js',
+  'server/src/agent/index.js',
+  'server/src/agent/loop.js',
+  'server/src/agent/autolearn.js',
+  'server/hakster-config.json',
+  'server/src/hakster-config.json',
+  'scripts/hakster-guardrails.sh',
+  'HAKSTERAI-PHANTOM-MERGED.md',
+  '.env',
+];
+
+// Check the list against `root` (default: this repository). Read-only —
+// existsSync only; nothing is created, repaired or deleted here.
+export function fileGuard(root = path.resolve(CLI_DIR, '..')) {
+  const present = [];
+  const missing = [];
+  for (const rel of IMPORTANT_FILES) {
+    try {
+      if (fs.existsSync(path.join(root, rel))) present.push(rel);
+      else missing.push(rel);
+    } catch {
+      missing.push(rel);
+    }
+  }
+  return { present: present.length, total: IMPORTANT_FILES.length, missing };
+}
+
+// A short human label for a listening port that is not a known service: the
+// command's first word, clipped, or "listening" when `ss` could not name it.
+export function portLabel(entry, max = 14) {
+  const proc = String((entry && entry.proc) || '').split(/\s+/)[0];
+  const text = proc || 'listening';
+  return text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}…`;
 }

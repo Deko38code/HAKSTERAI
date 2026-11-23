@@ -24,11 +24,13 @@ export function GridPanel({ title, cols = 4, width, children, borderColor = 'gra
     : hintWidth > 1 ? `${hintText.slice(0, hintWidth - 1)}…` : '';
   return (
     <box style={{ width, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor, paddingLeft: 1, paddingRight: 1 }}>
-      <box style={{ width: inner, justifyContent: 'space-between' }}>
+      {/* Yoga's default flexDirection is `column`, so a row of title + hint
+          (and the cell grid itself) has to say so explicitly. */}
+      <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
         <text fg="cyan" attributes={TextAttributes.BOLD}>{titleText.slice(0, inner)}</text>
         {clippedHint ? <text fg="gray">{clippedHint}</text> : null}
       </box>
-      <box style={{ width: inner, flexWrap: 'wrap' }}>{children}</box>
+      <box style={{ width: inner, flexDirection: 'row', flexWrap: 'wrap' }}>{children}</box>
     </box>
   );
 }

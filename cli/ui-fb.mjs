@@ -412,6 +412,62 @@ var require_inline_ad_layout = __commonJS({
   }
 });
 
+// ../src/models/ladder.js
+var require_ladder = __commonJS({
+  "../src/models/ladder.js"(exports, module) {
+    "use strict";
+    var PRIMARY_MODEL2 = "deepseek-v4.1-flash:cloud";
+    var PRIMARY_PROVIDER2 = "ollama";
+    var MODEL_LADDER2 = Object.freeze([
+      Object.freeze({
+        tier: 1,
+        provider: PRIMARY_PROVIDER2,
+        model: PRIMARY_MODEL2,
+        label: "DeepSeek Flash"
+      }),
+      Object.freeze({
+        tier: 2,
+        provider: "codex-cli",
+        // Empty model: the server fills in the provider's own defaultModel, so the
+        // CLI never invents a Codex model string of its own.
+        model: "",
+        label: "Codex"
+      }),
+      Object.freeze({
+        tier: 3,
+        provider: "",
+        model: "",
+        label: "waterfall"
+      })
+    ]);
+    var isPrimary = (model) => String(model || "") === PRIMARY_MODEL2;
+    function attemptsFor2(model) {
+      const chosen = String(model || "");
+      if (!chosen || isPrimary(chosen)) return MODEL_LADDER2.map((entry) => ({ ...entry }));
+      return [{ tier: 0, provider: null, model: chosen, label: chosen }];
+    }
+    function labelForModel(model) {
+      const chosen = String(model || "");
+      const hit = MODEL_LADDER2.find((entry) => entry.model && entry.model === chosen);
+      return hit ? hit.label : chosen || PRIMARY_MODEL2;
+    }
+    function tierOf(model) {
+      const chosen = String(model || "");
+      if (!chosen || isPrimary(chosen)) return 1;
+      return 0;
+    }
+    module.exports = {
+      MODEL_LADDER: MODEL_LADDER2,
+      PRIMARY_MODEL: PRIMARY_MODEL2,
+      PRIMARY_PROVIDER: PRIMARY_PROVIDER2,
+      attemptsFor: attemptsFor2,
+      labelForModel,
+      tierOf,
+      isPrimary
+    };
+  }
+});
+
 // ../src/models/catalog.js
 var require_catalog = __commonJS({
   "../src/models/catalog.js"(exports, module) {
@@ -589,15 +645,16 @@ var require_catalog = __commonJS({
 });
 
 // src/index.jsx
-import React14 from "react";
+import React16 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React13, { useCallback as useCallback2, useEffect as useEffect5, useRef as useRef2, useState as useState5 } from "react";
-import fs2 from "node:fs";
+import React15, { useCallback as useCallback2, useEffect as useEffect5, useRef as useRef2, useState as useState5 } from "react";
+import fs3 from "node:fs";
+import path3 from "node:path";
 import { useKeyboard as useKeyboard3, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { TextAttributes as TextAttributes10 } from "@opentui/core";
+import { TextAttributes as TextAttributes12 } from "@opentui/core";
 
 // src/components/DockAd.jsx
 var import_ad_client = __toESM(require_ad_client());
@@ -782,7 +839,7 @@ function ApprovalPrompt({ width = 80, request, onAnswer }) {
         paddingRight: 1
       },
       children: [
-        /* @__PURE__ */ jsxs2("box", { style: { width: inner, justifyContent: "space-between" }, children: [
+        /* @__PURE__ */ jsxs2("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
           /* @__PURE__ */ jsx2("text", { fg: sudo ? "red" : "yellow", attributes: TextAttributes2.BOLD, children: sudo ? "sudo approval required" : "approval required" }),
           /* @__PURE__ */ jsx2("text", { fg: "gray", children: request.toolName })
         ] }),
@@ -817,6 +874,10 @@ function ApprovalPrompt({ width = 80, request, onAnswer }) {
 import React3 from "react";
 import { TextAttributes as TextAttributes3 } from "@opentui/core";
 import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
+var clipHint = (s, n) => {
+  const t = String(s == null ? "" : s);
+  return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
+};
 function Composer({
   width,
   value = "",
@@ -859,7 +920,7 @@ function Composer({
           ) : /* @__PURE__ */ jsx3("text", { fg: "gray", children: value || (disabled ? "working\u2026" : placeholder) })
         ] }),
         adSlot,
-        /* @__PURE__ */ jsx3("box", { style: { width: inner }, children: /* @__PURE__ */ jsx3("text", { fg: "gray", children: hint || "enter send \xB7 esc stop \xB7 tab focus \xB7 ctrl+c quit" }) })
+        /* @__PURE__ */ jsx3("box", { style: { width: inner }, children: /* @__PURE__ */ jsx3("text", { fg: "gray", children: clipHint(hint || "enter send \xB7 esc stop \xB7 tab focus \xB7 ctrl+c quit", inner) }) })
       ]
     }
   );
@@ -974,21 +1035,21 @@ function GridPanel({ title, cols = 4, width, children, borderColor = "gray", hin
   const hintWidth = Math.max(0, inner - titleText.length - 1);
   const clippedHint = hintText.length <= hintWidth ? hintText : hintWidth > 1 ? `${hintText.slice(0, hintWidth - 1)}\u2026` : "";
   return /* @__PURE__ */ jsxs5("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor, paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsxs5("box", { style: { width: inner, justifyContent: "space-between" }, children: [
+    /* @__PURE__ */ jsxs5("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
       /* @__PURE__ */ jsx5("text", { fg: "cyan", attributes: TextAttributes4.BOLD, children: titleText.slice(0, inner) }),
       clippedHint ? /* @__PURE__ */ jsx5("text", { fg: "gray", children: clippedHint }) : null
     ] }),
-    /* @__PURE__ */ jsx5("box", { style: { width: inner, flexWrap: "wrap" }, children })
+    /* @__PURE__ */ jsx5("box", { style: { width: inner, flexDirection: "row", flexWrap: "wrap" }, children })
   ] });
 }
 function Cell({ label, value, w = 18, color = "white" }) {
-  const clip4 = (s, n) => {
+  const clip6 = (s, n) => {
     const t = String(s == null ? "\u2014" : s);
     return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
   };
   return /* @__PURE__ */ jsxs5("box", { style: { width: Math.max(1, w), flexDirection: "column", flexShrink: 0, marginRight: 1 }, children: [
-    /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip4(label, w) }),
-    /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: clip4(value, w) })
+    /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip6(label, w) }),
+    /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: clip6(value, w) })
   ] });
 }
 function Meter({ value, max = 100, w = 16, color = "green" }) {
@@ -1024,7 +1085,7 @@ var clip = (s, n) => {
 };
 function Row({ width, k, v, color = "white" }) {
   const kw = Math.min(10, Math.max(4, Math.floor(width / 3)));
-  return /* @__PURE__ */ jsxs6("box", { style: { width, justifyContent: "space-between", flexShrink: 0 }, children: [
+  return /* @__PURE__ */ jsxs6("box", { style: { width, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }, children: [
     /* @__PURE__ */ jsx6("text", { fg: "gray", children: clip(k, kw) }),
     /* @__PURE__ */ jsx6("text", { fg: color, attributes: TextAttributes5.BOLD, children: clip(v, Math.max(1, width - kw - 1)) })
   ] });
@@ -1032,7 +1093,7 @@ function Row({ width, k, v, color = "white" }) {
 function Panel({ width, title, hint, children }) {
   const inner = Math.max(1, width - 4);
   return /* @__PURE__ */ jsxs6("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs6("box", { style: { width: inner, justifyContent: "space-between" }, children: [
+    /* @__PURE__ */ jsxs6("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
       /* @__PURE__ */ jsx6("text", { fg: "cyan", attributes: TextAttributes5.BOLD, children: clip(title, inner) }),
       hint ? /* @__PURE__ */ jsx6("text", { fg: "gray", children: clip(hint, Math.max(0, inner - title.length - 1)) }) : null
     ] }),
@@ -1062,7 +1123,7 @@ function LiveSidebar({
   const shown = ordered.slice(0, Math.max(0, maxServers));
   const hidden = ordered.length - shown.length;
   return /* @__PURE__ */ jsxs6("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs6(Panel, { width, title: "Live", hint: serverOk ? "online" : "offline", children: [
+    /* @__PURE__ */ jsxs6(Panel, { width, title: "\u25C8 Live", hint: serverOk ? "online" : "offline", children: [
       /* @__PURE__ */ jsx6(Row, { width: inner, k: "status", v: agentStatus || "idle", color: agentStatus === "error" ? "red" : agentStatus === "idle" ? "gray" : "green" }),
       /* @__PURE__ */ jsx6(Row, { width: inner, k: "phase", v: phase || "IDLE", color: "cyan" }),
       /* @__PURE__ */ jsx6(Row, { width: inner, k: "tool", v: tool || "\u2014" }),
@@ -1071,7 +1132,7 @@ function LiveSidebar({
       /* @__PURE__ */ jsx6(Row, { width: inner, k: "model", v: model, color: "yellow" }),
       /* @__PURE__ */ jsx6(Row, { width: inner, k: "version", v: `tui ${version}` })
     ] }),
-    /* @__PURE__ */ jsxs6(Panel, { width, title: "MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
+    /* @__PURE__ */ jsxs6(Panel, { width, title: "\u2B21 MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
       shown.length === 0 ? /* @__PURE__ */ jsx6(Row, { width: inner, k: "servers", v: "\u2014", color: "gray" }) : shown.map((s) => {
         const up = !!s.initialized || (s.toolCount || 0) > 0;
         const lazy = !!s.lazy && !up;
@@ -1098,6 +1159,9 @@ import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 var MENU_ITEMS = [
   { cmd: "/model", label: "Models", detail: "switch the model for this session" },
   { cmd: "/mcp", label: "MCP servers", detail: "live servers and their tool counts" },
+  { cmd: "/handoff", label: "Auto handoff", detail: "on/off \xB7 DeepSeek \u2192 Codex \u2192 others" },
+  { cmd: "/ports", label: "Ports", detail: "services and every listening port" },
+  { cmd: "/attach", label: "Attach image", detail: "/attach <path> \xB7 sends with your message" },
   { cmd: "/dashboard", label: "Dashboard", detail: "system / session / agent panels" },
   { cmd: "/status", label: "Status", detail: "server, phase, tokens" },
   { cmd: "/clear", label: "Clear transcript", detail: "start the conversation over" },
@@ -1111,13 +1175,13 @@ var clip2 = (s, n) => {
 function MenuPalette({ width = 60, selected = 0 }) {
   const inner = Math.max(1, width - 4);
   return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "cyan", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs7("box", { style: { width: inner, justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx7("text", { fg: "cyan", attributes: TextAttributes6.BOLD, children: "Menu" }),
+    /* @__PURE__ */ jsxs7("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx7("text", { fg: "cyan", attributes: TextAttributes6.BOLD, children: "\u25C7 Menu" }),
       /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip2("\u2191\u2193 select \xB7 enter run \xB7 esc close", inner - 6) })
     ] }),
     /* @__PURE__ */ jsx7("box", { style: { width: inner, flexDirection: "column" }, children: MENU_ITEMS.map((item, i) => {
       const active = i === selected;
-      return /* @__PURE__ */ jsxs7("box", { style: { width: inner, justifyContent: "space-between" }, children: [
+      return /* @__PURE__ */ jsxs7("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
         /* @__PURE__ */ jsx7("text", { fg: active ? "cyan" : "white", attributes: active ? TextAttributes6.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${item.cmd.padEnd(11)} ${clip2(item.label, 16)}` }),
         /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip2(item.detail, Math.max(0, inner - 30)) })
       ] }, item.cmd);
@@ -1126,10 +1190,300 @@ function MenuPalette({ width = 60, selected = 0 }) {
   ] });
 }
 
-// src/components/StatusBar.jsx
+// src/components/ServicesPanel.jsx
 import React8 from "react";
 import { TextAttributes as TextAttributes7 } from "@opentui/core";
+
+// ../smartness.mjs
+import fs2 from "node:fs";
+import os2 from "node:os";
+import path2 from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+var CLI_DIR = path2.dirname(fileURLToPath(import.meta.url));
+var EXPECTED_SERVICES = [
+  { port: 3579, name: "haksterAi", proto: "http" },
+  { port: 8081, name: "cinevault", proto: "http" },
+  { port: 4e3, name: "phantom", proto: "http" },
+  { port: 8082, name: "claude-proxy", proto: "http" },
+  { port: 5555, name: "miniforge", proto: "http" }
+];
+var DEFAULT_SCORE = 98;
+function anchorScore() {
+  try {
+    const file = path2.join(os2.homedir(), ".hakster", "perf_history.json");
+    const rows = JSON.parse(fs2.readFileSync(file, "utf8"));
+    const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
+    const n = Number(last && (last.smartnessEnd ?? last.smartnessPeak));
+    if (!Number.isFinite(n)) return DEFAULT_SCORE;
+    return Math.max(50, Math.min(100, Math.round(n)));
+  } catch {
+    return DEFAULT_SCORE;
+  }
+}
+function scoreToolCall(name, args, ok, out) {
+  const cmd = String(args && args.command || "");
+  const o = String(out || "").toLowerCase();
+  let d = 0;
+  if (ok === false) {
+    d -= 5;
+    if (/(eaddrinuse|err_dlopen_failed|npm error|syntaxerror|cannot find module|enoent|eacces|permission denied|module not found)/.test(o)) d -= 5;
+  }
+  if (/\brm\s+-[rf]/i.test(cmd) || /\bgit\s+(reset\s+--hard|checkout\s+--|clean)\b/i.test(cmd)) {
+    if (/\.(md|json|env|js|ts|astro|sh|py)$|(agents\.md|package\.json|config|\.env)/i.test(cmd)) d -= 10;
+    else d -= 5;
+  }
+  if (ok !== false) {
+    if (/(http\/1\.1\s+200|\b200\s+ok\b|\bok\b|rebuilt|\bbuilt\b|success|✓|applied)/.test(o)) d += 2;
+    else d += 1;
+    if (["write_file", "patch_file", "multi_patch", "edit_file", "insert_lines", "replace_regex", "append_file"].includes(name)) {
+      const content = String(args && (args.content || args.patch || args.text || args.new_string) || "");
+      const fp = String(args && (args.path || args.file) || "");
+      const isDataDoc = /\.(md|json|ya?ml|txt|csv|py|js|ts|astro|sh)$/i.test(fp);
+      const len = content.length;
+      const pts = isDataDoc ? Math.min(10, Math.round(len / 200)) : Math.min(8, Math.round(len / 300));
+      d += Math.max(2, pts);
+    }
+    if (/scrape|firecrawl/i.test(name) || /firecrawl|scrape/.test(cmd)) d += 3;
+    if (/\b(npm\s+install|npm\s+rebuild|pip\s+install|chown|chmod|pm2\s+(restart|start))\b/i.test(cmd)) d += 1;
+  }
+  return Math.max(-12, Math.min(10, d));
+}
+function createMeter() {
+  const meter = {
+    score: anchorScore(),
+    delta: 0,
+    points: 0,
+    rounds: 0,
+    successes: 0,
+    failures: 0,
+    peak: 0
+  };
+  meter.peak = meter.score;
+  const apply = (d) => {
+    if (!Number.isFinite(d) || d === 0) return 0;
+    const before = meter.score;
+    meter.score = Math.max(0, Math.min(100, meter.score + d));
+    meter.delta = meter.score - before;
+    meter.points += d;
+    if (meter.score > meter.peak) meter.peak = meter.score;
+    return meter.delta;
+  };
+  meter.tool = (name, args, ok, out) => {
+    if (ok) meter.successes++;
+    else meter.failures++;
+    return apply(scoreToolCall(name, args, ok, out));
+  };
+  meter.bump = (d) => apply(d);
+  meter.resetTask = () => {
+    meter.rounds = 0;
+    meter.delta = 0;
+  };
+  meter.snapshot = () => ({
+    score: meter.score,
+    delta: meter.delta,
+    points: meter.points,
+    rounds: meter.rounds,
+    successes: meter.successes,
+    failures: meter.failures,
+    peak: meter.peak
+  });
+  return meter;
+}
+function smartLabel(score) {
+  if (score >= 80) return "Sharp";
+  if (score >= 66) return "Strong";
+  if (score >= 50) return "Steady";
+  if (score >= 33) return "Slipping";
+  return "Struggling";
+}
+function barCells(value, total, len = 16) {
+  const ratio = total > 0 ? Math.max(0, Math.min(1, value / total)) : 0;
+  const filled = Math.round(ratio * len);
+  return { filled, empty: Math.max(0, len - filled) };
+}
+function barColor(kind, value) {
+  if (kind === "points") {
+    if (value >= 150) return "#58a6ff";
+    if (value >= 66) return "#3fb950";
+    if (value >= 33) return "#d29922";
+    return "#f85149";
+  }
+  if (value >= 66) return "#3fb950";
+  if (value >= 33) return "#d29922";
+  return "#f85149";
+}
+function scanPorts(timeoutMs = 4e3) {
+  return new Promise((resolve) => {
+    execFile("ss", ["-tlnp"], { timeout: timeoutMs, maxBuffer: 1 << 20 }, (err, stdout) => {
+      const text = String(stdout || "");
+      const ports = /* @__PURE__ */ new Set();
+      const procs = {};
+      for (const line of text.split("\n")) {
+        const m = line.match(/:([0-9]{2,5})\s+\S+\s+.*users:\(\("([^"]+)"/);
+        if (m) {
+          ports.add(Number(m[1]));
+          procs[m[1]] = m[2];
+          continue;
+        }
+        const m2 = line.match(/:([0-9]{2,5})\s+\S+/);
+        if (m2) ports.add(Number(m2[1]));
+      }
+      if (err && !text) return resolve({ ok: false, ports: [], procs: {}, at: Date.now() });
+      resolve({ ok: true, ports: [...ports].sort((a, b) => a - b), procs, at: Date.now() });
+    });
+  });
+}
+function serviceStates(scan) {
+  const open = new Set(scan && scan.ports || []);
+  return EXPECTED_SERVICES.map((svc) => ({
+    ...svc,
+    up: open.has(svc.port),
+    proc: scan && scan.procs && scan.procs[String(svc.port)] || ""
+  }));
+}
+function otherListening(scan) {
+  const known = new Set(EXPECTED_SERVICES.map((svc) => svc.port));
+  const ports = scan && scan.ports || [];
+  return ports.filter((port) => !known.has(port)).map((port) => ({
+    port,
+    proc: scan && scan.procs && scan.procs[String(port)] || ""
+  }));
+}
+var IMPORTANT_FILES = [
+  "AGENTS.md",
+  "package.json",
+  "cli/index.js",
+  "cli/memory.js",
+  "server/src/index.js",
+  "server/src/agent/index.js",
+  "server/src/agent/loop.js",
+  "server/src/agent/autolearn.js",
+  "server/hakster-config.json",
+  "server/src/hakster-config.json",
+  "scripts/hakster-guardrails.sh",
+  "HAKSTERAI-PHANTOM-MERGED.md",
+  ".env"
+];
+function fileGuard(root2 = path2.resolve(CLI_DIR, "..")) {
+  const present = [];
+  const missing = [];
+  for (const rel of IMPORTANT_FILES) {
+    try {
+      if (fs2.existsSync(path2.join(root2, rel))) present.push(rel);
+      else missing.push(rel);
+    } catch {
+      missing.push(rel);
+    }
+  }
+  return { present: present.length, total: IMPORTANT_FILES.length, missing };
+}
+function portLabel(entry, max = 14) {
+  const proc = String(entry && entry.proc || "").split(/\s+/)[0];
+  const text = proc || "listening";
+  return text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}\u2026`;
+}
+
+// src/components/ServicesPanel.jsx
 import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+var CELL_W = 16;
+function servicesGridRows(width, count) {
+  const inner = Math.max(1, (Number(width) || 80) - 4);
+  const perRow = Math.max(1, Math.floor(inner / (CELL_W + 1)));
+  const rows = Math.max(1, Math.ceil(Math.max(1, Number(count) || 1) / perRow));
+  return 2 + rows * 2;
+}
+var clip3 = (s, n) => {
+  const t = String(s == null ? "" : s);
+  return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
+};
+function ServicesPanel({
+  width = 100,
+  services = [],
+  scan = null,
+  showAll = false
+}) {
+  const w = Math.max(24, Number(width) || 80);
+  const list = Array.isArray(services) ? services : [];
+  const known = new Set(list.map((s) => s.port));
+  const others = otherListening(scan).filter((p) => !known.has(p.port));
+  const up = list.filter((s) => s.up).length;
+  const scanOk = !!(scan && scan.ok);
+  const allUp = list.length > 0 && up === list.length;
+  if (w < 96) {
+    const inner = Math.max(8, w - 4);
+    const head = `Services ${up}/${list.length} online  `;
+    const room = Math.max(0, inner - head.length);
+    const shown = [];
+    let used = 0;
+    for (const s of list) {
+      const text = `\u25CF :${s.port}  `;
+      if (used + text.length > room) break;
+      shown.push({ ...s, text });
+      used += text.length;
+    }
+    const hiddenSvc = list.length - shown.length;
+    const leftover = Math.max(0, inner - head.length - used);
+    const tails = !scanOk ? ["scan unavailable", "scan \u2026", "\u2026"] : hiddenSvc > 0 ? [`+${hiddenSvc}  +${others.length} ports`, `+${hiddenSvc}  +${others.length}`, `+${hiddenSvc + others.length}`] : others.length ? [`+${others.length} other ports`, `+${others.length} ports`, `+${others.length}`] : [];
+    const tail = tails.find((t) => t.length <= leftover) || "";
+    return /* @__PURE__ */ jsx8("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: /* @__PURE__ */ jsxs8("text", { children: [
+      /* @__PURE__ */ jsx8("span", { fg: "cyan", attributes: TextAttributes7.BOLD, children: "Services " }),
+      /* @__PURE__ */ jsx8("span", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: `${up}/${list.length} online  ` }),
+      shown.map((s) => /* @__PURE__ */ jsx8("span", { fg: s.up ? "green" : "red", children: s.text }, s.port)),
+      /* @__PURE__ */ jsx8("span", { fg: scanOk ? "gray" : "yellow", children: tail })
+    ] }) });
+  }
+  const cells = list.map((s) => ({
+    key: String(s.port),
+    label: `:${s.port}`,
+    value: `\u25CF ${s.name}`,
+    color: s.up ? "green" : "red"
+  }));
+  if (showAll) {
+    const shown = others.slice(0, 15);
+    for (const p of shown) {
+      cells.push({
+        key: `x${p.port}`,
+        label: `:${p.port}`,
+        value: `\u25CF ${portLabel(p)}`,
+        color: "green"
+      });
+    }
+    if (others.length > shown.length) {
+      cells.push({
+        key: "more",
+        label: "other",
+        value: `+${others.length - shown.length} ports`,
+        color: "cyan"
+      });
+    }
+  } else if (others.length) {
+    cells.push({
+      key: "more",
+      label: "other",
+      value: `+${others.length} ports`,
+      color: "cyan"
+    });
+  }
+  return /* @__PURE__ */ jsx8(
+    GridPanel_default,
+    {
+      title: "\u25A3 Services on ports",
+      width: w,
+      borderColor: "gray",
+      hint: clip3(
+        `${up}/${list.length} online${others.length ? ` \xB7 ${others.length} other ports` : ""}${scanOk ? "" : " \xB7 scan unavailable"}`,
+        Math.max(6, w - 24)
+      ),
+      children: cells.map((c) => /* @__PURE__ */ jsx8(Cell, { label: c.label, value: c.value, w: CELL_W, color: c.color }, c.key))
+    }
+  );
+}
+
+// src/components/StatusBar.jsx
+import React9 from "react";
+import { TextAttributes as TextAttributes8 } from "@opentui/core";
+import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 var STATUS_STYLES = {
   idle: { text: "ready", color: "gray" },
   connecting: { text: "can't reach server\u2026", color: "yellow" },
@@ -1146,47 +1500,97 @@ function formatElapsed(ms) {
   if (!Number.isFinite(n) || n < 0) return null;
   return `${(n / 1e3).toFixed(1)}s`;
 }
-function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint }) {
+function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, handoff }) {
   const known = status ? STATUS_STYLES[status] : null;
   const label = known ? known.text : status ? String(status) : "";
   const elapsed = status === "streaming" || status === "thinking" || status === "approval" ? formatElapsed(elapsedMs) : null;
   const right = [];
   if (label) {
     right.push(
-      /* @__PURE__ */ jsx8("text", { fg: known ? known.color : "gray", children: label }, "status")
+      /* @__PURE__ */ jsx9("text", { fg: known ? known.color : "gray", children: label }, "status")
     );
   }
   if (elapsed) {
-    right.push(/* @__PURE__ */ jsx8("text", { fg: "gray", children: elapsed }, "elapsed"));
+    right.push(/* @__PURE__ */ jsx9("text", { fg: "gray", children: elapsed }, "elapsed"));
   }
   if (model) {
-    right.push(/* @__PURE__ */ jsx8("text", { fg: "yellow", children: model }, "model"));
+    right.push(/* @__PURE__ */ jsx9("text", { fg: "yellow", children: model }, "model"));
+  }
+  if (handoff !== void 0 && handoff !== null) {
+    right.push(
+      /* @__PURE__ */ jsx9("text", { fg: handoff ? "green" : "red", children: handoff ? "handoff auto" : "handoff off" }, "handoff")
+    );
   }
   if (cols !== void 0 && cols !== null) {
-    right.push(/* @__PURE__ */ jsx8("text", { fg: "gray", children: `${cols}c` }, "cols"));
+    right.push(/* @__PURE__ */ jsx9("text", { fg: "gray", children: `${cols}c` }, "cols"));
   }
   right.push(
-    /* @__PURE__ */ jsx8("text", { fg: adsOn ? "green" : "red", children: adsOn ? "ads on" : "ads off" }, "ads")
+    /* @__PURE__ */ jsx9("text", { fg: adsOn ? "green" : "red", children: adsOn ? "ads on" : "ads off" }, "ads")
   );
   const rightNodes = [];
   right.forEach((node, i) => {
     if (i > 0) {
-      rightNodes.push(/* @__PURE__ */ jsx8("text", { fg: "gray", children: " \xB7 " }, `sep-${i}`));
+      rightNodes.push(/* @__PURE__ */ jsx9("text", { fg: "gray", children: " \xB7 " }, `sep-${i}`));
     }
     rightNodes.push(node);
   });
-  return /* @__PURE__ */ jsxs8("box", { style: { width, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsxs8("box", { style: { flexDirection: "row" }, children: [
-      focus === "ad" ? /* @__PURE__ */ jsx8("text", { fg: "cyan", attributes: TextAttributes7.BOLD, children: "\u27EA ad \u27EB" }) : /* @__PURE__ */ jsx8("text", { fg: "gray", children: "\u27EA composer \u27EB" }),
-      hint ? /* @__PURE__ */ jsx8("text", { fg: "gray", children: `  ${hint}` }) : null
+  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsxs9("box", { style: { flexDirection: "row" }, children: [
+      focus === "ad" ? /* @__PURE__ */ jsx9("text", { fg: "cyan", attributes: TextAttributes8.BOLD, children: "\u27EA ad \u27EB" }) : /* @__PURE__ */ jsx9("text", { fg: "gray", children: "\u27EA composer \u27EB" }),
+      hint ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: `  ${hint}` }) : null
     ] }),
-    /* @__PURE__ */ jsx8("box", { style: { flexDirection: "row" }, children: rightNodes })
+    /* @__PURE__ */ jsx9("box", { style: { flexDirection: "row" }, children: rightNodes })
   ] });
 }
 
+// src/components/SystemPanel.jsx
+import React10 from "react";
+import { TextAttributes as TextAttributes9 } from "@opentui/core";
+import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+var clip4 = (s, n) => {
+  const t = String(s == null ? "" : s);
+  return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
+};
+function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1 }) {
+  const w = Math.max(24, Number(width) || 80);
+  const score = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
+  const points = Math.max(0, Math.round(Number(meters && meters.points) || 0));
+  const delta = Number(meters && meters.delta) || 0;
+  const ctxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
+  const arrow = delta > 0 ? "\u25B2" : delta < 0 ? "\u25BC" : "\u25C6";
+  const arrowColor = delta > 0 ? "green" : delta < 0 ? "red" : "gray";
+  const sc = barCells(score, 100, 12);
+  const ac = barCells(points, 100, 10);
+  const cc = barCells(ctxPct, 100, 8);
+  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + 16 + 3 + 4 + 8 + 7;
+  const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p autolearn  ctx ${ctxPct}%`;
+  const terse = `\u{1F9E0} ${score}% \u2726 ${points}p ctx ${ctxPct}%`;
+  if (fullLen <= w) {
+    return /* @__PURE__ */ jsx10("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs10("text", { children: [
+      /* @__PURE__ */ jsx10("span", { fg: barColor("smart", score), attributes: TextAttributes9.BOLD, children: "\u{1F9E0} " }),
+      /* @__PURE__ */ jsx10("span", { fg: barColor("smart", score), children: "\u2588".repeat(sc.filled) }),
+      /* @__PURE__ */ jsx10("span", { fg: "gray", children: "\u2591".repeat(sc.empty) }),
+      /* @__PURE__ */ jsx10("span", { fg: "white", attributes: TextAttributes9.BOLD, children: ` ${score}% ` }),
+      /* @__PURE__ */ jsx10("span", { fg: arrowColor, children: arrow }),
+      /* @__PURE__ */ jsx10("span", { fg: "gray", children: ` ${smartLabel(score)}` }),
+      /* @__PURE__ */ jsx10("span", { fg: "gray", children: "   " }),
+      /* @__PURE__ */ jsx10("span", { fg: barColor("points", points), attributes: TextAttributes9.BOLD, children: "\u2726 " }),
+      /* @__PURE__ */ jsx10("span", { fg: barColor("points", points), children: "\u2588".repeat(ac.filled) }),
+      /* @__PURE__ */ jsx10("span", { fg: "gray", children: "\u2591".repeat(ac.empty) }),
+      /* @__PURE__ */ jsx10("span", { fg: "white", attributes: TextAttributes9.BOLD, children: ` ${points}p` }),
+      /* @__PURE__ */ jsx10("span", { fg: "gray", children: " autolearn   " }),
+      /* @__PURE__ */ jsx10("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "ctx " }),
+      /* @__PURE__ */ jsx10("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "\u2588".repeat(cc.filled) }),
+      /* @__PURE__ */ jsx10("span", { fg: "gray", children: "\u2591".repeat(cc.empty) }),
+      /* @__PURE__ */ jsx10("span", { fg: "white", children: ` ${ctxPct}%` })
+    ] }) });
+  }
+  return /* @__PURE__ */ jsx10("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx10("text", { children: /* @__PURE__ */ jsx10("span", { fg: barColor("smart", score), attributes: TextAttributes9.BOLD, children: clip4(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
+}
+
 // src/components/CrushStatus.jsx
-import React9, { useEffect as useEffect3, useState as useState3 } from "react";
-import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
+import React11, { useEffect as useEffect3, useState as useState3 } from "react";
+import { jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
 var GRADIENT = [51, 87, 117, 153, 117, 87];
@@ -1216,31 +1620,31 @@ function CrushStatus({ width, phase, activity, elapsedMs }) {
   const gradColor = `rgb(${grad},${Math.floor(grad * 0.7)},${Math.floor(grad * 1.2)})`;
   const phrase = activity || info.phrases[Math.floor(frame / 20) % info.phrases.length];
   const shimmer = [0, 1, 2].map((offset) => SHIMMER[(frame + offset) % SHIMMER.length]).join("");
-  return /* @__PURE__ */ jsx9("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs9("text", { children: [
-    /* @__PURE__ */ jsx9("span", { fg: gradColor, children: "\u27E6" }),
-    /* @__PURE__ */ jsx9("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
-    /* @__PURE__ */ jsx9("span", { fg: gradColor, children: "\u27E7" }),
+  return /* @__PURE__ */ jsx11("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs11("text", { children: [
+    /* @__PURE__ */ jsx11("span", { fg: gradColor, children: "\u27E6" }),
+    /* @__PURE__ */ jsx11("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
+    /* @__PURE__ */ jsx11("span", { fg: gradColor, children: "\u27E7" }),
     " ",
-    /* @__PURE__ */ jsx9("span", { children: info.emoji }),
+    /* @__PURE__ */ jsx11("span", { children: info.emoji }),
     " ",
-    /* @__PURE__ */ jsx9("span", { fg: info.color, children: normalizedPhase }),
+    /* @__PURE__ */ jsx11("span", { fg: info.color, children: normalizedPhase }),
     " ",
-    /* @__PURE__ */ jsx9("span", { fg: "#a5b4c3", children: phrase }),
+    /* @__PURE__ */ jsx11("span", { fg: "#a5b4c3", children: phrase }),
     " ",
-    /* @__PURE__ */ jsx9("span", { fg: gradColor, children: shimmer }),
+    /* @__PURE__ */ jsx11("span", { fg: gradColor, children: shimmer }),
     " ",
-    /* @__PURE__ */ jsx9("span", { fg: "gray", children: formatElapsed2(elapsedMs) })
+    /* @__PURE__ */ jsx11("span", { fg: "gray", children: formatElapsed2(elapsedMs) })
   ] }) });
 }
 
 // src/components/TodoPanel.jsx
-import React10 from "react";
-import { TextAttributes as TextAttributes8 } from "@opentui/core";
-import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+import React12 from "react";
+import { TextAttributes as TextAttributes10 } from "@opentui/core";
+import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 var GLYPH_DONE = "\u2713";
 var GLYPH_TODO = "\u25CB";
 var EMPTY_TEXT = "No todos yet \u2014 the agent's checklist appears here once it creates one.";
-function clip3(text, n) {
+function clip5(text, n) {
   const t = String(text == null ? "" : text);
   if (n <= 0) return "";
   return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
@@ -1254,39 +1658,39 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   const rows = [];
   if (list.length === 0) {
     rows.push(
-      /* @__PURE__ */ jsx10("text", { fg: "gray", children: clip3(EMPTY_TEXT, inner) }, "empty")
+      /* @__PURE__ */ jsx12("text", { fg: "gray", children: clip5(EMPTY_TEXT, inner) }, "empty")
     );
   } else {
     visible.forEach((todo, i) => {
       const done = !!(todo && todo.done);
-      const text = clip3(todo && todo.text || "", Math.max(0, inner - 2));
+      const text = clip5(todo && todo.text || "", Math.max(0, inner - 2));
       rows.push(
-        /* @__PURE__ */ jsxs10("box", { style: { width: "100%", flexDirection: "row" }, children: [
-          /* @__PURE__ */ jsx10("text", { fg: done ? "green" : "gray", attributes: done ? 0 : TextAttributes8.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
-          /* @__PURE__ */ jsx10("text", { fg: done ? "white" : "gray", children: ` ${text}` })
+        /* @__PURE__ */ jsxs12("box", { style: { width: "100%", flexDirection: "row" }, children: [
+          /* @__PURE__ */ jsx12("text", { fg: done ? "green" : "gray", attributes: done ? 0 : TextAttributes10.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
+          /* @__PURE__ */ jsx12("text", { fg: done ? "white" : "gray", children: ` ${text}` })
         ] }, `row-${i}`)
       );
     });
     if (overflow > 0) {
       rows.push(
-        /* @__PURE__ */ jsx10("text", { fg: "gray", children: `+${overflow} more` }, "more")
+        /* @__PURE__ */ jsx12("text", { fg: "gray", children: `+${overflow} more` }, "more")
       );
     }
   }
-  return /* @__PURE__ */ jsxs10("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsx10("text", { fg: "cyan", attributes: TextAttributes8.BOLD, children: `Todos \u2014 ${completed}/${list.length} completed` }),
+  return /* @__PURE__ */ jsxs12("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsx12("text", { fg: "cyan", attributes: TextAttributes10.BOLD, children: `Todos \u2014 ${completed}/${list.length} completed` }),
     rows,
-    hint ? /* @__PURE__ */ jsx10("text", { fg: "gray", children: hint }) : null
+    hint ? /* @__PURE__ */ jsx12("text", { fg: "gray", children: hint }) : null
   ] });
 }
 
 // src/components/Transcript.jsx
-import React12 from "react";
+import React14 from "react";
 
 // src/components/MessageBlock.jsx
-import React11 from "react";
-import { TextAttributes as TextAttributes9 } from "@opentui/core";
-import { jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
+import React13 from "react";
+import { TextAttributes as TextAttributes11 } from "@opentui/core";
+import { jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
   assistant: { border: "gray", label: "hakster" },
@@ -1297,17 +1701,21 @@ function ToolRow({ tool, width }) {
   const pending = tool.result === null;
   const glyph = pending ? "\u2026" : "\u2713";
   const colour = pending ? "yellow" : "green";
-  const args = tool.args && Object.keys(tool.args).length ? ` ${JSON.stringify(tool.args).slice(0, 60)}` : "";
-  return /* @__PURE__ */ jsxs11("box", { style: { flexDirection: "column", width }, children: [
-    /* @__PURE__ */ jsxs11("text", { children: [
-      /* @__PURE__ */ jsxs11("span", { fg: colour, children: [
+  const args = tool.args && Object.keys(tool.args).length ? ` ${JSON.stringify(tool.args).slice(0, 80)}` : "";
+  return /* @__PURE__ */ jsxs13("box", { style: { flexDirection: "column", width }, children: [
+    /* @__PURE__ */ jsxs13("text", { children: [
+      /* @__PURE__ */ jsxs13("span", { fg: colour, children: [
         glyph,
         " "
       ] }),
-      /* @__PURE__ */ jsx11("span", { fg: "white", children: tool.name || "tool" }),
-      args ? /* @__PURE__ */ jsx11("span", { fg: "gray", children: args }) : null
+      /* @__PURE__ */ jsx13("span", { fg: "white", children: tool.name || "tool" }),
+      args ? /* @__PURE__ */ jsx13("span", { fg: "gray", children: args }) : null
     ] }),
-    tool.result != null ? /* @__PURE__ */ jsx11("text", { fg: "gray", children: `  ${String(tool.result).slice(0, 120)}` }) : null
+    tool.result != null ? (
+      // The whole result the server sent (it caps long output itself) —
+      // a clipped 120-char preview hid what the agent actually saw.
+      /* @__PURE__ */ jsx13("text", { fg: "gray", children: String(tool.result) })
+    ) : null
   ] });
 }
 function MessageBlock({ message, width }) {
@@ -1316,74 +1724,54 @@ function MessageBlock({ message, width }) {
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
   const inner = Math.max(8, (width || 80) - 4);
   if (message.role === "system") {
-    return /* @__PURE__ */ jsx11("box", { style: { width, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx11("text", { fg: border, children: String(message.text || "") }) });
+    return /* @__PURE__ */ jsx13("box", { style: { width, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx13("text", { fg: border, children: String(message.text || "") }) });
   }
   const tools = Array.isArray(message.tools) ? message.tools : [];
-  return /* @__PURE__ */ jsxs11("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsx11("text", { fg: border, attributes: TextAttributes9.BOLD, children: roleStyle.label }),
-    message.thinking ? /* @__PURE__ */ jsx11("text", { fg: "gray", children: String(message.thinking) }) : null,
-    message.text ? /* @__PURE__ */ jsx11("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx11("text", { fg: "gray", children: "thinking\u2026" }) : null,
-    tools.map((tool, i) => /* @__PURE__ */ jsx11(ToolRow, { tool, width: inner }, `tool-${i}`))
+  return /* @__PURE__ */ jsxs13("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsx13("text", { fg: border, attributes: TextAttributes11.BOLD, children: roleStyle.label }),
+    message.thinking ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: String(message.thinking) }) : null,
+    message.images ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: `\u{1F4CE} ${message.imageName || `${message.images} image`}` }) : null,
+    message.text ? /* @__PURE__ */ jsx13("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: "thinking\u2026" }) : null,
+    tools.map((tool, i) => /* @__PURE__ */ jsx13(ToolRow, { tool, width: inner }, `tool-${i}`))
   ] });
-}
-
-// src/utils/transcript-rows.js
-function wrappedRows(text, inner) {
-  const s = String(text == null ? "" : text);
-  if (!s) return 0;
-  const cols = Math.max(1, inner);
-  return s.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / cols)), 0);
-}
-function innerWidth(width, floor = 8) {
-  return Math.max(floor, (width || 80) - 4);
-}
-function estimateRows(message, width) {
-  if (!message) return 0;
-  const inner = innerWidth(width);
-  if (message.role === "system") return 1 + wrappedRows(message.text, inner - 2);
-  let rows = 3;
-  rows += wrappedRows(message.thinking, inner);
-  rows += wrappedRows(message.text, inner);
-  const tools = Array.isArray(message.tools) ? message.tools : [];
-  for (const tool of tools) {
-    rows += 1;
-    if (tool.result) rows += wrappedRows(String(tool.result).slice(0, 160), inner);
-  }
-  if (!message.text && !message.thinking && tools.length === 0) rows += 1;
-  return rows;
-}
-function fitTranscript(messages, width, budget) {
-  const list = Array.isArray(messages) ? messages : [];
-  const limit = Math.max(1, Number(budget) || 20);
-  const visible = [];
-  let used = 0;
-  for (let i = list.length - 1; i >= 0; i--) {
-    const rows = estimateRows(list[i], width) + 1;
-    if (used + rows > limit && visible.length > 0) break;
-    used += rows;
-    visible.unshift(list[i]);
-  }
-  return { visible, hidden: list.length - visible.length, used };
 }
 
 // src/components/Transcript.jsx
-import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
-function Transcript({ messages = [], width, height, emptyHint }) {
+import { jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
+var MAX_TURNS = 80;
+function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
   const list = Array.isArray(messages) ? messages : [];
   if (list.length === 0) {
-    return /* @__PURE__ */ jsx12("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx12("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
+    return /* @__PURE__ */ jsx14("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx14("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
   }
   const budget = Math.max(1, Number(height) || 20);
-  const { visible, hidden, used } = fitTranscript(list, width, budget);
-  const pad = Math.max(0, budget - used);
-  return /* @__PURE__ */ jsxs12("box", { style: { width, flexDirection: "column", height: budget }, children: [
-    hidden > 0 ? /* @__PURE__ */ jsx12("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"}` }) : null,
-    /* @__PURE__ */ jsx12("box", { style: { flexDirection: "column", marginTop: pad }, children: visible.map((message) => /* @__PURE__ */ jsx12("box", { style: { marginBottom: 1 }, children: /* @__PURE__ */ jsx12(MessageBlock, { message, width }) }, message.id)) })
-  ] });
+  const capped = list.slice(-MAX_TURNS);
+  const hidden = list.length - capped.length;
+  const contentW = Math.max(8, (Number(width) || 80) - 1);
+  return /* @__PURE__ */ jsx14("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsxs14(
+    "scrollbox",
+    {
+      ref: scrollRef,
+      style: {
+        width,
+        height: budget,
+        stickyScroll: true,
+        stickyStart: "bottom",
+        scrollY: true,
+        scrollX: false,
+        viewportCulling: true
+      },
+      children: [
+        hidden > 0 ? /* @__PURE__ */ jsx14("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
+        /* @__PURE__ */ jsx14("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message) => /* @__PURE__ */ jsx14("box", { style: { marginBottom: 1 }, children: /* @__PURE__ */ jsx14(MessageBlock, { message, width: contentW }) }, message.id)) })
+      ]
+    }
+  ) });
 }
 
 // src/hooks/useAgentStream.js
 import { useCallback, useEffect as useEffect4, useRef, useState as useState4 } from "react";
+var import_ladder = __toESM(require_ladder());
 var DEFAULT_API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
 var seq = 0;
@@ -1402,7 +1790,11 @@ function useAgentStream({
   system,
   sessionId,
   cwd,
-  approvalMode
+  approvalMode,
+  // Owner's switch (2026-11-23): when a run fails before producing anything,
+  // move to the next entry of the ladder (src/models/ladder.js). Off means the
+  // run fails where it failed — no silent model change.
+  autoHandoff = true
 } = {}) {
   const [messages, setMessages] = useState4([]);
   const [todos, setTodos] = useState4([]);
@@ -1411,11 +1803,28 @@ function useAgentStream({
   const [elapsedMs, setElapsedMs] = useState4(0);
   const [pendingConfirm, setPendingConfirm] = useState4(null);
   const pendingConfirmRef = useRef(null);
+  const meterRef = useRef(null);
+  if (!meterRef.current) meterRef.current = createMeter();
+  const [meters, setMeters] = useState4(() => meterRef.current.snapshot());
+  const toolMetaRef = useRef(/* @__PURE__ */ new Map());
+  const lastToolRef = useRef(null);
+  const syncMeters = useCallback(() => setMeters(meterRef.current.snapshot()), []);
+  const scoreTool = useCallback((name, args, result) => {
+    try {
+      const text = String(result == null ? "" : result).trim();
+      const ok = !/^Error[:\n]|^❌/i.test(text);
+      meterRef.current.tool(name || "tool", args || {}, ok, text);
+      syncMeters();
+    } catch {
+    }
+  }, [syncMeters]);
   const setPending = useCallback((value) => {
     pendingConfirmRef.current = value;
     setPendingConfirm(value);
   }, []);
   const abortRef = useRef(null);
+  const userAbortRef = useRef(false);
+  const attemptCtxRef = useRef({ produced: false, sawError: null, status: null });
   const startedAtRef = useRef(null);
   const statusRef = useRef("idle");
   const setStatusBoth = useCallback((next) => {
@@ -1442,7 +1851,11 @@ function useAgentStream({
   const append = useCallback((entry) => {
     setMessages((prev) => [...prev, entry]);
   }, []);
+  const drop = useCallback((id) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, []);
   const abort = useCallback(() => {
+    userAbortRef.current = true;
     if (pendingConfirmRef.current) {
       const pending = pendingConfirmRef.current;
       setPending(null);
@@ -1506,12 +1919,19 @@ function useAgentStream({
     [api, append, sessionId, setPending, setStatusBoth]
   );
   const send = useCallback(
-    async (text) => {
+    async (text, opts = {}) => {
       const prompt = String(text == null ? "" : text).trim();
       if (!prompt || statusRef.current === "connecting" || statusRef.current === "streaming") {
         return;
       }
-      append({ id: nextId("user"), role: "user", text: prompt });
+      const images = Array.isArray(opts && opts.images) ? opts.images.filter((url) => typeof url === "string" && url.startsWith("data:image/")) : [];
+      append({
+        id: nextId("user"),
+        role: "user",
+        text: prompt,
+        images: images.length,
+        imageName: opts && opts.imageName || ""
+      });
       const assistantId = nextId("ai");
       append({
         id: assistantId,
@@ -1526,14 +1946,24 @@ function useAgentStream({
       setStatusBoth("connecting");
       startedAtRef.current = Date.now();
       setElapsedMs(0);
-      const controller = new AbortController();
-      abortRef.current = controller;
-      const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      try {
+        meterRef.current.resetTask();
+        syncMeters();
+      } catch {
+      }
+      toolMetaRef.current.clear();
+      const attempts = (0, import_ladder.attemptsFor)(model);
+      if (attempts.length && provider && attempts[0].provider !== provider) {
+        attempts[0] = { ...attempts[0], provider };
+      }
+      const terminalStatus = (status2) => status2 === 400 || status2 === 401 || status2 === 402 || status2 === 403 || status2 === 413 || status2 === 415 || status2 === 422;
+      userAbortRef.current = false;
       const applyEvent = (evt) => {
         if (!evt || typeof evt !== "object") return;
         switch (evt.type) {
           case "delta":
             setStatusBoth("streaming");
+            attemptCtxRef.current.produced = true;
             patch(assistantId, (m) => ({ ...m, text: m.text + (evt.content || "") }));
             break;
           case "thinking_start":
@@ -1542,6 +1972,7 @@ function useAgentStream({
             break;
           case "thinking":
             setStatusBoth("thinking");
+            attemptCtxRef.current.produced = true;
             patch(assistantId, (m) => ({ ...m, thinking: m.thinking + (evt.content || "") }));
             break;
           case "thinking_end":
@@ -1551,6 +1982,8 @@ function useAgentStream({
             break;
           case "tool_call_start": {
             const name = evt.tool_name || "unknown";
+            lastToolRef.current = { name, args: evt.tool_args || {} };
+            if (evt.tool_call_id) toolMetaRef.current.set(evt.tool_call_id, lastToolRef.current);
             if (name === "update_todo" || name === "plan") {
               const raw = evt.tool_args && (evt.tool_args.todos || evt.tool_args.steps) || null;
               const next = name === "plan" ? normalizeTodos((raw || []).map((s) => ({ text: s, status: "pending" }))) : normalizeTodos(raw);
@@ -1573,6 +2006,8 @@ function useAgentStream({
           }
           case "mcp_result": {
             const result = String(evt.data == null ? "" : evt.data);
+            const meta = evt.tool_call_id && toolMetaRef.current.get(evt.tool_call_id) || lastToolRef.current;
+            if (meta) scoreTool(meta.name, meta.args, result);
             patch(assistantId, (m) => {
               const tools = m.tools.slice();
               let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
@@ -1594,6 +2029,8 @@ function useAgentStream({
             const result = String(
               evt.tool_result != null ? evt.tool_result : evt.result != null ? evt.result : ""
             );
+            const meta = evt.tool_call_id && toolMetaRef.current.get(evt.tool_call_id) || lastToolRef.current;
+            if (meta) scoreTool(meta.name, meta.args, result);
             patch(assistantId, (m) => {
               const tools = m.tools.slice();
               let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
@@ -1621,6 +2058,11 @@ function useAgentStream({
             break;
           }
           case "loop_detected":
+            try {
+              meterRef.current.bump(-10);
+              syncMeters();
+            } catch {
+            }
             append({ id: nextId("sys"), role: "system", tone: "warn", text: evt.message || "loop detected" });
             break;
           case "auto_nudge":
@@ -1653,9 +2095,8 @@ function useAgentStream({
             append({ id: nextId("sys"), role: "system", tone: "warn", text: "run aborted" });
             break;
           case "error":
-            setError(evt.error || "agent error");
+            attemptCtxRef.current.sawError = evt.error || "agent error";
             setStatusBoth("error");
-            append({ id: nextId("sys"), role: "system", tone: "error", text: evt.error || "agent error" });
             break;
           case "done":
             patch(assistantId, (m) => ({
@@ -1668,65 +2109,123 @@ function useAgentStream({
             break;
         }
       };
-      try {
-        const res = await fetch(`${api}/api/agent/run`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} },
-          signal: controller.signal,
-          body: JSON.stringify({
-            messages: [
-              ...system ? [{ role: "system", content: system }] : [],
-              { role: "user", content: prompt }
-            ],
-            stream: true,
-            provider,
-            model,
-            ...cwd ? { cwd } : {},
-            ...sessionId ? { sessionId } : {},
-            ...approvalMode ? { approvalMode } : {}
-          })
-        });
-        if (!res.ok) throw new Error(`server replied ${res.status}`);
-        if (!res.body) throw new Error("server sent no stream");
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        for (; ; ) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let idx;
-          while ((idx = buffer.indexOf("\n")) !== -1) {
-            const line = buffer.slice(0, idx).replace(/\r$/, "");
-            buffer = buffer.slice(idx + 1);
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload) continue;
-            try {
-              applyEvent(JSON.parse(payload));
-            } catch {
+      const runAttempt = async (target) => {
+        const controller = new AbortController();
+        abortRef.current = controller;
+        const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+        const ctx = { produced: false, sawError: null, status: null };
+        attemptCtxRef.current = ctx;
+        try {
+          const res = await fetch(`${api}/api/agent/run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} },
+            signal: controller.signal,
+            body: JSON.stringify({
+              messages: [
+                ...system ? [{ role: "system", content: system }] : [],
+                {
+                  role: "user",
+                  content: images.length ? [{ type: "text", text: prompt }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))] : prompt
+                }
+              ],
+              stream: true,
+              // Tier 3 sends neither, so the server's own waterfall decides —
+              // that is what "others last" means here.
+              ...target.provider ? { provider: target.provider } : {},
+              ...target.model ? { model: target.model } : {},
+              ...cwd ? { cwd } : {},
+              ...sessionId ? { sessionId } : {},
+              ...approvalMode ? { approvalMode } : {}
+            })
+          });
+          ctx.status = res.status;
+          if (!res.ok) {
+            throw new Error(
+              res.status === 413 ? "the server refused the body (413) \u2014 image too large" : `server replied ${res.status}`
+            );
+          }
+          if (!res.body) throw new Error("server sent no stream");
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          for (; ; ) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf("\n")) !== -1) {
+              const line = buffer.slice(0, idx).replace(/\r$/, "");
+              buffer = buffer.slice(idx + 1);
+              if (!line.startsWith("data:")) continue;
+              const payload = line.slice(5).trim();
+              if (!payload) continue;
+              try {
+                applyEvent(JSON.parse(payload));
+              } catch {
+              }
             }
           }
+          if (ctx.sawError) return { ok: false, aborted: false, ...ctx, error: ctx.sawError };
+          if (statusRef.current !== "error") setStatusBoth("idle");
+          return { ok: true, aborted: false, ...ctx, error: null };
+        } catch (e) {
+          if (e && e.name === "AbortError") {
+            return {
+              ok: false,
+              aborted: true,
+              ...ctx,
+              error: userAbortRef.current ? "run cancelled" : "timed out"
+            };
+          }
+          return { ok: false, aborted: false, ...ctx, error: e && e.message || "request failed" };
+        } finally {
+          clearTimeout(timeout);
         }
-        if (statusRef.current !== "error") setStatusBoth("idle");
-      } catch (e) {
-        if (e && e.name === "AbortError") {
+      };
+      let spoke = false;
+      for (let i = 0; i < attempts.length; i++) {
+        const target = attempts[i];
+        const res = await runAttempt(target);
+        spoke = spoke || !!res.produced;
+        if (res.ok) break;
+        if (res.aborted && userAbortRef.current) {
           append({ id: nextId("sys"), role: "system", tone: "warn", text: "run cancelled" });
           setStatusBoth("idle");
-        } else {
-          const msg = e && e.message || "request failed";
+          break;
+        }
+        const next = attempts[i + 1];
+        const canHandoff = autoHandoff && !!next && !res.produced && !res.aborted && !terminalStatus(res.status);
+        if (!canHandoff) {
+          const msg = res.error || "request failed";
           setError(msg);
           setStatusBoth("error");
+          if (!spoke) drop(assistantId);
           append({ id: nextId("sys"), role: "system", tone: "error", text: msg });
+          break;
         }
-      } finally {
-        clearTimeout(timeout);
-        abortRef.current = null;
-        setPending(null);
-        setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
+        append({
+          id: nextId("sys"),
+          role: "system",
+          tone: "warn",
+          text: `handoff ${target.label} \u2192 ${next.label}: ${res.error}`
+        });
+        patch(assistantId, (m) => ({
+          ...m,
+          text: "",
+          thinking: "",
+          tools: [],
+          phase: null,
+          model: next.model || next.provider || "auto"
+        }));
+        toolMetaRef.current.clear();
+        setError(null);
+        setStatusBoth("connecting");
       }
+      abortRef.current = null;
+      setPending(null);
+      setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
     },
-    [api, append, approvalMode, cwd, model, patch, provider, sessionId, setPending, setStatusBoth, system]
+    [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, sessionId, setPending, setStatusBoth, system]
   );
   const clear = useCallback(() => {
     abort();
@@ -1745,6 +2244,7 @@ function useAgentStream({
     error,
     elapsedMs,
     busy,
+    meters,
     pendingConfirm,
     answerConfirm,
     send,
@@ -1755,13 +2255,63 @@ function useAgentStream({
 var useAgentStream_default = useAgentStream;
 
 // src/App.jsx
+var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
 var import_ad_client2 = __toESM(require_ad_client());
-import { Fragment as Fragment2, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx15, jsxs as jsxs15 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 4;
 var MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
 var SYSTEM = process.env.HAKSTER_TUI_SYSTEM || "You are haksterAi running inside a terminal dashboard. Answer briefly and use tools when they are needed.";
+var IMAGE_MIME = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".bmp": "image/bmp"
+};
+var MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+var PREFS_PATH = path3.join(process.env.HOME || "/home/ghost", ".hakster", "tui-prefs.json");
+function readPrefs() {
+  try {
+    return JSON.parse(fs3.readFileSync(PREFS_PATH, "utf8")) || {};
+  } catch {
+    return {};
+  }
+}
+function writePrefs(patch) {
+  try {
+    const next = { ...readPrefs(), ...patch };
+    fs3.mkdirSync(path3.dirname(PREFS_PATH), { recursive: true });
+    fs3.writeFileSync(PREFS_PATH, `${JSON.stringify(next, null, 2)}
+`);
+  } catch {
+  }
+}
+var clipLine = (s, n) => {
+  const t = String(s == null ? "" : s);
+  return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
+};
+function readImageAttachment(file) {
+  const raw = String(file || "").trim();
+  if (!raw) throw new Error("no file given");
+  const abs = path3.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ""));
+  const mime = IMAGE_MIME[path3.extname(abs).toLowerCase()];
+  if (!mime) throw new Error("not an image (png, jpg, webp, gif, bmp)");
+  const st = fs3.statSync(abs);
+  if (!st.isFile()) throw new Error("not a file");
+  if (st.size > MAX_IMAGE_BYTES) {
+    throw new Error(`too large (${Math.round(st.size / 1024 / 1024)}MB, max 12MB)`);
+  }
+  const buf = fs3.readFileSync(abs);
+  return {
+    path: abs,
+    name: path3.basename(abs),
+    bytes: buf.length,
+    dataUrl: `data:${mime};base64,${buf.toString("base64")}`
+  };
+}
 function App({ version = "0.1.0" }) {
   const renderer2 = useRenderer();
   const { width: cols, height: rows } = useTerminalDimensions();
@@ -1770,8 +2320,12 @@ function App({ version = "0.1.0" }) {
   const [adsOn, setAdsOn] = useState5(true);
   const [dockExpanded, setDockExpanded] = useState5(false);
   const [draft, setDraft] = useState5("");
-  const [model, setModel] = useState5(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : "deepseek-v4.1-flash:cloud");
+  const [model, setModel] = useState5(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : import_ladder2.PRIMARY_MODEL);
+  const [provider, setProvider] = useState5(process.env.HAKSTER_PROVIDER || import_ladder2.PRIMARY_PROVIDER);
   const [modelIdx, setModelIdx] = useState5(0);
+  const prefsRef = useRef2(null);
+  if (!prefsRef.current) prefsRef.current = readPrefs();
+  const [handoffOn, setHandoffOn] = useState5(() => prefsRef.current.autoHandoff !== false);
   const [status, setStatus] = useState5(null);
   const [statusErr, setStatusErr] = useState5(null);
   const [mcp, setMcp] = useState5(null);
@@ -1780,13 +2334,22 @@ function App({ version = "0.1.0" }) {
   const [menuOpen, setMenuOpen] = useState5(false);
   const [menuIndex, setMenuIndex] = useState5(0);
   const [notice, setNotice] = useState5(null);
+  const [scan, setScan] = useState5({ ok: false, ports: [], procs: {}, at: 0 });
+  const [guard, setGuard] = useState5(null);
+  const [pointsHistory, setPointsHistory] = useState5([]);
+  const [attachment, setAttachment] = useState5(null);
+  const scrollRef = useRef2(null);
   const agent = useAgentStream_default({
     api: API,
     model,
-    provider: process.env.HAKSTER_PROVIDER || "ollama",
+    provider,
     system: SYSTEM,
-    cwd: process.env.HAKSTER_AGENT_CWD || null
+    cwd: process.env.HAKSTER_AGENT_CWD || null,
+    autoHandoff: handoffOn
   });
+  useEffect5(() => {
+    writePrefs({ autoHandoff: handoffOn });
+  }, [handoffOn]);
   const load = useCallback2(async () => {
     try {
       const r = await fetch(`${API}/api/tui/status`, { signal: AbortSignal.timeout(4e3), headers: { ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} } });
@@ -1825,9 +2388,40 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
+  useEffect5(() => {
+    let alive = true;
+    const tick = async () => {
+      const next = await scanPorts();
+      if (alive) setScan(next);
+    };
+    tick();
+    const t = setInterval(tick, 3e4);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+  useEffect5(() => {
+    const tick = () => {
+      try {
+        setGuard(fileGuard());
+      } catch {
+      }
+    };
+    tick();
+    const t = setInterval(tick, 1e4);
+    return () => clearInterval(t);
+  }, []);
+  const meterPoints = Number(agent.meters && agent.meters.points) || 0;
+  useEffect5(() => {
+    setPointsHistory((h) => [...h.slice(-59), meterPoints]);
+  }, [meterPoints]);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
   const ctxMax = import_catalog.default.contextMaxFor(model) || 1;
   const ctxUsed = Number(status && (status.tokens || status.contextUsed) || 0);
+  const meters = agent.meters || null;
+  const services = serviceStates(scan);
+  const otherPorts = otherListening(scan);
   const showNotice = useCallback2((text) => {
     setNotice(text);
     setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
@@ -1841,6 +2435,22 @@ function App({ version = "0.1.0" }) {
         setMenuIndex(0);
         setMenuOpen(true);
         return;
+      case "/attach":
+      case "/image": {
+        if (!arg || arg === "clear" || arg === "off") {
+          setAttachment(null);
+          showNotice("image attachment cleared");
+          return;
+        }
+        try {
+          const next = readImageAttachment(arg);
+          setAttachment(next);
+          showNotice(`\u{1F4CE} ${next.name} \xB7 ${Math.round(next.bytes / 1024)}K \u2014 enter sends it with your message`);
+        } catch (e) {
+          showNotice(`attach failed: ${e && e.message || "could not read the file"}`);
+        }
+        return;
+      }
       case "/model":
         if (arg) {
           setModel(arg);
@@ -1862,6 +2472,22 @@ function App({ version = "0.1.0" }) {
         showNotice(`MCP ${live}/${list.length} live \xB7 ${tools} tools \xB7 ${names}${list.length > 5 ? " \u2026" : ""}`);
         return;
       }
+      case "/handoff": {
+        const want = arg === "on" ? true : arg === "off" ? false : !handoffOn;
+        setHandoffOn(want);
+        showNotice(
+          want ? `auto handoff ON \u2014 ${import_ladder2.MODEL_LADDER.map((e) => e.label).join(" \u2192 ")} (a failed run moves on)` : "auto handoff OFF \u2014 a run that fails stays on the model it started on"
+        );
+        return;
+      }
+      case "/ports": {
+        const up = services.filter((s) => s.up).length;
+        setView("dashboard");
+        showNotice(
+          `services ${up}/${services.length} online \xB7 ${otherPorts.length} other listening${otherPorts.length ? ` \xB7 ${otherPorts.slice(0, 10).map((p) => `:${p.port}`).join(" ")}${otherPorts.length > 10 ? " \u2026" : ""}` : ""}${scan.ok ? "" : " \xB7 scan unavailable"}`
+        );
+        return;
+      }
       case "/dashboard":
         setView("dashboard");
         return;
@@ -1873,7 +2499,7 @@ function App({ version = "0.1.0" }) {
         showNotice("transcript cleared");
         return;
       case "/help":
-        showNotice("keys: tab focus \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /mcp /dashboard /status /clear /quit");
+        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 h handoff \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /mcp /handoff /ports /attach /dashboard /status /clear /quit");
         return;
       case "/quit":
       case "/exit":
@@ -1883,7 +2509,7 @@ function App({ version = "0.1.0" }) {
       default:
         showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
     }
-  }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice]);
+  }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn]);
   const submit = useCallback2(
     (text) => {
       const v = String(text == null ? "" : text).trim();
@@ -1894,10 +2520,12 @@ function App({ version = "0.1.0" }) {
         return;
       }
       if (agent.busy) return;
+      const att = attachment;
       setDraft("");
-      agent.send(v);
+      setAttachment(null);
+      agent.send(v, att ? { images: [att.dataUrl], imageName: att.name } : void 0);
     },
-    [agent, runCommand]
+    [agent, attachment, runCommand]
   );
   const approving = !!agent.pendingConfirm;
   const showCrushStatus = view === "chat" && agent.busy;
@@ -1930,7 +2558,7 @@ function App({ version = "0.1.0" }) {
   useKeyboard3((key) => {
     if (process.env.HAKSTER_TUI_KEYLOG) {
       try {
-        fs2.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
+        fs3.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
       } catch {
       }
     }
@@ -1985,6 +2613,13 @@ function App({ version = "0.1.0" }) {
       else if (focus !== "composer") setFocus("composer");
       return;
     }
+    if (key.name === "pageup" || key.name === "pagedown") {
+      const box = scrollRef.current;
+      if (box && typeof box.scrollBy === "function") {
+        box.scrollBy(key.name === "pageup" ? -1 : 1, "viewport");
+      }
+      return;
+    }
     if (focus === "composer" && !key.ctrl && !key.meta) return;
     if (key.ctrl && key.name === "o") {
       setDockExpanded((v) => !v);
@@ -1999,6 +2634,12 @@ function App({ version = "0.1.0" }) {
       case "a":
         setAdsOn((v) => !v);
         break;
+      case "h": {
+        const want = !handoffOn;
+        setHandoffOn(want);
+        showNotice(want ? `auto handoff ON \u2014 ${import_ladder2.MODEL_LADDER.map((e) => e.label).join(" \u2192 ")}` : "auto handoff OFF \u2014 a failed run stays on its model");
+        break;
+      }
       case "d":
         setView((v) => v === "chat" ? "dashboard" : "chat");
         break;
@@ -2021,9 +2662,27 @@ function App({ version = "0.1.0" }) {
     }
   });
   const panelW = Math.max(40, Math.min((cols || 100) - 2, 140));
+  const headerState = statusErr ? "OFFLINE" : status ? "ONLINE" : "connecting\u2026";
+  const ctxK = Math.round(ctxMax / 1e3);
+  const headerRightVariants = [
+    `tui ${version} \xB7 ${view} \xB7 ${model} \xB7 ctx ${ctxK}K`,
+    `${view} \xB7 ${model} \xB7 ctx ${ctxK}K`,
+    `${view} \xB7 ctx ${ctxK}K`,
+    `${view}`
+  ];
+  const headerInner = panelW - 2;
+  const guardTxt = guard ? `${guard.present}/${guard.total} files` : "";
+  const headerLeftLen = (withFiles) => `\u25CF \u25C6 haksterAi \xB7 ${headerState}`.length + (withFiles && guardTxt ? `   ${guardTxt}`.length : 0);
+  const showGuard = !!guardTxt && headerLeftLen(true) + 8 <= headerInner;
+  const headerFiles = showGuard ? guardTxt : "";
+  const headerLeftText = headerLeftLen(showGuard);
+  const headerRight = headerRightVariants.find((t) => headerLeftText + t.length + 2 <= headerInner) || "";
   const sideW = (cols || 100) >= 96 ? 30 : 0;
   const mainW = panelW - (sideW ? sideW + 2 : 0);
-  const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2);
+  const systemRows = 1;
+  const servicesCellCount = services.length + (otherPorts.length ? 1 : 0);
+  const servicesRows = mainW < 96 ? 3 : servicesGridRows(mainW, servicesCellCount);
+  const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2 - systemRows - servicesRows);
   const maxServers = Math.max(0, Math.min(8, sidebarBudget));
   const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
   const MENU_ROWS = 2 + 1 + MENU_ITEMS.length + 1;
@@ -2034,7 +2693,7 @@ function App({ version = "0.1.0" }) {
   const approvalRows = approving ? 6 : 0;
   const transcriptRows = Math.max(
     4,
-    (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows - approvalRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0)
+    (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows - approvalRows - systemRows - servicesRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0)
   );
   const dashboardItems = [
     {
@@ -2045,7 +2704,8 @@ function App({ version = "0.1.0" }) {
         { label: "phase", value: status ? status.phase : "\u2014", color: "cyan" },
         { label: "connected", value: status ? status.connected ? "yes" : "no" : "\u2014", color: status && status.connected ? "green" : "red" },
         { label: "server model", value: status ? status.model : "\u2014" },
-        { label: "trust", value: status ? status.trust : "\u2014" }
+        { label: "trust", value: status ? status.trust : "\u2014" },
+        { label: "file guards", value: guard ? `${guard.present}/${guard.total}` : "\u2026", color: guard && guard.missing && guard.missing.length ? "red" : "green" }
       ]
     },
     {
@@ -2071,20 +2731,21 @@ function App({ version = "0.1.0" }) {
       ]
     }
   ];
-  return /* @__PURE__ */ jsxs13("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
-    /* @__PURE__ */ jsxs13("box", { style: { width: panelW, justifyContent: "space-between", flexShrink: 0 }, children: [
-      /* @__PURE__ */ jsxs13("box", { style: { flexDirection: "row" }, children: [
-        /* @__PURE__ */ jsx13("text", { fg: status ? statusErr ? "red" : "green" : "yellow", children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
-        /* @__PURE__ */ jsx13("text", { fg: "cyan", attributes: TextAttributes10.BOLD, children: "haksterAi" }),
-        /* @__PURE__ */ jsx13("text", { fg: "gray", children: ` \xB7 ${statusErr ? "OFFLINE" : status ? "ONLINE" : "connecting\u2026"}` })
+  return /* @__PURE__ */ jsxs15("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
+    /* @__PURE__ */ jsxs15("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
+      /* @__PURE__ */ jsxs15("box", { style: { flexDirection: "row" }, children: [
+        /* @__PURE__ */ jsx15("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes12.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
+        /* @__PURE__ */ jsx15("text", { fg: "cyan", attributes: TextAttributes12.BOLD, children: "\u25C6 haksterAi" }),
+        /* @__PURE__ */ jsx15("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
+        headerFiles ? /* @__PURE__ */ jsx15("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
       ] }),
-      /* @__PURE__ */ jsx13("text", { fg: "gray", children: `tui ${version} \xB7 ${view} \xB7 ${model} \xB7 ctx ${Math.round(ctxMax / 1e3)}K` })
+      headerRight ? /* @__PURE__ */ jsx15("text", { fg: "gray", children: headerRight }) : null
     ] }),
-    statusErr ? /* @__PURE__ */ jsx13("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs13("text", { fg: "red", children: [
+    statusErr ? /* @__PURE__ */ jsx15("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs15("text", { fg: "red", children: [
       "server unreachable \u2014 ",
       statusErr
     ] }) }) : null,
-    view === "models" ? /* @__PURE__ */ jsx13(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: models.map((m, i) => /* @__PURE__ */ jsx13(
+    view === "models" ? /* @__PURE__ */ jsx15(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: models.map((m, i) => /* @__PURE__ */ jsx15(
       Cell,
       {
         label: m.vendor,
@@ -2093,23 +2754,46 @@ function App({ version = "0.1.0" }) {
         color: i === modelIdx ? "yellow" : "white"
       },
       m.id
-    )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs13(Fragment2, { children: [
-      /* @__PURE__ */ jsx13(
+    )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs15(Fragment2, { children: [
+      /* @__PURE__ */ jsx15(
         GridLayout_default,
         {
           items: dashboardItems,
           availableWidth: panelW,
           getItemKey: (item) => item.key,
-          renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx13(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, children: item.cells.map((c) => /* @__PURE__ */ jsx13(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)) }, c.label)) })
+          renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx15(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, children: item.cells.map((c) => /* @__PURE__ */ jsx15(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)) }, c.label)) })
         }
       ),
-      /* @__PURE__ */ jsxs13(GridPanel_default, { title: "Context", width: panelW, hint: import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: model, vendor: "local", context: null }), children: [
-        /* @__PURE__ */ jsx13("box", { children: /* @__PURE__ */ jsx13(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, panelW - 30), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }) }),
-        /* @__PURE__ */ jsx13("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx13(Spark, { data: history, w: Math.min(30, Math.max(10, panelW - 10)) }) })
-      ] })
-    ] }) : /* @__PURE__ */ jsxs13("box", { style: { flexDirection: "row", width: panelW, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
-      /* @__PURE__ */ jsxs13("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
-        agent.todos.length ? /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+      /* @__PURE__ */ jsxs15(
+        GridPanel_default,
+        {
+          title: "\u25C9 Meters",
+          width: panelW,
+          hint: `${smartLabel(meters ? meters.score : 0)} \xB7 ${meterPoints}p autolearn \xB7 ${import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: model, vendor: "local", context: null })}`,
+          children: [
+            /* @__PURE__ */ jsxs15("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
+              /* @__PURE__ */ jsx15("text", { fg: "gray", children: "smartness   " }),
+              /* @__PURE__ */ jsx15(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
+              /* @__PURE__ */ jsx15("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
+            ] }),
+            /* @__PURE__ */ jsxs15("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
+              /* @__PURE__ */ jsx15("text", { fg: "gray", children: "autolearn   " }),
+              /* @__PURE__ */ jsx15(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
+              /* @__PURE__ */ jsx15("text", { fg: "white", children: ` ${meterPoints}p` }),
+              /* @__PURE__ */ jsx15("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx15(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
+            ] }),
+            /* @__PURE__ */ jsxs15("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
+              /* @__PURE__ */ jsx15("text", { fg: "gray", children: "context     " }),
+              /* @__PURE__ */ jsx15(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
+              /* @__PURE__ */ jsx15("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
+            ] })
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsx15(ServicesPanel, { width: panelW, services, scan, showAll: true })
+    ] }) : /* @__PURE__ */ jsxs15("box", { style: { flexDirection: "row", width: panelW, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+      /* @__PURE__ */ jsxs15("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
+        agent.todos.length ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
           TodoPanel,
           {
             todos: agent.todos,
@@ -2118,28 +2802,29 @@ function App({ version = "0.1.0" }) {
             maxVisibleRows: Math.min(agent.todos.length, 6)
           }
         ) }) : null,
-        /* @__PURE__ */ jsx13("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx13(
+        /* @__PURE__ */ jsx15("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx15(
           Transcript,
           {
             messages: agent.messages,
             width: mainW,
             height: transcriptRows,
-            emptyHint: "Type a task and the agent runs it with tools. Tab moves focus to the ad slot; esc stops a run."
+            scrollRef,
+            emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; esc stops a run."
           }
         ) }),
-        latestMcpTool ? /* @__PURE__ */ jsx13(
+        latestMcpTool ? /* @__PURE__ */ jsx15(
           GridPanel_default,
           {
             title: `MCP Output \xB7 ${String(latestMcpTool.name || "").split("__")[1] || "server"}`,
             width: mainW,
             borderColor: "magenta",
             hint: `${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} \xB7 Ctrl+\u2191/\u2193`,
-            children: /* @__PURE__ */ jsx13("box", { style: { flexDirection: "column", width: Math.max(1, mainW - 4) }, children: visibleMcpOutput.map((line, index) => {
-              return /* @__PURE__ */ jsx13("text", { fg: "white", children: String(line || " ") }, `mcp-output-${index}`);
+            children: /* @__PURE__ */ jsx15("box", { style: { flexDirection: "column", width: Math.max(1, mainW - 4) }, children: visibleMcpOutput.map((line, index) => {
+              return /* @__PURE__ */ jsx15("text", { fg: "white", children: String(line || " ") }, `mcp-output-${index}`);
             }) })
           }
         ) : null,
-        showCrushStatus ? /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+        showCrushStatus ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
           CrushStatus,
           {
             width: mainW,
@@ -2148,7 +2833,7 @@ function App({ version = "0.1.0" }) {
             elapsedMs: agent.elapsedMs
           }
         ) }) : null,
-        /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+        /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
           DockAd,
           {
             width: mainW,
@@ -2158,7 +2843,7 @@ function App({ version = "0.1.0" }) {
             expanded: dockExpanded
           }
         ) }),
-        approving ? /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+        approving ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
           ApprovalPrompt,
           {
             width: mainW,
@@ -2166,8 +2851,10 @@ function App({ version = "0.1.0" }) {
             onAnswer: answerApproval
           }
         ) }) : null,
-        notice ? /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx13("text", { fg: "cyan", children: `\u25C6 ${notice}` }) }) : null,
-        /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx13(MenuPalette, { width: Math.min(mainW, 72), selected: menuIndex }) : /* @__PURE__ */ jsx13(
+        notice ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx15("text", { fg: "cyan", children: clipLine(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
+        /* @__PURE__ */ jsx15(SystemPanel, { width: mainW, meters, ctxUsed, ctxMax }),
+        /* @__PURE__ */ jsx15(ServicesPanel, { width: mainW, services, scan }),
+        /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx15(MenuPalette, { width: Math.min(mainW, 72), selected: menuIndex }) : /* @__PURE__ */ jsx15(
           Composer,
           {
             width: mainW,
@@ -2176,8 +2863,8 @@ function App({ version = "0.1.0" }) {
             onSubmit: submit,
             focused: focus === "composer" && !approving,
             disabled: agent.busy,
-            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? "esc stop \xB7 the run is streaming" : "enter send \xB7 /menu commands \xB7 tab focus \xB7 a ads \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit",
-            adSlot: /* @__PURE__ */ jsx13(
+            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? "esc stop \xB7 the run is streaming" : attachment ? `\u{1F4CE} ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 /menu commands \xB7 /attach image \xB7 pgup scroll \xB7 q quit",
+            adSlot: /* @__PURE__ */ jsx15(
               DockAd,
               {
                 width: Math.max(8, mainW - 4),
@@ -2190,7 +2877,7 @@ function App({ version = "0.1.0" }) {
           }
         ) })
       ] }),
-      sideW ? /* @__PURE__ */ jsx13("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx13(
+      sideW ? /* @__PURE__ */ jsx15("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx15(
         LiveSidebar,
         {
           width: sideW,
@@ -2207,7 +2894,7 @@ function App({ version = "0.1.0" }) {
         }
       ) }) : null
     ] }),
-    /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+    /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
       StatusBar,
       {
         width: panelW,
@@ -2217,6 +2904,7 @@ function App({ version = "0.1.0" }) {
         focus,
         adsOn,
         elapsedMs: agent.elapsedMs,
+        handoff: handoffOn,
         hint: focus === "ad" ? "enter opens \xB7 ^O details" : null
       }
     ) })
@@ -2234,7 +2922,7 @@ async function start({ version = "0.1.0" } = {}) {
     hideCursor: true
   });
   root = createRoot(renderer);
-  root.render(React14.createElement(App, { version }));
+  root.render(React16.createElement(App, { version }));
   return {
     unmount() {
       if (root) {

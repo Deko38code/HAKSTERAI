@@ -36,7 +36,7 @@ function formatElapsed(ms) {
   return `${(n / 1000).toFixed(1)}s`;
 }
 
-export default function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint }) {
+export default function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, handoff }) {
   const known = status ? STATUS_STYLES[status] : null;
   // An unrecognised but truthy status is shown verbatim and dim, so a new state
   // is visible the moment it appears instead of vanishing.
@@ -62,6 +62,15 @@ export default function StatusBar({ width, status, model, cols, focus, adsOn, el
   }
   if (model) {
     right.push(<text key="model" fg="yellow">{model}</text>);
+  }
+  // The owner's switch, always visible: green means a failed run will move on
+  // to the next ladder model, red means it will stay where it failed.
+  if (handoff !== undefined && handoff !== null) {
+    right.push(
+      <text key="handoff" fg={handoff ? 'green' : 'red'}>
+        {handoff ? 'handoff auto' : 'handoff off'}
+      </text>,
+    );
   }
   if (cols !== undefined && cols !== null) {
     right.push(<text key="cols" fg="gray">{`${cols}c`}</text>);

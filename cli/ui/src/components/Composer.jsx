@@ -17,6 +17,11 @@ import { TextAttributes } from '@opentui/core';
  * grows by one row when a creative arrives is far less disruptive than one that
  * pushes the transcript around.
  */
+const clipHint = (s, n) => {
+  const t = String(s == null ? '' : s);
+  return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}…`;
+};
+
 export default function Composer({
   width,
   value = '',
@@ -65,7 +70,9 @@ export default function Composer({
       {adSlot}
 
       <box style={{ width: inner }}>
-        <text fg="gray">{hint || 'enter send · esc stop · tab focus · ctrl+c quit'}</text>
+        {/* One row, always: the hint is clipped to the box so a long hint can
+            never wrap and push the layout down by a line. */}
+        <text fg="gray">{clipHint(hint || 'enter send · esc stop · tab focus · ctrl+c quit', inner)}</text>
       </box>
     </box>
   );

@@ -1228,7 +1228,11 @@ app.use(serverBuild.track());
 // paid plans never actually apply.
 app.use((req, res, next) => {
   if (req.path === '/api/stripe/webhook') return next();
-  return express.json()(req, res, next);
+  // Same limit as the JSON parser further down (`JSON_BODY_LIMIT` / 50mb).
+  // This parser runs first, so leaving it on express's 100 kB default meant
+  // every image attachment over ~75 kB was answered with a 413 before any
+  // route saw the request — the TUI's /attach and the web chat's paste both.
+  return express.json({ limit: process.env.JSON_BODY_LIMIT || '50mb' })(req, res, next);
 });
 const tuiState = {
   messages: [],

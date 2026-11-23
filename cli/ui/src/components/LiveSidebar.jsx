@@ -20,7 +20,7 @@ const clip = (s, n) => {
 function Row({ width, k, v, color = 'white' }) {
   const kw = Math.min(10, Math.max(4, Math.floor(width / 3)));
   return (
-    <box style={{ width, justifyContent: 'space-between', flexShrink: 0 }}>
+    <box style={{ width, flexDirection: 'row', justifyContent: 'space-between', flexShrink: 0 }}>
       <text fg="gray">{clip(k, kw)}</text>
       <text fg={color} attributes={TextAttributes.BOLD}>{clip(v, Math.max(1, width - kw - 1))}</text>
     </box>
@@ -31,7 +31,7 @@ function Panel({ width, title, hint, children }) {
   const inner = Math.max(1, width - 4);
   return (
     <box style={{ width, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'gray', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
-      <box style={{ width: inner, justifyContent: 'space-between' }}>
+      <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
         <text fg="cyan" attributes={TextAttributes.BOLD}>{clip(title, inner)}</text>
         {hint ? <text fg="gray">{clip(hint, Math.max(0, inner - title.length - 1))}</text> : null}
       </box>
@@ -64,7 +64,7 @@ export default function LiveSidebar({
   const hidden = ordered.length - shown.length;
   return (
     <box style={{ width, flexDirection: 'column', flexShrink: 0 }}>
-      <Panel width={width} title="Live" hint={serverOk ? 'online' : 'offline'}>
+      <Panel width={width} title="◈ Live" hint={serverOk ? 'online' : 'offline'}>
         <Row width={inner} k="status" v={agentStatus || 'idle'} color={agentStatus === 'error' ? 'red' : agentStatus === 'idle' ? 'gray' : 'green'} />
         <Row width={inner} k="phase" v={phase || 'IDLE'} color="cyan" />
         <Row width={inner} k="tool" v={tool || '—'} />
@@ -73,7 +73,7 @@ export default function LiveSidebar({
         <Row width={inner} k="model" v={model} color="yellow" />
         <Row width={inner} k="version" v={`tui ${version}`} />
       </Panel>
-      <Panel width={width} title="MCP servers" hint={servers.length ? `${live}/${servers.length}` : '…'}>
+      <Panel width={width} title="⬡ MCP servers" hint={servers.length ? `${live}/${servers.length}` : '…'}>
         {shown.length === 0 ? (
           <Row width={inner} k="servers" v="—" color="gray" />
         ) : (

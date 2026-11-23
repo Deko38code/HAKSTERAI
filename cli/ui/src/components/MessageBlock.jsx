@@ -28,7 +28,7 @@ function ToolRow({ tool, width }) {
   const glyph = pending ? '…' : '✓';
   const colour = pending ? 'yellow' : 'green';
   const args = tool.args && Object.keys(tool.args).length
-    ? ` ${JSON.stringify(tool.args).slice(0, 60)}`
+    ? ` ${JSON.stringify(tool.args).slice(0, 80)}`
     : '';
 
   return (
@@ -39,7 +39,9 @@ function ToolRow({ tool, width }) {
         {args ? <span fg="gray">{args}</span> : null}
       </text>
       {tool.result != null ? (
-        <text fg="gray">{`  ${String(tool.result).slice(0, 120)}`}</text>
+        // The whole result the server sent (it caps long output itself) —
+        // a clipped 120-char preview hid what the agent actually saw.
+        <text fg="gray">{String(tool.result)}</text>
       ) : null}
     </box>
   );
@@ -73,6 +75,9 @@ export default function MessageBlock({ message, width }) {
       <text fg={border} attributes={TextAttributes.BOLD}>{roleStyle.label}</text>
       {message.thinking ? (
         <text fg="gray">{String(message.thinking)}</text>
+      ) : null}
+      {message.images ? (
+        <text fg="gray">{`📎 ${message.imageName || `${message.images} image`}`}</text>
       ) : null}
       {message.text ? (
         <text fg="white">{String(message.text)}</text>

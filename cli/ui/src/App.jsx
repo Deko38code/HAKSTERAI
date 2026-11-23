@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import fs from 'node:fs';
+import path from 'node:path';
 import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react';
 import { TextAttributes } from '@opentui/core';
 import AdRailSlot from './components/DockAd.jsx';
@@ -9,11 +10,15 @@ import GridLayout from './components/GridLayout.jsx';
 import GridPanel, { Cell, Meter, Spark } from './components/GridPanel.jsx';
 import LiveSidebar from './components/LiveSidebar.jsx';
 import MenuPalette, { MENU_ITEMS } from './components/MenuPalette.jsx';
+import ServicesPanel, { servicesGridRows } from './components/ServicesPanel.jsx';
 import StatusBar from './components/StatusBar.jsx';
+import SystemPanel from './components/SystemPanel.jsx';
 import CrushStatus from './components/CrushStatus.jsx';
 import TodoPanel from './components/TodoPanel.jsx';
 import Transcript from './components/Transcript.jsx';
 import useAgentStream from './hooks/useAgentStream.js';
+import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel } from '../../smartness.mjs';
+import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
 import ads from '../../src/ads/ad-client.js';
 
@@ -22,6 +27,69 @@ const MCP_OUTPUT_LINES = 4;
 const MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
 const SYSTEM = process.env.HAKSTER_TUI_SYSTEM
   || 'You are haksterAi running inside a terminal dashboard. Answer briefly and use tools when they are needed.';
+
+/* Image attachments.
+ *
+ * The server's /api/agent/run already accepts OpenAI-style content parts, and
+ * pre-processes an `image_url` block for models without vision — so the TUI
+ * only has to read the file and hand over a data URL. Nothing is uploaded
+ * anywhere else, and nothing is written back to disk.
+ */
+const IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+};
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
+/* The auto-handoff switch is the owner's, and it stays where he left it.
+ * One small file under ~/.hakster, read at start and rewritten on change; a
+ * missing or unreadable file simply means "on" (the default order). */
+const PREFS_PATH = path.join(process.env.HOME || '/home/ghost', '.hakster', 'tui-prefs.json');
+function readPrefs() {
+  try {
+    return JSON.parse(fs.readFileSync(PREFS_PATH, 'utf8')) || {};
+  } catch {
+    return {};
+  }
+}
+function writePrefs(patch) {
+  try {
+    const next = { ...readPrefs(), ...patch };
+    fs.mkdirSync(path.dirname(PREFS_PATH), { recursive: true });
+    fs.writeFileSync(PREFS_PATH, `${JSON.stringify(next, null, 2)}\n`);
+  } catch {
+    /* preferences are a convenience; never let them break the session */
+  }
+}
+
+const clipLine = (s, n) => {
+  const t = String(s == null ? '' : s);
+  return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}…`;
+};
+
+function readImageAttachment(file) {
+  const raw = String(file || '').trim();
+  if (!raw) throw new Error('no file given');
+  const abs = path.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ''));
+  const mime = IMAGE_MIME[path.extname(abs).toLowerCase()];
+  if (!mime) throw new Error('not an image (png, jpg, webp, gif, bmp)');
+  const st = fs.statSync(abs);
+  if (!st.isFile()) throw new Error('not a file');
+  if (st.size > MAX_IMAGE_BYTES) {
+    throw new Error(`too large (${Math.round(st.size / 1024 / 1024)}MB, max 12MB)`);
+  }
+  const buf = fs.readFileSync(abs);
+  return {
+    path: abs,
+    name: path.basename(abs),
+    bytes: buf.length,
+    dataUrl: `data:${mime};base64,${buf.toString('base64')}`,
+  };
+}
 
 /* The harness TUI.
  *
@@ -51,9 +119,16 @@ export default function App({ version = '0.1.0' }) {
   const [adsOn, setAdsOn] = useState(true);
   const [dockExpanded, setDockExpanded] = useState(false);
   const [draft, setDraft] = useState('');
-  // Start on the owner's DeepSeek config; a GLM env tag is the old default and falls through.
-  const [model, setModel] = useState(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : 'deepseek-v4.1-flash:cloud');
+  // Start on the owner's cheap DeepSeek config; a GLM env tag is the old
+  // default and falls through (§22 — the pinned Phantom Flash config).
+  const [model, setModel] = useState(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : PRIMARY_MODEL);
+  const [provider, setProvider] = useState(process.env.HAKSTER_PROVIDER || PRIMARY_PROVIDER);
   const [modelIdx, setModelIdx] = useState(0);
+  // Auto handoff: DeepSeek Flash → Codex → server waterfall. On unless the
+  // owner turned it off; the choice is remembered between sessions.
+  const prefsRef = useRef(null);
+  if (!prefsRef.current) prefsRef.current = readPrefs();
+  const [handoffOn, setHandoffOn] = useState(() => prefsRef.current.autoHandoff !== false);
 
   const [status, setStatus] = useState(null);
   const [statusErr, setStatusErr] = useState(null);
@@ -65,14 +140,29 @@ export default function App({ version = '0.1.0' }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
   const [notice, setNotice] = useState(null);
+  // Services on ports — the old CLI's ONLINE PORTS panel, scanned read-only
+  // and refreshed every 30 s. It starts empty rather than guessing.
+  const [scan, setScan] = useState({ ok: false, ports: [], procs: {}, at: 0 });
+  // The 13 code files the agent counts; rechecked every 10 s so a file the
+  // agent loses (or restores) shows up immediately.
+  const [guard, setGuard] = useState(null);
+  const [pointsHistory, setPointsHistory] = useState([]);
+  // One image waiting to ride on the next message (`/attach <path>`).
+  const [attachment, setAttachment] = useState(null);
+  const scrollRef = useRef(null);
 
   const agent = useAgentStream({
     api: API,
     model,
-    provider: process.env.HAKSTER_PROVIDER || 'ollama',
+    provider,
     system: SYSTEM,
     cwd: process.env.HAKSTER_AGENT_CWD || null,
+    autoHandoff: handoffOn,
   });
+
+  useEffect(() => {
+    writePrefs({ autoHandoff: handoffOn });
+  }, [handoffOn]);
 
   // ── Machine status: unchanged contract with the server's /api/tui/status ──
   const load = useCallback(async () => {
@@ -113,9 +203,41 @@ export default function App({ version = '0.1.0' }) {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
+  // Services/ports: one bounded `ss -tlnp` on boot and every 30 s. Read-only.
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      const next = await scanPorts();
+      if (alive) setScan(next);
+    };
+    tick();
+    const t = setInterval(tick, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  // File guards: the same 13 entries the agent's integrity check counts.
+  useEffect(() => {
+    const tick = () => {
+      try { setGuard(fileGuard()); } catch { /* leave the last reading */ }
+    };
+    tick();
+    const t = setInterval(tick, 10000);
+    return () => clearInterval(t);
+  }, []);
+
+  // The autolearn sparkline is the session's point total over time — one
+  // sample whenever a tool result actually moves the meter.
+  const meterPoints = Number(agent.meters && agent.meters.points) || 0;
+  useEffect(() => {
+    setPointsHistory((h) => [...h.slice(-59), meterPoints]);
+  }, [meterPoints]);
+
   const models = catalog.REFERENCE_CATALOG || [];
   const ctxMax = catalog.contextMaxFor(model) || 1;
   const ctxUsed = Number((status && (status.tokens || status.contextUsed)) || 0);
+  const meters = agent.meters || null;
+  const services = serviceStates(scan);
+  const otherPorts = otherListening(scan);
 
   const showNotice = useCallback((text) => {
     setNotice(text);
@@ -134,6 +256,22 @@ export default function App({ version = '0.1.0' }) {
         setMenuIndex(0);
         setMenuOpen(true);
         return;
+      case '/attach':
+      case '/image': {
+        if (!arg || arg === 'clear' || arg === 'off') {
+          setAttachment(null);
+          showNotice('image attachment cleared');
+          return;
+        }
+        try {
+          const next = readImageAttachment(arg);
+          setAttachment(next);
+          showNotice(`📎 ${next.name} · ${Math.round(next.bytes / 1024)}K — enter sends it with your message`);
+        } catch (e) {
+          showNotice(`attach failed: ${(e && e.message) || 'could not read the file'}`);
+        }
+        return;
+      }
       case '/model':
         if (arg) { setModel(arg); showNotice(`model → ${arg}`); }
         else {
@@ -154,6 +292,26 @@ export default function App({ version = '0.1.0' }) {
         showNotice(`MCP ${live}/${list.length} live · ${tools} tools · ${names}${list.length > 5 ? ' …' : ''}`);
         return;
       }
+      case '/handoff': {
+        const want = arg === 'on' ? true : arg === 'off' ? false : !handoffOn;
+        setHandoffOn(want);
+        showNotice(
+          want
+            ? `auto handoff ON — ${MODEL_LADDER.map((e) => e.label).join(' → ')} (a failed run moves on)`
+            : 'auto handoff OFF — a run that fails stays on the model it started on',
+        );
+        return;
+      }
+      case '/ports': {
+        const up = services.filter((s) => s.up).length;
+        setView('dashboard');
+        showNotice(
+          `services ${up}/${services.length} online · ${otherPorts.length} other listening`
+          + `${otherPorts.length ? ` · ${otherPorts.slice(0, 10).map((p) => `:${p.port}`).join(' ')}${otherPorts.length > 10 ? ' …' : ''}` : ''}`
+          + `${scan.ok ? '' : ' · scan unavailable'}`,
+        );
+        return;
+      }
       case '/dashboard':
         setView('dashboard');
         return;
@@ -167,7 +325,7 @@ export default function App({ version = '0.1.0' }) {
         showNotice('transcript cleared');
         return;
       case '/help':
-        showNotice('keys: tab focus · d dashboard · m models · c clear · q quit · esc stop — commands: /menu /model /mcp /dashboard /status /clear /quit');
+        showNotice('keys: tab focus · pgup/pgdn scroll · h handoff · d dashboard · m models · c clear · q quit · esc stop — commands: /menu /model /mcp /handoff /ports /attach /dashboard /status /clear /quit');
         return;
       case '/quit':
       case '/exit':
@@ -177,7 +335,7 @@ export default function App({ version = '0.1.0' }) {
       default:
         showNotice(`unknown command ${cmd} — /menu lists them`);
     }
-  }, [agent, models, model, mcp, status, statusErr, renderer, showNotice]);
+  }, [agent, models, model, mcp, status, statusErr, renderer, showNotice, services, otherPorts, scan, handoffOn]);
 
   const submit = useCallback(
     (text) => {
@@ -191,10 +349,12 @@ export default function App({ version = '0.1.0' }) {
         return;
       }
       if (agent.busy) return;
+      const att = attachment;
       setDraft('');
-      agent.send(v);
+      setAttachment(null);
+      agent.send(v, att ? { images: [att.dataUrl], imageName: att.name } : undefined);
     },
-    [agent, runCommand],
+    [agent, attachment, runCommand],
   );
 
   // A pending approval blocks the run, so it takes the keyboard. Both halves are
@@ -298,6 +458,16 @@ export default function App({ version = '0.1.0' }) {
       return;
     }
 
+    // PgUp/PgDn walk the transcript — the composer never wants them, so this
+    // runs before the "printable keys belong to the input" stand-down.
+    if (key.name === 'pageup' || key.name === 'pagedown') {
+      const box = scrollRef.current;
+      if (box && typeof box.scrollBy === 'function') {
+        box.scrollBy(key.name === 'pageup' ? -1 : 1, 'viewport');
+      }
+      return;
+    }
+
     // While the composer has focus, printable keys belong to the input and the
     // shortcut layer below must stay out of the way.
     if (focus === 'composer' && !key.ctrl && !key.meta) return;
@@ -320,6 +490,14 @@ export default function App({ version = '0.1.0' }) {
       case 'a':
         setAdsOn((v) => !v);
         break;
+      case 'h': {
+        const want = !handoffOn;
+        setHandoffOn(want);
+        showNotice(want
+          ? `auto handoff ON — ${MODEL_LADDER.map((e) => e.label).join(' → ')}`
+          : 'auto handoff OFF — a failed run stays on its model');
+        break;
+      }
       case 'd':
         setView((v) => (v === 'chat' ? 'dashboard' : 'chat'));
         break;
@@ -344,13 +522,39 @@ export default function App({ version = '0.1.0' }) {
 
   const panelW = Math.max(40, Math.min((cols || 100) - 2, 140));
 
+  // Header fitting: [dot + brand + state + files] on the left, a right-hand
+  // variant chosen so the pair fits the panel. Files survive longer than the
+  // right-hand detail because the owner asked for the guard count always on.
+  const headerState = statusErr ? 'OFFLINE' : status ? 'ONLINE' : 'connecting…';
+  const ctxK = Math.round(ctxMax / 1000);
+  const headerRightVariants = [
+    `tui ${version} · ${view} · ${model} · ctx ${ctxK}K`,
+    `${view} · ${model} · ctx ${ctxK}K`,
+    `${view} · ctx ${ctxK}K`,
+    `${view}`,
+  ];
+  const headerInner = panelW - 2;
+  const guardTxt = guard ? `${guard.present}/${guard.total} files` : '';
+  const headerLeftLen = (withFiles) =>
+    `● ◆ haksterAi · ${headerState}`.length + (withFiles && guardTxt ? `   ${guardTxt}`.length : 0);
+  const showGuard = !!guardTxt && headerLeftLen(true) + 8 <= headerInner;
+  const headerFiles = showGuard ? guardTxt : '';
+  const headerLeftText = headerLeftLen(showGuard);
+  const headerRight = headerRightVariants.find((t) => headerLeftText + t.length + 2 <= headerInner) || '';
+
   // HakTerm-style live column: only when there is room for it beside a readable
   // transcript (>=96 cols). Narrower terminals keep the panels full width.
   const sideW = (cols || 100) >= 96 ? 30 : 0;
   const mainW = panelW - (sideW ? sideW + 2 : 0);
+  // The meters row is one line; the services box is its own grid (3 rows when
+  // compact, a wrapped grid when wide). Both sit above the composer, so their
+  // rows come out of the transcript budget — and out of the sidebar's too.
+  const systemRows = 1;
+  const servicesCellCount = services.length + (otherPorts.length ? 1 : 0);
+  const servicesRows = mainW < 96 ? 3 : servicesGridRows(mainW, servicesCellCount);
   // Live panel = border 2 + 7 rows; MCP panel = border 2 + rows. Both must fit
   // between the header/status/composer rows or they push the layout apart.
-  const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2);
+  const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2 - systemRows - servicesRows);
   const maxServers = Math.max(0, Math.min(8, sidebarBudget));
 
   // ── Row budget ────────────────────────────────────────────────────────────
@@ -368,7 +572,8 @@ export default function App({ version = '0.1.0' }) {
   const approvalRows = approving ? 6 : 0;
   const transcriptRows = Math.max(
     4,
-    (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows - approvalRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0),
+    (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows
+      - approvalRows - systemRows - servicesRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0),
   );
 
   const dashboardItems = [
@@ -381,6 +586,7 @@ export default function App({ version = '0.1.0' }) {
         { label: 'connected', value: status ? (status.connected ? 'yes' : 'no') : '—', color: status && status.connected ? 'green' : 'red' },
         { label: 'server model', value: status ? status.model : '—' },
         { label: 'trust', value: status ? status.trust : '—' },
+        { label: 'file guards', value: guard ? `${guard.present}/${guard.total}` : '…', color: guard && guard.missing && guard.missing.length ? 'red' : 'green' },
       ],
     },
     {
@@ -409,14 +615,19 @@ export default function App({ version = '0.1.0' }) {
 
   return (
     <box style={{ flexDirection: 'column', width: cols || 100, height: rows || 30, overflow: 'hidden' }}>
-      {/* header */}
-      <box style={{ width: panelW, justifyContent: 'space-between', flexShrink: 0 }}>
+      {/* header — one row at every terminal width. The right-hand variants are
+          tried longest-first against the measured left side, so a narrow
+          terminal shortens the line instead of wrapping it onto the panels. */}
+      <box style={{ width: panelW, flexDirection: 'row', justifyContent: 'space-between', flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
         <box style={{ flexDirection: 'row' }}>
-          <text fg={status ? (statusErr ? 'red' : 'green') : 'yellow'}>{statusErr ? '○ ' : status ? '● ' : '◌ '}</text>
-          <text fg="cyan" attributes={TextAttributes.BOLD}>haksterAi</text>
-          <text fg="gray">{` · ${statusErr ? 'OFFLINE' : status ? 'ONLINE' : 'connecting…'}`}</text>
+          <text fg={status ? (statusErr ? 'red' : 'green') : 'yellow'} attributes={TextAttributes.BOLD}>{statusErr ? '○ ' : status ? '● ' : '◌ '}</text>
+          <text fg="cyan" attributes={TextAttributes.BOLD}>{'◆ haksterAi'}</text>
+          <text fg={statusErr ? 'red' : status ? 'green' : 'yellow'}>{` · ${headerState}`}</text>
+          {headerFiles ? (
+            <text fg={guard.missing && guard.missing.length ? 'red' : 'gray'}>{`   ${headerFiles}`}</text>
+          ) : null}
         </box>
-        <text fg="gray">{`tui ${version} · ${view} · ${model} · ctx ${Math.round(ctxMax / 1000)}K`}</text>
+        {headerRight ? <text fg="gray">{headerRight}</text> : null}
       </box>
 
       {statusErr ? (
@@ -451,14 +662,33 @@ export default function App({ version = '0.1.0' }) {
               </GridPanel>
             )}
           />
-          <GridPanel title="Context" width={panelW} hint={catalog.labelFor(catalog.findModel(model) || { id: model, vendor: 'local', context: null })}>
-            <box>
-              <Meter value={ctxUsed} max={ctxMax} w={Math.min(40, panelW - 30)} color={ctxUsed / ctxMax > 0.8 ? 'red' : 'green'} />
+          {/* The three bars the old CLI measured: smartness, autolearn and the
+              context window. Each is labelled and reads from live state. */}
+          <GridPanel
+            title="◉ Meters"
+            width={panelW}
+            hint={`${smartLabel(meters ? meters.score : 0)} · ${meterPoints}p autolearn · ${catalog.labelFor(catalog.findModel(model) || { id: model, vendor: 'local', context: null })}`}
+          >
+            <box style={{ width: Math.max(10, panelW - 4), flexDirection: 'row', flexShrink: 0 }}>
+              <text fg="gray">{'smartness   '}</text>
+              <Meter value={meters ? meters.score : 0} max={100} w={Math.min(40, Math.max(10, panelW - 40))} color={barColor('smart', meters ? meters.score : 0)} />
+              <text fg="white">{` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? '▲' : meters && meters.delta < 0 ? '▼' : '◆'} ${smartLabel(meters ? meters.score : 0)}`}</text>
             </box>
-            <box style={{ marginLeft: 1 }}>
-              <Spark data={history} w={Math.min(30, Math.max(10, panelW - 10))} />
+            <box style={{ width: Math.max(10, panelW - 4), flexDirection: 'row', flexShrink: 0 }}>
+              <text fg="gray">{'autolearn   '}</text>
+              <Meter value={Math.min(100, meterPoints)} max={100} w={Math.min(40, Math.max(10, panelW - 40))} color={barColor('points', meterPoints)} />
+              <text fg="white">{` ${meterPoints}p`}</text>
+              <box style={{ marginLeft: 2 }}>
+                <Spark data={pointsHistory} w={Math.min(24, Math.max(8, panelW - 70))} />
+              </box>
+            </box>
+            <box style={{ width: Math.max(10, panelW - 4), flexDirection: 'row', flexShrink: 0 }}>
+              <text fg="gray">{'context     '}</text>
+              <Meter value={ctxUsed} max={ctxMax} w={Math.min(40, Math.max(10, panelW - 40))} color={ctxUsed / ctxMax > 0.8 ? 'red' : 'green'} />
+              <text fg="white">{` ${Math.round(ctxUsed / ctxMax * 100)}%`}</text>
             </box>
           </GridPanel>
+          <ServicesPanel width={panelW} services={services} scan={scan} showAll />
         </>
       ) : (
         <box style={{ flexDirection: 'row', width: panelW, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
@@ -479,7 +709,8 @@ export default function App({ version = '0.1.0' }) {
                 messages={agent.messages}
                 width={mainW}
                 height={transcriptRows}
-                emptyHint="Type a task and the agent runs it with tools. Tab moves focus to the ad slot; esc stops a run."
+                scrollRef={scrollRef}
+                emptyHint="Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; esc stops a run."
               />
             </box>
 
@@ -531,9 +762,15 @@ export default function App({ version = '0.1.0' }) {
 
             {notice ? (
               <box style={{ flexShrink: 0, width: mainW }}>
-                <text fg="cyan">{`◆ ${notice}`}</text>
+                {/* One row, always — a long /ports or /help notice is clipped
+                    rather than allowed to wrap the layout. */}
+                <text fg="cyan">{clipLine(`◆ ${notice}`, Math.max(8, mainW - 2))}</text>
               </box>
             ) : null}
+
+            {/* Old CLI's two meters + the context bar, then their ports grid. */}
+            <SystemPanel width={mainW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} />
+            <ServicesPanel width={mainW} services={services} scan={scan} />
 
             <box style={{ flexShrink: 0 }}>
               {menuOpen ? (
@@ -551,7 +788,9 @@ export default function App({ version = '0.1.0' }) {
                       ? 'answer the request above — it is holding the run'
                       : agent.busy
                         ? 'esc stop · the run is streaming'
-                        : 'enter send · /menu commands · tab focus · a ads · d dashboard · m models · c clear · q quit'
+                        : attachment
+                          ? `📎 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K · enter sends it · /attach clear`
+                          : 'enter send · /menu commands · /attach image · pgup scroll · q quit'
                   }
                   adSlot={
                     <AdRailSlot
@@ -595,6 +834,7 @@ export default function App({ version = '0.1.0' }) {
           focus={focus}
           adsOn={adsOn}
           elapsedMs={agent.elapsedMs}
+          handoff={handoffOn}
           hint={focus === 'ad' ? 'enter opens · ^O details' : null}
         />
       </box>

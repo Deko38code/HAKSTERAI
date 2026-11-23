@@ -12,6 +12,9 @@ import { TextAttributes } from '@opentui/core';
 export const MENU_ITEMS = [
   { cmd: '/model', label: 'Models', detail: 'switch the model for this session' },
   { cmd: '/mcp', label: 'MCP servers', detail: 'live servers and their tool counts' },
+  { cmd: '/handoff', label: 'Auto handoff', detail: 'on/off · DeepSeek → Codex → others' },
+  { cmd: '/ports', label: 'Ports', detail: 'services and every listening port' },
+  { cmd: '/attach', label: 'Attach image', detail: '/attach <path> · sends with your message' },
   { cmd: '/dashboard', label: 'Dashboard', detail: 'system / session / agent panels' },
   { cmd: '/status', label: 'Status', detail: 'server, phase, tokens' },
   { cmd: '/clear', label: 'Clear transcript', detail: 'start the conversation over' },
@@ -28,15 +31,15 @@ export default function MenuPalette({ width = 60, selected = 0 }) {
   const inner = Math.max(1, width - 4);
   return (
     <box style={{ width, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'cyan', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
-      <box style={{ width: inner, justifyContent: 'space-between' }}>
-        <text fg="cyan" attributes={TextAttributes.BOLD}>Menu</text>
+      <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
+        <text fg="cyan" attributes={TextAttributes.BOLD}>◇ Menu</text>
         <text fg="gray">{clip('↑↓ select · enter run · esc close', inner - 6)}</text>
       </box>
       <box style={{ width: inner, flexDirection: 'column' }}>
         {MENU_ITEMS.map((item, i) => {
           const active = i === selected;
           return (
-            <box key={item.cmd} style={{ width: inner, justifyContent: 'space-between' }}>
+            <box key={item.cmd} style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
               <text fg={active ? 'cyan' : 'white'} attributes={active ? TextAttributes.BOLD : 0}>
                 {`${active ? '▸ ' : '  '}${item.cmd.padEnd(11)} ${clip(item.label, 16)}`}
               </text>

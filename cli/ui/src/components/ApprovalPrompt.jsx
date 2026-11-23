@@ -113,7 +113,7 @@ export default function ApprovalPrompt({ width = 80, request, onAnswer }) {
         paddingRight: 1,
       }}
     >
-      <box style={{ width: inner, justifyContent: 'space-between' }}>
+      <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
         <text fg={sudo ? 'red' : 'yellow'} attributes={TextAttributes.BOLD}>
           {sudo ? 'sudo approval required' : 'approval required'}
         </text>

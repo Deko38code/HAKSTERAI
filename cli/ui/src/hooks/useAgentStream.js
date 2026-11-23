@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createMeter } from '../../../smartness.mjs';
+import { attemptsFor } from '../../../src/models/ladder.js';
 
 /* useAgentStream — the TUI's one connection to the agent.
  *
@@ -54,6 +56,10 @@ export function useAgentStream({
   sessionId,
   cwd,
   approvalMode,
+  // Owner's switch (2026-11-23): when a run fails before producing anything,
+  // move to the next entry of the ladder (src/models/ladder.js). Off means the
+  // run fails where it failed — no silent model change.
+  autoHandoff = true,
 } = {}) {
   const [messages, setMessages] = useState([]);
   const [todos, setTodos] = useState([]);
@@ -67,12 +73,44 @@ export function useAgentStream({
   const [pendingConfirm, setPendingConfirm] = useState(null);
   const pendingConfirmRef = useRef(null);
 
+  // ── Smartness + autolearn ────────────────────────────────────────────────
+  // The same meter the old CLI (and the Ink TUI) uses: scoreToolCall's rules
+  // are in smartness.mjs, seeded from the last old-CLI session so a fresh TUI
+  // starts where the operator left off. Every tool result the stream delivers
+  // is scored once, and a loop break costs the same -10 it always has.
+  const meterRef = useRef(null);
+  if (!meterRef.current) meterRef.current = createMeter();
+  const [meters, setMeters] = useState(() => meterRef.current.snapshot());
+  // tool_call_id → the call that produced a later result, so a result is
+  // scored against its own name/args even when several tools run in parallel.
+  const toolMetaRef = useRef(new Map());
+  const lastToolRef = useRef(null);
+  const syncMeters = useCallback(() => setMeters(meterRef.current.snapshot()), []);
+  const scoreTool = useCallback((name, args, result) => {
+    try {
+      const text = String(result == null ? '' : result).trim();
+      // The server tags a failed tool result as `Error:` / `❌` — the same
+      // success test the old CLI scores with.
+      const ok = !/^Error[:\n]|^❌/i.test(text);
+      meterRef.current.tool(name || 'tool', args || {}, ok, text);
+      syncMeters();
+    } catch {
+      /* metering must never break the run */
+    }
+  }, [syncMeters]);
+
   const setPending = useCallback((value) => {
     pendingConfirmRef.current = value;
     setPendingConfirm(value);
   }, []);
 
   const abortRef = useRef(null);
+  // Did the operator press esc/ctrl+c, or did our own timeout fire? Both
+  // arrive as AbortError, but only the second one is a handoff candidate.
+  const userAbortRef = useRef(false);
+  // Per-attempt bookkeeping for the ladder: what this attempt produced and
+  // whether the stream ended in an `error` event.
+  const attemptCtxRef = useRef({ produced: false, sawError: null, status: null });
   const startedAtRef = useRef(null);
   // Mirrors `status` for the stream loop, which outlives any single render.
   const statusRef = useRef('idle');
@@ -112,7 +150,14 @@ export function useAgentStream({
     setMessages((prev) => [...prev, entry]);
   }, []);
 
+  /** Drop an entry — used for a turn's empty assistant bubble when every
+   *  attempt failed before writing a single character. */
+  const drop = useCallback((id) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
   const abort = useCallback(() => {
+    userAbortRef.current = true;
     // A run parked on an approval has to be released explicitly. Aborting our
     // fetch closes the socket but leaves the server's pending entry to time out
     // for five minutes on a response nobody is reading.
@@ -196,13 +241,24 @@ export function useAgentStream({
   );
 
   const send = useCallback(
-    async (text) => {
+    async (text, opts = {}) => {
       const prompt = String(text == null ? '' : text).trim();
       if (!prompt || statusRef.current === 'connecting' || statusRef.current === 'streaming') {
         return;
       }
+      // Data URLs supplied by /attach. The server accepts OpenAI-style
+      // image_url parts and converts them for models without vision.
+      const images = Array.isArray(opts && opts.images)
+        ? opts.images.filter((url) => typeof url === 'string' && url.startsWith('data:image/'))
+        : [];
 
-      append({ id: nextId('user'), role: 'user', text: prompt });
+      append({
+        id: nextId('user'),
+        role: 'user',
+        text: prompt,
+        images: images.length,
+        imageName: (opts && opts.imageName) || '',
+      });
       const assistantId = nextId('ai');
       append({
         id: assistantId,
@@ -218,10 +274,27 @@ export function useAgentStream({
       setStatusBoth('connecting');
       startedAtRef.current = Date.now();
       setElapsedMs(0);
+      // A new turn starts a new round budget for the meter; the session's
+      // smartness and points carry over, exactly as the old CLI's did.
+      try { meterRef.current.resetTask(); syncMeters(); } catch { /* metering is best-effort */ }
+      toolMetaRef.current.clear();
 
-      const controller = new AbortController();
-      abortRef.current = controller;
-      const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      // ── The ladder ──────────────────────────────────────────────────────
+      // Cheap DeepSeek first, Codex next, the server's own waterfall last
+      // (src/models/ladder.js). One attempt at a time; an attempt that failed
+      // before producing anything hands the same prompt to the next entry when
+      // the owner's auto-handoff switch is on.
+      const attempts = attemptsFor(model);
+      if (attempts.length && provider && attempts[0].provider !== provider) {
+        // An explicit HAKSTER_PROVIDER / caller provider wins for tier 1.
+        attempts[0] = { ...attempts[0], provider };
+      }
+      // Statuses that another model cannot fix: a signed-out session, an
+      // entitlement problem, a malformed turn, or a body the server refused.
+      const terminalStatus = (status) =>
+        status === 400 || status === 401 || status === 402 || status === 403 ||
+        status === 413 || status === 415 || status === 422;
+      userAbortRef.current = false;
 
       /** Apply one decoded SSE payload to the transcript. */
       const applyEvent = (evt) => {
@@ -229,6 +302,7 @@ export function useAgentStream({
         switch (evt.type) {
           case 'delta':
             setStatusBoth('streaming');
+            attemptCtxRef.current.produced = true;
             patch(assistantId, (m) => ({ ...m, text: m.text + (evt.content || '') }));
             break;
 
@@ -239,6 +313,7 @@ export function useAgentStream({
 
           case 'thinking':
             setStatusBoth('thinking');
+            attemptCtxRef.current.produced = true;
             patch(assistantId, (m) => ({ ...m, thinking: m.thinking + (evt.content || '') }));
             break;
 
@@ -253,6 +328,8 @@ export function useAgentStream({
 
           case 'tool_call_start': {
             const name = evt.tool_name || 'unknown';
+            lastToolRef.current = { name, args: evt.tool_args || {} };
+            if (evt.tool_call_id) toolMetaRef.current.set(evt.tool_call_id, lastToolRef.current);
             // The checklist is a tool call, not a panel event, so this is where
             // the panel's data actually comes from.
             if (name === 'update_todo' || name === 'plan') {
@@ -280,6 +357,8 @@ export function useAgentStream({
 
           case 'mcp_result': {
             const result = String(evt.data == null ? '' : evt.data);
+            const meta = (evt.tool_call_id && toolMetaRef.current.get(evt.tool_call_id)) || lastToolRef.current;
+            if (meta) scoreTool(meta.name, meta.args, result);
             patch(assistantId, (m) => {
               const tools = m.tools.slice();
               let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
@@ -299,6 +378,10 @@ export function useAgentStream({
             const result = String(
               evt.tool_result != null ? evt.tool_result : evt.result != null ? evt.result : '',
             );
+            // Score the call before patching: the meter must move the moment
+            // the result arrives, even if the run is about to fail.
+            const meta = (evt.tool_call_id && toolMetaRef.current.get(evt.tool_call_id)) || lastToolRef.current;
+            if (meta) scoreTool(meta.name, meta.args, result);
             patch(assistantId, (m) => {
               const tools = m.tools.slice();
               // Match by id when the server sent one; otherwise attribute the
@@ -336,6 +419,9 @@ export function useAgentStream({
           }
 
           case 'loop_detected':
+            // A loop break is a real penalty in the old CLI (-10) — the same
+            // cost here, so the bar tells the truth about a bad run.
+            try { meterRef.current.bump(-10); syncMeters(); } catch { /* metering is best-effort */ }
             append({ id: nextId('sys'), role: 'system', tone: 'warn', text: evt.message || 'loop detected' });
             break;
 
@@ -373,9 +459,10 @@ export function useAgentStream({
             break;
 
           case 'error':
-            setError(evt.error || 'agent error');
+            // Recorded, not rendered: the attempt loop decides whether this
+            // becomes a handoff to the next model or the turn's final error.
+            attemptCtxRef.current.sawError = evt.error || 'agent error';
             setStatusBoth('error');
-            append({ id: nextId('sys'), role: 'system', tone: 'error', text: evt.error || 'agent error' });
             break;
 
           case 'done':
@@ -396,78 +483,157 @@ export function useAgentStream({
         }
       };
 
-      try {
-        const res = await fetch(`${api}/api/agent/run`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) },
-          signal: controller.signal,
-          body: JSON.stringify({
-            messages: [
-              ...(system ? [{ role: 'system', content: system }] : []),
-              { role: 'user', content: prompt },
-            ],
-            stream: true,
-            provider,
-            model,
-            ...(cwd ? { cwd } : {}),
-            ...(sessionId ? { sessionId } : {}),
-            ...(approvalMode ? { approvalMode } : {}),
-          }),
-        });
+      /** Run one attempt and report what happened; decide nothing. */
+      const runAttempt = async (target) => {
+        const controller = new AbortController();
+        abortRef.current = controller;
+        const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+        const ctx = { produced: false, sawError: null, status: null };
+        attemptCtxRef.current = ctx;
+        try {
+          const res = await fetch(`${api}/api/agent/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) },
+            signal: controller.signal,
+            body: JSON.stringify({
+              messages: [
+                ...(system ? [{ role: 'system', content: system }] : []),
+                {
+                  role: 'user',
+                  content: images.length
+                    ? [{ type: 'text', text: prompt }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))]
+                    : prompt,
+                },
+              ],
+              stream: true,
+              // Tier 3 sends neither, so the server's own waterfall decides —
+              // that is what "others last" means here.
+              ...(target.provider ? { provider: target.provider } : {}),
+              ...(target.model ? { model: target.model } : {}),
+              ...(cwd ? { cwd } : {}),
+              ...(sessionId ? { sessionId } : {}),
+              ...(approvalMode ? { approvalMode } : {}),
+            }),
+          });
 
-        if (!res.ok) throw new Error(`server replied ${res.status}`);
-        if (!res.body) throw new Error('server sent no stream');
+          ctx.status = res.status;
+          if (!res.ok) {
+            throw new Error(
+              res.status === 413
+                ? 'the server refused the body (413) — image too large'
+                : `server replied ${res.status}`,
+            );
+          }
+          if (!res.body) throw new Error('server sent no stream');
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
 
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
 
-          // SSE frames are newline-delimited. A partial trailing line stays in
-          // the buffer, because a chunk boundary is not a frame boundary.
-          let idx;
-          while ((idx = buffer.indexOf('\n')) !== -1) {
-            const line = buffer.slice(0, idx).replace(/\r$/, '');
-            buffer = buffer.slice(idx + 1);
-            // `:heartbeat` comments exist to keep the socket warm; they carry
-            // no data and must not be parsed.
-            if (!line.startsWith('data:')) continue;
-            const payload = line.slice(5).trim();
-            if (!payload) continue;
-            try {
-              applyEvent(JSON.parse(payload));
-            } catch {
-              /* a malformed frame is not worth killing the run over */
+            // SSE frames are newline-delimited. A partial trailing line stays
+            // in the buffer, because a chunk boundary is not a frame boundary.
+            let idx;
+            while ((idx = buffer.indexOf('\n')) !== -1) {
+              const line = buffer.slice(0, idx).replace(/\r$/, '');
+              buffer = buffer.slice(idx + 1);
+              // `:heartbeat` comments exist to keep the socket warm; they carry
+              // no data and must not be parsed.
+              if (!line.startsWith('data:')) continue;
+              const payload = line.slice(5).trim();
+              if (!payload) continue;
+              try {
+                applyEvent(JSON.parse(payload));
+              } catch {
+                /* a malformed frame is not worth killing the run over */
+              }
             }
           }
-        }
 
-        // Only clear the spinner if the error branch has not already set one.
-        if (statusRef.current !== 'error') setStatusBoth('idle');
-      } catch (e) {
-        if (e && e.name === 'AbortError') {
+          if (ctx.sawError) return { ok: false, aborted: false, ...ctx, error: ctx.sawError };
+          // Only clear the spinner if an error event has not already set one.
+          if (statusRef.current !== 'error') setStatusBoth('idle');
+          return { ok: true, aborted: false, ...ctx, error: null };
+        } catch (e) {
+          if (e && e.name === 'AbortError') {
+            return {
+              ok: false,
+              aborted: true,
+              ...ctx,
+              error: userAbortRef.current ? 'run cancelled' : 'timed out',
+            };
+          }
+          return { ok: false, aborted: false, ...ctx, error: (e && e.message) || 'request failed' };
+        } finally {
+          clearTimeout(timeout);
+        }
+      };
+
+      // Did any attempt write anything? A turn where nothing was ever
+      // produced must not leave an empty "thinking…" bubble behind.
+      let spoke = false;
+
+      for (let i = 0; i < attempts.length; i++) {
+        const target = attempts[i];
+        const res = await runAttempt(target);
+        spoke = spoke || !!res.produced;
+        if (res.ok) break;
+
+        if (res.aborted && userAbortRef.current) {
           append({ id: nextId('sys'), role: 'system', tone: 'warn', text: 'run cancelled' });
           setStatusBoth('idle');
-        } else {
-          const msg = (e && e.message) || 'request failed';
+          break;
+        }
+
+        const next = attempts[i + 1];
+        // A handoff only ever follows a failure that produced nothing: partial
+        // output is kept and reported rather than replayed on another model.
+        // 400/401/402/403 are the request's own fault — another model cannot
+        // fix a signed-out session or a malformed turn.
+        const canHandoff =
+          autoHandoff && !!next && !res.produced && !res.aborted && !terminalStatus(res.status);
+
+        if (!canHandoff) {
+          const msg = res.error || 'request failed';
           setError(msg);
           setStatusBoth('error');
+          if (!spoke) drop(assistantId);
           append({ id: nextId('sys'), role: 'system', tone: 'error', text: msg });
+          break;
         }
-      } finally {
-        clearTimeout(timeout);
-        abortRef.current = null;
-        // Once the stream is over there is nothing left to answer: a pending
-        // approval whose socket has closed can no longer be reported anywhere.
-        setPending(null);
-        setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
+
+        // Honest, visible handoff: which model failed, why, and which one is
+        // taking over — never a silent swap.
+        append({
+          id: nextId('sys'),
+          role: 'system',
+          tone: 'warn',
+          text: `handoff ${target.label} → ${next.label}: ${res.error}`,
+        });
+        patch(assistantId, (m) => ({
+          ...m,
+          text: '',
+          thinking: '',
+          tools: [],
+          phase: null,
+          model: next.model || next.provider || 'auto',
+        }));
+        toolMetaRef.current.clear();
+        setError(null);
+        setStatusBoth('connecting');
       }
+
+      abortRef.current = null;
+      // Once the stream is over there is nothing left to answer: a pending
+      // approval whose socket has closed can no longer be reported anywhere.
+      setPending(null);
+      setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
     },
-    [api, append, approvalMode, cwd, model, patch, provider, sessionId, setPending, setStatusBoth, system],
+    [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, sessionId, setPending, setStatusBoth, system],
   );
 
   const clear = useCallback(() => {
@@ -493,6 +659,7 @@ export function useAgentStream({
     error,
     elapsedMs,
     busy,
+    meters,
     pendingConfirm,
     answerConfirm,
     send,
