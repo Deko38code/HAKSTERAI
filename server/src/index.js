@@ -2360,7 +2360,16 @@ function getHaksterModelConfig() {
   const envProvider = process.env.DEFAULT_PROVIDER;
   const envModel = process.env.DEFAULT_MODEL;
   if (envProvider && PROVIDERS[envProvider]) {
-    return { provider: envProvider, model: envModel || PROVIDERS[envProvider].defaultModel };
+    // server/.env still carries the old GLM default (DEFAULT_MODEL=glm-5.3:cloud),
+    // and because env wins here every agent run answered on GLM instead of the
+    // owner's Claude DeepSeek config. A GLM tag is that stale default, not a
+    // choice: resolve it through the same resolver the config file uses, which
+    // reads the owner's Ollama "claude" integration (deepseek-v4.1-flash:cloud
+    // on 127.0.0.1:11434). A deliberate non-GLM pick is still honoured verbatim.
+    // Owner, 2026-11-24: "use my deepseek ollama always this one we use in
+    // claude cli same config never alter".
+    const resolved = resolveTerminalModel(envModel || PROVIDERS[envProvider].defaultModel, envProvider);
+    return { provider: resolved.provider || envProvider, model: resolved.model };
   }
   const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');
   let provider = 'ollama';
@@ -5666,6 +5675,22 @@ ${dirListing}
   };
 
   let lastHadToolCalls = false;
+  // Counts tool calls across the whole run. The empty-reply nudge below needs
+  // it: a turn that used tools then came back with no prose at all is the
+  // "he ran it but never told me the answer" case, and `lastHadToolCalls` is
+  // reset before that check can read it.
+  let toolsUsedThisRun = 0;
+  // Text the run actually handed back, and the last tool result it saw. If a
+  // run ends with tools having run but zero text, the operator gets the last
+  // real tool result instead of silence (see emitRundownFallback below).
+  let runTextChars = 0;
+  let lastToolSummary = '';
+  const emitRundownFallback = () => {
+    if (runTextChars > 0 || !lastToolSummary) return;
+    const line = `Ran ${toolsUsedThisRun} tool call${toolsUsedThisRun === 1 ? '' : 's'}. Last result — ${lastToolSummary}`;
+    runTextChars = line.length;
+    res.write(`data: ${JSON.stringify({ type: 'delta', content: line })}\n\n`);
+  };
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       // Check abort at start of each iteration
@@ -5782,6 +5807,7 @@ ${dirListing}
       const toolCalls = []; // { id, name, arguments (accumulated) }
       let currentToolCall = null;
       let thinkingActive = false;
+      let assistantThinking = ''; // reasoning channel, kept for the empty-reply fallback
 
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta;
@@ -5791,6 +5817,7 @@ ${dirListing}
         // GLM-5.2 streams reasoning as delta.reasoning (not reasoning_content or thinking)
         const thinkingContent = delta.reasoning_content || delta.thinking || delta.reasoning;
         if (thinkingContent && !customerDirective) {
+          assistantThinking += thinkingContent;
           if (!thinkingActive) {
             thinkingActive = true;
             res.write(`data: ${JSON.stringify({ type: 'thinking_start' })}\n\n`);
@@ -5845,9 +5872,25 @@ ${dirListing}
         res.write(`data: ${JSON.stringify({ type: 'thinking_end' })}\n\n`);
       }
 
-      // Build assistant message for history
-      const assistantMsg = { role: 'assistant' };
-      if (assistantContent) assistantMsg.content = assistantContent;
+      // A reasoning model can stream its entire answer into the reasoning channel
+      // and return empty content (measured 2026-11-24 on glm-5.3:cloud: 7,978
+      // chars of thinking, zero content, so the turn ended with no answer at all
+      // and the operator saw a tool row and nothing else). When that happens and
+      // there is no tool call to run, the reasoning text is the reply — hand it
+      // over as the result rather than returning nothing.
+      if (!assistantContent.trim() && assistantThinking.trim() && toolCalls.length === 0) {
+        assistantContent = assistantThinking.trim();
+        res.write(`data: ${JSON.stringify({ type: 'delta', content: assistantContent })}\n\n`);
+      }
+
+      runTextChars += assistantContent.trim().length;
+
+      // Build assistant message for history. `content` is always present, even
+      // as '' — an OpenAI-compatible provider that gets a tool-call message with
+      // no content field can answer the next turn empty, which reads as the agent
+      // calling the same tool forever and never reporting the result (measured
+      // 2026-11-24 on ollama/glm-5.3:cloud and ollama/deepseek-v4.1-flash:cloud).
+      const assistantMsg = { role: 'assistant', content: assistantContent || '' };
       if (toolCalls.length > 0) {
         assistantMsg.tool_calls = toolCalls.map(tc => ({
           id: tc.id,
@@ -5904,6 +5947,24 @@ ${dirListing}
           }
         }
 
+        // ── Empty-reply nudge: tools ran, but the model said nothing ──
+        // Measured 2026-11-24: an autonomous run called exec_shell, got the
+        // result, then ended the turn with empty content — the operator saw a
+        // tool row and no answer ("he ran it but never told me"). Ask once (or
+        // twice at most) for the rundown before closing the run.
+        if (
+          isAutonomousMode && !customerDirective && toolCalls.length === 0
+          && assistantContent.trim().length === 0 && toolsUsedThisRun > 0
+          && turn < maxTurns - 2
+        ) {
+          const emptyNudgeCount = agentMessages.filter(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('You ran the tools but did not report back')).length;
+          if (emptyNudgeCount < 2) {
+            agentMessages.push({ role: 'user', content: 'You ran the tools but did not report back. Write the final rundown now, in under 8 lines: what you ran, the actual result, and what it means for the operator. Do not call another tool unless the task is genuinely unfinished.' });
+            res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Model ran tools but returned no answer — asking for the rundown...' })}\n\n`);
+            continue;
+          }
+        }
+
         // Phase: ACT→OBSERVE→CONSOLIDATE (session end)
         if (currentPhase === AgentLoopPhase.ACT) {
           currentPhase = AgentLoopPhase.OBSERVE;
@@ -5921,6 +5982,7 @@ ${dirListing}
         }
         clearInterval(heartbeat);
         recordThisAgentUsage();
+        emitRundownFallback();
         res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
         res.end();
         return;
@@ -5969,6 +6031,7 @@ ${dirListing}
         if (breakCount >= 3) {
           clearInterval(heartbeat);
           recordThisAgentUsage();
+          emitRundownFallback();
           res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
           res.end();
           return;
@@ -6014,6 +6077,7 @@ ${dirListing}
             if (breakCount >= 3) {
               clearInterval(heartbeat);
               recordThisAgentUsage();
+              emitRundownFallback();
               res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
               res.end();
               return;
@@ -6038,6 +6102,7 @@ ${dirListing}
           clearInterval(heartbeat);
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'no_progress', message: 'Model is making tool calls without producing content. Stopping to avoid infinite loop.' })}\n\n`);
           recordThisAgentUsage();
+          emitRundownFallback();
           res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
           res.end();
           return;
@@ -6066,6 +6131,7 @@ ${dirListing}
           clearInterval(heartbeat);
           res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'duplicate_tool_call', message: `Tool ${tc.name} called ${dupes}x with same arguments. Stopping to avoid infinite loop.` })}\n\n`);
           recordThisAgentUsage();
+          emitRundownFallback();
           res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
           res.end();
           return;
@@ -6126,6 +6192,7 @@ ${dirListing}
         if (breakCount >= 3) {
           clearInterval(heartbeat);
           recordThisAgentUsage();
+          emitRundownFallback();
           res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
           res.end();
           return;
@@ -6141,6 +6208,7 @@ ${dirListing}
 
       // Tool calls in progress — mark so next turn skips compact
       lastHadToolCalls = true;
+      toolsUsedThisRun += toolCalls.length;
       loopDetect.lastAssistantContent = assistantContent || '';
 
       // Execute tool calls — run independent (non-shell) tools in parallel
@@ -6228,6 +6296,7 @@ ${dirListing}
           responseOutputTokens += estimateUsageTokens(contextResult);
 
           res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
+          lastToolSummary = `${toolName} → ${String(truncatedResult).replace(/\r/g, '').trim().split('\n').slice(0, 3).join(' · ').slice(0, 300)}`;
 
           // ── Capture raw memory for the autolearn pipeline ──
           // This is the entry point that was missing — without this, raw_memories.json
@@ -6314,6 +6383,7 @@ ${dirListing}
               clearInterval(heartbeat);
               res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'tool_error', message: `Tool ${toolName} has failed ${existing.count} times in a row. Stopping to avoid retry loop.` })}\n\n`);
               recordThisAgentUsage();
+              emitRundownFallback();
               res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
               res.end();
               return;
@@ -6417,6 +6487,7 @@ ${dirListing}
 
         // Notify frontend: tool call result
         res.write(`data: ${JSON.stringify({ type: 'tool_call_result', tool_call_id: tc.id, tool_name: toolName, tool_result: truncatedResult })}\n\n`);
+        lastToolSummary = `${toolName} → ${String(truncatedResult).replace(/\r/g, '').trim().split('\n').slice(0, 3).join(' · ').slice(0, 300)}`;
 
         // ── Capture raw memory for the autolearn pipeline (path 2) ──
         try {
@@ -6502,6 +6573,7 @@ ${dirListing}
               clearInterval(heartbeat);
               res.write(`data: ${JSON.stringify({ type: 'loop_detected', reason: 'tool_error', message: `Tool ${toolName} has failed ${existing.count} times in a row. Stopping to avoid retry loop.` })}\n\n`);
               recordThisAgentUsage();
+              emitRundownFallback();
               res.write(`data: ${JSON.stringify({ type: 'done', model: agentModel, provider })}\n\n`);
               res.end();
               return;

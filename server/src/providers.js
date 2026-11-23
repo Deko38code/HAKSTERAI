@@ -2494,6 +2494,20 @@ const SYS_PROMPT_CACHE_TTL = 60000; // 60s; prompts are expensive to rebuild
  * IDE / server knowledge it is supposed to carry (owner, 2026-11-24: "make sure
  * he has the phantom brain merge md"). The full doc is ~570KB, so an excerpt
  * ships in the prompt and its path is given for read_file on demand. */
+/* Prompt budget — the steering walk-up (project AGENTS.md + the master rulebook
+ * at /home/ghost/AGENTS.md) is ~115K chars and .hakster/MEMORY.md is ~62K, which
+ * pushed the system prompt past 143K tokens (measured 2026-11-24: the context
+ * ceiling reported 144,659 tokens against a 131K window). Over-budget prompts
+ * get silently trimmed by the provider, and the agent then ends a turn with tool
+ * calls and no answer. Each injected block is capped with an explicit note and a
+ * path, so the agent can still read_file the full text when it needs it. */
+const SYS_PROMPT_BLOCK_CAPS = { agentsMd: 50000, memoryMd: 8000, lessons: 6000 };
+function capBlock(text, max, note) {
+  if (!text) return text;
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n...[trimmed at ${max} chars — ${note}]`;
+}
+
 let _phantomBrainCache = null;
 let _phantomBrainMtime = 0;
 let _phantomBrainPath = '';
@@ -2556,11 +2570,13 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
     }
   } catch (_) { /* promos are best-effort; a missing file must not break a prompt */ }
 
-  // Inject AGENTS.md (walks up from cwd)
+  // Inject AGENTS.md (walks up from cwd) — capped, see SYS_PROMPT_BLOCK_CAPS
   try {
     const agentsMd = injectAgentsMd(cwd || process.cwd());
     if (agentsMd) {
-      prompt += `\n\n═══ PROJECT STEERING (AGENTS.md) ═══\n${agentsMd}\n═══ END STEERING ═══`;
+      const capped = capBlock(agentsMd, SYS_PROMPT_BLOCK_CAPS.agentsMd,
+        `full steering: ${path.join(cwd || process.cwd(), 'AGENTS.md')} and /home/ghost/AGENTS.md — read_file for the rest`);
+      prompt += `\n\n═══ PROJECT STEERING (AGENTS.md) ═══\n${capped}\n═══ END STEERING ═══`;
     }
   } catch (e) { /* AGENTS.md injection is best-effort */ }
 
@@ -2609,7 +2625,8 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
     if (fs2.existsSync(memoryMdPath)) {
       const memoryContent = fs2.readFileSync(memoryMdPath, 'utf8').trim();
       if (memoryContent) {
-        prompt += `\n\n═══ PROJECT MEMORY (MEMORY.md) ═══\n${memoryContent}\n═══ END MEMORY ═══`;
+        const cappedMemory = capBlock(memoryContent, SYS_PROMPT_BLOCK_CAPS.memoryMd, `read_file ${memoryMdPath}`);
+        prompt += `\n\n═══ PROJECT MEMORY (MEMORY.md) ═══\n${cappedMemory}\n═══ END MEMORY ═══`;
       }
     }
     // Also check global haksterAi memory
@@ -2617,7 +2634,8 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
     if (fs2.existsSync(globalMemoryPath) && globalMemoryPath !== memoryMdPath) {
       const globalMemory = fs2.readFileSync(globalMemoryPath, 'utf8').trim();
       if (globalMemory) {
-        prompt += `\n\n═══ GLOBAL MEMORY (haksterAi MEMORY.md) ═══\n${globalMemory}\n═══ END GLOBAL MEMORY ═══`;
+        const cappedGlobal = capBlock(globalMemory, SYS_PROMPT_BLOCK_CAPS.memoryMd, `read_file ${globalMemoryPath}`);
+        prompt += `\n\n═══ GLOBAL MEMORY (haksterAi MEMORY.md) ═══\n${cappedGlobal}\n═══ END GLOBAL MEMORY ═══`;
       }
     }
   } catch (e) { /* MEMORY.md injection is best-effort */ }
@@ -2626,7 +2644,7 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
   try {
     const lessons = injectLearnedLessons(cwd || process.cwd(), contextTags || []);
     if (lessons) {
-      const cappedLessons = lowToken && lessons.length > 1500 ? lessons.slice(0, 1500) + '\n...(learned lessons trimmed)' : lessons;
+      const cappedLessons = capBlock(lessons, lowToken ? 1500 : SYS_PROMPT_BLOCK_CAPS.lessons, 'full lessons: .hakster/MEMORY.md');
       prompt += `\n\n═══ LEARNED LESSONS (auto-memory) ═══\n${cappedLessons}\n═══ END LESSONS ═══`;
     }
   } catch (e) { /* lessons injection is best-effort */ }
