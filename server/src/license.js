@@ -172,7 +172,13 @@ async function checkLicense(allowTrial = true) {
 
     if (status === 200 && data && data.user) {
       const { plan, status: acctStatus, email } = data.user;
-      const paid = acctStatus === 'active' && (plan === 'pro' || plan === 'enterprise');
+      // The owner's own account (is_owner from /api/auth/me, the email-based
+      // owner check) is entitled to every surface regardless of the plan
+      // label, at the owner's direction ("add to my owner account for free
+      // access always"). Client accounts are unaffected: they still need an
+      // active pro/enterprise plan, so no client is ever granted a free ride.
+      const paid = acctStatus === 'active'
+        && (plan === 'pro' || plan === 'enterprise' || data.user.is_owner === true);
       writeCache({ apiKey, paid, plan, email, validatedAt: Date.now() });
 
       if (paid) {

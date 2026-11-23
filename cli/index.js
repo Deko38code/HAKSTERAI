@@ -161,6 +161,13 @@ function getDangerPassword() {
 
 // ── Default AI provider + model (config first, env override, sensible fallback) ──
 const _cfgDefaults = (() => { try { return loadConfig(); } catch { return {}; } })();
+// Sign-in for the TUIs: both renderers authenticate their /api calls with
+// HAKSTER_API_KEY. `hakster init` stores the key in config.json; put it in the
+// environment here so a bare `hakster` works signed-in without exporting it
+// by hand. The value is never printed, logged or placed in argv (§23).
+if (!process.env.HAKSTER_API_KEY && _cfgDefaults && _cfgDefaults.apiKey) {
+  process.env.HAKSTER_API_KEY = _cfgDefaults.apiKey;
+}
 const DEFAULT_AI_PROVIDER = process.env.HAKSTER_PROVIDER || process.env.DEFAULT_PROVIDER || _cfgDefaults.provider || 'ollama';
 // Start on the owner's Claude DeepSeek config (Ollama "claude" integration),
 // not a GLM default — owner, 2026-11-16. HAKSTER_MODEL still wins; /model still
@@ -679,7 +686,15 @@ program
     if (Object.keys(cfg).length === 0) {
       console.log('  (empty — run: hakster config set server http://your-server:3579)');
     } else {
-      for (const [k, v] of Object.entries(cfg)) console.log(`  ${k} = ${v}`);
+      // Secrets stay out of stdout: a key/token/password value is shown as its
+      // first 8 characters plus its length, never in full (CLAUDE.md §23).
+      const MASK_RE = /(api[-_]?key|token|secret|password)/i;
+      const shown = (k, v) => {
+        const s = typeof v === 'string' ? v : JSON.stringify(v);
+        if (!s || !MASK_RE.test(k)) return s;
+        return `${s.slice(0, 8)}… (${s.length} chars)`;
+      };
+      for (const [k, v] of Object.entries(cfg)) console.log(`  ${k} = ${shown(k, v)}`);
     }
     if (cfg.server) {
       try {
@@ -2686,6 +2701,7 @@ program
       process.exit(1);
     });
 
+    process.env.NODE_ENV = process.env.NODE_ENV || 'production';
     import('./ui.mjs').then(mod => {
       try { mod.start(); }
       catch (err) { restoreTerminal(); console.error(err); process.exit(1); }
@@ -2710,17 +2726,31 @@ program
     }
 
     const version = require('./package.json').version;
+    // One CLI, two renderers: the OpenTUI dashboard (ui-fb.mjs, needs Bun) is
+    // the default; the Ink chat TUI (ui.mjs) is the fallback so `hakster` opens
+    // a TUI on every machine instead of printing an install error.
+    const fallbackInk = (why) => {
+      if (why) console.error(`${C.dim}${why} — opening the Ink TUI instead.${C.reset}`);
+      // React's development build prints key-prop warnings straight into the
+      // alternate screen; the TUI is not running React DevTools, so use the
+      // production build and keep the screen clean.
+      process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+      import('./ui.mjs').then(mod => {
+        try { mod.start(); }
+        catch (err) { console.error(err); process.exit(1); }
+      }).catch(err => {
+        console.error(`${C.red}✗ No TUI available.${C.reset}`);
+        console.error(err && err.message ? err.message : err);
+        process.exit(1);
+      });
+    };
 
     if (process.versions.bun) {
       // Already under Bun — import the bundle directly.
       import('./ui-fb.mjs').then(mod => {
         try { mod.start({ version }); }
         catch (err) { console.error(err); process.exit(1); }
-      }).catch(err => {
-        console.error(`${C.red}✗ Could not load ui-fb.mjs.${C.reset} Build it first: ${C.green}npm run build:ui${C.reset}`);
-        console.error(err && err.message ? err.message : err);
-        process.exit(1);
-      });
+      }).catch(() => fallbackInk('ui-fb.mjs is not built'));
       return;
     }
 
@@ -2734,11 +2764,36 @@ program
     });
     child.on('exit', (code) => process.exit(code || 0));
     child.on('error', (err) => {
-      console.error(`${C.red}✗ Bun is required for the TUI but could not be launched.${C.reset}`);
-      console.error(`${C.dim}Install Bun: ${C.green}curl -fsSL https://bun.sh/install | bash${C.reset}`);
-      console.error(err.message);
-      process.exit(1);
+      fallbackInk(`Bun is not available (${err.message})`);
     });
+  });
+
+// ── quake — the CLI in a Guake drop-down ─────────────────────────────────
+// The desktop already runs Guake; this opens the dashboard TUI in a tab of
+// that drop-down instead of asking the operator to keep a window around.
+// Each call adds a tab named "hakster" — Guake's CLI cannot list tabs, so an
+// existing one cannot be found and re-focused.
+program
+  .command('quake')
+  .description('Open the dashboard TUI in a Guake drop-down tab (quake terminal)')
+  .option('--show', 'Show the drop-down window')
+  .option('--hide', 'Hide the drop-down window')
+  .option('--toggle', 'Toggle the drop-down window')
+  .action((opts) => {
+    const { spawnSync } = require('child_process');
+    const have = spawnSync('bash', ['-lc', 'command -v guake'], { encoding: 'utf8' });
+    if (!have.stdout.trim()) {
+      console.log(`${C.red}✗ Guake is not installed.${C.reset} ${C.dim}Install: sudo apt install guake${C.reset}`);
+      process.exit(1);
+    }
+    const run = (args) => spawnSync('guake', args, { stdio: 'inherit' }).status || 0;
+    if (opts.hide) process.exit(run(['--hide']));
+    if (opts.toggle) process.exit(run(['--toggle-visibility']));
+    if (opts.show) process.exit(run(['--show']));
+    const q = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
+    const entry = path.join(__dirname, 'index.js');
+    const cmd = `cd ${q(process.cwd())} && HAKSTER_NO_SPLASH=1 ${q(process.execPath)} ${q(entry)} tui`;
+    process.exit(run(['--show', '--new-tab', process.cwd(), '--rename-tab', 'hakster', '-e', cmd]));
   });
 
 // ── sessions — grid box view of server sessions ──────────────────────────
@@ -2888,9 +2943,12 @@ program
     });
   });
 
-// ── no args? launch straight into chat ──────────────────────────────────
+// ── no args? launch the dashboard TUI ────────────────────────────────────
+// Owner direction 2026-11-23: the OMP render with its live output panels is the
+// one `hakster` opens. `hakster ui` still opens the Ink TUI, `hakster chat` the
+// scrolling shell.
 if (process.argv.length <= 2) {
-  process.argv.push('chat');
+  process.argv.push('tui');
 }
 
 // Do not dispatch a command until the paid-license check has completed.
