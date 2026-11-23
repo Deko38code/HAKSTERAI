@@ -642,12 +642,28 @@ var require_ladder = __commonJS({
     var MODEL_LADDER2 = Object.freeze([
       Object.freeze({
         tier: 1,
-        provider: PRIMARY_PROVIDER2,
+        // The engine the TUI drives its turns with: the Claude Code CLI on the
+        // owner's own DeepSeek route (owner, 2026-11-24: "just add my claude cli
+        // with my deepseek model to the tui … and he will run like butter").
+        // Same wire model, same base URL (127.0.0.1:11434), same context window as
+        // the Claude Code session this box already runs (§22 — the model config is
+        // unchanged; only the harness around it is Claude Code's own tool loop,
+        // which keeps going across tool rounds instead of stopping after one).
+        provider: "claude-cli",
         model: PRIMARY_MODEL2,
         label: "DeepSeek Flash"
       }),
       Object.freeze({
         tier: 2,
+        // The same model straight from the Ollama relay through the server's own
+        // loop. Nothing was replaced: if the CLI engine fails, the identical turn
+        // retries on this route before any other lane is tried.
+        provider: PRIMARY_PROVIDER2,
+        model: PRIMARY_MODEL2,
+        label: "DeepSeek direct"
+      }),
+      Object.freeze({
+        tier: 3,
         provider: "codex-cli",
         // Empty model: the server fills in the provider's own defaultModel, so the
         // CLI never invents a Codex model string of its own.
@@ -655,7 +671,7 @@ var require_ladder = __commonJS({
         label: "Codex"
       }),
       Object.freeze({
-        tier: 3,
+        tier: 4,
         provider: "",
         model: "",
         label: "waterfall"

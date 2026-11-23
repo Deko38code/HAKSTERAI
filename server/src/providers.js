@@ -146,11 +146,11 @@ const PROVIDERS = {
     type: 'nous',
   },
   'claude-cli': {
-    name: 'Claude (Pro/Max CLI)',
-    // Shells out to the locally-authenticated `claude` CLI instead of the
-    // metered Anthropic API — rides the user's existing Pro/Max subscription
-    // for zero extra token cost. Fallback for when ollama is rate-limited.
-    defaultModel: process.env.CLAUDE_CLI_MODEL || 'sonnet',
+    name: 'Claude Code CLI (DeepSeek)',
+    // Shells out to the `claude` CLI, pointed at this box's local Ollama relay
+    // (see claudeCliEnv): the same wire model, base URL and context window the
+    // owner's Claude Code session runs on (§22 lock). No per-token API bill.
+    defaultModel: process.env.CLAUDE_CLI_MODEL || 'deepseek-v4.1-flash:cloud',
     type: 'claude-cli',
   },
   'codex-cli': {
@@ -899,13 +899,34 @@ function isRefusal(text) {
 // (~/.claude.json) or its own binary on PATH. Force the real home/PATH so
 // the CLI always resolves against the authenticated ghost account.
 const CLAUDE_CLI_HOME = '/home/ghost';
+// The owner's Claude Code route, stated literally (CLAUDE.md §22 model lock):
+// the local Ollama relay and the DeepSeek tag this box's Claude Code session
+// runs on. Until 2026-11-24 this env was built by *stripping* ANTHROPIC_* from
+// the server's own environment, so a CLI spawned by the pm2 server had no route
+// at all and died with "Failed to authenticate. API Error: 401" — the account
+// behind ~/.claude.json is not signed in here. That made claude-cli unusable
+// and left the TUI falling through to slower lanes mid-task.
+// Same route and env as HakTerm's claude brain (dsterm/hakterm.mjs
+// chatStreamClaude), already proven on this machine. The relay authenticates
+// with the literal token "ollama" — it is not a secret; ANTHROPIC_API_KEY must
+// stay empty so the CLI sends nothing else.
+const CLAUDE_CLI_BASE_URL = 'http://127.0.0.1:11434';
+const CLAUDE_CLI_MODEL = 'deepseek-v4.1-flash:cloud';
 function claudeCliEnv() {
-  const { ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ...rest } = process.env;
   return {
-    ...rest,
+    ...process.env,
     HOME: CLAUDE_CLI_HOME,
     USER: 'ghost',
     PATH: `${CLAUDE_CLI_HOME}/.local/bin:${process.env.PATH || ''}`,
+    ANTHROPIC_BASE_URL: CLAUDE_CLI_BASE_URL,
+    ANTHROPIC_AUTH_TOKEN: 'ollama',
+    ANTHROPIC_API_KEY: '',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: CLAUDE_CLI_MODEL,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: CLAUDE_CLI_MODEL,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: CLAUDE_CLI_MODEL,
+    CLAUDE_CODE_SUBAGENT_MODEL: CLAUDE_CLI_MODEL,
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1048576',
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
   };
 }
 

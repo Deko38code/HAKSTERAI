@@ -5030,7 +5030,28 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         })
         .join('\n\n');
       const sysMsg = messages.find(m => m.role === 'system');
-      const sysPrompt = sysMsg ? getMessageText(sysMsg.content) : '';
+      const clientSys = sysMsg ? getMessageText(sysMsg.content) : '';
+      // The CLI keeps its own system prompt (tool guidance, environment, project
+      // CLAUDE.md); Hakster's steering — AGENTS.md, learned lessons and the
+      // phantom brain merge, all via buildAgentSystemPrompt — is appended to it.
+      // Substituting the TUI's one-line SYSTEM instead was why this engine
+      // answered like a bare completion with no tool instructions.
+      const claudeUserMsg = messages.filter(m => m.role === 'user').pop();
+      const claudeCtxTags = String(getMessageText(claudeUserMsg?.content) || '')
+        .split(/\s+/).filter(w => w.length > 3).slice(0, 10);
+      let sysPrompt = buildAgentSystemPrompt(workDir, claudeCtxTags, { lowToken });
+      sysPrompt += '\n\n=== NATIVE TOOLS (CLAUDE CODE CLI) ===\n'
+        + 'This session runs the Claude Code CLI, so your tools are its native ones — '
+        + 'Bash, Read, Edit, Write, Glob, Grep, Task. Where a hakster tool name appears '
+        + 'below (exec_shell, read_file, list_dir, write_file, shell_bg), use the native '
+        + 'equivalent instead; shell commands are your own Bash tool and need no JSON envelope.\n';
+      if (isAutonomousMode) {
+        sysPrompt += `\n=== AUTONOMOUS MODE (${effectiveApprovalMode === 'full-auto' ? 'FULL-AUTO' : 'AUTO-EDIT'}) ===\n`
+          + 'Do the work to completion without asking. Start with a tool call, keep looping '
+          + 'across tool rounds until the task is done or a real blocker stops you, and end '
+          + 'with a short rundown of what was done and verified.\n';
+      }
+      if (clientSys) sysPrompt += `\n=== CLIENT DIRECTIVE ===\n${clientSys}\n`;
 
       // Prompt goes over stdin, not argv — a resumed session's transcript can
       // easily exceed the OS's command-line argument size limit ("spawn E2BIG").
@@ -5049,13 +5070,14 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
       // The system prompt is often huge (steering docs, memory summaries) — passing
       // it as a raw --system-prompt argv string hits Linux's ~128KB per-argument
       // limit and fails with "spawn E2BIG". A file has no such cap.
-      // CRITICAL: Use --system-prompt-file (REPLACE), NOT --append-system-prompt-file
-      // (APPEND) — appending keeps Claude's "I am Claude" identity, causing bleed-through.
+      // Append, not replace: the CLI's own prompt carries the tool guidance this
+      // engine's loop depends on. (The pure-text claudeCliComplete oracle below
+      // still replaces it — it must not use tools at all.)
       let sysPromptFile = null;
       if (sysPrompt) {
         sysPromptFile = path.join(os.tmpdir(), `hakster-sysprompt-${process.pid}-${Date.now()}.txt`);
         fs.writeFileSync(sysPromptFile, sysPrompt);
-        args.push('--system-prompt-file', sysPromptFile);
+        args.push('--append-system-prompt-file', sysPromptFile);
       }
       if (agentModel) args.push('--model', agentModel);
 
@@ -5137,8 +5159,11 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
 
     try {
       const result = await runClaudeCliAgent();
-      // Real identity of what answered — model name + cost claude-cli itself
-      // reported, not the config alias ("sonnet") that was requested.
+      // Real identity of what answered — the model the CLI reported back, not
+      // the alias that was requested. Cost is recorded as 0: the CLI's own
+      // total_cost_usd is priced at Anthropic rates, but this route is the
+      // owner's local Ollama relay with no per-token bill (§26.4), so copying
+      // that figure would overstate our cost. Tokens stay exact.
       res.write(`data: ${JSON.stringify({
         type: 'done',
         provider: 'claude-cli',
@@ -5146,7 +5171,7 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         toolCalls: result.toolCount,
         inputTokens: result.usage?.input_tokens || 0,
         outputTokens: result.usage?.output_tokens || 0,
-        cost: result.costUsd || 0,
+        cost: 0,
       })}\n\n`);
     } catch (err) {
       console.error('[claude-cli] run failed:', err.message || err);
