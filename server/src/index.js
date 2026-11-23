@@ -3792,8 +3792,7 @@ app.post('/api/client-context', (req, res) => {
   const apiKey = req.headers['x-api-key'] || req.body.google_token;
   let trackedUserId = null;
   if (apiKey) {
-    const u = db.prepare('SELECT id FROM users WHERE api_key = ?').get(apiKey);
-    if (u) trackedUserId = u.id;
+    trackedUserId = userIdByAnyKey(db, apiKey);
   }
 
   // Link session to user_id so getClientContextString can find them without API key
@@ -4272,10 +4271,7 @@ app.post('/api/sessions', (req, res) => {
   // BUGFIX: Attach user_id to new sessions so they're scoped per Google account
   const apiKey = req.headers['x-api-key'] || req.body?.apiKey || req.body?.google_token;
   let userId = null;
-  if (apiKey) {
-    const user = db.prepare('SELECT id FROM users WHERE api_key = ?').get(apiKey);
-    if (user) userId = user.id;
-  }
+  if (apiKey) userId = userIdByAnyKey(db, apiKey);
   db.prepare(
     `INSERT INTO sessions (id, user_id, provider, model, title) VALUES (?, ?, ?, ?, ?)`
   ).run(id, userId, provider, finalModel, title || null);
@@ -4289,9 +4285,9 @@ app.get('/api/sessions', (req, res) => {
   // so different Google accounts don't see each other's sessions
   const apiKey = req.headers['x-api-key'] || req.query.apiKey;
   if (apiKey) {
-    const user = db.prepare('SELECT id FROM users WHERE api_key = ?').get(apiKey);
-    if (user) {
-      const sessions = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC').all(user.id);
+    const keyUserId = userIdByAnyKey(db, apiKey);
+    if (keyUserId) {
+      const sessions = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC').all(keyUserId);
       return res.json({ sessions });
     }
   }
@@ -10126,6 +10122,36 @@ app.post('/api/auth/miniforge/exchange', (req, res) => {
 });
 
 // ── Usage tracking & limits ───────────────────────────────────────
+// ── Owner API keys ────────────────────────────────────────────────────────
+// A dedicated key for the owner's own account, kept in its own table so an
+// owner sign-in, plan change or billing event can never be confused with a
+// paid entitlement (owner 2026-11-23: "add a owner api key to seperate from
+// plans mixups"). An owner key only ever resolves to an account whose email
+// is the configured owner email — it grants no plan and changes no plan; the
+// account's own entitlement logic (is_owner) is what it unlocks.
+function ensureOwnerApiKeysTable(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS owner_api_keys (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    label        TEXT,
+    key          TEXT NOT NULL UNIQUE,
+    created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+    last_used_at INTEGER,
+    revoked_at   INTEGER
+  )`);
+}
+
+function getUserByOwnerKey(db, apiKey) {
+  if (!String(apiKey).startsWith('hkowner_')) return null;
+  ensureOwnerApiKeysTable(db);
+  const row = db.prepare('SELECT * FROM owner_api_keys WHERE key = ? AND revoked_at IS NULL').get(apiKey);
+  if (!row) return null;
+  const user = db.prepare("SELECT * FROM users WHERE id = ? AND status = 'active'").get(row.user_id);
+  if (!user || !isOwnerUser(user)) return null;
+  try { db.prepare('UPDATE owner_api_keys SET last_used_at = unixepoch() WHERE id = ?').run(row.id); } catch {}
+  return user;
+}
+
 function getUserByApiKey(req) {
   const authHeader = req.headers['authorization'] || '';
   const bearerKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
@@ -10133,7 +10159,24 @@ function getUserByApiKey(req) {
   if (!apiKey) return null;
   const db = getDb();
   // Suspended and banned accounts cannot authenticate to API routes that use this helper.
+  if (String(apiKey).startsWith('hkowner_')) {
+    const owner = getUserByOwnerKey(db, apiKey);
+    if (owner) return owner;
+  }
   return db.prepare("SELECT * FROM users WHERE api_key = ? AND status = 'active'").get(apiKey);
+}
+
+// Look up a user id from a raw key, owner key included — the tracking paths
+// (sessions, device context, pty identity) call this instead of querying the
+// users table directly so an owner key is never treated as anonymous.
+function userIdByAnyKey(db, apiKey) {
+  if (!apiKey) return null;
+  if (String(apiKey).startsWith('hkowner_')) {
+    const owner = getUserByOwnerKey(db, apiKey);
+    return owner ? owner.id : null;
+  }
+  const u = db.prepare('SELECT id FROM users WHERE api_key = ?').get(apiKey);
+  return u ? u.id : null;
 }
 
 // ── Token credits (one-time packs) ─────────────────────────────────────────
@@ -12154,7 +12197,9 @@ ptyWss.on('connection', (ws, req) => {
     const apiKey = url.searchParams.get('key');
     if (apiKey) {
       const db = getDb();
-      const u = db.prepare('SELECT username, email, role FROM users WHERE api_key = ?').get(apiKey);
+      const u = String(apiKey).startsWith('hkowner_')
+        ? getUserByOwnerKey(db, apiKey)
+        : db.prepare('SELECT username, email, role FROM users WHERE api_key = ?').get(apiKey);
       if (u) {
         ptyUser = u;
         userName = u.username || 'Ghost';

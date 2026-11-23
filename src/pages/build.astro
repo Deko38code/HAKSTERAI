@@ -4346,6 +4346,82 @@ import Layout from '../layouts/Layout.astro';
       document.body.appendChild(banner);
       setTimeout(() => banner.remove(), 5000);
     }
+    // ── Connect the CLI after payment ───────────────────────────────────────
+    // The key that unlocks the CLI is the account's own API key — the same one
+    // saved to this browser at checkout. `hakster init` stores it, and every
+    // CLI run verifies the account's plan server-side, so a paid account keeps
+    // working without any per-machine licence. The value is only ever shown
+    // masked until Reveal; Copy reads it from storage without displaying it.
+    function showCliConnectCard() {
+      if (document.getElementById('cli-connect-card')) return;
+      const key = getStoredAuthToken();
+      if (!key) return;
+      const masked = key.slice(0, 9) + '… (' + key.length + ' chars)';
+
+      const card = document.createElement('div');
+      card.id = 'cli-connect-card';
+      card.setAttribute('role', 'dialog');
+      card.setAttribute('aria-label', 'Connect the CLI');
+      // left+right + margin:auto instead of translate centring: the card then
+      // keeps a 20 px gutter on every phone width (§18) even when the page has
+      // a classic scrollbar taking part of 100vw.
+      card.style.cssText = [
+        'position:fixed', 'top:12px', 'left:20px', 'right:20px', 'margin:0 auto',
+        'z-index:2147483000', 'width:auto', 'max-width:560px',
+        'max-height:calc(100vh - 24px)', 'overflow:auto', 'box-sizing:border-box',
+        'background:#111118', 'color:#e2e8f0',
+        'border:1px solid rgba(0,255,65,0.35)', 'border-radius:14px',
+        'box-shadow:0 18px 50px rgba(0,0,0,0.55)', 'padding:16px 18px',
+        'font:600 13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace',
+      ].join(';');
+
+      card.innerHTML = [
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">',
+        '<span style="color:#00ff41;font-weight:800;letter-spacing:.5px">CONNECT THE CLI</span>',
+        '<button id="cli-card-close" aria-label="Close" style="background:none;border:1px solid #333;border-radius:8px;color:#94a3b8;width:28px;height:28px;cursor:pointer;font:700 14px/1 inherit">×</button>',
+        '</div>',
+        '<div style="color:#94a3b8;font-weight:400;margin-bottom:6px">Your account key</div>',
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">',
+        '<code id="cli-card-key" style="flex:1 1 200px;min-width:0;background:#0a0a0f;border:1px solid #222;border-radius:8px;padding:8px 10px;color:#e2e8f0;word-break:break-all;filter:blur(0)">' + masked + '</code>',
+        '<button id="cli-card-copy" style="background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.45);border-radius:8px;color:#00ff41;padding:8px 12px;cursor:pointer;font:700 12px/1 inherit">Copy</button>',
+        '<button id="cli-card-reveal" style="background:none;border:1px solid #333;border-radius:8px;color:#94a3b8;padding:8px 12px;cursor:pointer;font:700 12px/1 inherit">Reveal</button>',
+        '</div>',
+        '<div style="color:#94a3b8;font-weight:400;margin-bottom:6px">In a terminal on any machine:</div>',
+        '<pre style="margin:0 0 4px;background:#0a0a0f;border:1px solid #222;border-radius:8px;padding:10px 12px;color:#e2e8f0;white-space:pre-wrap;word-break:break-word;font:inherit"><span style="color:#00ff41">hakster init</span>   # paste this key when asked\n<span style="color:#00ff41">hakster</span>        # opens the dashboard</pre>',
+        '<div style="color:#64748b;font-weight:400;margin-top:8px">The CLI checks this account\'s plan on every run — paid plans stay signed in, no per-machine licence needed.</div>',
+      ].join('');
+
+      document.body.appendChild(card);
+
+      const keyEl = card.querySelector('#cli-card-key') as HTMLElement | null;
+      const copyBtn = card.querySelector('#cli-card-copy') as HTMLButtonElement | null;
+      const revealBtn = card.querySelector('#cli-card-reveal') as HTMLButtonElement | null;
+      let revealed = false;
+
+      revealBtn?.addEventListener('click', () => {
+        if (!keyEl || !revealBtn) return;
+        revealed = !revealed;
+        keyEl.textContent = revealed ? key : masked;
+        keyEl.style.filter = revealed ? 'none' : 'blur(4px)';
+        revealBtn.textContent = revealed ? 'Hide' : 'Reveal';
+      });
+      copyBtn?.addEventListener('click', async () => {
+        if (!copyBtn) return;
+        try {
+          await navigator.clipboard.writeText(key);
+          copyBtn.textContent = 'Copied';
+        } catch {
+          // Clipboard blocked (http/permissions) — reveal so it can be copied by hand.
+          if (keyEl) { keyEl.textContent = key; keyEl.style.filter = 'none'; }
+          if (revealBtn) revealBtn.textContent = 'Hide';
+          copyBtn.textContent = 'Select the key';
+          revealed = true;
+        }
+        setTimeout(() => { if (copyBtn) copyBtn.textContent = 'Copy'; }, 2500);
+      });
+      card.querySelector('#cli-card-close')?.addEventListener('click', () => card.remove());
+    }
+
     async function checkStripeCheckoutResult() {
       const params = new URLSearchParams(window.location.search);
       const checkout = params.get('checkout');
@@ -4354,6 +4430,7 @@ import Layout from '../layouts/Layout.astro';
       window.history.replaceState({}, '', window.location.pathname);
       if (checkout === 'success') {
         showCheckoutBanner(`✓ Payment successful${plan ? ' — ' + plan + ' plan activated' : ''}`, '#16a34a');
+        showCliConnectCard();
         const token = getStoredAuthToken();
         if (token) {
           try {
@@ -4427,6 +4504,14 @@ import Layout from '../layouts/Layout.astro';
     checkGoogleCallback(); // Handle OAuth redirect result
     checkTelegramMiniApp(); // Handle Telegram Mini App auto-login (no-op outside Telegram)
     checkStripeCheckoutResult(); // Handle Stripe checkout redirect result
+    // /plans claims the checkout and redirects here with this flag set, so the
+    // CLI card also appears when payment finished away from a `?checkout=` URL.
+    try {
+      if (sessionStorage.getItem('hakster_show_cli_card') === '1') {
+        sessionStorage.removeItem('hakster_show_cli_card');
+        showCliConnectCard();
+      }
+    } catch {}
 
     // ── Sign-in gate: chat is for signed-in users only ──
     if (!getStoredAuthToken()) {

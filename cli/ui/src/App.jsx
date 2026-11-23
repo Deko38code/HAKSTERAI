@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import fs from 'node:fs';
 import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react';
 import { TextAttributes } from '@opentui/core';
 import AdRailSlot from './components/DockAd.jsx';
@@ -6,6 +7,8 @@ import ApprovalPrompt from './components/ApprovalPrompt.jsx';
 import Composer from './components/Composer.jsx';
 import GridLayout from './components/GridLayout.jsx';
 import GridPanel, { Cell, Meter, Spark } from './components/GridPanel.jsx';
+import LiveSidebar from './components/LiveSidebar.jsx';
+import MenuPalette, { MENU_ITEMS } from './components/MenuPalette.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import CrushStatus from './components/CrushStatus.jsx';
 import TodoPanel from './components/TodoPanel.jsx';
@@ -54,8 +57,14 @@ export default function App({ version = '0.1.0' }) {
 
   const [status, setStatus] = useState(null);
   const [statusErr, setStatusErr] = useState(null);
+  const [mcp, setMcp] = useState(null);
   const [history, setHistory] = useState([]);
   const [mcpOutputOffset, setMcpOutputOffset] = useState(0);
+  // `/menu` popout (HakTerm's command palette, in the terminal). Closed on
+  // start — never auto-opens; esc closes it without running anything.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuIndex, setMenuIndex] = useState(0);
+  const [notice, setNotice] = useState(null);
 
   const agent = useAgentStream({
     api: API,
@@ -84,18 +93,108 @@ export default function App({ version = '0.1.0' }) {
     return () => clearInterval(t);
   }, [load]);
 
+  // MCP inventory: the same /api/agent/mcp-status the browser HakTerm lists.
+  // Read-only, every 30s; a failed read keeps the last good panel.
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${API}/api/agent/mcp-status`, {
+          signal: AbortSignal.timeout(5000),
+          headers: { ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) },
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (alive && j && Array.isArray(j.servers)) setMcp(j);
+      } catch { /* keep the previous reading */ }
+    };
+    tick();
+    const t = setInterval(tick, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
   const models = catalog.REFERENCE_CATALOG || [];
   const ctxMax = catalog.contextMaxFor(model) || 1;
   const ctxUsed = Number((status && (status.tokens || status.contextUsed)) || 0);
 
+  const showNotice = useCallback((text) => {
+    setNotice(text);
+    setTimeout(() => setNotice((cur) => (cur === text ? null : cur)), 6000);
+  }, []);
+
+  // Slash commands from the composer — the terminal counterpart of HakTerm's
+  // palette actions. Unknown commands say so instead of being sent to the
+  // model, so a typo never becomes a prompt.
+  const runCommand = useCallback((raw) => {
+    const parts = String(raw || '').trim().split(/\s+/);
+    const cmd = (parts[0] || '').toLowerCase();
+    const arg = parts.slice(1).join(' ');
+    switch (cmd) {
+      case '/menu':
+        setMenuIndex(0);
+        setMenuOpen(true);
+        return;
+      case '/model':
+        if (arg) { setModel(arg); showNotice(`model → ${arg}`); }
+        else {
+          setModelIdx(Math.max(0, models.findIndex((x) => x.id === model)));
+          setView('models');
+        }
+        return;
+      case '/mcp': {
+        const list = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
+        if (!list.length) { showNotice('MCP — no server list yet (server unreachable?)'); return; }
+        const live = list.filter((x) => x.initialized || (x.toolCount || 0) > 0).length;
+        const tools = list.reduce((n, x) => n + (Number(x.toolCount) || 0), 0);
+        const names = list
+          .filter((x) => x.initialized || (x.toolCount || 0) > 0)
+          .slice(0, 5)
+          .map((x) => `${x.name}(${x.toolCount || 0})`)
+          .join(' · ');
+        showNotice(`MCP ${live}/${list.length} live · ${tools} tools · ${names}${list.length > 5 ? ' …' : ''}`);
+        return;
+      }
+      case '/dashboard':
+        setView('dashboard');
+        return;
+      case '/status':
+        showNotice(status
+          ? `phase ${status.phase} · model ${status.model} · tokens ${status.tokens} · trust ${status.trust} · ${status.connected ? 'connected' : 'offline'}`
+          : `server ${statusErr || 'connecting…'}`);
+        return;
+      case '/clear':
+        agent.clear();
+        showNotice('transcript cleared');
+        return;
+      case '/help':
+        showNotice('keys: tab focus · d dashboard · m models · c clear · q quit · esc stop — commands: /menu /model /mcp /dashboard /status /clear /quit');
+        return;
+      case '/quit':
+      case '/exit':
+        agent.abort();
+        renderer.destroy();
+        return;
+      default:
+        showNotice(`unknown command ${cmd} — /menu lists them`);
+    }
+  }, [agent, models, model, mcp, status, statusErr, renderer, showNotice]);
+
   const submit = useCallback(
     (text) => {
       const v = String(text == null ? '' : text).trim();
-      if (!v || agent.busy) return;
+      if (!v) return;
+      // Commands run even while a turn is streaming — /quit and /clear must
+      // always be reachable.
+      if (v.startsWith('/')) {
+        setDraft('');
+        runCommand(v);
+        return;
+      }
+      if (agent.busy) return;
       setDraft('');
       agent.send(v);
     },
-    [agent],
+    [agent, runCommand],
   );
 
   // A pending approval blocks the run, so it takes the keyboard. Both halves are
@@ -139,10 +238,32 @@ export default function App({ version = '0.1.0' }) {
   }, []);
 
   useKeyboard((key) => {
+    // Optional key log for debugging the popout in odd terminals (set
+    // HAKSTER_TUI_KEYLOG to a file path). Never active by default.
+    if (process.env.HAKSTER_TUI_KEYLOG) {
+      try {
+        fs.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + '\n');
+      } catch {}
+    }
     // Ctrl+C always exits, from anywhere.
     if (key.ctrl && key.name === 'c') {
       agent.abort();
       renderer.destroy();
+      return;
+    }
+
+    // The /menu popout owns the keyboard while it is open; esc closes it
+    // without running anything, enter runs the highlighted command.
+    if (menuOpen) {
+      if (key.name === 'escape') { setMenuOpen(false); return; }
+      if (key.name === 'up') { setMenuIndex((i) => (i - 1 + MENU_ITEMS.length) % MENU_ITEMS.length); return; }
+      if (key.name === 'down') { setMenuIndex((i) => (i + 1) % MENU_ITEMS.length); return; }
+      if (key.name === 'return') {
+        const item = MENU_ITEMS[menuIndex] || MENU_ITEMS[0];
+        setMenuOpen(false);
+        runCommand(item.cmd);
+        return;
+      }
       return;
     }
 
@@ -190,6 +311,11 @@ export default function App({ version = '0.1.0' }) {
       return;
     }
 
+    // Only plain letters reach the shortcuts: a Ctrl/Alt chord must never
+    // toggle a view. (Ctrl+D, sent by a pipe at EOF, used to flip to the
+    // dashboard mid-session because it arrives as name 'd' with ctrl set.)
+    if (key.ctrl || key.meta) return;
+
     switch (key.name) {
       case 'a':
         setAdsOn((v) => !v);
@@ -218,18 +344,31 @@ export default function App({ version = '0.1.0' }) {
 
   const panelW = Math.max(40, Math.min((cols || 100) - 2, 140));
 
+  // HakTerm-style live column: only when there is room for it beside a readable
+  // transcript (>=96 cols). Narrower terminals keep the panels full width.
+  const sideW = (cols || 100) >= 96 ? 30 : 0;
+  const mainW = panelW - (sideW ? sideW + 2 : 0);
+  // Live panel = border 2 + 7 rows; MCP panel = border 2 + rows. Both must fit
+  // between the header/status/composer rows or they push the layout apart.
+  const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2);
+  const maxServers = Math.max(0, Math.min(8, sidebarBudget));
+
   // ── Row budget ────────────────────────────────────────────────────────────
   // header 1 · status bar 1 · composer 5 (border 2, input 1, inline ad 1, hint 1)
   // · rail 1 collapsed or 7 expanded · todos: border 2 + header 1 + rows + hint 1
   const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
-  const composerRows = 5;
+  // The /menu popout takes the composer's slot, so its height is budgeted in
+  // the same place: border 2 + header 1 + one row per command + hint 1.
+  const MENU_ROWS = 2 + 1 + MENU_ITEMS.length + 1;
+  const composerRows = menuOpen ? MENU_ROWS : 5;
+  const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
   const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 4 : 0;
   // approval: border 2 + header 1 + reason 1 + command 1 + answer row 1
   const approvalRows = approving ? 6 : 0;
   const transcriptRows = Math.max(
     4,
-    (rows || 30) - CHROME_ROWS - composerRows - railRows - todoRows - approvalRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0),
+    (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows - approvalRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0),
   );
 
   const dashboardItems = [
@@ -272,9 +411,11 @@ export default function App({ version = '0.1.0' }) {
     <box style={{ flexDirection: 'column', width: cols || 100, height: rows || 30, overflow: 'hidden' }}>
       {/* header */}
       <box style={{ width: panelW, justifyContent: 'space-between', flexShrink: 0 }}>
-        <text fg="cyan" attributes={TextAttributes.BOLD}>
-          haksterAi
-        </text>
+        <box style={{ flexDirection: 'row' }}>
+          <text fg={status ? (statusErr ? 'red' : 'green') : 'yellow'}>{statusErr ? '○ ' : status ? '● ' : '◌ '}</text>
+          <text fg="cyan" attributes={TextAttributes.BOLD}>haksterAi</text>
+          <text fg="gray">{` · ${statusErr ? 'OFFLINE' : status ? 'ONLINE' : 'connecting…'}`}</text>
+        </box>
         <text fg="gray">{`tui ${version} · ${view} · ${model} · ctx ${Math.round(ctxMax / 1000)}K`}</text>
       </box>
 
@@ -320,100 +461,129 @@ export default function App({ version = '0.1.0' }) {
           </GridPanel>
         </>
       ) : (
-        <>
-          {agent.todos.length ? (
-            <box style={{ flexShrink: 0 }}>
-              <TodoPanel
-                todos={agent.todos}
-                width={panelW}
-                hint="the agent's checklist · updates live"
-                maxVisibleRows={Math.min(agent.todos.length, 6)}
-              />
-            </box>
-          ) : null}
-
-          <box style={{ flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
-            <Transcript
-              messages={agent.messages}
-              width={panelW}
-              height={transcriptRows}
-              emptyHint="Type a task and the agent runs it with tools. Tab moves focus to the ad slot; esc stops a run."
-            />
-          </box>
-
-          {latestMcpTool ? (
-            <GridPanel
-              title={`MCP Output · ${String(latestMcpTool.name || '').split('__')[1] || 'server'}`}
-              width={panelW}
-              borderColor="magenta"
-              hint={`${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} · Ctrl+↑/↓`}
-            >
-              <box style={{ flexDirection: 'column', width: Math.max(1, panelW - 4) }}>
-                {visibleMcpOutput.map((line, index) => {
-                    return <text key={`mcp-output-${index}`} fg="white">{String(line || ' ')}</text>;
-                })}
-              </box>
-            </GridPanel>
-          ) : null}
-
-          {showCrushStatus ? (
-            <box style={{ flexShrink: 0 }}>
-              <CrushStatus
-                width={panelW}
-                phase={crushPhase}
-                activity={activeTool?.name || ''}
-                elapsedMs={agent.elapsedMs}
-              />
-            </box>
-          ) : null}
-
-          <box style={{ flexShrink: 0 }}>
-            <AdRailSlot
-              width={panelW}
-              placementId={ads.PLACEMENTS.tuiRail}
-              enabled={adsOn}
-              focused={focus === 'ad'}
-              expanded={dockExpanded}
-            />
-          </box>
-
-          {approving ? (
-            <box style={{ flexShrink: 0 }}>
-              <ApprovalPrompt
-                width={panelW}
-                request={agent.pendingConfirm}
-                onAnswer={answerApproval}
-              />
-            </box>
-          ) : null}
-
-          <box style={{ flexShrink: 0 }}>
-            <Composer
-              width={panelW}
-              value={draft}
-              onChange={setDraft}
-              onSubmit={submit}
-              focused={focus === 'composer' && !approving}
-              disabled={agent.busy}
-              hint={
-                approving
-                  ? 'answer the request above — it is holding the run'
-                  : agent.busy
-                    ? 'esc stop · the run is streaming'
-                    : 'enter send · tab focus · a ads · d dashboard · m models · c clear · q quit'
-              }
-              adSlot={
-                <AdRailSlot
-                  width={Math.max(8, panelW - 4)}
-                  placementId={ads.PLACEMENTS.tuiComposer}
-                  enabled={adsOn}
-                  focused={false}
-                  expanded={false}
+        <box style={{ flexDirection: 'row', width: panelW, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
+          <box style={{ width: mainW, flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+            {agent.todos.length ? (
+              <box style={{ flexShrink: 0 }}>
+                <TodoPanel
+                  todos={agent.todos}
+                  width={mainW}
+                  hint="the agent's checklist · updates live"
+                  maxVisibleRows={Math.min(agent.todos.length, 6)}
                 />
-              }
-            />
+              </box>
+            ) : null}
+
+            <box style={{ flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
+              <Transcript
+                messages={agent.messages}
+                width={mainW}
+                height={transcriptRows}
+                emptyHint="Type a task and the agent runs it with tools. Tab moves focus to the ad slot; esc stops a run."
+              />
+            </box>
+
+            {latestMcpTool ? (
+              <GridPanel
+                title={`MCP Output · ${String(latestMcpTool.name || '').split('__')[1] || 'server'}`}
+                width={mainW}
+                borderColor="magenta"
+                hint={`${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} · Ctrl+↑/↓`}
+              >
+                <box style={{ flexDirection: 'column', width: Math.max(1, mainW - 4) }}>
+                  {visibleMcpOutput.map((line, index) => {
+                      return <text key={`mcp-output-${index}`} fg="white">{String(line || ' ')}</text>;
+                  })}
+                </box>
+              </GridPanel>
+            ) : null}
+
+            {showCrushStatus ? (
+              <box style={{ flexShrink: 0 }}>
+                <CrushStatus
+                  width={mainW}
+                  phase={crushPhase}
+                  activity={activeTool?.name || ''}
+                  elapsedMs={agent.elapsedMs}
+                />
+              </box>
+            ) : null}
+
+            <box style={{ flexShrink: 0 }}>
+              <AdRailSlot
+                width={mainW}
+                placementId={ads.PLACEMENTS.tuiRail}
+                enabled={adsOn}
+                focused={focus === 'ad'}
+                expanded={dockExpanded}
+              />
+            </box>
+
+            {approving ? (
+              <box style={{ flexShrink: 0 }}>
+                <ApprovalPrompt
+                  width={mainW}
+                  request={agent.pendingConfirm}
+                  onAnswer={answerApproval}
+                />
+              </box>
+            ) : null}
+
+            {notice ? (
+              <box style={{ flexShrink: 0, width: mainW }}>
+                <text fg="cyan">{`◆ ${notice}`}</text>
+              </box>
+            ) : null}
+
+            <box style={{ flexShrink: 0 }}>
+              {menuOpen ? (
+                <MenuPalette width={Math.min(mainW, 72)} selected={menuIndex} />
+              ) : (
+                <Composer
+                  width={mainW}
+                  value={draft}
+                  onChange={setDraft}
+                  onSubmit={submit}
+                  focused={focus === 'composer' && !approving}
+                  disabled={agent.busy}
+                  hint={
+                    approving
+                      ? 'answer the request above — it is holding the run'
+                      : agent.busy
+                        ? 'esc stop · the run is streaming'
+                        : 'enter send · /menu commands · tab focus · a ads · d dashboard · m models · c clear · q quit'
+                  }
+                  adSlot={
+                    <AdRailSlot
+                      width={Math.max(8, mainW - 4)}
+                      placementId={ads.PLACEMENTS.tuiComposer}
+                      enabled={adsOn}
+                      focused={false}
+                      expanded={false}
+                    />
+                  }
+                />
+              )}
+            </box>
           </box>
-        </>
+          {sideW ? (
+            <box style={{ marginLeft: 1 }}>
+              <LiveSidebar
+                width={sideW}
+                agentStatus={agent.status}
+                phase={crushPhase}
+                tool={activeTool?.name || ''}
+                turns={agent.messages.filter((m) => m.role === 'user').length}
+                elapsedMs={agent.elapsedMs}
+                model={model}
+                version={version}
+                mcp={mcp}
+                serverOk={!statusErr && !!status}
+                maxServers={maxServers}
+              />
+            </box>
+          ) : null}
+        </box>
       )}
 
       <box style={{ flexShrink: 0 }}>

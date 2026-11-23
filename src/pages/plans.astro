@@ -241,6 +241,10 @@ import Layout from '../layouts/Layout.astro';
           picture: '',
         }));
         clearCheckoutParams();
+        // The chat page shows the "Connect the CLI" card (key + `hakster init`)
+        // right after a purchase, so flag it before the redirect — the payment
+        // flow ends with a signed-in CLI, not just a saved browser session.
+        try { sessionStorage.setItem('hakster_show_cli_card', '1'); } catch (e) {}
         say('You are signed in on the ' + (data.plan || 'new') + ' plan. Your API key is saved in this browser.', 'ok');
         setTimeout(function () { location.href = '/build'; }, 1400);
         return;

@@ -531,6 +531,7 @@ var require_catalog = __commonJS({
     ];
     var CONTEXT_BY_MODEL = {
       "deepseek-v4.1-flash:cloud": 1048576,
+      // owner's Claude DeepSeek config (1 MiB override)
       "glm-5.2:cloud": 128e3,
       "thudm/glm-5.2:cloud": 128e3,
       "thudm/glm-5.1:cloud-ctx": 128e3,
@@ -554,6 +555,7 @@ var require_catalog = __commonJS({
       if (m.includes("gpt-oss") || m.includes("120b")) return 131072;
       if (m.includes("glm")) return 128e3;
       if (m.includes("deepseek-v4.1-flash")) return 1048576;
+      if (m.includes("deepseek")) return 131072;
       const hit = REFERENCE_CATALOG.find((c) => c.id.toLowerCase() === m);
       if (hit && hit.context) return hit.context;
       const env = parseInt(process.env.HAKSTER_CONTEXT_MAX || "", 10);
@@ -587,14 +589,15 @@ var require_catalog = __commonJS({
 });
 
 // src/index.jsx
-import React12 from "react";
+import React14 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React11, { useCallback as useCallback2, useEffect as useEffect5, useRef as useRef2, useState as useState5 } from "react";
+import React13, { useCallback as useCallback2, useEffect as useEffect5, useRef as useRef2, useState as useState5 } from "react";
+import fs2 from "node:fs";
 import { useKeyboard as useKeyboard3, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { TextAttributes as TextAttributes8 } from "@opentui/core";
+import { TextAttributes as TextAttributes10 } from "@opentui/core";
 
 // src/components/DockAd.jsx
 var import_ad_client = __toESM(require_ad_client());
@@ -979,13 +982,13 @@ function GridPanel({ title, cols = 4, width, children, borderColor = "gray", hin
   ] });
 }
 function Cell({ label, value, w = 18, color = "white" }) {
-  const clip2 = (s, n) => {
+  const clip4 = (s, n) => {
     const t = String(s == null ? "\u2014" : s);
     return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
   };
   return /* @__PURE__ */ jsxs5("box", { style: { width: Math.max(1, w), flexDirection: "column", flexShrink: 0, marginRight: 1 }, children: [
-    /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip2(label, w) }),
-    /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: clip2(value, w) })
+    /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip4(label, w) }),
+    /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: clip4(value, w) })
   ] });
 }
 function Meter({ value, max = 100, w = 16, color = "green" }) {
@@ -1011,10 +1014,122 @@ function Spark({ data = [], w = 24 }) {
 }
 var GridPanel_default = GridPanel;
 
-// src/components/StatusBar.jsx
+// src/components/LiveSidebar.jsx
 import React6 from "react";
 import { TextAttributes as TextAttributes5 } from "@opentui/core";
 import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+var clip = (s, n) => {
+  const t = String(s == null ? "\u2014" : s);
+  return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
+};
+function Row({ width, k, v, color = "white" }) {
+  const kw = Math.min(10, Math.max(4, Math.floor(width / 3)));
+  return /* @__PURE__ */ jsxs6("box", { style: { width, justifyContent: "space-between", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx6("text", { fg: "gray", children: clip(k, kw) }),
+    /* @__PURE__ */ jsx6("text", { fg: color, attributes: TextAttributes5.BOLD, children: clip(v, Math.max(1, width - kw - 1)) })
+  ] });
+}
+function Panel({ width, title, hint, children }) {
+  const inner = Math.max(1, width - 4);
+  return /* @__PURE__ */ jsxs6("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs6("box", { style: { width: inner, justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx6("text", { fg: "cyan", attributes: TextAttributes5.BOLD, children: clip(title, inner) }),
+      hint ? /* @__PURE__ */ jsx6("text", { fg: "gray", children: clip(hint, Math.max(0, inner - title.length - 1)) }) : null
+    ] }),
+    /* @__PURE__ */ jsx6("box", { style: { width: inner, flexDirection: "column" }, children })
+  ] });
+}
+function LiveSidebar({
+  width = 30,
+  agentStatus = "idle",
+  phase = "IDLE",
+  tool = "",
+  turns = 0,
+  elapsedMs = 0,
+  model = "",
+  version = "0.1.0",
+  mcp = null,
+  serverOk = false,
+  maxServers = 8
+}) {
+  const inner = Math.max(1, width - 4);
+  const servers = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
+  const live = servers.filter((s) => s.initialized || (s.toolCount || 0) > 0).length;
+  const ordered = [...servers].sort((a, b) => {
+    const rank = (x) => x.initialized || (x.toolCount || 0) > 0 ? 0 : x.lazy ? 1 : 2;
+    return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name));
+  });
+  const shown = ordered.slice(0, Math.max(0, maxServers));
+  const hidden = ordered.length - shown.length;
+  return /* @__PURE__ */ jsxs6("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs6(Panel, { width, title: "Live", hint: serverOk ? "online" : "offline", children: [
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "status", v: agentStatus || "idle", color: agentStatus === "error" ? "red" : agentStatus === "idle" ? "gray" : "green" }),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "phase", v: phase || "IDLE", color: "cyan" }),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "tool", v: tool || "\u2014" }),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "turns", v: turns }),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "elapsed", v: `${(Number(elapsedMs || 0) / 1e3).toFixed(1)}s` }),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "model", v: model, color: "yellow" }),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "version", v: `tui ${version}` })
+    ] }),
+    /* @__PURE__ */ jsxs6(Panel, { width, title: "MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
+      shown.length === 0 ? /* @__PURE__ */ jsx6(Row, { width: inner, k: "servers", v: "\u2014", color: "gray" }) : shown.map((s) => {
+        const up = !!s.initialized || (s.toolCount || 0) > 0;
+        const lazy = !!s.lazy && !up;
+        return /* @__PURE__ */ jsx6(
+          Row,
+          {
+            width: inner,
+            k: s.name,
+            v: up ? `${s.toolCount || 0} tools` : lazy ? "lazy" : "down",
+            color: up ? "green" : lazy ? "yellow" : "red"
+          },
+          s.name
+        );
+      }),
+      hidden > 0 ? /* @__PURE__ */ jsx6(Row, { width: inner, k: "more", v: `+${hidden}`, color: "gray" }) : null
+    ] })
+  ] });
+}
+
+// src/components/MenuPalette.jsx
+import React7 from "react";
+import { TextAttributes as TextAttributes6 } from "@opentui/core";
+import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+var MENU_ITEMS = [
+  { cmd: "/model", label: "Models", detail: "switch the model for this session" },
+  { cmd: "/mcp", label: "MCP servers", detail: "live servers and their tool counts" },
+  { cmd: "/dashboard", label: "Dashboard", detail: "system / session / agent panels" },
+  { cmd: "/status", label: "Status", detail: "server, phase, tokens" },
+  { cmd: "/clear", label: "Clear transcript", detail: "start the conversation over" },
+  { cmd: "/help", label: "Help", detail: "keys and commands" },
+  { cmd: "/quit", label: "Quit", detail: "leave the dashboard" }
+];
+var clip2 = (s, n) => {
+  const t = String(s == null ? "" : s);
+  return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
+};
+function MenuPalette({ width = 60, selected = 0 }) {
+  const inner = Math.max(1, width - 4);
+  return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "cyan", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs7("box", { style: { width: inner, justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx7("text", { fg: "cyan", attributes: TextAttributes6.BOLD, children: "Menu" }),
+      /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip2("\u2191\u2193 select \xB7 enter run \xB7 esc close", inner - 6) })
+    ] }),
+    /* @__PURE__ */ jsx7("box", { style: { width: inner, flexDirection: "column" }, children: MENU_ITEMS.map((item, i) => {
+      const active = i === selected;
+      return /* @__PURE__ */ jsxs7("box", { style: { width: inner, justifyContent: "space-between" }, children: [
+        /* @__PURE__ */ jsx7("text", { fg: active ? "cyan" : "white", attributes: active ? TextAttributes6.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${item.cmd.padEnd(11)} ${clip2(item.label, 16)}` }),
+        /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip2(item.detail, Math.max(0, inner - 30)) })
+      ] }, item.cmd);
+    }) }),
+    /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip2("type /menu anytime \xB7 /help for every command", inner) }) })
+  ] });
+}
+
+// src/components/StatusBar.jsx
+import React8 from "react";
+import { TextAttributes as TextAttributes7 } from "@opentui/core";
+import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 var STATUS_STYLES = {
   idle: { text: "ready", color: "gray" },
   connecting: { text: "can't reach server\u2026", color: "yellow" },
@@ -1038,40 +1153,40 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint }
   const right = [];
   if (label) {
     right.push(
-      /* @__PURE__ */ jsx6("text", { fg: known ? known.color : "gray", children: label }, "status")
+      /* @__PURE__ */ jsx8("text", { fg: known ? known.color : "gray", children: label }, "status")
     );
   }
   if (elapsed) {
-    right.push(/* @__PURE__ */ jsx6("text", { fg: "gray", children: elapsed }, "elapsed"));
+    right.push(/* @__PURE__ */ jsx8("text", { fg: "gray", children: elapsed }, "elapsed"));
   }
   if (model) {
-    right.push(/* @__PURE__ */ jsx6("text", { fg: "yellow", children: model }, "model"));
+    right.push(/* @__PURE__ */ jsx8("text", { fg: "yellow", children: model }, "model"));
   }
   if (cols !== void 0 && cols !== null) {
-    right.push(/* @__PURE__ */ jsx6("text", { fg: "gray", children: `${cols}c` }, "cols"));
+    right.push(/* @__PURE__ */ jsx8("text", { fg: "gray", children: `${cols}c` }, "cols"));
   }
   right.push(
-    /* @__PURE__ */ jsx6("text", { fg: adsOn ? "green" : "red", children: adsOn ? "ads on" : "ads off" }, "ads")
+    /* @__PURE__ */ jsx8("text", { fg: adsOn ? "green" : "red", children: adsOn ? "ads on" : "ads off" }, "ads")
   );
   const rightNodes = [];
   right.forEach((node, i) => {
     if (i > 0) {
-      rightNodes.push(/* @__PURE__ */ jsx6("text", { fg: "gray", children: " \xB7 " }, `sep-${i}`));
+      rightNodes.push(/* @__PURE__ */ jsx8("text", { fg: "gray", children: " \xB7 " }, `sep-${i}`));
     }
     rightNodes.push(node);
   });
-  return /* @__PURE__ */ jsxs6("box", { style: { width, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsxs6("box", { style: { flexDirection: "row" }, children: [
-      focus === "ad" ? /* @__PURE__ */ jsx6("text", { fg: "cyan", attributes: TextAttributes5.BOLD, children: "\u27EA ad \u27EB" }) : /* @__PURE__ */ jsx6("text", { fg: "gray", children: "\u27EA composer \u27EB" }),
-      hint ? /* @__PURE__ */ jsx6("text", { fg: "gray", children: `  ${hint}` }) : null
+  return /* @__PURE__ */ jsxs8("box", { style: { width, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsxs8("box", { style: { flexDirection: "row" }, children: [
+      focus === "ad" ? /* @__PURE__ */ jsx8("text", { fg: "cyan", attributes: TextAttributes7.BOLD, children: "\u27EA ad \u27EB" }) : /* @__PURE__ */ jsx8("text", { fg: "gray", children: "\u27EA composer \u27EB" }),
+      hint ? /* @__PURE__ */ jsx8("text", { fg: "gray", children: `  ${hint}` }) : null
     ] }),
-    /* @__PURE__ */ jsx6("box", { style: { flexDirection: "row" }, children: rightNodes })
+    /* @__PURE__ */ jsx8("box", { style: { flexDirection: "row" }, children: rightNodes })
   ] });
 }
 
 // src/components/CrushStatus.jsx
-import React7, { useEffect as useEffect3, useState as useState3 } from "react";
-import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+import React9, { useEffect as useEffect3, useState as useState3 } from "react";
+import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
 var GRADIENT = [51, 87, 117, 153, 117, 87];
@@ -1101,31 +1216,31 @@ function CrushStatus({ width, phase, activity, elapsedMs }) {
   const gradColor = `rgb(${grad},${Math.floor(grad * 0.7)},${Math.floor(grad * 1.2)})`;
   const phrase = activity || info.phrases[Math.floor(frame / 20) % info.phrases.length];
   const shimmer = [0, 1, 2].map((offset) => SHIMMER[(frame + offset) % SHIMMER.length]).join("");
-  return /* @__PURE__ */ jsx7("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs7("text", { children: [
-    /* @__PURE__ */ jsx7("span", { fg: gradColor, children: "\u27E6" }),
-    /* @__PURE__ */ jsx7("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
-    /* @__PURE__ */ jsx7("span", { fg: gradColor, children: "\u27E7" }),
+  return /* @__PURE__ */ jsx9("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs9("text", { children: [
+    /* @__PURE__ */ jsx9("span", { fg: gradColor, children: "\u27E6" }),
+    /* @__PURE__ */ jsx9("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
+    /* @__PURE__ */ jsx9("span", { fg: gradColor, children: "\u27E7" }),
     " ",
-    /* @__PURE__ */ jsx7("span", { children: info.emoji }),
+    /* @__PURE__ */ jsx9("span", { children: info.emoji }),
     " ",
-    /* @__PURE__ */ jsx7("span", { fg: info.color, children: normalizedPhase }),
+    /* @__PURE__ */ jsx9("span", { fg: info.color, children: normalizedPhase }),
     " ",
-    /* @__PURE__ */ jsx7("span", { fg: "#a5b4c3", children: phrase }),
+    /* @__PURE__ */ jsx9("span", { fg: "#a5b4c3", children: phrase }),
     " ",
-    /* @__PURE__ */ jsx7("span", { fg: gradColor, children: shimmer }),
+    /* @__PURE__ */ jsx9("span", { fg: gradColor, children: shimmer }),
     " ",
-    /* @__PURE__ */ jsx7("span", { fg: "gray", children: formatElapsed2(elapsedMs) })
+    /* @__PURE__ */ jsx9("span", { fg: "gray", children: formatElapsed2(elapsedMs) })
   ] }) });
 }
 
 // src/components/TodoPanel.jsx
-import React8 from "react";
-import { TextAttributes as TextAttributes6 } from "@opentui/core";
-import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+import React10 from "react";
+import { TextAttributes as TextAttributes8 } from "@opentui/core";
+import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 var GLYPH_DONE = "\u2713";
 var GLYPH_TODO = "\u25CB";
 var EMPTY_TEXT = "No todos yet \u2014 the agent's checklist appears here once it creates one.";
-function clip(text, n) {
+function clip3(text, n) {
   const t = String(text == null ? "" : text);
   if (n <= 0) return "";
   return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
@@ -1139,39 +1254,39 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   const rows = [];
   if (list.length === 0) {
     rows.push(
-      /* @__PURE__ */ jsx8("text", { fg: "gray", children: clip(EMPTY_TEXT, inner) }, "empty")
+      /* @__PURE__ */ jsx10("text", { fg: "gray", children: clip3(EMPTY_TEXT, inner) }, "empty")
     );
   } else {
     visible.forEach((todo, i) => {
       const done = !!(todo && todo.done);
-      const text = clip(todo && todo.text || "", Math.max(0, inner - 2));
+      const text = clip3(todo && todo.text || "", Math.max(0, inner - 2));
       rows.push(
-        /* @__PURE__ */ jsxs8("box", { style: { width: "100%", flexDirection: "row" }, children: [
-          /* @__PURE__ */ jsx8("text", { fg: done ? "green" : "gray", attributes: done ? 0 : TextAttributes6.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
-          /* @__PURE__ */ jsx8("text", { fg: done ? "white" : "gray", children: ` ${text}` })
+        /* @__PURE__ */ jsxs10("box", { style: { width: "100%", flexDirection: "row" }, children: [
+          /* @__PURE__ */ jsx10("text", { fg: done ? "green" : "gray", attributes: done ? 0 : TextAttributes8.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
+          /* @__PURE__ */ jsx10("text", { fg: done ? "white" : "gray", children: ` ${text}` })
         ] }, `row-${i}`)
       );
     });
     if (overflow > 0) {
       rows.push(
-        /* @__PURE__ */ jsx8("text", { fg: "gray", children: `+${overflow} more` }, "more")
+        /* @__PURE__ */ jsx10("text", { fg: "gray", children: `+${overflow} more` }, "more")
       );
     }
   }
-  return /* @__PURE__ */ jsxs8("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsx8("text", { fg: "cyan", attributes: TextAttributes6.BOLD, children: `Todos \u2014 ${completed}/${list.length} completed` }),
+  return /* @__PURE__ */ jsxs10("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsx10("text", { fg: "cyan", attributes: TextAttributes8.BOLD, children: `Todos \u2014 ${completed}/${list.length} completed` }),
     rows,
-    hint ? /* @__PURE__ */ jsx8("text", { fg: "gray", children: hint }) : null
+    hint ? /* @__PURE__ */ jsx10("text", { fg: "gray", children: hint }) : null
   ] });
 }
 
 // src/components/Transcript.jsx
-import React10 from "react";
+import React12 from "react";
 
 // src/components/MessageBlock.jsx
-import React9 from "react";
-import { TextAttributes as TextAttributes7 } from "@opentui/core";
-import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
+import React11 from "react";
+import { TextAttributes as TextAttributes9 } from "@opentui/core";
+import { jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
   assistant: { border: "gray", label: "hakster" },
@@ -1183,16 +1298,16 @@ function ToolRow({ tool, width }) {
   const glyph = pending ? "\u2026" : "\u2713";
   const colour = pending ? "yellow" : "green";
   const args = tool.args && Object.keys(tool.args).length ? ` ${JSON.stringify(tool.args).slice(0, 60)}` : "";
-  return /* @__PURE__ */ jsxs9("box", { style: { flexDirection: "column", width }, children: [
-    /* @__PURE__ */ jsxs9("text", { children: [
-      /* @__PURE__ */ jsxs9("span", { fg: colour, children: [
+  return /* @__PURE__ */ jsxs11("box", { style: { flexDirection: "column", width }, children: [
+    /* @__PURE__ */ jsxs11("text", { children: [
+      /* @__PURE__ */ jsxs11("span", { fg: colour, children: [
         glyph,
         " "
       ] }),
-      /* @__PURE__ */ jsx9("span", { fg: "white", children: tool.name || "tool" }),
-      args ? /* @__PURE__ */ jsx9("span", { fg: "gray", children: args }) : null
+      /* @__PURE__ */ jsx11("span", { fg: "white", children: tool.name || "tool" }),
+      args ? /* @__PURE__ */ jsx11("span", { fg: "gray", children: args }) : null
     ] }),
-    tool.result != null ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: `  ${String(tool.result).slice(0, 120)}` }) : null
+    tool.result != null ? /* @__PURE__ */ jsx11("text", { fg: "gray", children: `  ${String(tool.result).slice(0, 120)}` }) : null
   ] });
 }
 function MessageBlock({ message, width }) {
@@ -1201,14 +1316,14 @@ function MessageBlock({ message, width }) {
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
   const inner = Math.max(8, (width || 80) - 4);
   if (message.role === "system") {
-    return /* @__PURE__ */ jsx9("box", { style: { width, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx9("text", { fg: border, children: String(message.text || "") }) });
+    return /* @__PURE__ */ jsx11("box", { style: { width, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx11("text", { fg: border, children: String(message.text || "") }) });
   }
   const tools = Array.isArray(message.tools) ? message.tools : [];
-  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsx9("text", { fg: border, attributes: TextAttributes7.BOLD, children: roleStyle.label }),
-    message.thinking ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: String(message.thinking) }) : null,
-    message.text ? /* @__PURE__ */ jsx9("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: "thinking\u2026" }) : null,
-    tools.map((tool, i) => /* @__PURE__ */ jsx9(ToolRow, { tool, width: inner }, `tool-${i}`))
+  return /* @__PURE__ */ jsxs11("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsx11("text", { fg: border, attributes: TextAttributes9.BOLD, children: roleStyle.label }),
+    message.thinking ? /* @__PURE__ */ jsx11("text", { fg: "gray", children: String(message.thinking) }) : null,
+    message.text ? /* @__PURE__ */ jsx11("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx11("text", { fg: "gray", children: "thinking\u2026" }) : null,
+    tools.map((tool, i) => /* @__PURE__ */ jsx11(ToolRow, { tool, width: inner }, `tool-${i}`))
   ] });
 }
 
@@ -1252,18 +1367,18 @@ function fitTranscript(messages, width, budget) {
 }
 
 // src/components/Transcript.jsx
-import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 function Transcript({ messages = [], width, height, emptyHint }) {
   const list = Array.isArray(messages) ? messages : [];
   if (list.length === 0) {
-    return /* @__PURE__ */ jsx10("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx10("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
+    return /* @__PURE__ */ jsx12("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx12("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
   }
   const budget = Math.max(1, Number(height) || 20);
   const { visible, hidden, used } = fitTranscript(list, width, budget);
   const pad = Math.max(0, budget - used);
-  return /* @__PURE__ */ jsxs10("box", { style: { width, flexDirection: "column", height: budget }, children: [
-    hidden > 0 ? /* @__PURE__ */ jsx10("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"}` }) : null,
-    /* @__PURE__ */ jsx10("box", { style: { flexDirection: "column", marginTop: pad }, children: visible.map((message) => /* @__PURE__ */ jsx10("box", { style: { marginBottom: 1 }, children: /* @__PURE__ */ jsx10(MessageBlock, { message, width }) }, message.id)) })
+  return /* @__PURE__ */ jsxs12("box", { style: { width, flexDirection: "column", height: budget }, children: [
+    hidden > 0 ? /* @__PURE__ */ jsx12("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"}` }) : null,
+    /* @__PURE__ */ jsx12("box", { style: { flexDirection: "column", marginTop: pad }, children: visible.map((message) => /* @__PURE__ */ jsx12("box", { style: { marginBottom: 1 }, children: /* @__PURE__ */ jsx12(MessageBlock, { message, width }) }, message.id)) })
   ] });
 }
 
@@ -1642,7 +1757,7 @@ var useAgentStream_default = useAgentStream;
 // src/App.jsx
 var import_catalog = __toESM(require_catalog());
 var import_ad_client2 = __toESM(require_ad_client());
-import { Fragment as Fragment2, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 4;
 var MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
@@ -1659,8 +1774,12 @@ function App({ version = "0.1.0" }) {
   const [modelIdx, setModelIdx] = useState5(0);
   const [status, setStatus] = useState5(null);
   const [statusErr, setStatusErr] = useState5(null);
+  const [mcp, setMcp] = useState5(null);
   const [history, setHistory] = useState5([]);
   const [mcpOutputOffset, setMcpOutputOffset] = useState5(0);
+  const [menuOpen, setMenuOpen] = useState5(false);
+  const [menuIndex, setMenuIndex] = useState5(0);
+  const [notice, setNotice] = useState5(null);
   const agent = useAgentStream_default({
     api: API,
     model,
@@ -1685,17 +1804,100 @@ function App({ version = "0.1.0" }) {
     const t = setInterval(load, 3e3);
     return () => clearInterval(t);
   }, [load]);
+  useEffect5(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${API}/api/agent/mcp-status`, {
+          signal: AbortSignal.timeout(5e3),
+          headers: { ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} }
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (alive && j && Array.isArray(j.servers)) setMcp(j);
+      } catch {
+      }
+    };
+    tick();
+    const t = setInterval(tick, 3e4);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
   const ctxMax = import_catalog.default.contextMaxFor(model) || 1;
   const ctxUsed = Number(status && (status.tokens || status.contextUsed) || 0);
+  const showNotice = useCallback2((text) => {
+    setNotice(text);
+    setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
+  }, []);
+  const runCommand = useCallback2((raw) => {
+    const parts = String(raw || "").trim().split(/\s+/);
+    const cmd = (parts[0] || "").toLowerCase();
+    const arg = parts.slice(1).join(" ");
+    switch (cmd) {
+      case "/menu":
+        setMenuIndex(0);
+        setMenuOpen(true);
+        return;
+      case "/model":
+        if (arg) {
+          setModel(arg);
+          showNotice(`model \u2192 ${arg}`);
+        } else {
+          setModelIdx(Math.max(0, models.findIndex((x) => x.id === model)));
+          setView("models");
+        }
+        return;
+      case "/mcp": {
+        const list = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
+        if (!list.length) {
+          showNotice("MCP \u2014 no server list yet (server unreachable?)");
+          return;
+        }
+        const live = list.filter((x) => x.initialized || (x.toolCount || 0) > 0).length;
+        const tools = list.reduce((n, x) => n + (Number(x.toolCount) || 0), 0);
+        const names = list.filter((x) => x.initialized || (x.toolCount || 0) > 0).slice(0, 5).map((x) => `${x.name}(${x.toolCount || 0})`).join(" \xB7 ");
+        showNotice(`MCP ${live}/${list.length} live \xB7 ${tools} tools \xB7 ${names}${list.length > 5 ? " \u2026" : ""}`);
+        return;
+      }
+      case "/dashboard":
+        setView("dashboard");
+        return;
+      case "/status":
+        showNotice(status ? `phase ${status.phase} \xB7 model ${status.model} \xB7 tokens ${status.tokens} \xB7 trust ${status.trust} \xB7 ${status.connected ? "connected" : "offline"}` : `server ${statusErr || "connecting\u2026"}`);
+        return;
+      case "/clear":
+        agent.clear();
+        showNotice("transcript cleared");
+        return;
+      case "/help":
+        showNotice("keys: tab focus \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /mcp /dashboard /status /clear /quit");
+        return;
+      case "/quit":
+      case "/exit":
+        agent.abort();
+        renderer2.destroy();
+        return;
+      default:
+        showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
+    }
+  }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice]);
   const submit = useCallback2(
     (text) => {
       const v = String(text == null ? "" : text).trim();
-      if (!v || agent.busy) return;
+      if (!v) return;
+      if (v.startsWith("/")) {
+        setDraft("");
+        runCommand(v);
+        return;
+      }
+      if (agent.busy) return;
       setDraft("");
       agent.send(v);
     },
-    [agent]
+    [agent, runCommand]
   );
   const approving = !!agent.pendingConfirm;
   const showCrushStatus = view === "chat" && agent.busy;
@@ -1726,9 +1928,36 @@ function App({ version = "0.1.0" }) {
     setFocus((f) => f === "composer" ? "ad" : "composer");
   }, []);
   useKeyboard3((key) => {
+    if (process.env.HAKSTER_TUI_KEYLOG) {
+      try {
+        fs2.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
+      } catch {
+      }
+    }
     if (key.ctrl && key.name === "c") {
       agent.abort();
       renderer2.destroy();
+      return;
+    }
+    if (menuOpen) {
+      if (key.name === "escape") {
+        setMenuOpen(false);
+        return;
+      }
+      if (key.name === "up") {
+        setMenuIndex((i) => (i - 1 + MENU_ITEMS.length) % MENU_ITEMS.length);
+        return;
+      }
+      if (key.name === "down") {
+        setMenuIndex((i) => (i + 1) % MENU_ITEMS.length);
+        return;
+      }
+      if (key.name === "return") {
+        const item = MENU_ITEMS[menuIndex] || MENU_ITEMS[0];
+        setMenuOpen(false);
+        runCommand(item.cmd);
+        return;
+      }
       return;
     }
     if (approving) return;
@@ -1765,6 +1994,7 @@ function App({ version = "0.1.0" }) {
       setMcpOutputOffset((offset) => Math.max(0, Math.min(mcpMaxOffset, offset + (key.name === "up" ? -1 : 1))));
       return;
     }
+    if (key.ctrl || key.meta) return;
     switch (key.name) {
       case "a":
         setAdsOn((v) => !v);
@@ -1791,14 +2021,20 @@ function App({ version = "0.1.0" }) {
     }
   });
   const panelW = Math.max(40, Math.min((cols || 100) - 2, 140));
+  const sideW = (cols || 100) >= 96 ? 30 : 0;
+  const mainW = panelW - (sideW ? sideW + 2 : 0);
+  const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2);
+  const maxServers = Math.max(0, Math.min(8, sidebarBudget));
   const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
-  const composerRows = 5;
+  const MENU_ROWS = 2 + 1 + MENU_ITEMS.length + 1;
+  const composerRows = menuOpen ? MENU_ROWS : 5;
+  const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
   const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 4 : 0;
   const approvalRows = approving ? 6 : 0;
   const transcriptRows = Math.max(
     4,
-    (rows || 30) - CHROME_ROWS - composerRows - railRows - todoRows - approvalRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0)
+    (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows - approvalRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0)
   );
   const dashboardItems = [
     {
@@ -1835,16 +2071,20 @@ function App({ version = "0.1.0" }) {
       ]
     }
   ];
-  return /* @__PURE__ */ jsxs11("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
-    /* @__PURE__ */ jsxs11("box", { style: { width: panelW, justifyContent: "space-between", flexShrink: 0 }, children: [
-      /* @__PURE__ */ jsx11("text", { fg: "cyan", attributes: TextAttributes8.BOLD, children: "haksterAi" }),
-      /* @__PURE__ */ jsx11("text", { fg: "gray", children: `tui ${version} \xB7 ${view} \xB7 ${model} \xB7 ctx ${Math.round(ctxMax / 1e3)}K` })
+  return /* @__PURE__ */ jsxs13("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
+    /* @__PURE__ */ jsxs13("box", { style: { width: panelW, justifyContent: "space-between", flexShrink: 0 }, children: [
+      /* @__PURE__ */ jsxs13("box", { style: { flexDirection: "row" }, children: [
+        /* @__PURE__ */ jsx13("text", { fg: status ? statusErr ? "red" : "green" : "yellow", children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
+        /* @__PURE__ */ jsx13("text", { fg: "cyan", attributes: TextAttributes10.BOLD, children: "haksterAi" }),
+        /* @__PURE__ */ jsx13("text", { fg: "gray", children: ` \xB7 ${statusErr ? "OFFLINE" : status ? "ONLINE" : "connecting\u2026"}` })
+      ] }),
+      /* @__PURE__ */ jsx13("text", { fg: "gray", children: `tui ${version} \xB7 ${view} \xB7 ${model} \xB7 ctx ${Math.round(ctxMax / 1e3)}K` })
     ] }),
-    statusErr ? /* @__PURE__ */ jsx11("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs11("text", { fg: "red", children: [
+    statusErr ? /* @__PURE__ */ jsx13("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs13("text", { fg: "red", children: [
       "server unreachable \u2014 ",
       statusErr
     ] }) }) : null,
-    view === "models" ? /* @__PURE__ */ jsx11(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: models.map((m, i) => /* @__PURE__ */ jsx11(
+    view === "models" ? /* @__PURE__ */ jsx13(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: models.map((m, i) => /* @__PURE__ */ jsx13(
       Cell,
       {
         label: m.vendor,
@@ -1853,102 +2093,121 @@ function App({ version = "0.1.0" }) {
         color: i === modelIdx ? "yellow" : "white"
       },
       m.id
-    )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs11(Fragment2, { children: [
-      /* @__PURE__ */ jsx11(
+    )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs13(Fragment2, { children: [
+      /* @__PURE__ */ jsx13(
         GridLayout_default,
         {
           items: dashboardItems,
           availableWidth: panelW,
           getItemKey: (item) => item.key,
-          renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx11(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, children: item.cells.map((c) => /* @__PURE__ */ jsx11(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)) }, c.label)) })
+          renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx13(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, children: item.cells.map((c) => /* @__PURE__ */ jsx13(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)) }, c.label)) })
         }
       ),
-      /* @__PURE__ */ jsxs11(GridPanel_default, { title: "Context", width: panelW, hint: import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: model, vendor: "local", context: null }), children: [
-        /* @__PURE__ */ jsx11("box", { children: /* @__PURE__ */ jsx11(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, panelW - 30), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }) }),
-        /* @__PURE__ */ jsx11("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx11(Spark, { data: history, w: Math.min(30, Math.max(10, panelW - 10)) }) })
+      /* @__PURE__ */ jsxs13(GridPanel_default, { title: "Context", width: panelW, hint: import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: model, vendor: "local", context: null }), children: [
+        /* @__PURE__ */ jsx13("box", { children: /* @__PURE__ */ jsx13(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, panelW - 30), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }) }),
+        /* @__PURE__ */ jsx13("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx13(Spark, { data: history, w: Math.min(30, Math.max(10, panelW - 10)) }) })
       ] })
-    ] }) : /* @__PURE__ */ jsxs11(Fragment2, { children: [
-      agent.todos.length ? /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
-        TodoPanel,
+    ] }) : /* @__PURE__ */ jsxs13("box", { style: { flexDirection: "row", width: panelW, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+      /* @__PURE__ */ jsxs13("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
+        agent.todos.length ? /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+          TodoPanel,
+          {
+            todos: agent.todos,
+            width: mainW,
+            hint: "the agent's checklist \xB7 updates live",
+            maxVisibleRows: Math.min(agent.todos.length, 6)
+          }
+        ) }) : null,
+        /* @__PURE__ */ jsx13("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx13(
+          Transcript,
+          {
+            messages: agent.messages,
+            width: mainW,
+            height: transcriptRows,
+            emptyHint: "Type a task and the agent runs it with tools. Tab moves focus to the ad slot; esc stops a run."
+          }
+        ) }),
+        latestMcpTool ? /* @__PURE__ */ jsx13(
+          GridPanel_default,
+          {
+            title: `MCP Output \xB7 ${String(latestMcpTool.name || "").split("__")[1] || "server"}`,
+            width: mainW,
+            borderColor: "magenta",
+            hint: `${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} \xB7 Ctrl+\u2191/\u2193`,
+            children: /* @__PURE__ */ jsx13("box", { style: { flexDirection: "column", width: Math.max(1, mainW - 4) }, children: visibleMcpOutput.map((line, index) => {
+              return /* @__PURE__ */ jsx13("text", { fg: "white", children: String(line || " ") }, `mcp-output-${index}`);
+            }) })
+          }
+        ) : null,
+        showCrushStatus ? /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+          CrushStatus,
+          {
+            width: mainW,
+            phase: crushPhase,
+            activity: activeTool?.name || "",
+            elapsedMs: agent.elapsedMs
+          }
+        ) }) : null,
+        /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+          DockAd,
+          {
+            width: mainW,
+            placementId: import_ad_client2.default.PLACEMENTS.tuiRail,
+            enabled: adsOn,
+            focused: focus === "ad",
+            expanded: dockExpanded
+          }
+        ) }),
+        approving ? /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
+          ApprovalPrompt,
+          {
+            width: mainW,
+            request: agent.pendingConfirm,
+            onAnswer: answerApproval
+          }
+        ) }) : null,
+        notice ? /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx13("text", { fg: "cyan", children: `\u25C6 ${notice}` }) }) : null,
+        /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx13(MenuPalette, { width: Math.min(mainW, 72), selected: menuIndex }) : /* @__PURE__ */ jsx13(
+          Composer,
+          {
+            width: mainW,
+            value: draft,
+            onChange: setDraft,
+            onSubmit: submit,
+            focused: focus === "composer" && !approving,
+            disabled: agent.busy,
+            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? "esc stop \xB7 the run is streaming" : "enter send \xB7 /menu commands \xB7 tab focus \xB7 a ads \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit",
+            adSlot: /* @__PURE__ */ jsx13(
+              DockAd,
+              {
+                width: Math.max(8, mainW - 4),
+                placementId: import_ad_client2.default.PLACEMENTS.tuiComposer,
+                enabled: adsOn,
+                focused: false,
+                expanded: false
+              }
+            )
+          }
+        ) })
+      ] }),
+      sideW ? /* @__PURE__ */ jsx13("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx13(
+        LiveSidebar,
         {
-          todos: agent.todos,
-          width: panelW,
-          hint: "the agent's checklist \xB7 updates live",
-          maxVisibleRows: Math.min(agent.todos.length, 6)
-        }
-      ) }) : null,
-      /* @__PURE__ */ jsx11("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx11(
-        Transcript,
-        {
-          messages: agent.messages,
-          width: panelW,
-          height: transcriptRows,
-          emptyHint: "Type a task and the agent runs it with tools. Tab moves focus to the ad slot; esc stops a run."
-        }
-      ) }),
-      latestMcpTool ? /* @__PURE__ */ jsx11(
-        GridPanel_default,
-        {
-          title: `MCP Output \xB7 ${String(latestMcpTool.name || "").split("__")[1] || "server"}`,
-          width: panelW,
-          borderColor: "magenta",
-          hint: `${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} \xB7 Ctrl+\u2191/\u2193`,
-          children: /* @__PURE__ */ jsx11("box", { style: { flexDirection: "column", width: Math.max(1, panelW - 4) }, children: visibleMcpOutput.map((line, index) => {
-            return /* @__PURE__ */ jsx11("text", { fg: "white", children: String(line || " ") }, `mcp-output-${index}`);
-          }) })
-        }
-      ) : null,
-      showCrushStatus ? /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
-        CrushStatus,
-        {
-          width: panelW,
+          width: sideW,
+          agentStatus: agent.status,
           phase: crushPhase,
-          activity: activeTool?.name || "",
-          elapsedMs: agent.elapsedMs
+          tool: activeTool?.name || "",
+          turns: agent.messages.filter((m) => m.role === "user").length,
+          elapsedMs: agent.elapsedMs,
+          model,
+          version,
+          mcp,
+          serverOk: !statusErr && !!status,
+          maxServers
         }
-      ) }) : null,
-      /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
-        DockAd,
-        {
-          width: panelW,
-          placementId: import_ad_client2.default.PLACEMENTS.tuiRail,
-          enabled: adsOn,
-          focused: focus === "ad",
-          expanded: dockExpanded
-        }
-      ) }),
-      approving ? /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
-        ApprovalPrompt,
-        {
-          width: panelW,
-          request: agent.pendingConfirm,
-          onAnswer: answerApproval
-        }
-      ) }) : null,
-      /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
-        Composer,
-        {
-          width: panelW,
-          value: draft,
-          onChange: setDraft,
-          onSubmit: submit,
-          focused: focus === "composer" && !approving,
-          disabled: agent.busy,
-          hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? "esc stop \xB7 the run is streaming" : "enter send \xB7 tab focus \xB7 a ads \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit",
-          adSlot: /* @__PURE__ */ jsx11(
-            DockAd,
-            {
-              width: Math.max(8, panelW - 4),
-              placementId: import_ad_client2.default.PLACEMENTS.tuiComposer,
-              enabled: adsOn,
-              focused: false,
-              expanded: false
-            }
-          )
-        }
-      ) })
+      ) }) : null
     ] }),
-    /* @__PURE__ */ jsx11("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx11(
+    /* @__PURE__ */ jsx13("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx13(
       StatusBar,
       {
         width: panelW,
@@ -1975,7 +2234,7 @@ async function start({ version = "0.1.0" } = {}) {
     hideCursor: true
   });
   root = createRoot(renderer);
-  root.render(React12.createElement(App, { version }));
+  root.render(React14.createElement(App, { version }));
   return {
     unmount() {
       if (root) {

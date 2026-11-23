@@ -545,6 +545,76 @@ function StatusBar({
   ] });
 }
 
+// src/components/MCPPanel.jsx
+import { Box as McpBox, Text as McpText } from "ink";
+import { jsx as mcpJsx, jsxs as mcpJsxs } from "react/jsx-runtime";
+
+// MCP servers as a width-adaptive grid: live servers first, then lazy ones,
+// then dead ones. Cell width follows the terminal so the panel never wraps
+// into extra lines and pushes the input bar off-screen.
+function mcpGrid(cols, count) {
+  const cellW = cols >= 120 ? 34 : cols >= 96 ? 28 : cols >= 72 ? 22 : Math.max(16, cols - 4);
+  const perRow = Math.max(1, Math.floor((cols - 2) / cellW));
+  const totalRows = Math.ceil(count / perRow);
+  return { cellW, perRow, rows: Math.min(2, Math.max(1, totalRows)), totalRows };
+}
+function mcpCell(s, cellW) {
+  const live = !!s.initialized || (s.toolCount || 0) > 0;
+  const lazy = !!s.lazy && !live;
+  const glyph = live ? "●" : lazy ? "◌" : "○";
+  const color = live ? "#3fb950" : lazy ? "#d29922" : "#f85149";
+  const name = String(s.name || "?").slice(0, Math.max(6, cellW - 10));
+  const tools = live ? `${s.toolCount || 0}t` : lazy ? "lazy" : "down";
+  const pad = Math.max(1, cellW - name.length - tools.length - 2);
+  return { glyph, color, name, tools, pad };
+}
+function mcpOutputLines(mcpOut) {
+  if (!mcpOut) return [];
+  return String(mcpOut.text || "(no output)").replace(/\r/g, "").split("\n").filter((l) => l.trim().length).slice(0, 3);
+}
+function MCPPanel({ mcp, cols = 80 }) {
+  const sum = mcpSummary(mcp);
+  if (!sum || !Array.isArray(mcp.servers)) return null;
+  const rank = (x) => x.initialized || (x.toolCount || 0) > 0 ? 0 : x.lazy ? 1 : 2;
+  const ordered = [...mcp.servers].sort((a, b) => rank(a) - rank(b) || String(a.name).localeCompare(String(b.name)));
+  const grid = mcpGrid(cols, ordered.length);
+  const shown = ordered.slice(0, grid.perRow * grid.rows);
+  const hidden = ordered.length - shown.length;
+  const headColor = sum.live >= sum.total ? "#3fb950" : sum.live > 0 ? "#d29922" : "#f85149";
+  const rows = [];
+  for (let i = 0; i < shown.length; i += grid.perRow) rows.push(shown.slice(i, i + grid.perRow));
+  return mcpJsxs(McpBox, { flexDirection: "column", width: cols, paddingX: 1, flexShrink: 0, children: [
+    mcpJsxs(McpText, { wrap: "truncate", children: [
+      mcpJsx(McpText, { color: "gray", dim: true, children: "MCP " }),
+      mcpJsx(McpText, { color: headColor, bold: true, children: `${sum.live}/${sum.total}` }),
+      mcpJsx(McpText, { color: "gray", dim: true, children: ` live · ${sum.tools} tools${sum.lazy ? ` · ${sum.lazy} lazy` : ""}${hidden > 0 ? ` · +${hidden} more (/mcp)` : " · /mcp"}` })
+    ] }),
+    ...rows.map((row, ri) => mcpJsx(McpText, { wrap: "truncate", children: row.map((s, ci) => {
+      const c = mcpCell(s, grid.cellW);
+      return mcpJsxs(McpText, { children: [
+        mcpJsx(McpText, { color: c.color, children: c.glyph }),
+        " ",
+        mcpJsx(McpText, { color: c.color, children: c.name }),
+        mcpJsx(McpText, { color: "gray", dim: true, children: ` ${c.tools}` }),
+        " ".repeat(c.pad)
+      ] }, `${ri}:${ci}:${s.name}`);
+    }) }, `mcp-row-${ri}`))
+  ] });
+}
+
+// Last MCP tool result — the same "MCP Output" panel the OpenTUI dashboard
+// shows, so the Ink TUI reflects the same MCP wiring.
+function MCPOutput({ mcpOut, cols = 80 }) {
+  if (!mcpOut) return null;
+  const width = Math.max(12, cols - 6);
+  const lines = mcpOutputLines(mcpOut);
+  const head = `MCP Output · ${mcpOut.server}${mcpOut.tool ? ` / ${mcpOut.tool}` : ""}`;
+  return mcpJsxs(McpBox, { flexDirection: "column", width: cols, paddingX: 1, flexShrink: 0, children: [
+    mcpJsx(McpText, { color: "#d29922", bold: true, wrap: "truncate", children: head.slice(0, width) }),
+    ...(lines.length ? lines : ["(no output)"]).map((l, i) => mcpJsx(McpText, { color: "gray", dim: i > 0, wrap: "truncate", children: "  " + String(l).slice(0, width - 2) }, `mcp-out-${i}`))
+  ] });
+}
+
 // src/components/SlashMenu.jsx
 import React2, { useState, useMemo } from "react";
 import { Box as Box2, Text as Text2 } from "ink";
@@ -1977,6 +2047,7 @@ function App() {
   const [contextMax, setContextMax] = useState9(128e3);
   const [contextChars, setContextChars] = useState9(0);
   const [mcp, setMcp] = useState9(null);
+  const [mcpOut, setMcpOut] = useState9(null);
   // ── Smartness + autolearn meters (same scoring as the old CLI) ──
   const meterRef = useRef3(null);
   if (!meterRef.current) meterRef.current = createMeter();
@@ -1993,7 +2064,13 @@ function App() {
   // fixed `rows - 10` ignored those extras, so the bottom bars were pushed
   // off-screen and the transcript clipped.
   const spinnerActive = Boolean(thinkingText) || ["THINK", "PLAN", "ACT", "OBSERVE", "REFLECT", "CONSOLIDATE"].includes(String(status.phase || "").toUpperCase());
-  const chromeRows = 2 + 2 + 5 + 1 + (spinnerActive ? 1 : 0) + (tools.length > 0 ? 1 : 0) + (queue && queue.length ? 1 : 0);
+  // The MCP grid and MCP output panels sit between the transcript and the
+  // system panel, so their rows come out of the same budget — otherwise they
+  // push the input bar and bottom status line off the screen.
+  const mcpSum = mcpSummary(mcp);
+  const mcpPanelRows = mcpSum ? 1 + mcpGrid(cols, mcpSum.total).rows : 0;
+  const mcpOutRows = mcpOut ? 1 + Math.max(1, mcpOutputLines(mcpOut).length) : 0;
+  const chromeRows = 2 + 2 + 5 + 1 + (spinnerActive ? 1 : 0) + (tools.length > 0 ? 1 : 0) + (queue && queue.length ? 1 : 0) + mcpPanelRows + mcpOutRows;
   const outputHeight = Math.max(3, rows - chromeRows);
   const maxScroll = Math.max(0, output.length - outputHeight);
   const effectiveOffset = Math.min(maxScroll, scrollOffset);
@@ -2127,6 +2204,10 @@ function App() {
         meterRef.current.tool(name, args, ok, text);
         syncMeters();
       } catch { /* metering must never break the tool strip */ }
+      // Keep the latest MCP tool result for the MCP Output panel. Tool names
+      // arrive as mcp__<server>__<tool>; plain tools are left alone.
+      const mcpMatch = /^mcp__(.+)__(.+)$/.exec(String(name || ""));
+      if (mcpMatch) setMcpOut({ server: mcpMatch[1], tool: mcpMatch[2], text: String(result == null ? "" : result).slice(0, 4000) });
       setTools((p) => {
         const idx = [...p].reverse().findIndex((t2) => t2.name === name && t2.status === "running");
         if (idx === -1) return [...p, { name, status: "done", result: String(result || "").slice(0, 80), start: Date.now() }].slice(-MAX_TOOLS);
@@ -2343,7 +2424,10 @@ function App() {
         setOutput((p) => [...p, ...lines.map((text) => ({ type: "system", text }))].slice(-MAX_OUTPUT));
         break;
       }
+      case "/menu":
       case "/commands":
+        // HakTerm's `/menu` palette, in the terminal: the same popout dialog
+        // (never auto-opens; esc closes it).
         setShowCommandsDialog(true);
         break;
       case "/provider":
@@ -2609,17 +2693,18 @@ function App() {
     // MessageGrid used to re-render the last 8 output entries as cards below
     // the transcript, so every AI answer appeared in two slots. The transcript
     // above is the single source; the thinking spinner now lives in InputBox.
-    tools.length > 0 && /* @__PURE__ */ jsxs17(Box16, { width: cols, flexDirection: "row", overflow: "hidden", children: [
+    // One truncating Text row (not sibling Texts): mcp__server__tool names are
+    // long, and sibling Texts wrap into a second row that the row budget never
+    // counted, shoving the input bar off-screen.
+    tools.length > 0 && /* @__PURE__ */ jsx16(Text17, { width: cols, wrap: "truncate", children: [
       /* @__PURE__ */ jsx16(Text17, { color: "gray", dim: true, children: "tools: " }),
-      tools.slice(-6).map((t2, i) => /* @__PURE__ */ jsxs17(Text17, { color: t2.status === "running" ? "yellow" : theme.success, children: [
-        t2.status === "running" ? "\u25C9" : "\u2713",
-        t2.name,
-        t2.duration ? `(${t2.duration})` : "",
-        " "
-      ] }, i))
+      /* @__PURE__ */ jsx16(Text17, { color: theme.success, children: tools.slice(-6).map((t2) => `${t2.status === "running" ? "\u25C9" : "\u2713"}${String(t2.name).replace(/^mcp__/, "").slice(0, 24)}${t2.duration ? `(${t2.duration})` : ""}`).join("  ") })
     ] }),
     queue && queue.length > 0 && /* @__PURE__ */ jsx16(QueueBox, { items: queue, cols }),
     showPlan && plan && /* @__PURE__ */ jsx16(PlanDisplay, { plan, cols }),
+    // MCP wiring: latest MCP tool output, then the connected-server grid.
+    /* @__PURE__ */ jsx16(MCPOutput, { mcpOut, cols }),
+    /* @__PURE__ */ jsx16(MCPPanel, { mcp, cols }),
     // The old CLI's SMARTNESS / ONLINE PORTS panels, two rows above the input.
     /* @__PURE__ */ jsx12(SystemPanel, { key: "system-panel", meters, services: serviceStates(ports), scanOk: ports.ok, cols, theme }),
     /* @__PURE__ */ jsx16(

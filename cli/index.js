@@ -763,7 +763,7 @@ program
     const noSplash = process.env.HAKSTER_NO_SPLASH === '1' || process.env.NO_SPLASH === '1';
     if (noSplash) {
       console.log(`${C.green}  👻 HAKSTERAI AGENT${C.reset}  ${C.gray}·${C.reset}  ${C.gray}autonomous mode${C.reset}`);
-      console.log(`${C.gray}  Commands: /help /tools /models /clear /exit${C.reset}\n`);
+      console.log(`${C.gray}  Commands: /menu /help /tools /models /clear /exit${C.reset}\n`);
     } else {
       try {
         const usbRoot = mem.findUSB();
@@ -772,7 +772,7 @@ program
         // Fallback to simple banner if ui fails
         console.log();
         console.log(`${C.green}  👻 HAKSTERAI AGENT${C.reset}  ${C.gray}·${C.reset}  ${C.gray}autonomous mode${C.reset}`);
-        console.log(`${C.gray}  Commands: /help /tools /models /clear /exit${C.reset}`);
+        console.log(`${C.gray}  Commands: /menu /help /tools /models /clear /exit${C.reset}`);
         console.log();
       }
     }
@@ -818,6 +818,32 @@ program
         history.length = 0;
         clearHistory();
         console.log(`${C.gray}history cleared${C.reset}`);
+        rl.prompt();
+        return true;
+      }
+
+      // ── Menu (the palette, in the scrolling shell) ──
+      // HakTerm's `/menu` popout, printed as a box. The dashboard TUIs open the
+      // real popout dialog; here the same commands are listed with what they do.
+      if (cmd === '/menu') {
+        const rows = [
+          ['/help', 'keys and every command'],
+          ['/tools  /mcp', 'MCP servers and their tools'],
+          ['/models', 'available models per provider'],
+          ['/clear', 'clear this session history'],
+          ['/menu', 'this list'],
+          ['/exit', 'leave the CLI'],
+        ];
+        const w = Math.max(...rows.map(([c, d]) => c.length + d.length)) + 6;
+        console.log(`${C.cyan}┌${'─'.repeat(w)}┐${C.reset}`);
+        console.log(`${C.cyan}│${C.reset} ${C.bold}MENU${C.reset}${' '.repeat(w - 6)}${C.cyan}│${C.reset}`);
+        console.log(`${C.cyan}├${'─'.repeat(w)}┤${C.reset}`);
+        for (const [c, d] of rows) {
+          const line = ` ${c.padEnd(13)} ${d}`;
+          console.log(`${C.cyan}│${C.reset}${line}${' '.repeat(Math.max(0, w - line.length))}${C.cyan}│${C.reset}`);
+        }
+        console.log(`${C.cyan}└${'─'.repeat(w)}┘${C.reset}`);
+        console.log(`${C.gray}  dashboard TUI: /menu opens the same list as a popout dialog${C.reset}`);
         rl.prompt();
         return true;
       }
