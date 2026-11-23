@@ -652,16 +652,16 @@ var require_catalog = __commonJS({
 });
 
 // src/index.jsx
-import React16 from "react";
+import React17 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React15, { useCallback as useCallback2, useEffect as useEffect6, useRef as useRef3, useState as useState6 } from "react";
+import React16, { useCallback as useCallback2, useEffect as useEffect6, useRef as useRef3, useState as useState6 } from "react";
 import fs4 from "node:fs";
 import path3 from "node:path";
 import { useKeyboard as useKeyboard3, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { TextAttributes as TextAttributes12 } from "@opentui/core";
+import { TextAttributes as TextAttributes13 } from "@opentui/core";
 
 // src/components/DockAd.jsx
 var import_ad_client = __toESM(require_ad_client());
@@ -1175,31 +1175,69 @@ var MENU_ITEMS = [
   { cmd: "/help", label: "Help", detail: "keys and commands" },
   { cmd: "/quit", label: "Quit", detail: "leave the dashboard" }
 ];
+
+// src/components/CatalogPopout.jsx
+import React8 from "react";
+import { TextAttributes as TextAttributes7 } from "@opentui/core";
+import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 var clip2 = (s, n) => {
   const t = String(s == null ? "" : s);
-  return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
+  return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
 };
-function MenuPalette({ width = 60, selected = 0 }) {
-  const inner = Math.max(1, width - 4);
-  return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "cyan", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs7("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx7("text", { fg: "cyan", attributes: TextAttributes6.BOLD, children: "\u25C7 Menu" }),
-      /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip2("\u2191\u2193 select \xB7 enter run \xB7 esc close", inner - 6) })
+var KIND_COLOR = {
+  agent: "magenta",
+  model: "cyan",
+  mcp: "blue",
+  cmd: "green"
+};
+function CatalogPopout({
+  width = 72,
+  height = 20,
+  rows = [],
+  selectable = [],
+  selected = 0,
+  query = "",
+  filter = ""
+}) {
+  const w = Math.max(24, Number(width) || 72);
+  const inner = Math.max(1, w - 4);
+  const h = Math.max(6, Number(height) || 20);
+  const bodyRows = Math.max(3, h - 4);
+  const selRow = selectable[Math.min(selected, selectable.length - 1)] ?? 0;
+  const start2 = Math.max(0, Math.min(selRow - Math.floor(bodyRows / 2), Math.max(0, rows.length - bodyRows)));
+  const shown = rows.slice(start2, start2 + bodyRows);
+  const hiddenAbove = start2;
+  const hiddenBelow = Math.max(0, rows.length - start2 - shown.length);
+  return /* @__PURE__ */ jsxs8("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "cyan", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs8("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx8("text", { fg: "cyan", attributes: TextAttributes7.BOLD, children: "\u25C7 Catalog" }),
+      /* @__PURE__ */ jsx8("text", { fg: "gray", children: clip2(hiddenAbove || hiddenBelow ? `${hiddenAbove}\u2191 ${hiddenBelow}\u2193 \xB7 \u2191\u2193 \xB7 enter \xB7 esc` : "\u2191\u2193 select \xB7 enter apply \xB7 esc close", inner - 10) })
     ] }),
-    /* @__PURE__ */ jsx7("box", { style: { width: inner, flexDirection: "column" }, children: MENU_ITEMS.map((item, i) => {
-      const active = i === selected;
-      return /* @__PURE__ */ jsxs7("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-        /* @__PURE__ */ jsx7("text", { fg: active ? "cyan" : "white", attributes: active ? TextAttributes6.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${item.cmd.padEnd(11)} ${clip2(item.label, 16)}` }),
-        /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip2(item.detail, Math.max(0, inner - 30)) })
-      ] }, item.cmd);
+    /* @__PURE__ */ jsxs8("box", { style: { width: inner, flexDirection: "row" }, children: [
+      /* @__PURE__ */ jsx8("text", { fg: "yellow", children: "\u2315 " }),
+      /* @__PURE__ */ jsx8("text", { fg: "white", children: clip2(query, inner - 2) })
+    ] }),
+    /* @__PURE__ */ jsx8("box", { style: { width: inner, flexDirection: "column" }, children: shown.length === 0 ? /* @__PURE__ */ jsx8("text", { fg: "gray", children: clip2("no match \u2014 backspace to widen, esc to close", inner) }) : shown.map((row, i) => {
+      const abs = start2 + i;
+      if (row.kind === "header") {
+        return /* @__PURE__ */ jsx8("box", { style: { width: inner, flexDirection: "row" }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", attributes: TextAttributes7.BOLD, children: clip2(`\u2014 ${row.label} \u2014`, inner) }) }, `h:${row.label}`);
+      }
+      const isSel = abs === selRow;
+      const color = KIND_COLOR[row.kind] || "white";
+      const detail = row.detail || "";
+      const valueW = Math.min(detail.length, Math.max(0, Math.floor(inner / 2)));
+      return /* @__PURE__ */ jsxs8("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+        /* @__PURE__ */ jsx8("text", { fg: isSel ? "yellow" : color, attributes: isSel ? TextAttributes7.BOLD : 0, children: clip2(`${isSel ? "\u25B8 " : "  "}${row.label}`, Math.max(8, inner - valueW - 1)) }),
+        /* @__PURE__ */ jsx8("text", { fg: isSel ? "white" : "gray", children: clip2(detail, valueW) })
+      ] }, `${row.kind}:${row.label}`);
     }) }),
-    /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip2("type /menu anytime \xB7 /help for every command", inner) }) })
+    /* @__PURE__ */ jsx8("box", { style: { width: inner, flexDirection: "row" }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", children: clip2(filter || "type to filter \xB7 a model row switches this session \xB7 esc closes", inner) }) })
   ] });
 }
 
 // src/components/ServicesPanel.jsx
-import React8 from "react";
-import { TextAttributes as TextAttributes7 } from "@opentui/core";
+import React9 from "react";
+import { TextAttributes as TextAttributes8 } from "@opentui/core";
 
 // ../smartness.mjs
 import fs2 from "node:fs";
@@ -1392,7 +1430,7 @@ function portLabel(entry, max = 14) {
 }
 
 // src/components/ServicesPanel.jsx
-import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 var CELL_W = 16;
 function servicesGridRows(width, count) {
   const inner = Math.max(1, (Number(width) || 80) - 4);
@@ -1433,11 +1471,11 @@ function ServicesPanel({
     const leftover = Math.max(0, inner - head.length - used);
     const tails = !scanOk ? ["scan unavailable", "scan \u2026", "\u2026"] : hiddenSvc > 0 ? [`+${hiddenSvc}  +${others.length} ports`, `+${hiddenSvc}  +${others.length}`, `+${hiddenSvc + others.length}`] : others.length ? [`+${others.length} other ports`, `+${others.length} ports`, `+${others.length}`] : [];
     const tail = tails.find((t) => t.length <= leftover) || "";
-    return /* @__PURE__ */ jsx8("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: /* @__PURE__ */ jsxs8("text", { children: [
-      /* @__PURE__ */ jsx8("span", { fg: "cyan", attributes: TextAttributes7.BOLD, children: "Services " }),
-      /* @__PURE__ */ jsx8("span", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: `${up}/${list.length} online  ` }),
-      shown.map((s) => /* @__PURE__ */ jsx8("span", { fg: s.up ? "green" : "red", children: s.text }, s.port)),
-      /* @__PURE__ */ jsx8("span", { fg: scanOk ? "gray" : "yellow", children: tail })
+    return /* @__PURE__ */ jsx9("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: /* @__PURE__ */ jsxs9("text", { children: [
+      /* @__PURE__ */ jsx9("span", { fg: "cyan", attributes: TextAttributes8.BOLD, children: "Services " }),
+      /* @__PURE__ */ jsx9("span", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: `${up}/${list.length} online  ` }),
+      shown.map((s) => /* @__PURE__ */ jsx9("span", { fg: s.up ? "green" : "red", children: s.text }, s.port)),
+      /* @__PURE__ */ jsx9("span", { fg: scanOk ? "gray" : "yellow", children: tail })
     ] }) });
   }
   const cells = list.map((s) => ({
@@ -1472,7 +1510,7 @@ function ServicesPanel({
       color: "cyan"
     });
   }
-  return /* @__PURE__ */ jsx8(
+  return /* @__PURE__ */ jsx9(
     GridPanel_default,
     {
       title: "\u25A3 Services on ports",
@@ -1482,15 +1520,15 @@ function ServicesPanel({
         `${up}/${list.length} online${others.length ? ` \xB7 ${others.length} other ports` : ""}${scanOk ? "" : " \xB7 scan unavailable"}`,
         Math.max(6, w - 24)
       ),
-      children: cells.map((c) => /* @__PURE__ */ jsx8(Cell, { label: c.label, value: c.value, w: CELL_W, color: c.color }, c.key))
+      children: cells.map((c) => /* @__PURE__ */ jsx9(Cell, { label: c.label, value: c.value, w: CELL_W, color: c.color }, c.key))
     }
   );
 }
 
 // src/components/StatusBar.jsx
-import React9 from "react";
-import { TextAttributes as TextAttributes8 } from "@opentui/core";
-import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
+import React10 from "react";
+import { TextAttributes as TextAttributes9 } from "@opentui/core";
+import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 var STATUS_STYLES = {
   idle: { text: "ready", color: "gray" },
   connecting: { text: "can't reach server\u2026", color: "yellow" },
@@ -1514,46 +1552,46 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
   const right = [];
   if (label) {
     right.push(
-      /* @__PURE__ */ jsx9("text", { fg: known ? known.color : "gray", children: label }, "status")
+      /* @__PURE__ */ jsx10("text", { fg: known ? known.color : "gray", children: label }, "status")
     );
   }
   if (elapsed) {
-    right.push(/* @__PURE__ */ jsx9("text", { fg: "gray", children: elapsed }, "elapsed"));
+    right.push(/* @__PURE__ */ jsx10("text", { fg: "gray", children: elapsed }, "elapsed"));
   }
   if (model) {
-    right.push(/* @__PURE__ */ jsx9("text", { fg: "yellow", children: model }, "model"));
+    right.push(/* @__PURE__ */ jsx10("text", { fg: "yellow", children: model }, "model"));
   }
   if (handoff !== void 0 && handoff !== null) {
     right.push(
-      /* @__PURE__ */ jsx9("text", { fg: handoff ? "green" : "red", children: handoff ? "handoff auto" : "handoff off" }, "handoff")
+      /* @__PURE__ */ jsx10("text", { fg: handoff ? "green" : "red", children: handoff ? "handoff auto" : "handoff off" }, "handoff")
     );
   }
   if (cols !== void 0 && cols !== null) {
-    right.push(/* @__PURE__ */ jsx9("text", { fg: "gray", children: `${cols}c` }, "cols"));
+    right.push(/* @__PURE__ */ jsx10("text", { fg: "gray", children: `${cols}c` }, "cols"));
   }
   right.push(
-    /* @__PURE__ */ jsx9("text", { fg: adsOn ? "green" : "red", children: adsOn ? "ads on" : "ads off" }, "ads")
+    /* @__PURE__ */ jsx10("text", { fg: adsOn ? "green" : "red", children: adsOn ? "ads on" : "ads off" }, "ads")
   );
   const rightNodes = [];
   right.forEach((node, i) => {
     if (i > 0) {
-      rightNodes.push(/* @__PURE__ */ jsx9("text", { fg: "gray", children: " \xB7 " }, `sep-${i}`));
+      rightNodes.push(/* @__PURE__ */ jsx10("text", { fg: "gray", children: " \xB7 " }, `sep-${i}`));
     }
     rightNodes.push(node);
   });
-  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsxs9("box", { style: { flexDirection: "row" }, children: [
-      focus === "ad" ? /* @__PURE__ */ jsx9("text", { fg: "cyan", attributes: TextAttributes8.BOLD, children: "\u27EA ad \u27EB" }) : /* @__PURE__ */ jsx9("text", { fg: "gray", children: "\u27EA composer \u27EB" }),
-      hint ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: `  ${hint}` }) : null
+  return /* @__PURE__ */ jsxs10("box", { style: { width, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsxs10("box", { style: { flexDirection: "row" }, children: [
+      focus === "ad" ? /* @__PURE__ */ jsx10("text", { fg: "cyan", attributes: TextAttributes9.BOLD, children: "\u27EA ad \u27EB" }) : /* @__PURE__ */ jsx10("text", { fg: "gray", children: "\u27EA composer \u27EB" }),
+      hint ? /* @__PURE__ */ jsx10("text", { fg: "gray", children: `  ${hint}` }) : null
     ] }),
-    /* @__PURE__ */ jsx9("box", { style: { flexDirection: "row" }, children: rightNodes })
+    /* @__PURE__ */ jsx10("box", { style: { flexDirection: "row" }, children: rightNodes })
   ] });
 }
 
 // src/components/SystemPanel.jsx
-import React10 from "react";
-import { TextAttributes as TextAttributes9 } from "@opentui/core";
-import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+import React11 from "react";
+import { TextAttributes as TextAttributes10 } from "@opentui/core";
+import { jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var clip4 = (s, n) => {
   const t = String(s == null ? "" : s);
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
@@ -1579,35 +1617,35 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p autolearn  ctx ${ctxPct}%${hostShort}`;
   const terse = `\u{1F9E0} ${score}% \u2726 ${points}p ctx ${ctxPct}%${hostShort}`;
   if (fullLen <= w) {
-    return /* @__PURE__ */ jsx10("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs10("text", { children: [
-      /* @__PURE__ */ jsx10("span", { fg: barColor("smart", score), attributes: TextAttributes9.BOLD, children: "\u{1F9E0} " }),
-      /* @__PURE__ */ jsx10("span", { fg: barColor("smart", score), children: "\u2588".repeat(sc.filled) }),
-      /* @__PURE__ */ jsx10("span", { fg: "gray", children: "\u2591".repeat(sc.empty) }),
-      /* @__PURE__ */ jsx10("span", { fg: "white", attributes: TextAttributes9.BOLD, children: ` ${score}% ` }),
-      /* @__PURE__ */ jsx10("span", { fg: arrowColor, children: arrow }),
-      /* @__PURE__ */ jsx10("span", { fg: "gray", children: ` ${smartLabel(score)}` }),
-      /* @__PURE__ */ jsx10("span", { fg: "gray", children: "   " }),
-      /* @__PURE__ */ jsx10("span", { fg: barColor("points", points), attributes: TextAttributes9.BOLD, children: "\u2726 " }),
-      /* @__PURE__ */ jsx10("span", { fg: barColor("points", points), children: "\u2588".repeat(ac.filled) }),
-      /* @__PURE__ */ jsx10("span", { fg: "gray", children: "\u2591".repeat(ac.empty) }),
-      /* @__PURE__ */ jsx10("span", { fg: "white", attributes: TextAttributes9.BOLD, children: ` ${points}p` }),
-      /* @__PURE__ */ jsx10("span", { fg: "gray", children: " autolearn   " }),
-      /* @__PURE__ */ jsx10("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "ctx " }),
-      /* @__PURE__ */ jsx10("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "\u2588".repeat(cc.filled) }),
-      /* @__PURE__ */ jsx10("span", { fg: "gray", children: "\u2591".repeat(cc.empty) }),
-      /* @__PURE__ */ jsx10("span", { fg: "white", children: ` ${ctxPct}%` }),
-      hostTxt ? /* @__PURE__ */ jsx10("span", { fg: "gray", children: "   " }) : null,
-      hostTxt ? /* @__PURE__ */ jsx10("span", { fg: heat(cpuPct), children: `cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`}` }) : null,
-      hostTxt ? /* @__PURE__ */ jsx10("span", { fg: heat(memPct), children: `  ram ${memPct == null ? "\u2014" : `${memPct}%`}` }) : null,
-      hostTxt ? /* @__PURE__ */ jsx10("span", { fg: heat(swapPct), children: `  swap ${swapPct == null ? "\u2014" : `${swapPct}%`}` }) : null
+    return /* @__PURE__ */ jsx11("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs11("text", { children: [
+      /* @__PURE__ */ jsx11("span", { fg: barColor("smart", score), attributes: TextAttributes10.BOLD, children: "\u{1F9E0} " }),
+      /* @__PURE__ */ jsx11("span", { fg: barColor("smart", score), children: "\u2588".repeat(sc.filled) }),
+      /* @__PURE__ */ jsx11("span", { fg: "gray", children: "\u2591".repeat(sc.empty) }),
+      /* @__PURE__ */ jsx11("span", { fg: "white", attributes: TextAttributes10.BOLD, children: ` ${score}% ` }),
+      /* @__PURE__ */ jsx11("span", { fg: arrowColor, children: arrow }),
+      /* @__PURE__ */ jsx11("span", { fg: "gray", children: ` ${smartLabel(score)}` }),
+      /* @__PURE__ */ jsx11("span", { fg: "gray", children: "   " }),
+      /* @__PURE__ */ jsx11("span", { fg: barColor("points", points), attributes: TextAttributes10.BOLD, children: "\u2726 " }),
+      /* @__PURE__ */ jsx11("span", { fg: barColor("points", points), children: "\u2588".repeat(ac.filled) }),
+      /* @__PURE__ */ jsx11("span", { fg: "gray", children: "\u2591".repeat(ac.empty) }),
+      /* @__PURE__ */ jsx11("span", { fg: "white", attributes: TextAttributes10.BOLD, children: ` ${points}p` }),
+      /* @__PURE__ */ jsx11("span", { fg: "gray", children: " autolearn   " }),
+      /* @__PURE__ */ jsx11("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "ctx " }),
+      /* @__PURE__ */ jsx11("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "\u2588".repeat(cc.filled) }),
+      /* @__PURE__ */ jsx11("span", { fg: "gray", children: "\u2591".repeat(cc.empty) }),
+      /* @__PURE__ */ jsx11("span", { fg: "white", children: ` ${ctxPct}%` }),
+      hostTxt ? /* @__PURE__ */ jsx11("span", { fg: "gray", children: "   " }) : null,
+      hostTxt ? /* @__PURE__ */ jsx11("span", { fg: heat(cpuPct), children: `cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`}` }) : null,
+      hostTxt ? /* @__PURE__ */ jsx11("span", { fg: heat(memPct), children: `  ram ${memPct == null ? "\u2014" : `${memPct}%`}` }) : null,
+      hostTxt ? /* @__PURE__ */ jsx11("span", { fg: heat(swapPct), children: `  swap ${swapPct == null ? "\u2014" : `${swapPct}%`}` }) : null
     ] }) });
   }
-  return /* @__PURE__ */ jsx10("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx10("text", { children: /* @__PURE__ */ jsx10("span", { fg: barColor("smart", score), attributes: TextAttributes9.BOLD, children: clip4(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
+  return /* @__PURE__ */ jsx11("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx11("text", { children: /* @__PURE__ */ jsx11("span", { fg: barColor("smart", score), attributes: TextAttributes10.BOLD, children: clip4(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
 }
 
 // src/components/CrushStatus.jsx
-import React11, { useEffect as useEffect3, useState as useState3 } from "react";
-import { jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
+import React12, { useEffect as useEffect3, useState as useState3 } from "react";
+import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
 var GRADIENT = [51, 87, 117, 153, 117, 87];
@@ -1637,27 +1675,27 @@ function CrushStatus({ width, phase, activity, elapsedMs }) {
   const gradColor = `rgb(${grad},${Math.floor(grad * 0.7)},${Math.floor(grad * 1.2)})`;
   const phrase = activity || info.phrases[Math.floor(frame / 20) % info.phrases.length];
   const shimmer = [0, 1, 2].map((offset) => SHIMMER[(frame + offset) % SHIMMER.length]).join("");
-  return /* @__PURE__ */ jsx11("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs11("text", { children: [
-    /* @__PURE__ */ jsx11("span", { fg: gradColor, children: "\u27E6" }),
-    /* @__PURE__ */ jsx11("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
-    /* @__PURE__ */ jsx11("span", { fg: gradColor, children: "\u27E7" }),
+  return /* @__PURE__ */ jsx12("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs12("text", { children: [
+    /* @__PURE__ */ jsx12("span", { fg: gradColor, children: "\u27E6" }),
+    /* @__PURE__ */ jsx12("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
+    /* @__PURE__ */ jsx12("span", { fg: gradColor, children: "\u27E7" }),
     " ",
-    /* @__PURE__ */ jsx11("span", { children: info.emoji }),
+    /* @__PURE__ */ jsx12("span", { children: info.emoji }),
     " ",
-    /* @__PURE__ */ jsx11("span", { fg: info.color, children: normalizedPhase }),
+    /* @__PURE__ */ jsx12("span", { fg: info.color, children: normalizedPhase }),
     " ",
-    /* @__PURE__ */ jsx11("span", { fg: "#a5b4c3", children: phrase }),
+    /* @__PURE__ */ jsx12("span", { fg: "#a5b4c3", children: phrase }),
     " ",
-    /* @__PURE__ */ jsx11("span", { fg: gradColor, children: shimmer }),
+    /* @__PURE__ */ jsx12("span", { fg: gradColor, children: shimmer }),
     " ",
-    /* @__PURE__ */ jsx11("span", { fg: "gray", children: formatElapsed2(elapsedMs) })
+    /* @__PURE__ */ jsx12("span", { fg: "gray", children: formatElapsed2(elapsedMs) })
   ] }) });
 }
 
 // src/components/TodoPanel.jsx
-import React12 from "react";
-import { TextAttributes as TextAttributes10 } from "@opentui/core";
-import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
+import React13 from "react";
+import { TextAttributes as TextAttributes11 } from "@opentui/core";
+import { jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
 var GLYPH_DONE = "\u2713";
 var GLYPH_TODO = "\u25CB";
 var EMPTY_TEXT = "No todos yet \u2014 the agent's checklist appears here once it creates one.";
@@ -1675,39 +1713,39 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   const rows = [];
   if (list.length === 0) {
     rows.push(
-      /* @__PURE__ */ jsx12("text", { fg: "gray", children: clip5(EMPTY_TEXT, inner) }, "empty")
+      /* @__PURE__ */ jsx13("text", { fg: "gray", children: clip5(EMPTY_TEXT, inner) }, "empty")
     );
   } else {
     visible.forEach((todo, i) => {
       const done = !!(todo && todo.done);
       const text = clip5(todo && todo.text || "", Math.max(0, inner - 2));
       rows.push(
-        /* @__PURE__ */ jsxs12("box", { style: { width: "100%", flexDirection: "row" }, children: [
-          /* @__PURE__ */ jsx12("text", { fg: done ? "green" : "gray", attributes: done ? 0 : TextAttributes10.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
-          /* @__PURE__ */ jsx12("text", { fg: done ? "white" : "gray", children: ` ${text}` })
+        /* @__PURE__ */ jsxs13("box", { style: { width: "100%", flexDirection: "row" }, children: [
+          /* @__PURE__ */ jsx13("text", { fg: done ? "green" : "gray", attributes: done ? 0 : TextAttributes11.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
+          /* @__PURE__ */ jsx13("text", { fg: done ? "white" : "gray", children: ` ${text}` })
         ] }, `row-${i}`)
       );
     });
     if (overflow > 0) {
       rows.push(
-        /* @__PURE__ */ jsx12("text", { fg: "gray", children: `+${overflow} more` }, "more")
+        /* @__PURE__ */ jsx13("text", { fg: "gray", children: `+${overflow} more` }, "more")
       );
     }
   }
-  return /* @__PURE__ */ jsxs12("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsx12("text", { fg: "cyan", attributes: TextAttributes10.BOLD, children: `Todos \u2014 ${completed}/${list.length} completed` }),
+  return /* @__PURE__ */ jsxs13("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsx13("text", { fg: "cyan", attributes: TextAttributes11.BOLD, children: `Todos \u2014 ${completed}/${list.length} completed` }),
     rows,
-    hint ? /* @__PURE__ */ jsx12("text", { fg: "gray", children: hint }) : null
+    hint ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: hint }) : null
   ] });
 }
 
 // src/components/Transcript.jsx
-import React14 from "react";
+import React15 from "react";
 
 // src/components/MessageBlock.jsx
-import React13 from "react";
-import { TextAttributes as TextAttributes11 } from "@opentui/core";
-import { jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
+import React14 from "react";
+import { TextAttributes as TextAttributes12 } from "@opentui/core";
+import { jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
   assistant: { border: "gray", label: "hakster" },
@@ -1719,19 +1757,19 @@ function ToolRow({ tool, width }) {
   const glyph = pending ? "\u2026" : "\u2713";
   const colour = pending ? "yellow" : "green";
   const args = tool.args && Object.keys(tool.args).length ? ` ${JSON.stringify(tool.args).slice(0, 80)}` : "";
-  return /* @__PURE__ */ jsxs13("box", { style: { flexDirection: "column", width }, children: [
-    /* @__PURE__ */ jsxs13("text", { children: [
-      /* @__PURE__ */ jsxs13("span", { fg: colour, children: [
+  return /* @__PURE__ */ jsxs14("box", { style: { flexDirection: "column", width }, children: [
+    /* @__PURE__ */ jsxs14("text", { children: [
+      /* @__PURE__ */ jsxs14("span", { fg: colour, children: [
         glyph,
         " "
       ] }),
-      /* @__PURE__ */ jsx13("span", { fg: "white", children: tool.name || "tool" }),
-      args ? /* @__PURE__ */ jsx13("span", { fg: "gray", children: args }) : null
+      /* @__PURE__ */ jsx14("span", { fg: "white", children: tool.name || "tool" }),
+      args ? /* @__PURE__ */ jsx14("span", { fg: "gray", children: args }) : null
     ] }),
     tool.result != null ? (
       // The whole result the server sent (it caps long output itself) —
       // a clipped 120-char preview hid what the agent actually saw.
-      /* @__PURE__ */ jsx13("text", { fg: "gray", children: String(tool.result) })
+      /* @__PURE__ */ jsx14("text", { fg: "gray", children: String(tool.result) })
     ) : null
   ] });
 }
@@ -1741,31 +1779,31 @@ function MessageBlock({ message, width }) {
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
   const inner = Math.max(8, (width || 80) - 4);
   if (message.role === "system") {
-    return /* @__PURE__ */ jsx13("box", { style: { width, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx13("text", { fg: border, children: String(message.text || "") }) });
+    return /* @__PURE__ */ jsx14("box", { style: { width, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx14("text", { fg: border, children: String(message.text || "") }) });
   }
   const tools = Array.isArray(message.tools) ? message.tools : [];
-  return /* @__PURE__ */ jsxs13("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsx13("text", { fg: border, attributes: TextAttributes11.BOLD, children: roleStyle.label }),
-    message.thinking ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: String(message.thinking) }) : null,
-    message.images ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: `\u{1F4CE} ${message.imageName || `${message.images} image`}` }) : null,
-    message.text ? /* @__PURE__ */ jsx13("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: "thinking\u2026" }) : null,
-    tools.map((tool, i) => /* @__PURE__ */ jsx13(ToolRow, { tool, width: inner }, `tool-${i}`))
+  return /* @__PURE__ */ jsxs14("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsx14("text", { fg: border, attributes: TextAttributes12.BOLD, children: roleStyle.label }),
+    message.thinking ? /* @__PURE__ */ jsx14("text", { fg: "gray", children: String(message.thinking) }) : null,
+    message.images ? /* @__PURE__ */ jsx14("text", { fg: "gray", children: `\u{1F4CE} ${message.imageName || `${message.images} image`}` }) : null,
+    message.text ? /* @__PURE__ */ jsx14("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx14("text", { fg: "gray", children: "thinking\u2026" }) : null,
+    tools.map((tool, i) => /* @__PURE__ */ jsx14(ToolRow, { tool, width: inner }, `tool-${i}`))
   ] });
 }
 
 // src/components/Transcript.jsx
-import { jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
+import { jsx as jsx15, jsxs as jsxs15 } from "react/jsx-runtime";
 var MAX_TURNS = 80;
 function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
   const list = Array.isArray(messages) ? messages : [];
   if (list.length === 0) {
-    return /* @__PURE__ */ jsx14("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx14("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
+    return /* @__PURE__ */ jsx15("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx15("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
   }
   const budget = Math.max(1, Number(height) || 20);
   const capped = list.slice(-MAX_TURNS);
   const hidden = list.length - capped.length;
   const contentW = Math.max(8, (Number(width) || 80) - 1);
-  return /* @__PURE__ */ jsx14("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsxs14(
+  return /* @__PURE__ */ jsx15("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsxs15(
     "scrollbox",
     {
       ref: scrollRef,
@@ -1779,8 +1817,8 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
         viewportCulling: true
       },
       children: [
-        hidden > 0 ? /* @__PURE__ */ jsx14("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
-        /* @__PURE__ */ jsx14("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message) => /* @__PURE__ */ jsx14("box", { style: { marginBottom: 1 }, children: /* @__PURE__ */ jsx14(MessageBlock, { message, width: contentW }) }, message.id)) })
+        hidden > 0 ? /* @__PURE__ */ jsx15("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
+        /* @__PURE__ */ jsx15("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message) => /* @__PURE__ */ jsx15("box", { style: { marginBottom: 1 }, children: /* @__PURE__ */ jsx15(MessageBlock, { message, width: contentW }) }, message.id)) })
       ]
     }
   ) });
@@ -2362,7 +2400,7 @@ function useHostStats(intervalMs = 5e3) {
 var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
 var import_ad_client2 = __toESM(require_ad_client());
-import { Fragment as Fragment2, jsx as jsx15, jsxs as jsxs15 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx16, jsxs as jsxs16 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 4;
 var MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
@@ -2392,6 +2430,24 @@ function writePrefs(patch) {
 `);
   } catch {
   }
+}
+var CRUSH_CONFIG_PATHS = [
+  path3.join(process.env.HOME || "/home/ghost", ".crush.json"),
+  path3.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
+];
+function readCrushModels() {
+  for (const p of CRUSH_CONFIG_PATHS) {
+    try {
+      const j = JSON.parse(fs4.readFileSync(p, "utf8"));
+      const out = [];
+      for (const [slot, m] of Object.entries(j.models || {})) {
+        if (m && m.model) out.push({ slot, model: m.model, provider: m.provider || "ollama" });
+      }
+      if (out.length) return out;
+    } catch {
+    }
+  }
+  return [];
 }
 var clipLine = (s, n) => {
   const t = String(s == null ? "" : s);
@@ -2437,6 +2493,7 @@ function App({ version = "0.1.0" }) {
   const [mcpOutputOffset, setMcpOutputOffset] = useState6(0);
   const [menuOpen, setMenuOpen] = useState6(false);
   const [menuIndex, setMenuIndex] = useState6(0);
+  const [menuQuery, setMenuQuery] = useState6("");
   const [notice, setNotice] = useState6(null);
   const [scan, setScan] = useState6({ ok: false, ports: [], procs: {}, at: 0 });
   const [guard, setGuard] = useState6(null);
@@ -2548,6 +2605,7 @@ function App({ version = "0.1.0" }) {
     switch (cmd) {
       case "/menu":
         setMenuIndex(0);
+        setMenuQuery("");
         setMenuOpen(true);
         return;
       case "/attach":
@@ -2615,7 +2673,7 @@ function App({ version = "0.1.0" }) {
         showNotice("transcript cleared");
         return;
       case "/help":
-        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 h handoff \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /mcp /handoff /ports /attach /dashboard /status /clear /quit");
+        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 m models \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /mcp /handoff /ports /attach /dashboard /status /clear /quit");
         return;
       case "/quit":
       case "/exit":
@@ -2626,6 +2684,60 @@ function App({ version = "0.1.0" }) {
         showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
     }
   }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn]);
+  const crushModelList = useRef3(null);
+  if (!crushModelList.current) crushModelList.current = readCrushModels();
+  const catalogRows = (() => {
+    const q = menuQuery.trim().toLowerCase();
+    const match = (label, detail) => !q || `${label} ${detail}`.toLowerCase().includes(q);
+    const rows2 = [];
+    const pushSection = (section, items) => {
+      const hits = items.filter((it) => match(it.label, it.detail));
+      if (!hits.length) return;
+      rows2.push({ kind: "header", label: section });
+      rows2.push(...hits);
+    };
+    pushSection("AGENTS", [
+      { kind: "agent", label: `Claude \xB7 ${import_ladder2.PRIMARY_MODEL}`, detail: "our config \xB7 ollama", action: { model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER } },
+      { kind: "agent", label: "Codex (Pro)", detail: "provider default \xB7 ladder 2", action: { model: "", provider: "codex-cli" } },
+      ...(crushModelList.current || []).map((c) => ({
+        kind: "agent",
+        label: `Crush ${c.slot} \xB7 ${c.model}`,
+        detail: `crush \xB7 ${c.provider}`,
+        action: { model: c.model, provider: c.provider }
+      }))
+    ]);
+    pushSection("MODELS", models.map((m) => ({
+      kind: "model",
+      label: m.id,
+      detail: `${m.vendor}${m.context ? ` \xB7 ${Math.round(m.context / 1e3)}K` : ""}`,
+      action: { model: m.id, provider: import_ladder2.PRIMARY_PROVIDER }
+    })));
+    const servers = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
+    pushSection("MCP", servers.map((s) => ({
+      kind: "mcp",
+      label: s.name,
+      detail: `${s.toolCount == null ? "?" : s.toolCount} tools${s.initialized === false ? " \xB7 down" : ""}`,
+      action: { cmd: "/mcp" }
+    })));
+    pushSection("COMMANDS", MENU_ITEMS.map((i) => ({
+      kind: "cmd",
+      label: `${i.cmd} ${i.label}`,
+      detail: i.detail,
+      action: { cmd: i.cmd }
+    })));
+    return rows2;
+  })();
+  const catalogSelectable = catalogRows.map((r, i) => r.kind === "header" ? -1 : i).filter((i) => i >= 0);
+  const applyCatalogRow = useCallback2((row) => {
+    if (!row || !row.action) return;
+    if ("model" in row.action) {
+      setModel(row.action.model || "");
+      setProvider(row.action.provider || import_ladder2.PRIMARY_PROVIDER);
+      showNotice(`model \u2192 ${row.action.model || row.label} \xB7 provider ${row.action.provider || import_ladder2.PRIMARY_PROVIDER}`);
+      return;
+    }
+    if (row.action.cmd) runCommand(row.action.cmd);
+  }, [runCommand, showNotice]);
   const submit = useCallback2(
     (text) => {
       const v = String(text == null ? "" : text).trim();
@@ -2684,23 +2796,36 @@ function App({ version = "0.1.0" }) {
       return;
     }
     if (menuOpen) {
+      const n = catalogSelectable.length || 1;
       if (key.name === "escape") {
         setMenuOpen(false);
         return;
       }
       if (key.name === "up") {
-        setMenuIndex((i) => (i - 1 + MENU_ITEMS.length) % MENU_ITEMS.length);
+        setMenuIndex((i) => (i - 1 + n) % n);
         return;
       }
       if (key.name === "down") {
-        setMenuIndex((i) => (i + 1) % MENU_ITEMS.length);
+        setMenuIndex((i) => (i + 1) % n);
+        return;
+      }
+      if (key.name === "backspace") {
+        setMenuQuery((q) => q.slice(0, -1));
+        setMenuIndex(0);
         return;
       }
       if (key.name === "return") {
-        const item = MENU_ITEMS[menuIndex] || MENU_ITEMS[0];
+        const row = catalogRows[catalogSelectable[Math.min(menuIndex, catalogSelectable.length - 1)]];
         setMenuOpen(false);
-        runCommand(item.cmd);
+        setMenuQuery("");
+        applyCatalogRow(row);
         return;
+      }
+      if (key.ctrl || key.meta) return;
+      const ch = key.name === "space" ? " " : key.name && key.name.length === 1 ? key.name : "";
+      if (ch) {
+        setMenuQuery((q) => q + ch);
+        setMenuIndex(0);
       }
       return;
     }
@@ -2740,6 +2865,12 @@ function App({ version = "0.1.0" }) {
       return;
     }
     if (focus === "composer" && !key.ctrl && !key.meta) return;
+    if (key.ctrl && key.name === "p") {
+      setMenuQuery("");
+      setMenuIndex(0);
+      setMenuOpen(true);
+      return;
+    }
     if (key.ctrl && key.name === "o") {
       setDockExpanded((v) => !v);
       return;
@@ -2806,7 +2937,7 @@ function App({ version = "0.1.0" }) {
   const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2 - systemRows - servicesRows);
   const maxServers = Math.max(0, Math.min(8, sidebarBudget));
   const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
-  const MENU_ROWS = 2 + 1 + MENU_ITEMS.length + 1;
+  const MENU_ROWS = Math.max(10, Math.min(26, (rows || 30) - 12));
   const composerRows = menuOpen ? MENU_ROWS : 5;
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
@@ -2865,21 +2996,21 @@ function App({ version = "0.1.0" }) {
       ]
     }
   ];
-  return /* @__PURE__ */ jsxs15("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
-    /* @__PURE__ */ jsxs15("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
-      /* @__PURE__ */ jsxs15("box", { style: { flexDirection: "row" }, children: [
-        /* @__PURE__ */ jsx15("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes12.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
-        /* @__PURE__ */ jsx15("text", { fg: "cyan", attributes: TextAttributes12.BOLD, children: "\u25C6 haksterAi" }),
-        /* @__PURE__ */ jsx15("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
-        headerFiles ? /* @__PURE__ */ jsx15("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
+  return /* @__PURE__ */ jsxs16("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
+    /* @__PURE__ */ jsxs16("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
+      /* @__PURE__ */ jsxs16("box", { style: { flexDirection: "row" }, children: [
+        /* @__PURE__ */ jsx16("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes13.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
+        /* @__PURE__ */ jsx16("text", { fg: "cyan", attributes: TextAttributes13.BOLD, children: "\u25C6 haksterAi" }),
+        /* @__PURE__ */ jsx16("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
+        headerFiles ? /* @__PURE__ */ jsx16("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
       ] }),
-      headerRight ? /* @__PURE__ */ jsx15("text", { fg: "gray", children: headerRight }) : null
+      headerRight ? /* @__PURE__ */ jsx16("text", { fg: "gray", children: headerRight }) : null
     ] }),
-    statusErr ? /* @__PURE__ */ jsx15("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs15("text", { fg: "red", children: [
+    statusErr ? /* @__PURE__ */ jsx16("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs16("text", { fg: "red", children: [
       "server unreachable \u2014 ",
       statusErr
     ] }) }) : null,
-    view === "models" ? /* @__PURE__ */ jsx15(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: pickerModels.map((m, i) => /* @__PURE__ */ jsx15(
+    view === "models" ? /* @__PURE__ */ jsx16(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: pickerModels.map((m, i) => /* @__PURE__ */ jsx16(
       Cell,
       {
         label: m.vendor,
@@ -2888,46 +3019,46 @@ function App({ version = "0.1.0" }) {
         color: i === modelIdx ? "yellow" : "white"
       },
       m.key
-    )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs15(Fragment2, { children: [
-      /* @__PURE__ */ jsx15(
+    )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs16(Fragment2, { children: [
+      /* @__PURE__ */ jsx16(
         GridLayout_default,
         {
           items: dashboardItems,
           availableWidth: panelW,
           getItemKey: (item) => item.key,
-          renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx15(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, children: item.cells.map((c) => /* @__PURE__ */ jsx15(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)) }, c.label)) })
+          renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx16(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, children: item.cells.map((c) => /* @__PURE__ */ jsx16(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)) }, c.label)) })
         }
       ),
-      /* @__PURE__ */ jsxs15(
+      /* @__PURE__ */ jsxs16(
         GridPanel_default,
         {
           title: "\u25C9 Meters",
           width: panelW,
           hint: `${smartLabel(meters ? meters.score : 0)} \xB7 ${meterPoints}p autolearn \xB7 ${import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: modelText, vendor: "local", context: null })}`,
           children: [
-            /* @__PURE__ */ jsxs15("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
-              /* @__PURE__ */ jsx15("text", { fg: "gray", children: "smartness   " }),
-              /* @__PURE__ */ jsx15(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
-              /* @__PURE__ */ jsx15("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
+            /* @__PURE__ */ jsxs16("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
+              /* @__PURE__ */ jsx16("text", { fg: "gray", children: "smartness   " }),
+              /* @__PURE__ */ jsx16(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
+              /* @__PURE__ */ jsx16("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
             ] }),
-            /* @__PURE__ */ jsxs15("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
-              /* @__PURE__ */ jsx15("text", { fg: "gray", children: "autolearn   " }),
-              /* @__PURE__ */ jsx15(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
-              /* @__PURE__ */ jsx15("text", { fg: "white", children: ` ${meterPoints}p` }),
-              /* @__PURE__ */ jsx15("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx15(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
+            /* @__PURE__ */ jsxs16("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
+              /* @__PURE__ */ jsx16("text", { fg: "gray", children: "autolearn   " }),
+              /* @__PURE__ */ jsx16(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
+              /* @__PURE__ */ jsx16("text", { fg: "white", children: ` ${meterPoints}p` }),
+              /* @__PURE__ */ jsx16("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx16(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
             ] }),
-            /* @__PURE__ */ jsxs15("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
-              /* @__PURE__ */ jsx15("text", { fg: "gray", children: "context     " }),
-              /* @__PURE__ */ jsx15(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
-              /* @__PURE__ */ jsx15("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
+            /* @__PURE__ */ jsxs16("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
+              /* @__PURE__ */ jsx16("text", { fg: "gray", children: "context     " }),
+              /* @__PURE__ */ jsx16(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
+              /* @__PURE__ */ jsx16("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
             ] })
           ]
         }
       ),
-      /* @__PURE__ */ jsx15(ServicesPanel, { width: panelW, services, scan, showAll: true })
-    ] }) : /* @__PURE__ */ jsxs15("box", { style: { flexDirection: "row", width: panelW, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
-      /* @__PURE__ */ jsxs15("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
-        agent.todos.length ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
+      /* @__PURE__ */ jsx16(ServicesPanel, { width: panelW, services, scan, showAll: true })
+    ] }) : /* @__PURE__ */ jsxs16("box", { style: { flexDirection: "row", width: panelW, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+      /* @__PURE__ */ jsxs16("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
+        agent.todos.length ? /* @__PURE__ */ jsx16("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx16(
           TodoPanel,
           {
             todos: agent.todos,
@@ -2936,7 +3067,7 @@ function App({ version = "0.1.0" }) {
             maxVisibleRows: Math.min(agent.todos.length, 6)
           }
         ) }) : null,
-        /* @__PURE__ */ jsx15("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx15(
+        /* @__PURE__ */ jsx16("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx16(
           Transcript,
           {
             messages: agent.messages,
@@ -2946,19 +3077,19 @@ function App({ version = "0.1.0" }) {
             emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; esc stops a run."
           }
         ) }),
-        latestMcpTool ? /* @__PURE__ */ jsx15(
+        latestMcpTool ? /* @__PURE__ */ jsx16(
           GridPanel_default,
           {
             title: `MCP Output \xB7 ${String(latestMcpTool.name || "").split("__")[1] || "server"}`,
             width: mainW,
             borderColor: "magenta",
             hint: `${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} \xB7 Ctrl+\u2191/\u2193`,
-            children: /* @__PURE__ */ jsx15("box", { style: { flexDirection: "column", width: Math.max(1, mainW - 4) }, children: visibleMcpOutput.map((line, index) => {
-              return /* @__PURE__ */ jsx15("text", { fg: "white", children: String(line || " ") }, `mcp-output-${index}`);
+            children: /* @__PURE__ */ jsx16("box", { style: { flexDirection: "column", width: Math.max(1, mainW - 4) }, children: visibleMcpOutput.map((line, index) => {
+              return /* @__PURE__ */ jsx16("text", { fg: "white", children: String(line || " ") }, `mcp-output-${index}`);
             }) })
           }
         ) : null,
-        showCrushStatus ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
+        showCrushStatus ? /* @__PURE__ */ jsx16("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx16(
           CrushStatus,
           {
             width: mainW,
@@ -2967,7 +3098,7 @@ function App({ version = "0.1.0" }) {
             elapsedMs: agent.elapsedMs
           }
         ) }) : null,
-        /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
+        /* @__PURE__ */ jsx16("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx16(
           DockAd,
           {
             width: mainW,
@@ -2977,7 +3108,7 @@ function App({ version = "0.1.0" }) {
             expanded: dockExpanded
           }
         ) }),
-        approving ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
+        approving ? /* @__PURE__ */ jsx16("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx16(
           ApprovalPrompt,
           {
             width: mainW,
@@ -2985,10 +3116,20 @@ function App({ version = "0.1.0" }) {
             onAnswer: answerApproval
           }
         ) }) : null,
-        notice ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx15("text", { fg: "cyan", children: clipLine(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
-        /* @__PURE__ */ jsx15(SystemPanel, { width: mainW, meters, ctxUsed, ctxMax, host }),
-        /* @__PURE__ */ jsx15(ServicesPanel, { width: mainW, services, scan }),
-        /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx15(MenuPalette, { width: Math.min(mainW, 72), selected: menuIndex }) : /* @__PURE__ */ jsx15(
+        notice ? /* @__PURE__ */ jsx16("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx16("text", { fg: "cyan", children: clipLine(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
+        /* @__PURE__ */ jsx16(SystemPanel, { width: mainW, meters, ctxUsed, ctxMax, host }),
+        /* @__PURE__ */ jsx16(ServicesPanel, { width: mainW, services, scan }),
+        /* @__PURE__ */ jsx16("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx16(
+          CatalogPopout,
+          {
+            width: Math.min(mainW, 76),
+            height: MENU_ROWS,
+            rows: catalogRows,
+            selectable: catalogSelectable,
+            selected: menuIndex,
+            query: menuQuery
+          }
+        ) : /* @__PURE__ */ jsx16(
           Composer,
           {
             width: mainW,
@@ -2998,7 +3139,7 @@ function App({ version = "0.1.0" }) {
             focused: focus === "composer" && !approving,
             disabled: agent.busy,
             hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? "esc stop \xB7 the run is streaming" : attachment ? `\u{1F4CE} ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 /menu commands \xB7 /attach image \xB7 pgup scroll \xB7 q quit",
-            adSlot: /* @__PURE__ */ jsx15(
+            adSlot: /* @__PURE__ */ jsx16(
               DockAd,
               {
                 width: Math.max(8, mainW - 4),
@@ -3011,7 +3152,7 @@ function App({ version = "0.1.0" }) {
           }
         ) })
       ] }),
-      sideW ? /* @__PURE__ */ jsx15("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx15(
+      sideW ? /* @__PURE__ */ jsx16("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx16(
         LiveSidebar,
         {
           width: sideW,
@@ -3028,7 +3169,7 @@ function App({ version = "0.1.0" }) {
         }
       ) }) : null
     ] }),
-    /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx15(
+    /* @__PURE__ */ jsx16("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx16(
       StatusBar,
       {
         width: panelW,
@@ -3056,7 +3197,7 @@ async function start({ version = "0.1.0" } = {}) {
     hideCursor: true
   });
   root = createRoot(renderer);
-  root.render(React16.createElement(App, { version }));
+  root.render(React17.createElement(App, { version }));
   return {
     unmount() {
       if (root) {

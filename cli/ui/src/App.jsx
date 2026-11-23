@@ -9,7 +9,8 @@ import Composer from './components/Composer.jsx';
 import GridLayout from './components/GridLayout.jsx';
 import GridPanel, { Cell, Meter, Spark } from './components/GridPanel.jsx';
 import LiveSidebar from './components/LiveSidebar.jsx';
-import MenuPalette, { MENU_ITEMS } from './components/MenuPalette.jsx';
+import { MENU_ITEMS } from './components/MenuPalette.jsx';
+import CatalogPopout from './components/CatalogPopout.jsx';
 import ServicesPanel, { servicesGridRows } from './components/ServicesPanel.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import SystemPanel from './components/SystemPanel.jsx';
@@ -65,6 +66,30 @@ function writePrefs(patch) {
   } catch {
     /* preferences are a convenience; never let them break the session */
   }
+}
+
+/* The crush CLI's own model config, read only. The owner asked for "1 big
+ * catalog with all agents deepseek crush catalog combined", so the popout lists
+ * the models crush is configured with next to ours. Read at start; a missing or
+ * invalid file simply means no crush section — nothing is written back. */
+const CRUSH_CONFIG_PATHS = [
+  path.join(process.env.HOME || '/home/ghost', '.crush.json'),
+  path.join(process.env.HOME || '/home/ghost', '.config', 'crush', 'crush.json'),
+];
+function readCrushModels() {
+  for (const p of CRUSH_CONFIG_PATHS) {
+    try {
+      const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const out = [];
+      for (const [slot, m] of Object.entries(j.models || {})) {
+        if (m && m.model) out.push({ slot, model: m.model, provider: m.provider || 'ollama' });
+      }
+      if (out.length) return out;
+    } catch {
+      /* no crush config here — keep looking */
+    }
+  }
+  return [];
 }
 
 const clipLine = (s, n) => {
@@ -140,6 +165,7 @@ export default function App({ version = '0.1.0' }) {
   // start — never auto-opens; esc closes it without running anything.
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
+  const [menuQuery, setMenuQuery] = useState('');
   const [notice, setNotice] = useState(null);
   // Services on ports — the old CLI's ONLINE PORTS panel, scanned read-only
   // and refreshed every 30 s. It starts empty rather than guessing.
@@ -273,6 +299,7 @@ export default function App({ version = '0.1.0' }) {
     switch (cmd) {
       case '/menu':
         setMenuIndex(0);
+        setMenuQuery('');
         setMenuOpen(true);
         return;
       case '/attach':
@@ -350,7 +377,7 @@ export default function App({ version = '0.1.0' }) {
         showNotice('transcript cleared');
         return;
       case '/help':
-        showNotice('keys: tab focus · pgup/pgdn scroll · h handoff · d dashboard · m models · c clear · q quit · esc stop — commands: /menu /model /mcp /handoff /ports /attach /dashboard /status /clear /quit');
+        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · m models · c clear · q quit · esc stop — commands: /menu /model /mcp /handoff /ports /attach /dashboard /status /clear /quit');
         return;
       case '/quit':
       case '/exit':
@@ -361,6 +388,67 @@ export default function App({ version = '0.1.0' }) {
         showNotice(`unknown command ${cmd} — /menu lists them`);
     }
   }, [agent, models, model, mcp, status, statusErr, renderer, showNotice, services, otherPorts, scan, handoffOn]);
+
+  // ── One catalog: our agents, crush's models, the reference list, the live MCP
+  // servers and every slash command. Built from state — nothing invented, and a
+  // row only appears if its source actually exists on this machine.
+  const crushModelList = useRef(null);
+  if (!crushModelList.current) crushModelList.current = readCrushModels();
+  const catalogRows = (() => {
+    const q = menuQuery.trim().toLowerCase();
+    const match = (label, detail) => !q || `${label} ${detail}`.toLowerCase().includes(q);
+    const rows = [];
+    const pushSection = (section, items) => {
+      const hits = items.filter((it) => match(it.label, it.detail));
+      if (!hits.length) return;
+      rows.push({ kind: 'header', label: section });
+      rows.push(...hits);
+    };
+    pushSection('AGENTS', [
+      { kind: 'agent', label: `Claude · ${PRIMARY_MODEL}`, detail: 'our config · ollama', action: { model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER } },
+      { kind: 'agent', label: 'Codex (Pro)', detail: 'provider default · ladder 2', action: { model: '', provider: 'codex-cli' } },
+      ...(crushModelList.current || []).map((c) => ({
+        kind: 'agent',
+        label: `Crush ${c.slot} · ${c.model}`,
+        detail: `crush · ${c.provider}`,
+        action: { model: c.model, provider: c.provider },
+      })),
+    ]);
+    pushSection('MODELS', models.map((m) => ({
+      kind: 'model',
+      label: m.id,
+      detail: `${m.vendor}${m.context ? ` · ${Math.round(m.context / 1000)}K` : ''}`,
+      action: { model: m.id, provider: PRIMARY_PROVIDER },
+    })));
+    const servers = (mcp && Array.isArray(mcp.servers)) ? mcp.servers : [];
+    pushSection('MCP', servers.map((s) => ({
+      kind: 'mcp',
+      label: s.name,
+      detail: `${s.toolCount == null ? '?' : s.toolCount} tools${s.initialized === false ? ' · down' : ''}`,
+      action: { cmd: '/mcp' },
+    })));
+    pushSection('COMMANDS', MENU_ITEMS.map((i) => ({
+      kind: 'cmd',
+      label: `${i.cmd} ${i.label}`,
+      detail: i.detail,
+      action: { cmd: i.cmd },
+    })));
+    return rows;
+  })();
+  const catalogSelectable = catalogRows
+    .map((r, i) => (r.kind === 'header' ? -1 : i))
+    .filter((i) => i >= 0);
+
+  const applyCatalogRow = useCallback((row) => {
+    if (!row || !row.action) return;
+    if ('model' in row.action) {
+      setModel(row.action.model || '');
+      setProvider(row.action.provider || PRIMARY_PROVIDER);
+      showNotice(`model → ${row.action.model || row.label} · provider ${row.action.provider || PRIMARY_PROVIDER}`);
+      return;
+    }
+    if (row.action.cmd) runCommand(row.action.cmd);
+  }, [runCommand, showNotice]);
 
   const submit = useCallback(
     (text) => {
@@ -440,15 +528,23 @@ export default function App({ version = '0.1.0' }) {
     // The /menu popout owns the keyboard while it is open; esc closes it
     // without running anything, enter runs the highlighted command.
     if (menuOpen) {
+      // The popout owns the keyboard while it is open: type to filter, ↑↓ to
+      // move, enter to apply, esc to close without running anything.
+      const n = catalogSelectable.length || 1;
       if (key.name === 'escape') { setMenuOpen(false); return; }
-      if (key.name === 'up') { setMenuIndex((i) => (i - 1 + MENU_ITEMS.length) % MENU_ITEMS.length); return; }
-      if (key.name === 'down') { setMenuIndex((i) => (i + 1) % MENU_ITEMS.length); return; }
+      if (key.name === 'up') { setMenuIndex((i) => (i - 1 + n) % n); return; }
+      if (key.name === 'down') { setMenuIndex((i) => (i + 1) % n); return; }
+      if (key.name === 'backspace') { setMenuQuery((q) => q.slice(0, -1)); setMenuIndex(0); return; }
       if (key.name === 'return') {
-        const item = MENU_ITEMS[menuIndex] || MENU_ITEMS[0];
+        const row = catalogRows[catalogSelectable[Math.min(menuIndex, catalogSelectable.length - 1)]];
         setMenuOpen(false);
-        runCommand(item.cmd);
+        setMenuQuery('');
+        applyCatalogRow(row);
         return;
       }
+      if (key.ctrl || key.meta) return;
+      const ch = key.name === 'space' ? ' ' : (key.name && key.name.length === 1 ? key.name : '');
+      if (ch) { setMenuQuery((q) => q + ch); setMenuIndex(0); }
       return;
     }
 
@@ -500,6 +596,13 @@ export default function App({ version = '0.1.0' }) {
     // shortcut layer below must stay out of the way.
     if (focus === 'composer' && !key.ctrl && !key.meta) return;
 
+    if (key.ctrl && key.name === 'p') {
+      // The popout's shortcut, the way crush opens its palette from anywhere.
+      setMenuQuery('');
+      setMenuIndex(0);
+      setMenuOpen(true);
+      return;
+    }
     if (key.ctrl && key.name === 'o') {
       setDockExpanded((v) => !v);
       return;
@@ -593,7 +696,9 @@ export default function App({ version = '0.1.0' }) {
   const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
   // The /menu popout takes the composer's slot, so its height is budgeted in
   // the same place: border 2 + header 1 + one row per command + hint 1.
-  const MENU_ROWS = 2 + 1 + MENU_ITEMS.length + 1;
+  // The catalog popout: bordered, title + filter + list + footer. It windows
+  // its own rows, so it is capped by the terminal rather than by catalog size.
+  const MENU_ROWS = Math.max(10, Math.min(26, (rows || 30) - 12));
   const composerRows = menuOpen ? MENU_ROWS : 5;
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
@@ -817,7 +922,14 @@ export default function App({ version = '0.1.0' }) {
 
             <box style={{ flexShrink: 0 }}>
               {menuOpen ? (
-                <MenuPalette width={Math.min(mainW, 72)} selected={menuIndex} />
+                <CatalogPopout
+                  width={Math.min(mainW, 76)}
+                  height={MENU_ROWS}
+                  rows={catalogRows}
+                  selectable={catalogSelectable}
+                  selected={menuIndex}
+                  query={menuQuery}
+                />
               ) : (
                 <Composer
                   width={mainW}
