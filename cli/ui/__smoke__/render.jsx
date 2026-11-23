@@ -16,6 +16,44 @@ import App from '../src/App.jsx';
 
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The decode splash is a start screen, not part of what these frames assert:
+// with the owner's prefs it lasts ~1.6 s and would swallow the first keystrokes.
+// App honours this flag once, for this process only.
+process.env.HAKSTER_NO_INTRO = '1';
+
+/* A turn the way a real agent run looks on a small screen: reasoning, a
+ * couple of spoken lines, then one shell call whose result is 40 long lines.
+ * The transcript must still show what the agent SAID — that is the owner's
+ * 2026-11-23 report ("only shell call tools i see"). */
+const BIG_RESULT = Array.from(
+  { length: 40 },
+  (_, i) => `webpack asset bundle-${i + 1}.js 4.2 MiB [emitted] asset annotation that is far longer than the column width and would wrap without clipping`,
+);
+const BIG_TURN = {
+  holds: false,
+  pre: [
+    { type: 'phase', phase: 'ACT', turn: 1 },
+    { type: 'thinking_start' },
+    { type: 'thinking', content: 'Checking the bundle sizes first.' },
+    { type: 'thinking_end' },
+    { type: 'delta', content: 'The bundle is too big — splitting the vendor chunk now.' },
+    {
+      type: 'tool_call_start',
+      tool_call_id: 'b1',
+      tool_name: 'exec_shell',
+      tool_args: { command: 'npm run build' },
+    },
+    {
+      type: 'tool_call_result',
+      tool_call_id: 'b1',
+      tool_name: 'exec_shell',
+      tool_result: BIG_RESULT.join('\n'),
+    },
+    { type: 'delta', content: 'Answer: the build passes after the split.' },
+    { type: 'done', model: 'glm-5.2:cloud', provider: 'ollama', inputTokens: 200, outputTokens: 40 },
+  ],
+};
+
 const TAB = '\t';
 const ENTER = '\r';
 const ESC = '\u001b';
@@ -104,6 +142,7 @@ export async function run({ adsPort }) {
 
   const confirmCalls = [];
   const runBatch = [];
+  let bigMode = false;
   let runIndex = 0;
   let heldController = null;
   let heldRun = null;
@@ -119,6 +158,24 @@ export async function run({ adsPort }) {
           model: 'glm-5.2:cloud',
           trust: 3,
           tokens: 41_200,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    // The Squad view lists the server's own MCP peers; mock one live, one
+    // lazy and one non-agent server so both the filter and the ordering show.
+    if (u.includes('/api/agent/mcp-status')) {
+      return new Response(
+        JSON.stringify({
+          servers: [
+            { name: 'filesystem', initialized: true, lazy: false, toolCount: 14, tools: ['read_file'] },
+            { name: 'subagents', initialized: true, lazy: false, toolCount: 2, tools: ['dispatch_subagent', 'list_subagents'] },
+            { name: 'codex', initialized: false, lazy: true, toolCount: 1, tools: ['codex_readonly'] },
+          ],
+          totalMcpTools: 17,
+          totalTools: 9,
+          builtinTools: 9,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
@@ -143,6 +200,15 @@ export async function run({ adsPort }) {
     }
 
     if (u.includes('/api/agent/run')) {
+      if (bigMode) {
+        const stream = new ReadableStream({
+          start(controller) {
+            for (const f of BIG_TURN.pre) controller.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`));
+            controller.close();
+          },
+        });
+        return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }
       const turn = TURNS[Math.min(runIndex, TURNS.length - 1)];
       runIndex += 1;
       const batch = { turn, confirms: [] };
@@ -210,10 +276,21 @@ export async function run({ adsPort }) {
   await settle(200);
   await setup.flush();
   const dashFrame = frame();
-  flushSync(() => setup.mockInput.pressKey('d'));
-  await settle(200);
+  flushSync(() => setup.mockInput.pressKey('s')); // Lab: live scripts
+  await settle(250);
   await setup.flush();
-  flushSync(() => setup.mockInput.pressKey('o', { ctrl: true }));
+  const scriptsFrame = frame();
+  flushSync(() => setup.mockInput.pressEscape());
+  await settle(120);
+  await setup.flush();
+  flushSync(() => setup.mockInput.pressKey('g')); // Lab: squad
+  await settle(250);
+  await setup.flush();
+  const squadFrame = frame();
+  flushSync(() => setup.mockInput.pressEscape()); // back to the chat…
+  await settle(120);
+  await setup.flush();
+  flushSync(() => setup.mockInput.pressKey('o', { ctrl: true })); // …where the dock lives
   await settle(100);
   await setup.flush();
   const dockFrame = frame();
@@ -288,6 +365,30 @@ export async function run({ adsPort }) {
   setup.renderer.destroy();
   await settle(50);
 
+  // ── 6. A small screen with a huge shell result ─────────────────────────
+  // The owner's report: "its not showing agents output what he says something
+  // only shell call tools i see". 120x30 is a realistic split-terminal size,
+  // and this turn dumps 40 long lines from one command — the layout must keep
+  // the agent's own words on screen and cap what the dump can cost.
+  bigMode = true;
+  const small = await createTestRenderer({ width: 120, height: 30 });
+  const smallRoot = createRoot(small.renderer);
+  flushSync(() => smallRoot.render(React.createElement(App, { version: 'smoke' })));
+  await small.flush();
+  await settle(500);
+  flushSync(() => {
+    for (const ch of 'build it') small.mockInput.pressKey(ch);
+  });
+  await small.flush();
+  flushSync(() => small.mockInput.pressEnter());
+  await settle(900);
+  await small.flush();
+  const bigFrame = small.captureCharFrame();
+  smallRoot.unmount();
+  small.renderer.destroy();
+  bigMode = false;
+  await settle(50);
+
   const c0 = confirmCalls[0] || {};
   const c1 = confirmCalls[1] || {};
   const cPassword = confirmCalls[2] || {};
@@ -296,7 +397,9 @@ export async function run({ adsPort }) {
     // ── baseline chrome ──
     ['header renders', /haksterAi/.test(idleFrame)],
     ['status bar renders', /ads on/.test(idleFrame)],
-    ['live ad rail fills from the real ad service', /your own agent harness/.test(idleFrame)],
+    // The creative is laid out across the rail's width, so its copy wraps;
+    // this asserts the real ad service filled the rail, not one exact line.
+    ['live ad rail fills from the real ad service', /haksterAi — your own/.test(idleFrame)],
     ['composer shows the placeholder', /describe a task/.test(idleFrame)],
 
     // ── plain chat turn ──
@@ -307,6 +410,33 @@ export async function run({ adsPort }) {
     // Anchored to the keystroke: the dashboard panel titles must appear in the
     // frame captured right after the `d` keypress.
     ['tab then d reaches the dashboard view', /Session/.test(dashFrame) && /Agent/.test(dashFrame) && /Context/.test(dashFrame)],
+    // ── the Lab views ──
+    // Scripts discovers real files, so this asserts the OMP-snapshot window and
+    // both panes are drawn — at 120 cols the compare view is two-up.
+    [
+      's opens the live-scripts snapshot window',
+      /Live scripts/.test(scriptsFrame) && /OMP SNAPSHOT/.test(scriptsFrame) && /OURS/.test(scriptsFrame) && /LIVE/.test(scriptsFrame),
+    ],
+    // The status bar is fixed chrome: if a Lab view overran its budget it would
+    // fall off the bottom of the 40-row frame.
+    ['the scripts view fits the screen', /ads on/.test(scriptsFrame)],
+    [
+      'g lists the server\'s own agent peers, lazy ones marked',
+      /Squad/.test(squadFrame) && /subagents/.test(squadFrame) && /1\/2 live · 1 lazy/.test(squadFrame) && /codex/.test(squadFrame),
+    ],
+    ['the squad view fits the screen', /ads on/.test(squadFrame)],
+
+    // ── a 40-line shell dump on a 30-row screen ──
+    // What the agent said, not just what the shell printed.
+    ['the agent\'s spoken line stays on screen', /The bundle is too big/.test(bigFrame)],
+    ['its closing answer stays on screen', /Answer: the build passes after the split/.test(bigFrame)],
+    // A compact turn keeps one reasoning line instead of hiding it.
+    ['reasoning is not dropped when the turn is dense', /Checking the bundle sizes first/.test(bigFrame)],
+    // The dump is capped and says where the rest is.
+    ['the shell result is capped, with a pointer to Output', /more lines · ▶ Output/.test(bigFrame)],
+    ['the cap is real: line 40 of the dump is not drawn', !/bundle-40\.js/.test(bigFrame)],
+    ['the small screen still keeps its status bar', /ads on/.test(bigFrame)],
+
     // The caret is escaped: unescaped it is a start-of-string anchor, and the
     // check then silently asks whether the frame BEGINS with "O collapse".
     ['ctrl+o expands the dock', /enter open/.test(dockFrame) && /\^O collapse/.test(dockFrame)],
@@ -365,6 +495,24 @@ export async function run({ adsPort }) {
 
 
   let failed = 0;
+  if (process.env.HAKSTER_SMOKE_DUMP) {
+    // Full frames, for diagnosing a layout failure (e.g. a panel one row too
+    // tall, which clips the status bar). Never printed unless asked for.
+    console.log('──── FULL IDLE FRAME ────');
+    console.log(idleFrame);
+    console.log('──── FULL CHAT FRAME ────');
+    console.log(chatFrame);
+    console.log('──── FULL DASH FRAME ────');
+    console.log(dashFrame);
+    console.log('──── FULL SCRIPTS FRAME ────');
+    console.log(scriptsFrame);
+    console.log('──── FULL SQUAD FRAME ────');
+    console.log(squadFrame);
+    console.log('──── FULL SUDO FRAME ────');
+    console.log(sudoFrame);
+    console.log('──── FULL BIG-OUTPUT FRAME ────');
+    console.log(bigFrame);
+  }
   console.log('──────── CHECKS ────────');
   for (const [name, pass, extra] of checks) {
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${!pass && extra ? ` — ${extra}` : ''}`);

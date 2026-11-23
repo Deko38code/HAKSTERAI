@@ -1,0 +1,166 @@
+/* make-hero-art.mjs — turn the hero artwork into a small pixel grid the CLI can
+ * draw in ANY truecolor terminal.
+ *
+ * Owner, 2026-11-23: "i want that logo in cli" (the hacker-desk HaksterAI
+ * artwork). That PNG already ships as the Kitty-graphics splash image, but a
+ * plain terminal paints nothing — so the start screen shows the real artwork
+ * as half-block colour cells instead. This script decodes the PNG once at
+ * build time and writes assets/haksterai-hero.art.json: a 72x54 RGB grid as
+ * base64 (15 KB), which the splash downsamples to whatever size it needs.
+ *
+ * Run: node scripts/make-hero-art.mjs   (re-run only if the artwork changes)
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SRC = path.join(ROOT, 'assets', 'haksterai-hero.png');
+const OUT = path.join(ROOT, 'assets', 'haksterai-hero.art.json');
+const GRID_W = 80; // cells across
+const GRID_H = 30; // cells down — each cell holds two pixel rows (▀)
+
+function decodePng(buf) {
+  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error('not a png');
+  let pos = 8;
+  let ihdr = null;
+  let palette = null;
+  const idat = [];
+  while (pos < buf.length) {
+    const len = buf.readUInt32BE(pos);
+    const type = buf.toString('ascii', pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + len);
+    if (type === 'IHDR') {
+      ihdr = {
+        width: data.readUInt32BE(0),
+        height: data.readUInt32BE(4),
+        bitDepth: data[8],
+        colorType: data[9],
+        compression: data[10],
+        filter: data[11],
+        interlace: data[12],
+      };
+    } else if (type === 'PLTE') palette = Buffer.from(data);
+    else if (type === 'IDAT') idat.push(Buffer.from(data));
+    else if (type === 'IEND') break;
+    pos += 12 + len;
+  }
+  if (!ihdr) throw new Error('no IHDR');
+  if (ihdr.bitDepth !== 8 || ihdr.interlace !== 0) throw new Error(`unsupported png (depth ${ihdr.bitDepth}, interlace ${ihdr.interlace})`);
+  const ch = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ihdr.colorType];
+  if (!ch) throw new Error(`unsupported colour type ${ihdr.colorType}`);
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = ihdr.width * ch;
+  const out = Buffer.alloc(stride * ihdr.height);
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < ihdr.height; y += 1) {
+    const filter = raw[y * (stride + 1)];
+    const line = raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride);
+    const cur = Buffer.alloc(stride);
+    for (let x = 0; x < stride; x += 1) {
+      const a = x >= ch ? cur[x - ch] : 0;
+      const b = prev[x];
+      const c = x >= ch ? prev[x - ch] : 0;
+      let v = line[x];
+      if (filter === 1) v += a;
+      else if (filter === 2) v += b;
+      else if (filter === 3) v += (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      cur[x] = v & 0xff;
+    }
+    cur.copy(out, y * stride);
+    prev = cur;
+  }
+  // Expand to RGB.
+  const rgb = Buffer.alloc(ihdr.width * ihdr.height * 3);
+  for (let i = 0; i < ihdr.width * ihdr.height; i += 1) {
+    let r;
+    let g;
+    let b;
+    if (ihdr.colorType === 3) {
+      const idx = out[i] * 3;
+      r = palette[idx];
+      g = palette[idx + 1];
+      b = palette[idx + 2];
+    } else if (ihdr.colorType === 0 || ihdr.colorType === 4) {
+      r = g = b = out[i * ch];
+    } else {
+      r = out[i * ch];
+      g = out[i * ch + 1];
+      b = out[i * ch + 2];
+    }
+    rgb[i * 3] = r;
+    rgb[i * 3 + 1] = g;
+    rgb[i * 3 + 2] = b;
+  }
+  return { width: ihdr.width, height: ihdr.height, rgb };
+}
+
+const src = decodePng(fs.readFileSync(SRC));
+// Box-average the artwork into GRID_W x (GRID_H * 2) pixels.
+const pxW = GRID_W;
+const pxH = GRID_H * 2;
+const grid = Buffer.alloc(pxW * pxH * 3);
+for (let gy = 0; gy < pxH; gy += 1) {
+  const y0 = Math.floor((gy * src.height) / pxH);
+  const y1 = Math.max(y0 + 1, Math.floor(((gy + 1) * src.height) / pxH));
+  for (let gx = 0; gx < pxW; gx += 1) {
+    const x0 = Math.floor((gx * src.width) / pxW);
+    const x1 = Math.max(x0 + 1, Math.floor(((gx + 1) * src.width) / pxW));
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let n = 0;
+    for (let y = y0; y < y1; y += 1) {
+      for (let x = x0; x < x1; x += 1) {
+        const o = (y * src.width + x) * 3;
+        r += src.rgb[o];
+        g += src.rgb[o + 1];
+        b += src.rgb[o + 2];
+        n += 1;
+      }
+    }
+    const o = (gy * pxW + gx) * 3;
+    grid[o] = Math.round(r / n);
+    grid[o + 1] = Math.round(g / n);
+    grid[o + 2] = Math.round(b / n);
+  }
+}
+
+const out = {
+  generatedFrom: 'assets/haksterai-hero.png',
+  width: pxW,
+  height: pxH,
+  note: 'RGB pixels, row-major, base64. Draw two pixel rows per cell with the upper half block (fg = top, bg = bottom). Values are display-corrected: gamma lifted and scaled so the art reads on a dark terminal instead of averaging into mud.',
+  rgbBase64: displayCorrect(grid).toString('base64'),
+};
+fs.writeFileSync(OUT, `${JSON.stringify(out)}\n`);
+console.log(`wrote ${path.relative(ROOT, OUT)} — ${pxW}x${pxH} px, ${fs.statSync(OUT).size} bytes`);
+
+/* Box-averaging 12x12 source pixels flattens the glow into near-black. Lift the
+ * midtones (gamma 0.62) and scale the 99th-percentile luminance to ~236 so the
+ * half-block art keeps the punch the PNG has on screen. */
+function displayCorrect(buf) {
+  const n = pxW * pxH;
+  const lum = new Array(n);
+  for (let i = 0; i < n; i += 1) {
+    lum[i] = 0.2126 * buf[i * 3] + 0.7152 * buf[i * 3 + 1] + 0.0722 * buf[i * 3 + 2];
+  }
+  const sorted = [...lum].sort((a, b) => a - b);
+  const p99 = sorted[Math.min(n - 1, Math.floor(n * 0.99))] || 1;
+  const scale = p99 > 0 ? 236 / Math.pow(p99 / 255, 0.62) : 1;
+  const outBuf = Buffer.alloc(buf.length);
+  for (let i = 0; i < n; i += 1) {
+    for (let c = 0; c < 3; c += 1) {
+      const v = buf[i * 3 + c] / 255;
+      outBuf[i * 3 + c] = Math.max(0, Math.min(255, Math.round(255 * Math.pow(v, 0.62) * (scale / 255))));
+    }
+  }
+  return outBuf;
+}

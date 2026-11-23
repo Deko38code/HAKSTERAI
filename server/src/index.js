@@ -9897,6 +9897,14 @@ app.get('/api/auth/me', (req, res) => {
       referralCode,
       tokenBalance: user.token_balance || 0,
     },
+    // The CLI's own answer: is this account allowed to run the CLI, and where
+    // is the line? Same derivation the request guard uses (PRICING_CATALOG),
+    // so `hakster whoami` can never disagree with the 403 the API sends.
+    cli: {
+      included: userIncludesCli(user),
+      minPriceCents: CLI_MIN_PRICE_CENTS,
+      upgrade: '/plans/',
+    },
   });
 });
 
@@ -10594,7 +10602,7 @@ function usageResetWindows(user) {
 }
 
 // GET /api/usage — returns current usage stats for the authenticated user
-app.get('/api/usage', (req, res) => {
+app.get('/api/usage', async (req, res) => {
   const user = getUserByApiKey(req);
   if (!user) return res.status(401).json({ error: 'Invalid or missing API key' });
   const db = getDb();
@@ -10643,10 +10651,42 @@ app.get('/api/usage', (req, res) => {
         WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 10`
     ).all(user.id),
   };
+  // Owner accounts only: what this account's measured tokens are worth at the
+  // locked rate card, so the owner's own CLI shows the same billing number the
+  // admin dash does. It is added to the response object by a fixed branch, never
+  // by filtering an owner payload (§25.2), and a client's response has no
+  // such key at all. Null when the live card cannot be read — never a figure
+  // from a rate invented in this project (§26.1). It is a meter, not an
+  // invoice: nothing is charged and no plan changes (§24.4).
+  let ownerMeter = null;
+  if (isOwnerUser(user)) {
+    try {
+      const rates = await readLiveRatesCached();
+      const meter = computeUserMeter(db, rates, Date.now(), { userId: user.id });
+      const acct = meter && meter.accounts && meter.accounts[0] ? meter.accounts[0] : null;
+      if (acct) {
+        ownerMeter = {
+          rateInPerMTok: meter.rateInPerMTok,
+          rateOutPerMTok: meter.rateOutPerMTok,
+          checkedAt: meter.checkedAt,
+          source: meter.source,
+          live: meter.live,
+          windowDays: meter.windowDays,
+          planUsdMonth: acct.planUsdMonth,
+          monthInTokens: acct.monthInTokens,
+          monthOutTokens: acct.monthOutTokens,
+          monthMeterUsd: acct.monthMeterUsd,
+          meterUsd: acct.meterUsd,
+          shareOfPlanPct: acct.shareOfPlanPct,
+          overageUsd: acct.overageUsd,
+          note: meter.note,
+        };
+      }
+    } catch { ownerMeter = null; }
+  }
   res.json({
     plan: user.plan,
-    used: user.usage_count || 0,
-    limit: Number.isFinite(effectiveCallLimit(user)) ? effectiveCallLimit(user) : -1, // -1 = unlimited
+    used: user.usage_count || 0,    limit: Number.isFinite(effectiveCallLimit(user)) ? effectiveCallLimit(user) : -1, // -1 = unlimited
     remaining: Number.isFinite(effectiveCallLimit(user)) ? Math.max(0, effectiveCallLimit(user) - (user.usage_count || 0)) : -1,
     webResearchUsed: isUnlimitedWebResearchUser(user) ? 0 : getWebResearchUses(user),
     webResearchRemaining: webResearchRemainingFor(user),
@@ -10667,6 +10707,7 @@ app.get('/api/usage', (req, res) => {
     referralCode,
     limitEnabled: USAGE_LIMIT_ENABLED,
     resetAt: user.usage_reset_at || null,
+    ...(ownerMeter ? { ownerMeter } : {}),
   });
 });
 
@@ -10683,6 +10724,29 @@ const PROFIT_PHANTOM_URL = process.env.PROFIT_PHANTOM_URL || 'https://phantomide
 // always to be live from dash to dash". Junkalot recomputes its locked rate card on every call;
 // this server fetches that, live and uncached, and never writes anything back into Junkalot.
 const PROFIT_JUNKALOT_RATES_URL = process.env.PROFIT_JUNKALOT_RATES_URL || 'https://junkalot.co/api/internal/profit-rates';
+// Owner (2026-11-23): "1 panel at junkalot 1 panel in admin halsterai" / "wired
+// together" / "from us to her". Our panel here and hers on junkalot.co are two ends
+// of one channel that junkalot owns: we send through its authenticated bridge and
+// pull her replies back from the same endpoint. Nothing is written into junkalot
+// from a file on this box, and the key is read over SSH and held in memory only
+// (CLAUDE.md 16, 23, 31). The channel is owner-only: her admin never shows our side.
+const PANEL_BRIDGE_KEY_FILE = '/home/ghost694/.config/junkalot-panel-bridge.key';
+const PANEL_BRIDGE_URL = process.env.PANEL_BRIDGE_URL || 'https://junkalot.co/api/internal/panel-bridge';
+let _panelBridgeKey = { at: 0, key: '' };
+function readPanelBridgeKey() {
+  if (_panelBridgeKey.key && Date.now() - _panelBridgeKey.at < 300000) return Promise.resolve(_panelBridgeKey.key);
+  const { execFile } = require('child_process');
+  return new Promise((resolve, reject) => {
+    execFile('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=accept-new', process.env.PEER_SSH_ALIAS || 'parrot', 'cat ' + PANEL_BRIDGE_KEY_FILE], { timeout: 9000 }, (err, stdout) => {
+      if (err) return reject(err);
+      const key = String(stdout || '').trim();
+      if (key.length < 48) return reject(new Error('panel bridge key unavailable'));
+      _panelBridgeKey = { at: Date.now(), key };
+      return resolve(key);
+    });
+  });
+}
+
 let _profitBridgeKey = { at: 0, key: '' };
 function readProfitBridgeKey() {
   if (_profitBridgeKey.key && Date.now() - _profitBridgeKey.at < 300000) return Promise.resolve(_profitBridgeKey.key);
@@ -10841,6 +10905,174 @@ function computeJunkalotValue(text, terms, now) {
   };
 }
 
+// ── Every account valued at the locked rate — owner only ────────────────────
+// Owner (2026-11-23): "need all wired at our profit margin rates for billing
+// users etc" / "to admin". Each account's measured tokens (user_token_usage,
+// the same ledger every usage page reads) are valued at the rate card Junkalot
+// serves. The rate is NEVER defined, rounded or overridden here (§26.1): with
+// no live card there is no figure, and the card's own checkedAt travels with
+// the number so a stale one can be told apart. It is a meter, not an invoice
+// (§24.4) — nothing is charged and no plan changes — and it is owner-only:
+// no client response or CLI usage page carries it (§25).
+const round4 = (n) => Math.round(n * 10000) / 10000;
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/** The monthly list price of a plan, from the pricing catalog (0 when the plan
+ *  is one-time packs only or unknown — a pack is not a monthly plan). */
+function planMonthlyPriceCents(planId) {
+  const plan = PRICING_CATALOG.find((p) => p.id === String(planId || '').toLowerCase());
+  if (!plan) return 0;
+  const monthly = (plan.prices || []).filter((p) => String(p.billingCycle || '') === 'monthly');
+  if (!monthly.length) return 0;
+  return Math.max(0, Number(monthly[0].amount) || 0);
+}
+
+let _userMeterRates = { at: 0, rates: null };
+/** The locked card, live and uncached beyond a short share: billing figures
+ *  must not be computed from a rate nobody can point at. */
+async function readLiveRatesCached(ttlMs = 60000) {
+  if (_userMeterRates.rates && Date.now() - _userMeterRates.at < ttlMs) return _userMeterRates.rates;
+  try {
+    const key = await readProfitBridgeKey();
+    const upstream = await fetch(PROFIT_JUNKALOT_RATES_URL, {
+      headers: { 'x-junkalot-payoff-bridge': key, accept: 'application/json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(9000),
+    });
+    if (upstream.ok) {
+      const data = await upstream.json().catch(() => null);
+      if (data?.ok === true && data.profit && typeof data.profit === 'object') {
+        const rates = Object.assign({}, data.profit, {
+          checkedAt: data.checkedAt || data.profit.checkedAt || null,
+          source: data.source || 'junkalot.co',
+          live: data.live === true,
+        });
+        _userMeterRates = { at: Date.now(), rates };
+        return rates;
+      }
+    }
+  } catch { /* fall through to whatever is still warm */ }
+  return null;
+}
+
+/**
+ * Value every account's measured tokens at the locked rate.
+ * `opts.userId` narrows it to one account (the owner's own CLI usage page).
+ * Returns null when no live card is available — never a figure from a rate
+ * invented here.
+ */
+function computeUserMeter(db, rates, now = Date.now(), opts = {}) {
+  const rateIn = Number(rates && rates.rateInPerMTok);
+  const rateOut = Number(rates && rates.rateOutPerMTok);
+  if (!(rateIn > 0) || !(rateOut > 0)) return null;
+  const since30 = Math.floor(now / 1000) - 30 * 86400;
+  // users.id is TEXT (owner accounts are numeric-looking strings like "1234",
+  // clients are uuids), so the id is bound exactly as given — coercing it with
+  // Number() made `WHERE u.id = ?` never match and silently hid the owner's
+  // own meter (found 2026-11-23).
+  const only = opts.userId != null ? opts.userId : null;
+  const rows = db.prepare(`
+    SELECT u.id, u.username, u.email, u.plan, u.role, u.status,
+           COUNT(t.id) AS calls,
+           COALESCE(SUM(t.input_tokens), 0) AS inTokens,
+           COALESCE(SUM(t.output_tokens), 0) AS outTokens,
+           COALESCE(SUM(CASE WHEN t.created_at >= ? THEN 1 ELSE 0 END), 0) AS monthCalls,
+           COALESCE(SUM(CASE WHEN t.created_at >= ? THEN t.input_tokens ELSE 0 END), 0) AS monthIn,
+           COALESCE(SUM(CASE WHEN t.created_at >= ? THEN t.output_tokens ELSE 0 END), 0) AS monthOut
+      FROM users u LEFT JOIN user_token_usage t ON t.user_id = u.id
+     ${only != null ? 'WHERE u.id = ?' : ''}
+     GROUP BY u.id
+     ORDER BY (monthIn + monthOut) DESC, u.id`
+  ).all(...(only != null ? [since30, since30, since30, only] : [since30, since30, since30]));
+  const value = (i, o) => round4((i / 1e6) * rateIn + (o / 1e6) * rateOut);
+  const accounts = rows.map((r) => {
+    const planUsdMonth = planMonthlyPriceCents(r.plan) / 100;
+    const monthMeterUsd = round2(value(Number(r.monthIn) || 0, Number(r.monthOut) || 0));
+    return {
+      id: r.id,
+      username: r.username,
+      email: r.email || '',
+      plan: r.plan,
+      role: r.role || '',
+      status: r.status || '',
+      planUsdMonth,
+      calls: Number(r.calls) || 0,
+      inTokens: Number(r.inTokens) || 0,
+      outTokens: Number(r.outTokens) || 0,
+      meterUsd: round2(value(Number(r.inTokens) || 0, Number(r.outTokens) || 0)),
+      monthCalls: Number(r.monthCalls) || 0,
+      monthInTokens: Number(r.monthIn) || 0,
+      monthOutTokens: Number(r.monthOut) || 0,
+      monthMeterUsd,
+      shareOfPlanPct: planUsdMonth > 0 ? Math.round((monthMeterUsd / planUsdMonth) * 10000) / 100 : null,
+      overageUsd: planUsdMonth > 0 ? round2(Math.max(0, monthMeterUsd - planUsdMonth)) : 0,
+    };
+  }).filter((a) => only != null || a.calls > 0 || a.planUsdMonth > 0);
+  return {
+    source: 'junkalot.co',
+    live: rates.live === true,
+    checkedAt: rates.checkedAt || null,
+    rateBasis: rates.rateBasis || null,
+    rateInPerMTok: rateIn,
+    rateOutPerMTok: rateOut,
+    planUsdMonth: Number(rates.planUsdMonth) || null,
+    allowanceInTokensPerMonth: Number(rates.allowanceInTokensPerMonth) || null,
+    allowanceOutTokensPerMonth: Number(rates.allowanceOutTokensPerMonth) || null,
+    windowDays: 30,
+    totalMonthMeterUsd: round2(accounts.reduce((s, a) => s + a.monthMeterUsd, 0)),
+    totalMeterUsd: round2(accounts.reduce((s, a) => s + a.meterUsd, 0)),
+    accounts: accounts.slice(0, 60),
+    accountCount: accounts.length,
+    note: 'Meter, not an invoice. Each account\'s measured tokens valued at the locked rate card read live from junkalot.co; nothing here charges an account, adds a seat or changes a plan.',
+  };
+}
+
+// Owner (2026-11-23): the owner end of the notice bridge. GET returns the whole
+// thread (both directions) from junkalot's bridge; POST sends her a message that
+// appears live in her own panel on its next refresh. Owner-only, read-through: this
+// server never writes into junkalot's project files (CLAUDE.md 16, 25).
+app.get('/api/admin/panel-bridge', requireOwner, async (req, res) => {
+  try {
+    const key = await readPanelBridgeKey();
+    const upstream = await fetch(PANEL_BRIDGE_URL + '?dir=all', {
+      headers: { 'x-junkalot-panel-bridge': key, accept: 'application/json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(9000),
+    });
+    if (!upstream.ok) return res.status(502).json({ ok: false, error: 'Junkalot bridge answered ' + upstream.status });
+    const data = await upstream.json().catch(() => ({}));
+    return res.json({
+      ok: true,
+      source: 'junkalot.co',
+      at: data.at || new Date().toISOString(),
+      messages: Array.isArray(data.messages) ? data.messages : [],
+    });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: 'Junkalot bridge unavailable' });
+  }
+});
+
+app.post('/api/admin/panel-bridge', requireOwner, async (req, res) => {
+  const body = String((req.body && req.body.body) || '').trim();
+  const title = String((req.body && req.body.title) || '').trim();
+  if (!body) return res.status(400).json({ ok: false, error: 'A message needs a body' });
+  try {
+    const key = await readPanelBridgeKey();
+    const upstream = await fetch(PANEL_BRIDGE_URL, {
+      method: 'POST',
+      headers: { 'x-junkalot-panel-bridge': key, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'send', title, body }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(9000),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok || !data.ok) return res.status(502).json({ ok: false, error: data.error || ('Junkalot bridge answered ' + upstream.status) });
+    return res.json({ ok: true, message: data.message });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: 'Junkalot bridge unavailable' });
+  }
+});
+
 app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
   try {
     const db = getDb();
@@ -10924,6 +11156,11 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
       junkalotValue = computeJunkalotValue(usageText, terms, new Date());
     } catch { junkalotValue = null; }
 
+    // Every HaksterAI account valued at that same locked card. Null when the
+    // card is unavailable: a billing figure is never computed from a rate that
+    // did not come from Junkalot (§26.1).
+    const userMeter = computeUserMeter(db, rates, Date.now());
+
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     return res.json({
@@ -10964,6 +11201,7 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
       phantom,
       junkalot,
       junkalotValue,
+      userMeter,
       bridge: bridgeState,
       note: 'Usage is recorded, never billed. Nothing here charges an account or changes a plan, a model or a route.',
     });
@@ -11864,6 +12102,9 @@ const ADMIN_PAGES = {
   // 2026-11-21 (owner): "live profit wheels grids charts" — owner-only accounting
   // page. Hidden behind the same owner gate as every other admin page.
   profit: 'admin/profit/index.html',
+  // 2026-11-23 (owner): "1 panel at junkalot 1 panel in admin halsterai" — the
+  // owner end of the notice bridge, owner-only like every page in this map.
+  panel: 'admin/panel/index.html',
 };
 app.get('/api/admin/page/:page', requireOwner, (req, res) => {
   const page = String(req.params.page || '').toLowerCase();
@@ -12081,6 +12322,179 @@ if (fs.existsSync(distPath)) {
     tar.stdout.pipe(res);
     tar.on('close', (code) => { if (code !== 0 && !res.headersSent) res.status(500).end('package failed'); });
   });
+
+// ── CLI sign-in: the magic link, verified in the browser ────────────────────
+// Owner 2026-11-23: "we need the auth flow for the login link magic link url
+// browser verification to hakster cli". The CLI asks for a device code, shows
+// the operator a URL, and the operator approves it in the browser where they
+// are already signed in; only then does the CLI receive the account's own API
+// key, once. Raw device codes are never stored — only their SHA-256 — and the
+// key never appears in a URL, a log line or argv (§9, §23).
+const cliDeviceCodes = new Map(); // sha256(deviceCode) -> record
+const CLI_DEVICE_TTL_MS = 15 * 60 * 1000;
+const cliDeviceHash = (code) => crypto.createHash('sha256').update(String(code)).digest('hex');
+const sweepCliDeviceCodes = () => {
+  const now = Date.now();
+  for (const [k, v] of cliDeviceCodes) if (v.expiresAt <= now || v.usedAt) cliDeviceCodes.delete(k);
+};
+const cliUserCode = () => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += alphabet[crypto.randomInt(alphabet.length)];
+  return `${out.slice(0, 4)}-${out.slice(4)}`;
+};
+const cliOrigin = (req) => ((req.headers['x-forwarded-proto'] || req.protocol || 'https') + '://' + (req.get('host') || 'haksterai.com')).replace(/\/+$/, '');
+
+app.post('/api/cli/device/start', (req, res) => {
+  sweepCliDeviceCodes();
+  const deviceCode = crypto.randomBytes(32).toString('base64url');
+  const userCode = cliUserCode();
+  cliDeviceCodes.set(cliDeviceHash(deviceCode), {
+    userCode,
+    client: String(req.headers['user-agent'] || '').slice(0, 160),
+    createdAt: Date.now(),
+    expiresAt: Date.now() + CLI_DEVICE_TTL_MS,
+    status: 'pending',
+    userId: null,
+    usedAt: null,
+  });
+  res.set('cache-control', 'no-store');
+  res.json({
+    deviceCode,
+    userCode,
+    expiresInSeconds: Math.round(CLI_DEVICE_TTL_MS / 1000),
+    intervalSeconds: 2,
+    verificationUrl: `${cliOrigin(req)}/cli/authorize?user_code=${encodeURIComponent(userCode)}`,
+  });
+});
+
+// The browser's answer. Requires a signed-in account: the api key the site
+// already stores is the credential, exactly as every other write uses it.
+app.post('/api/cli/device/approve', (req, res) => {
+  const user = getUserByApiKey(req);
+  if (!user) return res.status(401).json({ error: 'Sign in at haksterai.com first, then open the link again.' });
+  const userCode = String(req.body?.userCode || '').trim().toUpperCase();
+  const approved = req.body?.approve !== false;
+  sweepCliDeviceCodes();
+  for (const rec of cliDeviceCodes.values()) {
+    if (rec.userCode === userCode && rec.status === 'pending') {
+      rec.status = approved ? 'approved' : 'denied';
+      rec.userId = approved ? user.id : null;
+      rec.approvedAt = Date.now();
+      return res.json({
+        ok: true,
+        approved,
+        plan: user.plan || 'free',
+        cliIncluded: userIncludesCli(user),
+      });
+    }
+  }
+  return res.status(404).json({ error: 'That code is not waiting for approval — run the CLI sign-in again.' });
+});
+
+// The CLI's poll, and the one exchange that hands over the key.
+app.post('/api/cli/device/token', (req, res) => {
+  const code = String(req.body?.deviceCode || '');
+  sweepCliDeviceCodes();
+  const rec = code ? cliDeviceCodes.get(cliDeviceHash(code)) : null;
+  res.set('cache-control', 'no-store');
+  if (!rec) return res.status(404).json({ status: 'expired' });
+  if (rec.status === 'denied') return res.status(403).json({ status: 'denied' });
+  if (rec.status !== 'approved') return res.json({ status: 'pending' });
+  const db = getDb();
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(rec.userId);
+  if (!user || !user.api_key) return res.status(409).json({ status: 'error', error: 'account has no API key to hand over' });
+  rec.usedAt = Date.now(); // one exchange per approval
+  res.json({
+    status: 'approved',
+    apiKey: user.api_key,
+    plan: user.plan || 'free',
+    cliIncluded: userIncludesCli(user),
+    server: cliOrigin(req),
+  });
+});
+
+// The page the magic link opens. It never receives the device code: the
+// operator's browser approves the SHORT code shown in the terminal, and the CLI
+// is the only holder of the long one.
+const CLI_AUTHORIZE_HTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Authorize the HaksterAI CLI</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#07070b;color:#e2e8f0;font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+  main{width:min(560px,calc(100vw - 32px));border:1px solid #1e1e2e;background:#111118;border-radius:16px;padding:24px}
+  h1{font-size:18px;margin:0 0 6px}
+  .muted{color:#94a3b8;font-size:13px}
+  .code{margin:16px 0;padding:14px;border:1px solid rgba(0,255,65,.3);border-radius:12px;background:rgba(0,255,65,.05);font-size:22px;letter-spacing:2px;text-align:center;color:#00ff41}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  button{flex:1 1 160px;padding:11px 14px;border-radius:10px;font:inherit;font-weight:700;cursor:pointer;border:1px solid #1e1e2e;background:#0a0a0f;color:#e2e8f0}
+  button.allow{border-color:rgba(0,255,65,.4);background:rgba(0,255,65,.1);color:#00ff41}
+  #state{margin-top:14px;font-size:13px;color:#94a3b8}
+  a{color:#00ff41}
+</style></head>
+<body><main>
+  <h1>Authorize the HaksterAI CLI</h1>
+  <div class="muted">A terminal is asking to sign in as your account. Check the code matches the one it printed.</div>
+  <div class="code" id="code">— —</div>
+  <div class="muted" id="plan">checking your sign-in…</div>
+  <div class="row">
+    <button class="allow" id="allow" disabled>Allow</button>
+    <button id="deny" disabled>Deny</button>
+  </div>
+  <div id="state"></div>
+</main>
+<script>
+(function () {
+  var code = (new URLSearchParams(location.search).get('user_code') || '').toUpperCase();
+  document.getElementById('code').textContent = code || 'missing code';
+  var key = null;
+  try { key = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'); } catch (e) {}
+  var state = document.getElementById('state');
+  var allow = document.getElementById('allow');
+  var deny = document.getElementById('deny');
+  if (!code) { state.innerHTML = 'Open the link the CLI printed, or run <b>hakster login</b> again.'; return; }
+  if (!key) {
+    state.innerHTML = '<a href="/">Sign in to haksterai.com</a>, then open this link again.';
+    return;
+  }
+  fetch('/api/auth/me', { headers: { 'x-api-key': key } })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d || !d.user) throw new Error('sign-in expired');
+      document.getElementById('plan').textContent = 'Signed in as ' + d.user.username + ' · plan ' + d.user.plan;
+      allow.disabled = false; deny.disabled = false;
+    })
+    .catch(function () {
+      state.innerHTML = '<a href="/">Sign in again</a>, then reload this page.';
+    });
+  function answer(approve) {
+    allow.disabled = true; deny.disabled = true;
+    fetch('/api/cli/device/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      body: JSON.stringify({ userCode: code, approve: approve })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok) throw new Error((d && d.error) || 'approval failed');
+      state.textContent = approve
+        ? 'Approved — return to the terminal. Your plan: ' + (d.cliIncluded ? d.plan + ' (CLI included)' : d.plan + ' (CLI not included on this plan)')
+        : 'Denied — the terminal will say the sign-in was refused.';
+    }).catch(function (e) {
+      state.textContent = e.message || 'approval failed';
+      allow.disabled = false; deny.disabled = false;
+    });
+  }
+  allow.addEventListener('click', function () { answer(true); });
+  deny.addEventListener('click', function () { answer(false); });
+})();
+</script></body></html>`;
+
+app.get('/cli/authorize', (_req, res) => {
+  res.set('cache-control', 'no-store');
+  res.type('html').send(CLI_AUTHORIZE_HTML);
+});
+
   app.use(express.static(distPath));
   // SPA fallback: try page-specific index.html first, then root index.html
   // Astro generates /chat/index.html, /terminal/index.html, etc.

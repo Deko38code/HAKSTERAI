@@ -432,3 +432,16 @@ source of truth), builds into `dist-next`, rsyncs into `dist`, waits for `/api/v
 id the served page carries, health-checks `:3579`, and only then marks it complete. A bare `astro build`
 into `dist` changes the live site without showing in the widget — never use it as a deploy. Never restart
 the server for a static deploy.
+
+## Junkalot rulebook index — mapped
+
+Junkalot's index of the MASTERGUARD rules is `/home/ghost694/junkalot/RULEBOOK-INDEX.md` (on Parrot's
+master copy): every section of `/home/ghost/CLAUDE.md` (§1–33) with what it means on that project and where
+this file mirrors it. It is a read-only pointer — HaksterAI never writes a rule, a rate, a key or usage into
+that project (§16) — and it is not a second rulebook: CLAUDE.md wins on any difference.
+
+Shared rules that apply here exactly as they do there: §16 project isolation, §17 tunnel protection, §19
+profit accounting, §22 the locked model configuration, §23 silent secret intake, §25 owner-internal stays
+internal, §26 locked rates with an advisory index, §27 builds go through the server widget, §30 no profit
+on Junkalot's client admin, §31 client API keys never enter Git, §32 installs only while a client is signed
+out, §33 queue builds in order and verify her email+IP before applying.

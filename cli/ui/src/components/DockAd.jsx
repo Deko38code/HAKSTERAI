@@ -102,13 +102,35 @@ export default function DockAd({
   const { title, description, label } = getInlineAdLayout(ad, width);
 
   if (!expanded) {
+    /* A collapsed slot is exactly ONE row — it is budgeted as one row by the
+     * caller (rail 1, composer 1). Three sibling <text>s each wrapped on their
+     * own when the creative was long, so the slot drew three rows and stole
+     * those rows from the transcript, whose fixed height then overflowed and
+     * clipped its own tail. Fit the description to the columns that are left
+     * instead of letting the layout wrap. */
+    const glyph = focused ? '▸ ' : '  ';
+    const tail = `${label ? ` ${label}` : ''}${focused ? '  enter open' : ''}`;
+    // A creative whose title alone is wider than the slot must be cut too —
+    // otherwise the title wraps and the "one row" promise is broken before the
+    // description is even considered.
+    const titleRoom = Math.max(6, width - 2 - glyph.length - tail.length);
+    const shownTitle = title.length > titleRoom ? `${title.slice(0, titleRoom - 1)}…` : title;
+    const lead = `${glyph}${shownTitle}`;
+    // Two columns are the box's own padding; everything else has to fit in
+    // what is left, INCLUDING the " — " joiner and its ellipsis.
+    const room = Math.max(0, width - 2 - lead.length - tail.length);
+    let desc = '';
+    if (description && room > 4) {
+      const full = ` — ${description}`;
+      desc = full.length <= room ? full : `${full.slice(0, Math.max(0, room - 1))}…`;
+    }
     return (
       <box style={{ width, flexDirection: 'row', paddingLeft: 1, paddingRight: 1 }}>
         <text fg={focused ? 'cyan' : 'gray'} attributes={TextAttributes.BOLD}>
           {focused ? '▸ ' : '  '}
         </text>
-        <text fg="white">{title}</text>
-        {description ? <text fg="gray">{` — ${description}`}</text> : null}
+        <text fg="white">{shownTitle}</text>
+        {desc ? <text fg="gray">{desc}</text> : null}
         {label ? <text fg="cyan">{` ${label}`}</text> : null}
         {focused ? <text fg="gray">{'  enter open'}</text> : null}
       </box>

@@ -280,4 +280,95 @@ function applyPending(explicitDir) {
   return { applied: true, version: pending.version, from: running.version, backupDir };
 }
 
-module.exports = { checkForUpdate, applyPending, pendingInfo, runningInfo, isSourceCheckout, cliDirOf, UPDATES_DIR, PENDING_FILE };
+/**
+ * The startup choice (owner, 2026-11-23: "it says install now or wait til next
+ * one option on startup if update available").
+ *
+ * A staged, hash-verified package means the update is already on disk; the only
+ * question is whether THIS session starts on it. Answering 'install' swaps it in
+ * before the bundle is imported, so the session that opens is the new CLI.
+ * Answering 'wait' leaves the running install untouched and the stage in place —
+ * the next start asks again. A non-interactive start keeps the old behaviour
+ * (apply what was verified) because there is nobody to ask.
+ *
+ * Resolves to { action: 'none'|'current'|'blocked'|'auto'|'install'|'wait', pending, running }.
+ * It never applies anything itself and never prints a secret.
+ */
+async function promptStagedUpdate(opts = {}) {
+  const pending = pendingInfo();
+  if (!pending || !pending.version) return { action: 'none' };
+  if (pending.appliedAt) return { action: 'none', pending };
+  const running = runningInfo(opts.cliDir);
+  if (pending.version === running.version && pending.bundleSha === running.bundleSha) {
+    return { action: 'current', pending, running };
+  }
+  if (isSourceCheckout(opts.cliDir)) return { action: 'blocked', pending, running };
+
+  const stdin = process.stdin;
+  const stdout = process.stdout;
+  const tty = !!(stdin && stdin.isTTY && stdout && stdout.isTTY);
+  if (!tty || process.env.HAKSTER_NO_UPDATE_PROMPT) {
+    return { action: 'auto', pending, running };
+  }
+
+  const mark = (state) => {
+    try {
+      writeJson(PENDING_FILE, { ...pending, deferredAt: state === 'wait' ? new Date().toISOString() : pending.deferredAt || null, promptState: state });
+    } catch { /* the prompt is a convenience; never let bookkeeping stop the CLI */ }
+  };
+
+  stdout.write(`\n⬆ CLI v${pending.version} is ready — this session is on v${running.version}.\n`);
+  stdout.write('  [i] Install now  · this session runs the new CLI\n');
+  stdout.write('  [w] Wait until next one  · keep the current version for now\n');
+  stdout.write('Choice [i/w]: ');
+
+  const answer = await readChoice(opts.timeoutMs || 20000);
+  stdout.write('\n');
+  const k = String(answer || '').trim().toLowerCase();
+  if (k === 'i' || k === 'y' || k === '1' || k === '\r' || k === '\n') {
+    mark('install');
+    return { action: 'install', pending, running };
+  }
+  mark('wait');
+  return { action: 'wait', pending, running };
+}
+
+/** One keypress from a raw TTY, or '' when the timer wins. Restores the terminal
+ *  before the renderer takes it over. */
+function readChoice(timeoutMs) {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { stdin.removeListener('data', onData); } catch { /* closed */ }
+      try { stdin.setRawMode(false); } catch { /* not a tty */ }
+      try { stdin.pause(); } catch { /* already paused */ }
+      resolve(value);
+    };
+    const onData = (buf) => {
+      const text = buf.toString('utf8');
+      // Enter arrives as \r; treat it as the typed key's confirmation.
+      if (text === '\r' || text === '\n') finish('\r');
+      else finish(text);
+    };
+    const timer = setTimeout(() => finish(''), Math.max(1000, Number(timeoutMs) || 20000));
+    try { stdin.setRawMode(true); } catch { /* not a tty */ }
+    stdin.resume();
+    stdin.on('data', onData);
+  });
+}
+
+module.exports = {
+  checkForUpdate,
+  applyPending,
+  pendingInfo,
+  promptStagedUpdate,
+  runningInfo,
+  isSourceCheckout,
+  cliDirOf,
+  UPDATES_DIR,
+  PENDING_FILE,
+};

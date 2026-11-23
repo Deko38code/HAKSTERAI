@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useKeyboard } from '@opentui/react';
 import MessageBlock from './MessageBlock.jsx';
 import { estimateRows } from '../utils/transcript-rows.js';
 
@@ -12,11 +13,106 @@ import { estimateRows } from '../utils/transcript-rows.js';
  *
  * Bottom alignment is preserved for a short session: stickyStart 'bottom'
  * keeps the newest turn against the composer instead of floating it mid-screen.
+ *
+ * Owner's 2026-11-23 rule ("all the panels have autoscroll and bars with
+ * arrows and auto compact"): the scroll box now carries OpenTUI's own
+ * scrollbar with ▲/▼ ends (mouse-clickable, auto-hides when the transcript
+ * fits), and the turns auto-compact when the window is short or narrow — the
+ * role label and reasoning line are dropped and tool output is first-line only,
+ * so a small terminal still reads as a transcript instead of two boxes.
  */
 const MAX_TURNS = 80;
 
+/** The native scrollbar: one column, arrow ends, a dim track and a bright
+ *  thumb. `trackOptions` and `arrowOptions` are the ScrollBar primitive's own
+ *  names — this is OpenTUI's bar, not a hand-drawn one. */
+const SCROLLBAR_OPTIONS = {
+  width: 1,
+  showArrows: true,
+  arrowOptions: {
+    foregroundColor: '#9ca3af',
+    arrowChars: { up: '▲', down: '▼' },
+  },
+  trackOptions: {
+    backgroundColor: '#374151',
+    foregroundColor: '#22d3ee',
+  },
+};
+
 export default function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
   const list = Array.isArray(messages) ? messages : [];
+  const budget = Math.max(1, Number(height) || 20);
+  const boxRef = useRef(null);
+  // `follow` is the operator's intent, not a guess from scrollTop: a run that
+  // streams a row pushes the content down before the sticky logic can notice,
+  // so "is it at the bottom?" is false exactly when we need it to be true.
+  const [follow, setFollow] = useState(true);
+  const tail = list.length ? list[list.length - 1] : null;
+  // Everything that changes the length of the drawn turn. Content changes move
+  // the tail; nothing else in the window needs a scroll.
+  const tailSig = tail
+    ? [
+      String(tail.text || '').length,
+      String(tail.thinking || '').length,
+      Array.isArray(tail.tools) ? tail.tools.length : 0,
+      Array.isArray(tail.tools) ? tail.tools.reduce((n, t) => n + String(t.result == null ? '' : t.result).length, 0) : 0,
+      Array.isArray(tail.rounds) ? tail.rounds.map((r) => `${String(r.text || '').length}.${String(r.thinking || '').length}.${(r.tools || []).length}`).join('|') : '',
+    ].join(':')
+    : '';
+
+  const setBox = (node) => {
+    boxRef.current = node;
+    if (!scrollRef) return;
+    if (typeof scrollRef === 'function') scrollRef(node);
+    else scrollRef.current = node;
+  };
+
+  // Follow the tail while the run streams: after every content change, put the
+  // window on the last row. Without this the transcript drew the TOP of an
+  // overflowing turn — the operator saw the start of the reasoning and missed
+  // the sentence the agent had just written under it.
+  useEffect(() => {
+    if (!follow) return undefined;
+    const box = boxRef.current;
+    if (!box) return undefined;
+    const toTail = () => {
+      const view = box.viewport && box.viewport.height ? box.viewport.height : 0;
+      if (!view) return;
+      const max = Math.max(0, (box.scrollHeight || 0) - view);
+      if (max > 0 && box.scrollTop < max) box.scrollTop = max;
+    };
+    toTail();
+    // The scroll box measures its content on the next layout pass, so one
+    // immediate set is not always enough on the row a tool result lands.
+    const t1 = setTimeout(toTail, 0);
+    const t2 = setTimeout(toTail, 25);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [list.length, budget, tailSig, follow]);
+
+  // PgUp/PgDn (and Home/End) page this window. Moving up parks the window
+  // where the operator put it; returning to the bottom re-arms the follow.
+  useKeyboard((key) => {
+    const box = boxRef.current;
+    if (!box) return;
+    const name = key.name;
+    if (name !== 'pageup' && name !== 'pagedown' && name !== 'home' && name !== 'end') return;
+    const view = box.viewport && box.viewport.height ? box.viewport.height : budget;
+    const max = Math.max(0, (box.scrollHeight || 0) - view);
+    if (name === 'pageup') {
+      box.scrollTop = Math.max(0, box.scrollTop - Math.max(1, view - 1));
+      setFollow(false);
+    } else if (name === 'pagedown') {
+      const next = Math.min(max, box.scrollTop + Math.max(1, view - 1));
+      box.scrollTop = next;
+      setFollow(next >= max);
+    } else if (name === 'home') {
+      box.scrollTop = 0;
+      setFollow(false);
+    } else {
+      box.scrollTop = max;
+      setFollow(true);
+    }
+  });
 
   if (list.length === 0) {
     return (
@@ -26,16 +122,21 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
     );
   }
 
-  const budget = Math.max(1, Number(height) || 20);
   const capped = list.slice(-MAX_TURNS);
   const hidden = list.length - capped.length;
   // Leave one column for the scroll bar so a long line never collides with it.
   const contentW = Math.max(8, (Number(width) || 80) - 1);
+  // Auto-compact: a short window or a narrow column gets the dense turn shape
+  // (no label row, no reasoning line, one-line tool results).
+  // A 40-row screen with the todos, meters, services and output panels leaves
+  // the transcript ~14 rows; that still fits a role label and the reasoning
+  // line, so only a genuinely tiny window drops them.
+  const compact = budget < 12 || contentW < 40;
 
   return (
     <box style={{ width, height: budget, flexShrink: 0, overflow: 'hidden' }}>
       <scrollbox
-        ref={scrollRef}
+        ref={setBox}
         style={{
           width,
           height: budget,
@@ -45,14 +146,15 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
           scrollX: false,
           viewportCulling: true,
         }}
+        scrollbarOptions={SCROLLBAR_OPTIONS}
       >
         {hidden > 0 ? (
           <text fg="gray">{`… ${hidden} earlier turn${hidden === 1 ? '' : 's'} (PgUp)`}</text>
         ) : null}
         <box style={{ flexDirection: 'column', width: contentW }}>
           {capped.map((message) => (
-            <box key={message.id} style={{ marginBottom: 1 }}>
-              <MessageBlock message={message} width={contentW} />
+            <box key={message.id} style={{ marginBottom: compact ? 0 : 1, flexShrink: 0 }}>
+              <MessageBlock message={message} width={contentW} compact={compact} />
             </box>
           ))}
         </box>

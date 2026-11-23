@@ -1,5 +1,6 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
+import { gutterChar, overflows } from '../utils/panel-scroll.js';
 
 /* CatalogPopout — the `/menu` popout, crush-style.
  *
@@ -46,13 +47,23 @@ export default function CatalogPopout({
   const h = Math.max(6, Number(height) || 20);
 
   // Window the list around the selection so the popout never needs to scroll
-  // the terminal itself: header rows count as a line, the rest as rows.
-  const bodyRows = Math.max(3, h - 4); // title, filter, footer, border
+  // the terminal itself. The box is exactly `h` rows: border 2 + title 1 +
+  // filter 1 + list + footer 1, so the list gets h - 5. (It used to claim
+  // h - 4, one row more than it drew, which pushed the row under it — the
+  // composer slot — down the screen.)
+  const bodyRows = Math.max(3, h - 5);
   const selRow = selectable[Math.min(selected, selectable.length - 1)] ?? 0;
   const start = Math.max(0, Math.min(selRow - Math.floor(bodyRows / 2), Math.max(0, rows.length - bodyRows)));
   const shown = rows.slice(start, start + bodyRows);
   const hiddenAbove = start;
   const hiddenBelow = Math.max(0, rows.length - start - shown.length);
+  // The house scrollbar (▲ / █ / ▼) when the catalog is longer than the
+  // window. It follows the selection, so the bar's thumb is the cursor.
+  const gutterOn = overflows(rows.length, bodyRows);
+  const bodyW = Math.max(8, inner - (gutterOn ? 1 : 0));
+  // Auto-compact: a narrow popout drops the right-hand detail column and
+  // spends every column on the label, instead of clipping both to nothing.
+  const compact = bodyW < 40;
 
   return (
     <box style={{ width: w, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'cyan', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
@@ -69,28 +80,41 @@ export default function CatalogPopout({
           <text fg="gray">{clip('no match — backspace to widen, esc to close', inner)}</text>
         ) : shown.map((row, i) => {
           const abs = start + i;
+          // Every row is the same width: the content column, then the shared
+          // ▲/█/▼ gutter when the catalog is longer than the window. That is
+          // what keeps the list, the headers and the right border in one line
+          // with the rest of the panels.
+          const gutter = gutterOn ? gutterChar(i, bodyRows, rows.length, start) : null;
           if (row.kind === 'header') {
             return (
-              <box key={`h:${row.label}`} style={{ width: inner, flexDirection: 'row' }}>
-                <text fg="gray" attributes={TextAttributes.BOLD}>{clip(`— ${row.label} —`, inner)}</text>
+              <box key={`h:${row.label}`} style={{ width: inner, flexDirection: 'row', flexShrink: 0 }}>
+                <text fg="gray" attributes={TextAttributes.BOLD}>{clip(`— ${row.label} —`, bodyW)}</text>
+                {gutter ? <text fg="gray">{gutter}</text> : null}
               </box>
             );
           }
           const isSel = abs === selRow;
           const color = KIND_COLOR[row.kind] || 'white';
-          const detail = row.detail || '';
-          // Give the label every column the detail does not need, so a long
-          // model id stays readable while a short vendor name stays right-aligned.
-          const valueW = Math.min(detail.length, Math.max(0, Math.floor(inner / 2)));
+          const detail = compact ? '' : String(row.detail || '');
+          const valueW = detail ? Math.min(detail.length, Math.max(0, Math.floor(bodyW / 2))) : 0;
+          const labelW = Math.max(8, bodyW - (valueW ? valueW + 1 : 0));
           return (
-            <box key={`${row.kind}:${row.label}`} style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
+            <box key={`${row.kind}:${row.label}`} style={{ width: inner, flexDirection: 'row', flexShrink: 0 }}>
               <text fg={isSel ? 'yellow' : color} attributes={isSel ? TextAttributes.BOLD : 0}>
-                {clip(`${isSel ? '▸ ' : '  '}${row.label}`, Math.max(8, inner - valueW - 1))}
+                {clip(`${isSel ? '▸ ' : '  '}${row.label}`, labelW)}
               </text>
-              <text fg={isSel ? 'white' : 'gray'}>{clip(detail, valueW)}</text>
+              {valueW ? <text fg={isSel ? 'white' : 'gray'}>{` ${clip(detail, valueW)}`}</text> : null}
+              {gutter ? <text fg="gray">{gutter}</text> : null}
             </box>
           );
         })}
+        {/* Pad the window to exactly `bodyRows` so the popout is the same
+            height whether the filter matched three rows or thirty. */}
+        {Array.from({ length: Math.max(0, bodyRows - Math.max(1, shown.length)) }, (_, i) => (
+          <box key={`pad:${i}`} style={{ width: inner, flexShrink: 0 }}>
+            <text> </text>
+          </box>
+        ))}
       </box>
       <box style={{ width: inner, flexDirection: 'row' }}>
         <text fg="gray">{clip(filter || 'type to filter · a model row switches this session · esc closes', inner)}</text>

@@ -109,15 +109,27 @@ export default function MonitorFeed({
               ))}
             </>
           ) : (
-            activity.slice(feedStart, feedStart + feedRows).map((line, i) => (
-              <ScrollRow
-                key={`e:${line.ts}:${i}`}
-                width={inner}
-                gutter={feedGutter ? gutterChar(i, feedRows, activity.length, feedStart) : null}
-              >
-                <EventLine width={feedBody} line={line} />
-              </ScrollRow>
-            ))
+            // Exactly `feedRows` rows: the bar's track is full height from the
+            // first event, and the newest line stays on the bottom row as the
+            // feed streams (§ all-panels rule).
+            Array.from({ length: feedRows }, (_, i) => {
+              const line = activity[feedStart + i];
+              return (
+                <ScrollRow
+                  key={`e:${feedStart + i}:${i}`}
+                  width={inner}
+                  gutter={feedGutter ? gutterChar(i, feedRows, activity.length, feedStart) : null}
+                >
+                  {line ? (
+                    <EventLine width={feedBody} line={line} />
+                  ) : (
+                    <box style={{ width: feedBody }}>
+                      <text> </text>
+                    </box>
+                  )}
+                </ScrollRow>
+              );
+            })
           )}
         </Panel>
       ) : null}
@@ -138,17 +150,26 @@ export default function MonitorFeed({
               ))}
             </>
           ) : (
-            liveLines.slice(outStart, outStart + outRows).map((line, i) => (
-              <ScrollRow
-                key={`o:${i}`}
-                width={inner}
-                gutter={outGutter ? gutterChar(i, outRows, liveLines.length, outStart) : null}
-              >
-                <box style={{ width: outBody }}>
-                  <text fg={i === outRows - 1 ? 'white' : 'gray'}>{clip(line, outBody)}</text>
-                </box>
-              </ScrollRow>
-            ))
+            Array.from({ length: outRows }, (_, i) => {
+              const index = outStart + i;
+              return (
+                <ScrollRow
+                  key={`o:${index}:${i}`}
+                  width={inner}
+                  gutter={outGutter ? gutterChar(i, outRows, liveLines.length, outStart) : null}
+                >
+                  {index < liveLines.length ? (
+                    <box style={{ width: outBody }}>
+                      <text fg={index === liveLines.length - 1 ? 'white' : 'gray'}>{clip(liveLines[index], outBody)}</text>
+                    </box>
+                  ) : (
+                    <box style={{ width: outBody }}>
+                      <text> </text>
+                    </box>
+                  )}
+                </ScrollRow>
+              );
+            })
           )}
         </Panel>
       ) : null}

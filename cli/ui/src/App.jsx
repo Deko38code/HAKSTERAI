@@ -9,10 +9,17 @@ import Composer from './components/Composer.jsx';
 import GridLayout from './components/GridLayout.jsx';
 import GridPanel, { Cell, Meter, Spark } from './components/GridPanel.jsx';
 import LiveSidebar from './components/LiveSidebar.jsx';
+import LiveOutputPanel from './components/LiveOutputPanel.jsx';
+import UsageView from './components/UsageView.jsx';
+import { useServerUsage } from './hooks/useServerUsage.js';
+import { findImageSource } from '../../src/live-image.js';
 import MonitorFeed from './components/MonitorFeed.jsx';
 import DecodeSplash from './components/DecodeSplash.jsx';
 import { MENU_ITEMS } from './components/MenuPalette.jsx';
 import CatalogPopout from './components/CatalogPopout.jsx';
+import ScrollPanel from './components/ScrollPanel.jsx';
+import ScriptsView from './components/ScriptsView.jsx';
+import SquadView from './components/SquadView.jsx';
 import ServicesPanel, { servicesGridRows } from './components/ServicesPanel.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import SystemPanel from './components/SystemPanel.jsx';
@@ -23,15 +30,33 @@ import useAgentStream from './hooks/useAgentStream.js';
 import useHostStats from './hooks/useHostStats.js';
 import useMemoryBank from './hooks/useMemoryBank.js';
 import useCliUpdate from './hooks/useCliUpdate.js';
+import useScriptRunner from './hooks/useScriptRunner.js';
+import { peersFromMcp } from './utils/squad.js';
 import cliPrefs from '../../src/prefs.js';
 import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel } from '../../smartness.mjs';
 import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
+import { isSupported as kittyGraphicsSupported } from '../../src/kitty-graphics.js';
 import ads from '../../src/ads/ad-client.js';
 
 const API = process.env.HAKSTER_API_URL || 'http://localhost:3579';
 const MCP_OUTPUT_LINES = 4;
 const MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
+// The dashboard and models pages are native OpenTUI scroll boxes: the same ▲ /
+// █ / ▼ bar the transcript uses, clickable with the mouse, auto-hidden when the
+// page fits (owner's 2026-11-23 all-panels rule).
+const PAGE_SCROLLBAR = {
+  width: 1,
+  showArrows: true,
+  arrowOptions: {
+    foregroundColor: '#9ca3af',
+    arrowChars: { up: '▲', down: '▼' },
+  },
+  trackOptions: {
+    backgroundColor: '#374151',
+    foregroundColor: '#22d3ee',
+  },
+};
 const SYSTEM = process.env.HAKSTER_TUI_SYSTEM
   || 'You are haksterAi running inside a terminal dashboard. Answer briefly and use tools when they are needed.';
 
@@ -168,18 +193,30 @@ export default function App({ version = '0.1.0' }) {
   const prefsRef = useRef(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
   const [handoffOn, setHandoffOn] = useState(() => prefsRef.current.autoHandoff !== false);
+  // The usage page's own poll rate (owner, 2026-11-23: "live graphs refresh
+  // rate"). Seconds; 0 pauses. It is a CLI preference, saved on this machine.
+  const [usageRefresh, setUsageRefresh] = useState(() => {
+    const n = Number(prefsRef.current.usageRefresh);
+    return Number.isFinite(n) && n >= 0 ? n : 15;
+  });
   // Start screen: five lines decode together, then the dashboard. Remembered
-  // in cli-prefs (`/settings intro off` skips it).
-  const [introDone, setIntroDone] = useState(() => readPrefs().intro === false);
+  // in cli-prefs (`/settings intro off` skips it). HAKSTER_NO_INTRO=1 skips it
+  // for one process — the render smoke test sets it, so its frames are the
+  // app's and not the splash's.
+  const [introDone, setIntroDone] = useState(() => process.env.HAKSTER_NO_INTRO === '1' || readPrefs().intro === false);
 
   const [status, setStatus] = useState(null);
   const [statusErr, setStatusErr] = useState(null);
   const [mcp, setMcp] = useState(null);
   const [history, setHistory] = useState([]);
-  const [mcpOutputOffset, setMcpOutputOffset] = useState(0);
   // `/menu` popout (HakTerm's command palette, in the terminal). Closed on
   // start — never auto-opens; esc closes it without running anything.
   const [menuOpen, setMenuOpen] = useState(false);
+  // The Lab views: our live scripts (with the OMP snapshot compare window) and
+  // the sub-agent squad. Both are read from real state — the checkout and the
+  // server's own /api/agent/mcp-status.
+  const [scriptIdx, setScriptIdx] = useState(0);
+  const [squadIdx, setSquadIdx] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuQuery, setMenuQuery] = useState('');
   const [notice, setNotice] = useState(null);
@@ -193,6 +230,14 @@ export default function App({ version = '0.1.0' }) {
   // One image waiting to ride on the next message (`/attach <path>`).
   const [attachment, setAttachment] = useState(null);
   const scrollRef = useRef(null);
+  // The dashboard and models views are scroll boxes too: a short terminal must
+  // scroll the page, not push the status bar off the bottom (§ owner's
+  // 2026-11-23 panel rule).
+  const dashRef = useRef(null);
+  // The usage page is a scroll box for the same reason: on a short terminal
+  // every measured row stays reachable and the bar tracks the page instead of
+  // the bottom of the list being clipped (§ all-panels rule).
+  const usageRef = useRef(null);
 
   const agent = useAgentStream({
     api: API,
@@ -202,6 +247,9 @@ export default function App({ version = '0.1.0' }) {
     cwd: process.env.HAKSTER_AGENT_CWD || null,
     autoHandoff: handoffOn,
   });
+
+  // Per-user usage, only fetched while the page is open (see the hook).
+  const usagePage = useServerUsage(usageRefresh, view === 'usage');
 
   useEffect(() => {
     writePrefs({ autoHandoff: handoffOn });
@@ -312,11 +360,20 @@ export default function App({ version = '0.1.0' }) {
     if (!lastAssistant) return [];
     const text = String(lastAssistant.text || '').trim();
     const result = lastTool && lastTool.result != null ? String(lastTool.result).trim() : '';
-    // Text wins once the model starts answering; before that the tool output is
-    // the freshest thing on the wire.
-    const src = text || result || String(lastAssistant.thinking || '').trim();
+    // What the agent SAYS wins — prose, then its reasoning, and only then
+    // shell output. A reasoning model spends its tool rounds thinking, so
+    // putting `result` ahead of `thinking` made this panel read as nothing but
+    // shell calls (owner, 2026-11-23).
+    const src = text || String(lastAssistant.thinking || '').trim() || result;
     return src ? src.split('\n').filter((l) => l.trim()).slice(-6) : [];
   })();
+  // The picture behind live-URL work (owner, 2026-11-23: "live image viewer in
+  // the output panels when showing live url work"): a screenshot path, an image
+  // URL or an inline data: image in what the last tool returned. The panels show
+  // it; this only finds it.
+  const liveImage = lastAssistant
+    ? findImageSource([lastTool && lastTool.result != null ? String(lastTool.result) : '', String(lastAssistant.text || '')])
+    : null;
   // This machine's own vitals — cpu, ram, swap, disk, load — sampled in-process.
   const host = useHostStats(5000);
   // 🧠 Memory: the same banks autolearn writes and the next run recalls,
@@ -326,6 +383,8 @@ export default function App({ version = '0.1.0' }) {
   // session runs, download and verify a newer CLI into ~/.hakster/updates and
   // let the next launch apply it. The session itself is never restarted.
   const update = useCliUpdate();
+  // ⌘ Live scripts: discovered from this checkout, run one at a time, bounded.
+  const runner = useScriptRunner();
   // ◔ Usage, counted from the session itself: tool calls actually streamed,
   // the meter's scored wins and losses, requests sent (handoffs included),
   // operator turns, the turn-reported token totals and the context share. No
@@ -347,6 +406,7 @@ export default function App({ version = '0.1.0' }) {
     tokensKnown: !!(agent.tokens && agent.tokens.reported),
     ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((ctxUsed / ctxMax) * 100))) : null,
   };
+  const peers = peersFromMcp(mcp);
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
 
@@ -453,6 +513,15 @@ export default function App({ version = '0.1.0' }) {
       case '/monitor':
         setView('monitor');
         return;
+      case '/usage':
+        setView('usage');
+        return;
+      case '/scripts':
+        setView('scripts');
+        return;
+      case '/squad':
+        setView('squad');
+        return;
       case '/status':
         showNotice(status
           ? `phase ${status.phase} · model ${status.model} · tokens ${status.tokens} · trust ${status.trust} · ${status.connected ? 'connected' : 'offline'}`
@@ -494,6 +563,20 @@ export default function App({ version = '0.1.0' }) {
         showNotice(`⚙ ${key} → ${typeof value === 'boolean' ? (value ? 'on' : 'off') : value || '(unset)'}${key === 'opaqueBackdrop' || key === 'intro' ? ' — applies on the next launch' : ''}`);
         return;
       }
+      case '/graphics': {
+        // Kitty graphics protocol: a real PNG (not half-block art) in terminals
+        // that speak it. Plain terminals are never touched — every sequence is
+        // sent with q=2 and only when support is detected.
+        const want = String(arg || '').trim().toLowerCase();
+        if (want === 'on' || want === 'off') {
+          writePrefs({ graphics: want === 'on' });
+          showNotice(`◆ kitty graphics → ${want}${want === 'on' ? ' (takes effect on the next launch)' : ''}`);
+          return;
+        }
+        const sup = kittyGraphicsSupported(process.env, process.stdout);
+        showNotice(`◆ kitty graphics — ${sup ? 'supported by this terminal' : 'not in this terminal (kitty · Ghostty · WezTerm)'} · logo ${prefsRef.current.graphics !== false ? 'on' : 'off'} · /graphics on|off`);
+        return;
+      }
       case '/update':
         showNotice(
           !update || update.status === 'idle' || update.status === 'checking'
@@ -512,7 +595,7 @@ export default function App({ version = '0.1.0' }) {
         showNotice('transcript cleared');
         return;
       case '/help':
-        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · c clear · q quit · esc stop — commands: /menu /model /mcp /handoff /ports /attach /dashboard /monitor /status /update /settings /clear /quit');
+        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit');
         return;
       case '/quit':
       case '/exit':
@@ -628,9 +711,6 @@ export default function App({ version = '0.1.0' }) {
     for (let i = 0; i < line.length; i += mcpPanelWidth) rows.push(line.slice(i, i + mcpPanelWidth));
     return rows;
   });
-  const mcpMaxOffset = Math.max(0, mcpOutputLines.length - MCP_OUTPUT_LINES);
-  const visibleMcpOutput = mcpOutputLines.slice(mcpOutputOffset, mcpOutputOffset + MCP_OUTPUT_LINES);
-  useEffect(() => { setMcpOutputOffset(0); }, [latestMcpTool?.id, latestMcpTool?.result]);
   const crushPhase = activeAssistant?.phase
     || (agent.status === 'thinking' ? 'THINK' : agent.status === 'connecting' ? 'PLAN' : 'ACT');
 
@@ -707,6 +787,73 @@ export default function App({ version = '0.1.0' }) {
       return;
     }
 
+    // The usage page owns four keys: r re-measures now, ] faster, [ slower,
+    // esc back. Every rate change is saved, so the page opens at the rate the
+    // operator chose. PgUp/PgDn (and ↑/↓/Home/End) scroll the page itself, the
+    // way the dashboard does — the bar keeps pace with what is drawn.
+    if (view === 'usage') {
+      if (key.name === 'escape') { setView('chat'); return; }
+      if (key.name === 'r') { usagePage.refresh(); showNotice('◔ usage — refreshed'); return; }
+      if (key.name === ']' || key.name === '=' || key.name === '+') {
+        const next = Math.min(300, (usageRefresh || 0) + 15);
+        setUsageRefresh(next); writePrefs({ usageRefresh: next });
+        showNotice(`◔ usage refresh — every ${next}s`); return;
+      }
+      if (key.name === '[' || key.name === '-') {
+        const next = Math.max(0, (usageRefresh || 0) - 15);
+        setUsageRefresh(next); writePrefs({ usageRefresh: next });
+        showNotice(next ? `◔ usage refresh — every ${next}s` : '◔ usage refresh — paused'); return;
+      }
+      const page = usageRef.current;
+      if (page && typeof page.scrollBy === 'function') {
+        if (key.name === 'pageup' || key.name === 'pagedown') {
+          page.scrollBy(key.name === 'pageup' ? -1 : 1, 'viewport');
+          return;
+        }
+        if (key.name === 'up' || key.name === 'down') {
+          page.scrollBy(key.name === 'up' ? -1 : 1, 'absolute');
+          return;
+        }
+        if (key.name === 'home') { page.scrollTo(0); return; }
+        if (key.name === 'end') { page.scrollBy(1000, 'viewport'); return; }
+      }
+      return;
+    }
+
+    // The Lab views own the keyboard while they are open: ↑↓ select, enter
+    // runs the script / places a delegation, esc returns to the chat.
+    if (view === 'scripts' || view === 'squad') {
+      const isScripts = view === 'scripts';
+      const n = (isScripts ? runner.scripts.length : peers.length) || 1;
+      const move = (d) => {
+        if (isScripts) setScriptIdx((i) => (i + d + n) % n);
+        else setSquadIdx((i) => (i + d + n) % n);
+      };
+      if (key.name === 'escape') { setView('chat'); return; }
+      if (key.name === 'up') { move(-1); return; }
+      if (key.name === 'down') { move(1); return; }
+      if (key.name === 'return') {
+        if (isScripts) {
+          const entry = runner.scripts[scriptIdx];
+          if (entry) {
+            runner.start(entry);
+            showNotice(`⌘ ${entry.label} — running`);
+          }
+        } else {
+          const peer = peers[squadIdx];
+          if (peer) {
+            const tool = peer.tools[0];
+            setDraft(`Delegate this to the ${peer.name} sub-agent${tool ? ` (mcp__${peer.name}__${tool})` : ''}: `);
+            setView('chat');
+            setFocus('composer');
+            showNotice(`⛨ ${peer.name} — delegation placed on the composer`);
+          }
+        }
+        return;
+      }
+      return;
+    }
+
     if (key.name === 'tab') {
       cycleFocus();
       return;
@@ -719,15 +866,34 @@ export default function App({ version = '0.1.0' }) {
       return;
     }
 
-    // PgUp/PgDn walk the transcript — the composer never wants them, so this
-    // runs before the "printable keys belong to the input" stand-down.
-    if (key.name === 'pageup' || key.name === 'pagedown') {
-      const box = scrollRef.current;
-      if (box && typeof box.scrollBy === 'function') {
-        box.scrollBy(key.name === 'pageup' ? -1 : 1, 'viewport');
+    // PgUp/PgDn (and, on the dashboard, ↑/↓/Home/End) scroll the pane the
+    // current view owns. The composer never wants them, so this runs before
+    // the "printable keys belong to the input" stand-down.
+    if (view === 'dashboard') {
+      const dash = dashRef.current;
+      if (dash && typeof dash.scrollBy === 'function') {
+        if (key.name === 'pageup' || key.name === 'pagedown') {
+          dash.scrollBy(key.name === 'pageup' ? -1 : 1, 'viewport');
+          return;
+        }
+        if (key.name === 'up' || key.name === 'down') {
+          dash.scrollBy(key.name === 'up' ? -1 : 1, 'absolute');
+          return;
+        }
+        if (key.name === 'home') {
+          dash.scrollTo(0);
+          return;
+        }
+        if (key.name === 'end') {
+          dash.scrollBy(1000, 'viewport');
+          return;
+        }
       }
-      return;
     }
+    // PgUp/PgDn on the chat view belong to <Transcript>: it owns the scroll
+    // window and has to park or re-arm its follow-the-tail state with them.
+    // A second handler here fought it row-for-row.
+    if (key.name === 'pageup' || key.name === 'pagedown') return;
 
     // While the composer has focus, printable keys belong to the input and the
     // shortcut layer below must stay out of the way.
@@ -742,10 +908,6 @@ export default function App({ version = '0.1.0' }) {
     }
     if (key.ctrl && key.name === 'o') {
       setDockExpanded((v) => !v);
-      return;
-    }
-    if (key.ctrl && latestMcpTool && (key.name === 'up' || key.name === 'down')) {
-      setMcpOutputOffset((offset) => Math.max(0, Math.min(mcpMaxOffset, offset + (key.name === 'up' ? -1 : 1))));
       return;
     }
 
@@ -778,6 +940,15 @@ export default function App({ version = '0.1.0' }) {
       case 'm':
         setModelIdx(pickerIndexFor(model, provider));
         setView('models');
+        break;
+      case 's':
+        setView('scripts');
+        break;
+      case 'g':
+        setView('squad');
+        break;
+      case 'u':
+        setView((v) => (v === 'usage' ? 'chat' : 'usage'));
         break;
       case 'c':
         agent.clear();
@@ -825,9 +996,40 @@ export default function App({ version = '0.1.0' }) {
   // The meters row is one line; the services box is its own grid (3 rows when
   // compact, a wrapped grid when wide). Both sit above the composer, so their
   // rows come out of the transcript budget — and out of the sidebar's too.
+  // Auto-compact: below this height every two-line cell becomes one line and
+  // the panels shrink instead of the transcript disappearing (§ owner's
+  // 2026-11-23 panel rule).
+  const dense = (rows || 30) < 34;
   const systemRows = 1;
-  const servicesCellCount = services.length + (otherPorts.length ? 1 : 0);
-  const servicesRows = mainW < 96 ? 3 : servicesGridRows(mainW, servicesCellCount);
+  // The services grid is capped so it can never eat the transcript: two rows
+  // of cells (three when dense), and the panel summarises the rest as "+N".
+  // Height and cell count are derived from the width the box is DRAWN at —
+  // the chat column, the monitor page and the dashboard page are three
+  // different widths, and a grid budgeted for the wrong one is the classic way
+  // this layout pushes its status bar off the screen.
+  const servicesCapacityFor = (w) => Math.max(4, Math.max(1, Math.floor(Math.max(1, w - 4) / 17)) * (dense ? 3 : 2));
+  const servicesRowsFor = (w, capacity) => {
+    if (w < 96) return 3; // the narrow one-line Services box
+    const raw = services.length + (otherPorts.length ? 1 : 0);
+    return servicesGridRows(w, Math.min(raw, capacity), dense);
+  };
+  const servicesCapacity = servicesCapacityFor(mainW);
+  const servicesRows = servicesRowsFor(mainW, servicesCapacity);
+  const dashServicesWidth = Math.max(1, panelW - 1);
+  const dashServicesCapacity = servicesCapacityFor(dashServicesWidth);
+  const monitorServicesCapacity = servicesCapacityFor(panelW);
+  const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity);
+  // The live output panel the owner asked to sit lowest, right above the input
+  // bar: a short window that follows the newest line while a run streams.
+  const liveOutputLines = (rows || 30) >= 48 ? 4 : 3;
+  const liveOutputCallRows = mainW >= 44 ? 1 : 0;
+  const liveOutputRows = liveOutputLines + 3 + liveOutputCallRows; // border 2 + title 1
+  // Dashboard scroll box: the whole page scrolls, so a short terminal cannot
+  // push the status bar off the bottom. Header + status bar are the fixed
+  // chrome; the offline banner takes its own rows when it is showing.
+  const dashRows = Math.max(6, (rows || 30) - 2 - (statusErr ? 3 : 0));
+  // Models picker: header + status bar + the panel's border/title.
+  const modelRows = Math.max(3, (rows || 30) - 5);
   // The sidebar spans the transcript column's area, so its vertical allowance
   // is the terminal minus the header and the status bar. LiveSidebar fits its
   // own panels (Live → Usage → Activity → Output → MCP) inside that number.
@@ -836,7 +1038,7 @@ export default function App({ version = '0.1.0' }) {
   // everything down to the status bar. No composer, no rail — watch only.
   const monitorRows = Math.max(
     8,
-    (rows || 30) - 2 - systemRows - servicesRows - (notice ? 1 : 0),
+    (rows || 30) - 2 - systemRows - monitorServicesRows - (notice ? 1 : 0),
   );
 
   // ── Row budget ────────────────────────────────────────────────────────────
@@ -851,13 +1053,13 @@ export default function App({ version = '0.1.0' }) {
   const composerRows = menuOpen ? MENU_ROWS : 5;
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
-  const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 4 : 0;
+  const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 3 : 0;
   // approval: border 2 + header 1 + reason 1 + command 1 + answer row 1
   const approvalRows = approving ? 6 : 0;
   const transcriptRows = Math.max(
     4,
     (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows
-      - approvalRows - systemRows - servicesRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0),
+      - approvalRows - systemRows - servicesRows - liveOutputRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0),
   );
 
   const dashboardItems = [
@@ -898,6 +1100,17 @@ export default function App({ version = '0.1.0' }) {
       ],
     },
     {
+      key: 'context',
+      title: 'Context',
+      hint: `${ctxK}K window`,
+      cells: [
+        { label: 'used', value: ctxUsed },
+        { label: 'window', value: `${ctxK}K` },
+        { label: 'share', value: ctxUsed > 0 && ctxMax > 0 ? `${Math.round((ctxUsed / ctxMax) * 100)}%` : '—', color: ctxUsed / ctxMax > 0.8 ? 'red' : 'green' },
+        { label: 'model', value: modelText, color: 'yellow' },
+      ],
+    },
+    {
       key: 'agent',
       title: 'Agent',
       hint: agent.status,
@@ -926,6 +1139,8 @@ export default function App({ version = '0.1.0' }) {
     serverOk: !statusErr && !!status,
     liveTool: liveToolTxt,
     liveLines,
+    liveImage,
+    graphics: prefsRef.current.graphics !== false,
     busy: agent.busy,
     activity: agent.activity || [],
     usage,
@@ -948,13 +1163,18 @@ export default function App({ version = '0.1.0' }) {
       <DecodeSplash
         width={cols || 100}
         height={rows || 30}
+        // HAKSTER_INTRO_STEP_MS slows or speeds the decode (default 55 ms);
+        // useful on a slow terminal or for a screenshot.
+        stepMs={Number(process.env.HAKSTER_INTRO_STEP_MS) > 0 ? Number(process.env.HAKSTER_INTRO_STEP_MS) : 55}
+        graphics={prefsRef.current.graphics !== false}
         lines={[
-          { text: '◆ haksterAi', color: 'cyan', bold: true },
+          // Lime green on the hacker-desk hero, per the owner's 2026-11-23 note.
+          { text: '◆ haksterAi', color: '#00ff41', bold: true },
           { text: `CLI v${version} · ${updateLine}`, color: 'gray' },
-          { text: `model ${modelText}`, color: 'yellow' },
+          { text: `model ${modelText}`, color: '#a3e635' },
           {
             text: statusErr ? `server offline — ${statusErr}` : status ? 'server online' : 'connecting…',
-            color: statusErr ? 'red' : status ? 'green' : 'yellow',
+            color: statusErr ? 'red' : status ? '#00ff41' : 'yellow',
           },
           { text: 'type a task · /menu commands · v live monitor', color: 'gray' },
         ]}
@@ -987,59 +1207,120 @@ export default function App({ version = '0.1.0' }) {
       ) : null}
 
       {view === 'models' ? (
-        <GridPanel title="Models" width={panelW} hint="↑↓ select · enter apply · esc back">
-          {pickerModels.map((m, i) => (
-            <Cell
-              key={m.key}
-              label={m.vendor}
-              value={`${i === modelIdx ? '▸ ' : ''}${m.value}`}
-              w={Math.max(1, Math.floor((panelW - 6) / 2))}
-              color={i === modelIdx ? 'yellow' : 'white'}
-            />
-          ))}
-        </GridPanel>
-      ) : view === 'dashboard' ? (
-        <>
-          <GridLayout
-            items={dashboardItems}
-            availableWidth={panelW}
-            getItemKey={(item) => item.key}
-            renderItem={(item, index, columnWidth) => (
-              <GridPanel title={item.title} width={columnWidth} hint={item.hint}>
-                {item.cells.map((c) => (
-                  <Cell key={c.label} label={c.label} value={c.value} color={c.color} w={Math.max(1, Math.floor((columnWidth - 6) / 2))} />
-                ))}
-              </GridPanel>
-            )}
-          />
-          {/* The three bars the old CLI measured: smartness, autolearn and the
-              context window. Each is labelled and reads from live state. */}
-          <GridPanel
-            title="◉ Meters"
-            width={panelW}
-            hint={`${smartLabel(meters ? meters.score : 0)} · ${meterPoints}p autolearn · ${catalog.labelFor(catalog.findModel(model) || { id: modelText, vendor: 'local', context: null })}`}
-          >
-            <box style={{ width: Math.max(10, panelW - 4), flexDirection: 'row', flexShrink: 0 }}>
-              <text fg="gray">{'smartness   '}</text>
-              <Meter value={meters ? meters.score : 0} max={100} w={Math.min(40, Math.max(10, panelW - 40))} color={barColor('smart', meters ? meters.score : 0)} />
-              <text fg="white">{` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? '▲' : meters && meters.delta < 0 ? '▼' : '◆'} ${smartLabel(meters ? meters.score : 0)}`}</text>
-            </box>
-            <box style={{ width: Math.max(10, panelW - 4), flexDirection: 'row', flexShrink: 0 }}>
-              <text fg="gray">{'autolearn   '}</text>
-              <Meter value={Math.min(100, meterPoints)} max={100} w={Math.min(40, Math.max(10, panelW - 40))} color={barColor('points', meterPoints)} />
-              <text fg="white">{` ${meterPoints}p`}</text>
-              <box style={{ marginLeft: 2 }}>
-                <Spark data={pointsHistory} w={Math.min(24, Math.max(8, panelW - 70))} />
+        <ScrollPanel
+          width={panelW}
+          title="Models"
+          hint="↑↓ select · enter apply · esc back"
+          total={pickerModels.length}
+          rows={modelRows}
+          selected={modelIdx}
+          initial="top"
+          compactWhen={panelW < 70}
+        >
+          {(index, { width: rowW, compact }) => {
+            const pick = pickerModels[index];
+            const active = index === modelIdx;
+            const vendorW = compact ? 7 : 11;
+            return (
+              <box style={{ width: rowW, flexDirection: 'row', flexShrink: 0 }}>
+                <text fg={active ? 'yellow' : 'gray'} attributes={active ? TextAttributes.BOLD : 0}>
+                  {`${active ? '▸ ' : '  '}${clipLine(pick.vendor, vendorW)}`}
+                </text>
+                <text fg={active ? 'yellow' : 'white'}>
+                  {` ${clipLine(pick.value, Math.max(4, rowW - vendorW - 3))}`}
+                </text>
               </box>
+            );
+          }}
+        </ScrollPanel>
+      ) : view === 'scripts' ? (
+        <ScriptsView
+          width={panelW}
+          height={dashRows}
+          scripts={runner.scripts}
+          selected={scriptIdx}
+          run={runner.run}
+        />
+      ) : view === 'squad' ? (
+        <SquadView
+          width={panelW}
+          height={dashRows}
+          peers={peers}
+          selected={squadIdx}
+        />
+      ) : view === 'usage' ? (
+        /* One scrollable page, like the dashboard: the page can be taller than
+           a short terminal, so it scrolls with OpenTUI's own ▲/█/▼ bar instead
+           of clipping the last measured rows (§ all-panels rule). */
+        <box style={{ width: panelW, height: dashRows, flexShrink: 0, overflow: 'hidden' }}>
+          <scrollbox
+            ref={usageRef}
+            style={{ width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true }}
+            scrollbarOptions={PAGE_SCROLLBAR}
+          >
+            <UsageView
+              width={Math.max(1, panelW - 1)}
+              height={dashRows}
+              usage={usagePage}
+              refreshSeconds={usageRefresh}
+              account={(status && status.user && status.user.username) || ''}
+            />
+          </scrollbox>
+        </box>
+      ) : view === 'dashboard' ? (
+        /* The dashboard is one scrollable page. Before this it was a fixed
+           stack, so a short terminal clipped the services grid and pushed the
+           status bar off the bottom. PgUp/PgDn (and ↑/↓, Home/End) scroll it;
+           the panel cells auto-compact to one line on a short screen. */
+        <box style={{ width: panelW, height: dashRows, flexShrink: 0, overflow: 'hidden' }}>
+          <scrollbox
+            ref={dashRef}
+            style={{ width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true }}
+            scrollbarOptions={PAGE_SCROLLBAR}
+          >
+            <box style={{ width: Math.max(1, panelW - 1), flexDirection: 'column' }}>
+              <GridLayout
+                items={dashboardItems}
+                availableWidth={Math.max(1, panelW - 1)}
+                getItemKey={(item) => item.key}
+                renderItem={(item, index, columnWidth) => (
+                  <GridPanel title={item.title} width={columnWidth} hint={item.hint} dense={dense}>
+                    {item.cells.map((c) => (
+                      <Cell key={c.label} label={c.label} value={c.value} color={c.color} w={Math.max(1, Math.floor((columnWidth - 6) / 2))} dense={dense} />
+                    ))}
+                  </GridPanel>
+                )}
+              />
+              {/* The three bars the old CLI measured: smartness, autolearn and the
+                  context window. Each is labelled and reads from live state. */}
+              <GridPanel
+                title="◉ Meters"
+                width={Math.max(1, panelW - 1)}
+                hint={`${smartLabel(meters ? meters.score : 0)} · ${meterPoints}p autolearn · ${catalog.labelFor(catalog.findModel(model) || { id: modelText, vendor: 'local', context: null })}`}
+              >
+                <box style={{ width: Math.max(10, panelW - 5), flexDirection: 'row', flexShrink: 0 }}>
+                  <text fg="gray">{'smartness   '}</text>
+                  <Meter value={meters ? meters.score : 0} max={100} w={Math.min(40, Math.max(10, panelW - 40))} color={barColor('smart', meters ? meters.score : 0)} />
+                  <text fg="white">{` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? '▲' : meters && meters.delta < 0 ? '▼' : '◆'} ${smartLabel(meters ? meters.score : 0)}`}</text>
+                </box>
+                <box style={{ width: Math.max(10, panelW - 5), flexDirection: 'row', flexShrink: 0 }}>
+                  <text fg="gray">{'autolearn   '}</text>
+                  <Meter value={Math.min(100, meterPoints)} max={100} w={Math.min(40, Math.max(10, panelW - 40))} color={barColor('points', meterPoints)} />
+                  <text fg="white">{` ${meterPoints}p`}</text>
+                  <box style={{ marginLeft: 2 }}>
+                    <Spark data={pointsHistory} w={Math.min(24, Math.max(8, panelW - 70))} />
+                  </box>
+                </box>
+                <box style={{ width: Math.max(10, panelW - 5), flexDirection: 'row', flexShrink: 0 }}>
+                  <text fg="gray">{'context     '}</text>
+                  <Meter value={ctxUsed} max={ctxMax} w={Math.min(40, Math.max(10, panelW - 40))} color={ctxUsed / ctxMax > 0.8 ? 'red' : 'green'} />
+                  <text fg="white">{` ${Math.round(ctxUsed / ctxMax * 100)}%`}</text>
+                </box>
+              </GridPanel>
+              <ServicesPanel width={dashServicesWidth} services={services} scan={scan} showAll dense={dense} maxCells={dashServicesCapacity} />
             </box>
-            <box style={{ width: Math.max(10, panelW - 4), flexDirection: 'row', flexShrink: 0 }}>
-              <text fg="gray">{'context     '}</text>
-              <Meter value={ctxUsed} max={ctxMax} w={Math.min(40, Math.max(10, panelW - 40))} color={ctxUsed / ctxMax > 0.8 ? 'red' : 'green'} />
-              <text fg="white">{` ${Math.round(ctxUsed / ctxMax * 100)}%`}</text>
-            </box>
-          </GridPanel>
-          <ServicesPanel width={panelW} services={services} scan={scan} showAll />
-        </>
+          </scrollbox>
+        </box>
       ) : view === 'monitor' ? (
         /* Live monitor — the whole screen watching one run: host meters and
            services on top, then the big activity feed and live output beside
@@ -1047,7 +1328,7 @@ export default function App({ version = '0.1.0' }) {
            esc returns to the chat. Nothing runs from here; it only watches. */
         <>
           <SystemPanel width={panelW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
-          <ServicesPanel width={panelW} services={services} scan={scan} />
+          <ServicesPanel width={panelW} services={services} scan={scan} dense={dense} maxCells={monitorServicesCapacity} />
           <box style={{ flexDirection: 'row', width: panelW, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
             <box style={{ width: sideW ? Math.max(20, panelW - sideW - 2) : panelW, flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
               <MonitorFeed
@@ -1091,18 +1372,24 @@ export default function App({ version = '0.1.0' }) {
             </box>
 
             {latestMcpTool ? (
-              <GridPanel
-                title={`MCP Output · ${String(latestMcpTool.name || '').split('__')[1] || 'server'}`}
+              <ScrollPanel
+                key={latestMcpTool.id || latestMcpTool.name || 'mcp'}
                 width={mainW}
+                title={`MCP Output · ${String(latestMcpTool.name || '').split('__')[1] || 'server'}`}
+                hint="Ctrl+↑/↓"
+                total={mcpOutputLines.length}
+                rows={MCP_OUTPUT_LINES}
+                initial="follow"
+                bindings={{ up: 'ctrl', down: 'ctrl', pageup: 'ctrl', pagedown: 'ctrl', home: 'ctrl', end: 'ctrl' }}
+                empty="Waiting for MCP server output…"
                 borderColor="magenta"
-                hint={`${Math.min(mcpOutputOffset + 1, mcpOutputLines.length)}-${Math.min(mcpOutputOffset + MCP_OUTPUT_LINES, mcpOutputLines.length)}/${mcpOutputLines.length} · Ctrl+↑/↓`}
               >
-                <box style={{ flexDirection: 'column', width: Math.max(1, mainW - 4) }}>
-                  {visibleMcpOutput.map((line, index) => {
-                      return <text key={`mcp-output-${index}`} fg="white">{String(line || ' ')}</text>;
-                  })}
-                </box>
-              </GridPanel>
+                {(index, { width: rowW }) => (
+                  <box style={{ width: rowW }}>
+                    <text fg="white">{clipLine(String(mcpOutputLines[index] || ' '), rowW)}</text>
+                  </box>
+                )}
+              </ScrollPanel>
             ) : null}
 
             {showCrushStatus ? (
@@ -1146,12 +1433,28 @@ export default function App({ version = '0.1.0' }) {
 
             {/* Old CLI's two meters + the context bar, then their ports grid. */}
             <SystemPanel width={mainW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
-            <ServicesPanel width={mainW} services={services} scan={scan} />
+            <ServicesPanel width={mainW} services={services} scan={scan} dense={dense} maxCells={servicesCapacity} />
+
+            {/* ▶ Output sits LOWEST, directly over the input bar (owner,
+                2026-11-23: "the lowest over the input bar cause reasonning
+                pushes context up screen hard to see or keep up"). It follows
+                the newest line while the run streams; shift+↑/↓ pages it when
+                the sidebar is hidden (the sidebar owns those keys when wide). */}
+            <LiveOutputPanel
+              width={mainW}
+              rows={liveOutputLines}
+              lines={liveLines}
+              image={liveImage}
+              graphics={prefsRef.current.graphics !== false}
+              call={liveToolTxt}
+              busy={agent.busy}
+              bindings={sideW ? null : { up: 'shift', down: 'shift', pageup: 'shift', pagedown: 'shift', home: 'shift', end: 'shift' }}
+            />
 
             <box style={{ flexShrink: 0 }}>
               {menuOpen ? (
                 <CatalogPopout
-                  width={Math.min(mainW, 76)}
+                  width={mainW}
                   height={MENU_ROWS}
                   rows={catalogRows}
                   selectable={catalogSelectable}

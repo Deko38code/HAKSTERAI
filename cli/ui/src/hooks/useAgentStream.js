@@ -179,10 +179,59 @@ export function useAgentStream({
     setMessages((prev) => [...prev, entry]);
   }, []);
 
+  /* A turn is not one text block followed by one list of calls: the model
+   * says something, calls a tool, then says the next thing. Flattening that
+   * into `text` + `tools` put every sentence ABOVE every tool row, so with the
+   * window on the tail the newest prose was never the newest row — a tool-
+   * heavy turn read as shell calls only (owner, 2026-11-23: "its not showing
+   * agents output what he says something only shell call tools i see").
+   * `rounds` keeps the real order; `text`/`thinking`/`tools` stay as the flat
+   * totals the rest of the UI (live output, meters) already reads. */
+  const withRound = useCallback((m, opensNew, mutate) => {
+    const rounds = Array.isArray(m.rounds)
+      ? m.rounds.map((r) => ({ ...r, tools: Array.isArray(r.tools) ? r.tools.slice() : [] }))
+      : [];
+    let cur = rounds[rounds.length - 1];
+    if (!cur || opensNew(cur)) {
+      cur = { text: '', thinking: '', tools: [] };
+      rounds.push(cur);
+    }
+    mutate(cur);
+    return { ...m, rounds };
+  }, []);
+
   /** Drop an entry — used for a turn's empty assistant bubble when every
    *  attempt failed before writing a single character. */
   const drop = useCallback((id) => {
     setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
+  /* Attribute a result to the tool that asked for it — in the flat list and in
+   * its round — so the row that is drawn in order gets the same result the
+   * live-output panel reads. Matching by id first, then the newest call still
+   * waiting, exactly as the flat list always did. */
+  const withToolResult = useCallback((m, id, result, mcp = false) => {
+    const pick = (list) => {
+      let idx = id ? list.findIndex((t) => t.id === id) : -1;
+      if (idx === -1) {
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (list[i].result === null && (mcp ? list[i].mcp : true)) { idx = i; break; }
+        }
+      }
+      return idx;
+    };
+    const tools = m.tools.slice();
+    const idx = pick(tools);
+    if (idx !== -1) tools[idx] = { ...tools[idx], result, ...(mcp ? { mcp: true } : {}) };
+    const rounds = Array.isArray(m.rounds)
+      ? m.rounds.map((r) => {
+        const rt = Array.isArray(r.tools) ? r.tools.slice() : [];
+        const at = pick(rt);
+        if (at !== -1) rt[at] = { ...rt[at], result, ...(mcp ? { mcp: true } : {}) };
+        return { ...r, tools: rt };
+      })
+      : m.rounds;
+    return { ...m, tools, rounds };
   }, []);
 
   const abort = useCallback(() => {
@@ -332,7 +381,11 @@ export function useAgentStream({
           case 'delta':
             setStatusBoth('streaming');
             attemptCtxRef.current.produced = true;
-            patch(assistantId, (m) => ({ ...m, text: m.text + (evt.content || '') }));
+            patch(assistantId, (m) => withRound(
+              { ...m, text: m.text + (evt.content || '') },
+              (r) => r.tools.length > 0,
+              (r) => { r.text += evt.content || ''; },
+            ));
             break;
 
           case 'thinking_start':
@@ -343,7 +396,11 @@ export function useAgentStream({
           case 'thinking':
             setStatusBoth('thinking');
             attemptCtxRef.current.produced = true;
-            patch(assistantId, (m) => ({ ...m, thinking: m.thinking + (evt.content || '') }));
+            patch(assistantId, (m) => withRound(
+              { ...m, thinking: m.thinking + (evt.content || '') },
+              (r) => r.tools.length > 0,
+              (r) => { r.thinking += evt.content || ''; },
+            ));
             break;
 
           case 'thinking_end':
@@ -372,19 +429,20 @@ export function useAgentStream({
                 : normalizeTodos(raw);
               if (next) setTodos(next);
             }
-            patch(assistantId, (m) => ({
-              ...m,
-              tools: [
-                ...m.tools,
-                {
-                  id: evt.tool_call_id || nextId('tool'),
-                  name,
-                  args: evt.tool_args || {},
-                  result: null,
-                  mcp: name.startsWith('mcp__'),
-                },
-              ],
-            }));
+            patch(assistantId, (m) => {
+              const call = {
+                id: evt.tool_call_id || nextId('tool'),
+                name,
+                args: evt.tool_args || {},
+                result: null,
+                mcp: name.startsWith('mcp__'),
+              };
+              return withRound(
+                { ...m, tools: [...m.tools, call] },
+                () => false, // a call joins the round the prose before it opened
+                (r) => { r.tools.push(call); },
+              );
+            });
             break;
           }
 
@@ -395,17 +453,7 @@ export function useAgentStream({
               const ok = scoreTool(meta.name, meta.args, result);
               pushActivity(ok ? 'mcp' : 'err', `${meta.name}${toolMs(meta)}`);
             }
-            patch(assistantId, (m) => {
-              const tools = m.tools.slice();
-              let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
-              if (idx === -1) {
-                for (let i = tools.length - 1; i >= 0; i--) {
-                  if (tools[i].mcp && tools[i].result === null) { idx = i; break; }
-                }
-              }
-              if (idx !== -1) tools[idx] = { ...tools[idx], result, mcp: true };
-              return { ...m, tools };
-            });
+            patch(assistantId, (m) => withToolResult(m, evt.tool_call_id, result, true));
             break;
           }
 
@@ -421,22 +469,7 @@ export function useAgentStream({
               const ok = scoreTool(meta.name, meta.args, result);
               pushActivity(ok ? 'ok' : 'err', `${meta.name}${toolMs(meta)}`);
             }
-            patch(assistantId, (m) => {
-              const tools = m.tools.slice();
-              // Match by id when the server sent one; otherwise attribute the
-              // result to the most recent call still waiting for one.
-              let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
-              if (idx === -1) {
-                for (let i = tools.length - 1; i >= 0; i--) {
-                  if (tools[i].result === null) {
-                    idx = i;
-                    break;
-                  }
-                }
-              }
-              if (idx !== -1) tools[idx] = { ...tools[idx], result };
-              return { ...m, tools };
-            });
+            patch(assistantId, (m) => withToolResult(m, evt.tool_call_id, result));
             break;
           }
 

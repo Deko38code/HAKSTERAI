@@ -32,7 +32,9 @@ async function _haksterLicenseGate() {
 // Every agent, chat, and model operation still requires an active paid plan.
 const _rawArgs = process.argv.slice(2);
 const _firstCommand = _rawArgs.find((arg) => !arg.startsWith('-')) || '';
-const _setupOnlyCommand = _firstCommand === 'init' || _firstCommand === 'config' || _firstCommand === 'help';
+// Signing in and out, and asking who you are, must work before a license is
+// held — that is the whole point of them (owner, 2026-11-23).
+const _setupOnlyCommand = ['init', 'config', 'help', 'login', 'logout', 'whoami'].includes(_firstCommand);
 const _helpOrVersion = _rawArgs.includes('--help') || _rawArgs.includes('-h') || _rawArgs.includes('--version') || _rawArgs.includes('-V');
 const _skipLicenseGate = _helpOrVersion || _setupOnlyCommand;
 
@@ -550,7 +552,12 @@ try {
   // This file lives in cli/, so __dirname is the CLI directory the updater
   // checks and updates — and the TUI it spawns inherits the same value.
   process.env.HAKSTER_CLI_DIR = process.env.HAKSTER_CLI_DIR || __dirname;
-  _updateApplied = require('./src/updater').applyPending();
+  // An interactive TUI start asks first ("install now / wait until next one",
+  // owner 2026-11-23) and does the swap in tui-entry.mjs before the bundle is
+  // imported. Applying here too would consume the stage before the operator
+  // ever saw the choice.
+  const interactiveTui = _isTerminalUi && process.stdin.isTTY && process.stdout.isTTY;
+  _updateApplied = interactiveTui ? null : require('./src/updater').applyPending();
 } catch (_) {
   _updateApplied = null;
 }
@@ -587,35 +594,261 @@ program
     else console.log(`${C.red}✗ update check failed${C.reset} ${C.gray}${res.reason || res.status}${C.reset}`);
   });
 
+// ── login / logout / whoami: the magic link, verified in the browser ───────
+// Owner 2026-11-23: "we need the auth flow for the login link magic link url
+// browser verfication to hakster cli". Signing in never prints or passes the
+// key around: it is written straight into ~/.hakster/config.json (mode 600).
+program
+  .command('login')
+  .description('Sign in with a magic link — open it in the browser, press Allow, and the CLI is signed in')
+  .option('-s, --server <url>', 'Server URL (default: the one already configured)')
+  .option('--no-open', 'Print the link only — do not open a browser')
+  .action(async (opts) => {
+    const { login } = require('./src/login');
+    const who = loadConfig();
+    if (who.apiKey) {
+      console.log(`${C.gray}A key is already stored for ${who.server || 'this server'} — signing in again replaces it.${C.reset}`);
+    }
+    const res = await login({ server: opts.server, open: opts.open !== false });
+    if (!res.ok) {
+      console.error(`${C.red}✗ not signed in${C.reset} ${C.gray}— ${res.reason}${C.reset}`);
+      process.exitCode = 1;
+      return;
+    }
+    const u = res.user || {};
+    console.log(`${C.green}✓ signed in${C.reset} as ${u.username || u.email || 'this account'} ${C.gray}(${res.server})${C.reset}`);
+    const cli = res.cli || {};
+    if (cli.included) {
+      console.log(`${C.green}✓ your plan includes the CLI${C.reset} ${C.gray}— run 'hakster tui' or 'hakster chat'.${C.reset}`);
+    } else {
+      console.log(`${C.yellow}⚠ signed in, but this plan does not include the CLI.${C.reset}`);
+      console.log(`${C.gray}Upgrade at ${res.server}${cli.upgrade || '/plans/'} — the agent tools unlock once the plan does.${C.reset}`);
+    }
+  });
+
+program
+  .command('logout')
+  .description('Sign out of this machine (removes the stored key; nothing else is touched)')
+  .action(() => {
+    const { logout } = require('./src/login');
+    const had = logout();
+    console.log(had ? `${C.green}✓ signed out${C.reset} ${C.gray}— run 'hakster login' to sign in again.${C.reset}` : `${C.gray}Not signed in — nothing to do.${C.reset}`);
+  });
+
+program
+  .command('whoami')
+  .description('Show who this CLI is signed in as, and whether the plan includes the CLI')
+  .option('-s, --server <url>', 'Server URL (default: the one already configured)')
+  .action(async (opts) => {
+    const { whoami } = require('./src/login');
+    const me = await whoami({ server: opts.server });
+    if (!me.signedIn) {
+      console.log(`${C.yellow}not signed in${C.reset}${me.reason ? ` ${C.gray}(${me.reason})${C.reset}` : ''} ${C.gray}— run 'hakster login'.${C.reset}`);
+      return;
+    }
+    const u = me.user || {};
+    console.log(`${C.green}${u.username || u.email || 'account'}${C.reset} ${C.gray}· plan ${u.plan || 'free'} · ${me.server}${C.reset}`);
+    console.log((me.cli && me.cli.included)
+      ? `${C.green}✓ the CLI is included on this plan${C.reset}`
+      : `${C.yellow}⚠ the CLI is not included on this plan${C.reset} ${C.gray}— upgrade at ${me.server}${(me.cli && me.cli.upgrade) || '/plans/'}${C.reset}`);
+  });
+
+// ── news: live AI + hacking headlines with real links ──────────────────────
+// Owner 2026-11-23: "our cli need live links updates to all ai news out
+// hacking etc". Reads the publishers' public feeds; never invents a headline,
+// a time or a feed status (§10).
+program
+  .command('news [topic]')
+  .description('Live AI, security and exploit-database headlines with links (ai | hack | exploit | all)')
+  .option('-n, --limit <n>', 'How many headlines to show', '15')
+  .option('--refresh', 'Ignore the 10-minute cache and fetch now')
+  .option('--json', 'Print machine-readable JSON')
+  .option('--open <n>', 'Open headline number n in the browser')
+  .option('-w, --watch <seconds>', 'Keep refreshing and print only what is new (default 120 with no value)')
+  .action(async (topic, opts) => {
+    const { getNews, age } = require('./src/news');
+    const alias = { hacking: 'hack', security: 'hack', exploits: 'exploit', db: 'exploit', cve: 'exploit', vulns: 'exploit' };
+    const topics = !topic || topic === 'all' ? null : [alias[topic] || topic];
+    if (topics && !['ai', 'hack', 'exploit'].includes(topics[0])) {
+      console.error(`${C.red}✗ unknown topic '${topic}'${C.reset} ${C.gray}— use ai, hack, exploit or all${C.reset}`);
+      process.exitCode = 1;
+      return;
+    }
+    const limit = Math.max(1, Math.min(100, parseInt(opts.limit, 10) || 15));
+    const openBrowser = (url) => {
+      const { spawn } = require('child_process');
+      const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
+      const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+      try { const c = spawn(cmd, args, { stdio: 'ignore', detached: true }); c.on('error', () => {}); c.unref(); } catch { /* printed link is enough */ }
+    };
+    const render = (res) => {
+      if (opts.json) { console.log(JSON.stringify(res, null, 2)); return; }
+      const tagOf = (t) => (t === 'hack' ? `${C.red}hack${C.reset}` : t === 'exploit' ? `${C.yellow}exploit${C.reset}` : `${C.cyan}ai${C.reset}`);
+      console.log(`${C.gray}${res.fromCache ? 'cached' : 'live'} · ${new Date(res.fetchedAt).toISOString()} · ${res.items.length} headline(s)${C.reset}`);
+      res.items.slice(0, limit).forEach((it, i) => {
+        const n = String(i + 1).padStart(2);
+        const a = age(it.ts);
+        console.log(`${C.green}${n}${C.reset} ${tagOf(it.topic)} ${C.gray}${it.source}${a ? ` · ${a}` : ''}${C.reset}`);
+        console.log(`   ${it.title}`);
+        console.log(`   ${C.blue}${it.url}${C.reset}`);
+      });
+      if (res.errors && res.errors.length) {
+        console.log(`${C.yellow}⚠ ${res.errors.length} feed(s) unavailable${C.reset} ${C.gray}— ${res.errors.map((e) => `${e.source}: ${e.error}`).join(' · ')}${C.reset}`);
+      }
+      if (!res.items.length) console.log(`${C.yellow}No headlines came back from any feed right now.${C.reset}`);
+    };
+
+    let res = await getNews({ refresh: !!opts.refresh, topics });
+    if (opts.open) {
+      const idx = parseInt(opts.open, 10) - 1;
+      const it = res.items[idx];
+      if (!it) { console.error(`${C.red}✗ no headline ${opts.open}${C.reset}`); process.exitCode = 1; return; }
+      console.log(`${C.green}→${C.reset} ${it.title}\n  ${it.url}`);
+      openBrowser(it.url);
+      return;
+    }
+    render(res);
+
+    if (opts.watch !== undefined) {
+      const every = Math.max(30, parseInt(opts.watch, 10) || 120) * 1000;
+      const seen = new Set(res.items.map((it) => it.url));
+      console.log(`${C.gray}watching — new headlines appear here; Ctrl+C stops. (every ${every / 1000}s)${C.reset}`);
+      const timer = setInterval(async () => {
+        if (!process.stdout.isTTY) return; // never spin in a piped call
+        const next = await getNews({ refresh: true, topics });
+        const fresh = next.items.filter((it) => !seen.has(it.url));
+        for (const it of fresh.slice(0, limit)) {
+          seen.add(it.url);
+          const a = age(it.ts);
+          console.log(`${C.green}new${C.reset} ${C.gray}${it.source}${a ? ` · ${a}` : ''}${C.reset}`);
+          console.log(`    ${it.title}\n    ${C.blue}${it.url}${C.reset}`);
+        }
+      }, every);
+      const stop = () => { clearInterval(timer); process.exit(0); };
+      process.on('SIGINT', stop);
+      process.on('SIGTERM', stop);
+      return;
+    }
+  });
+
+// ── shodan: live host search, key kept in-process ──────────────────────────
+program
+  .command('shodan <query...>')
+  .description('Search Shodan live and print host links (needs a key: hakster config set shodanKey — hidden prompt)')
+  .option('-n, --limit <n>', 'How many hosts to show', '10')
+  .option('--host', 'Treat the argument as one IP/hostname to look up instead of a search')
+  .option('--json', 'Print machine-readable JSON')
+  .action(async (queryParts, opts) => {
+    const shodan = require('./src/shodan');
+    const query = Array.isArray(queryParts) ? queryParts.join(' ') : String(queryParts || '');
+    const needKey = () => {
+      console.error(`${C.yellow}No Shodan API key is set.${C.reset}`);
+      console.error(`${C.gray}Add it without it touching your shell history:  hakster config set shodanKey${C.reset} ${C.gray}(typed hidden)${C.reset}`);
+      console.error(`${C.gray}or export SHODAN_API_KEY in the environment this terminal runs in.${C.reset}`);
+      process.exitCode = 1;
+    };
+    if (!shodan.apiKey()) { needKey(); return; }
+
+    if (opts.host) {
+      const r = await shodan.host(query.trim());
+      if (!r.ok) {
+        console.error(`${C.red}✗ Shodan: ${r.reason}${C.reset}`);
+        if (r.needsKey) needKey();
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.json) { console.log(JSON.stringify({ link: r.link, host: r.host }, null, 2)); return; }
+      const h = r.host || {};
+      console.log(`${C.green}${query}${C.reset} ${C.gray}${[h.org, h.os, h.country_name].filter(Boolean).join(' · ')}${C.reset}`);
+      const ports = (Array.isArray(h.ports) ? h.ports : (Array.isArray(h.data) ? h.data.map((d) => d.port) : [])).filter(Boolean);
+      console.log(`  ports: ${ports.length ? ports.join(', ') : 'none reported'}`);
+      if (Array.isArray(h.hostnames) && h.hostnames.length) console.log(`  hostnames: ${h.hostnames.join(', ')}`);
+      if (Array.isArray(h.vulns) && h.vulns.length) console.log(`  ${C.yellow}vulns: ${h.vulns.join(', ')}${C.reset}`);
+      console.log(`  ${C.blue}${r.link}${C.reset}`);
+      return;
+    }
+
+    const r = await shodan.search(query, { limit: Math.max(1, Math.min(50, parseInt(opts.limit, 10) || 10)) });
+    if (!r.ok) {
+      console.error(`${C.red}✗ Shodan: ${r.reason}${C.reset}`);
+      if (r.needsKey) needKey();
+      process.exitCode = 1;
+      return;
+    }
+    if (opts.json) { console.log(JSON.stringify(r, null, 2)); return; }
+    console.log(`${C.gray}"${query}" — ${r.total} result(s), showing ${r.matches.length}${C.reset}`);
+    r.matches.forEach((m, i) => {
+      const n = String(i + 1).padStart(2);
+      const bits = [m.org, m.product, m.transport].filter(Boolean).join(' · ');
+      console.log(`${C.green}${n}${C.reset} ${m.ip}${m.port ? `:${m.port}` : ''} ${C.gray}${bits}${C.reset}`);
+      if (m.hostnames.length) console.log(`   ${C.gray}${m.hostnames.join(', ')}${C.reset}`);
+      console.log(`   ${C.blue}${m.link}${C.reset}`);
+    });
+    if (!r.matches.length) console.log(`${C.yellow}No hosts matched that query.${C.reset}`);
+  });
+
 // ── config ──────────────────────────────────────────────────────────────
 const configCmd = program.command('config').description('Manage CLI configuration');
 
 configCmd
-  .command('set <key> <value>')
-  .description('Set a config value (e.g. server URL)')
+  .command('set <key> [value]')
+  .description('Set a config value (e.g. server URL). A credential key prompts for hidden input — never pass it on the command line.')
   .action((key, value) => {
     const cfg = loadConfig();
-    cfg[key] = value;
-    saveConfig(cfg);
+    if (value !== undefined) {
+      cfg[key] = value;
+      saveConfig(cfg);
+      if (_SECRET_CONFIG_KEY.test(key)) {
+        console.log(`${C.yellow}⚠ a credential was given on the command line, so it may be in your shell history — run 'hakster login' or set it again with hidden input if that matters.${C.reset}`);
+      }
+      return;
+    }
+    // No value on the line: read it hidden, the same way secret-add does (§23).
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    rl._writeToOutput = function (string) {
+      if (rl.stdoutMuted) rl.output.write('*');
+      else rl.output.write(string);
+    };
+    rl.stdoutMuted = true;
+    process.stdout.write(`${C.green}${key}${C.reset} (typed hidden, Enter to save): `);
+    rl.question('', (v) => {
+      rl.close();
+      process.stdout.write('\n');
+      const val = String(v || '');
+      if (!val) { console.log(`${C.red}✗ empty — nothing saved.${C.reset}`); return; }
+      cfg[key] = val;
+      saveConfig(cfg);
+      console.log(`${C.green}✓ ${key} saved${C.reset} ${C.gray}(${_shownConfigValue(key, val)})${C.reset}`);
+    });
   });
+
+// A config value that is a credential is never printed (§9, §23): the caller
+// sees whether it is set and how long it is, which is enough to know it works.
+const _SECRET_CONFIG_KEY = /key|token|password|secret|passphrase/i;
+function _shownConfigValue(k, v) {
+  if (!_SECRET_CONFIG_KEY.test(String(k))) return String(v);
+  const s = String(v == null ? '' : v);
+  return s ? `•••• (${s.length} chars, set)` : '(not set)';
+}
 
 configCmd
   .command('get <key>')
-  .description('Get a config value')
+  .description('Get a config value (credential values are masked)')
   .action((key) => {
     const cfg = loadConfig();
-    console.log(cfg[key] || '(not set)');
+    console.log(cfg[key] === undefined || cfg[key] === '' ? '(not set)' : _shownConfigValue(key, cfg[key]));
   });
 
 configCmd
   .command('list')
-  .description('Show all config')
+  .description('Show all config (credential values are masked)')
   .action(() => {
     const cfg = loadConfig();
     if (Object.keys(cfg).length === 0) {
       console.log('(empty — run: hakster config set server http://your-server:3579)');
     } else {
-      for (const [k, v] of Object.entries(cfg)) console.log(`${k} = ${v}`);
+      for (const [k, v] of Object.entries(cfg)) console.log(`${k} = ${_shownConfigValue(k, v)}`);
     }
   });
 
@@ -2811,11 +3044,30 @@ program
     };
 
     if (process.versions.bun) {
-      // Already under Bun — import the bundle directly.
-      import('./ui-fb.mjs').then(mod => {
-        try { mod.start({ version }); }
-        catch (err) { console.error(err); process.exit(1); }
-      }).catch(() => fallbackInk('ui-fb.mjs is not built'));
+      // Already under Bun — import the bundle directly. The staged-update
+      // choice has to happen BEFORE that import, exactly as tui-entry does it
+      // for a Node start, or this path would silently apply or skip an update
+      // without ever asking (owner, 2026-11-23).
+      (async () => {
+        try {
+          const updater = require('./src/updater');
+          const choice = typeof updater.promptStagedUpdate === 'function' ? await updater.promptStagedUpdate() : null;
+          if (!choice || choice.action !== 'wait') {
+            const applied = updater.applyPending();
+            if (applied && applied.applied) {
+              console.log(`${C.green}✓ CLI updated to v${applied.version}${C.reset} ${C.gray}(was v${applied.from})${C.reset}`);
+            }
+          } else {
+            console.log(`${C.dim}⬆ v${choice.pending.version} staged — will ask again on the next start.${C.reset}`);
+          }
+        } catch {
+          /* updater unavailable — open the TUI as it is */
+        }
+        import('./ui-fb.mjs').then(mod => {
+          try { mod.start({ version }); }
+          catch (err) { console.error(err); process.exit(1); }
+        }).catch(() => fallbackInk('ui-fb.mjs is not built'));
+      })();
       return;
     }
 

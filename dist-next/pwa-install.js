@@ -29,7 +29,11 @@
   var state = window.__haksterInstall || (window.__haksterInstall = { evt: null, installed: false });
 
   // Capture the deferred prompt as early as possible (this script is in <head>).
+  // preventDefault() is required to defer the event so prompt() works on a later tap —
+  // same canonical pattern as phantomide.com. Without it Chrome handles the install
+  // itself and a later prompt() call resolves instantly ("pops up but does nothing").
   window.addEventListener('beforeinstallprompt', function (event) {
+    event.preventDefault();
     state.evt = event;
     window.dispatchEvent(new Event('hakster-install-ready'));
   });
@@ -146,7 +150,9 @@
         ? 'Open the browser menu (⋮) and choose "Install app" or "Add to Home screen".'
         : 'Click the install icon at the right of the address bar, or open the browser menu (⋮) → "Cast, save, and share" → "Install page as app".';
 
-    function showPill() { if (!dismissed && !state.installed && !installedBefore && !inMiniApp()) pill.hidden = false; }
+    // Only offer install once Chrome has actually armed the prompt (state.evt) — phantomide parity.
+    // Showing it before the event fires let an early tap fall through to the "Got it" card.
+    function showPill() { if (!dismissed && !state.installed && !installedBefore && !inMiniApp() && state.evt) pill.hidden = false; }
     showPill();
     window.addEventListener('hakster-install-ready', showPill);
     window.addEventListener('hakster-install-done', function () {

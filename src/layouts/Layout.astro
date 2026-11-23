@@ -42,9 +42,14 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
     <script is:inline data-cfasync="false">
       window.__haksterInstall = { evt: null, installed: false };
       window.addEventListener('beforeinstallprompt', function (event) {
-        // Owner (2026-11-22): "junkalots pwa and phantomide works" / "need hakstersai pwa working".
-        // We keep the event so our own card can call prompt(), but we never preventDefault(): Chrome's
-        // own install control must keep working exactly as it does on junkalot.co and phantomide.com.
+        // Owner (2026-11-23): "haksterai pwa aint working ... popping up but does nothing after clicked".
+        // Root cause: Chrome only lets you call prompt() later if you DEFER the event here with
+        // preventDefault(). Without it Chrome handles the install itself, so the saved event's
+        // prompt() resolved instantly and the card just closed. phantomide.com (which works) does
+        // exactly this; junkalot.co has no custom handler and uses Chrome's native install.
+        // preventDefault only suppresses the auto mini-infobar — the omnibox install icon and the
+        // menu "Install" stay available, so Chrome's own control is not lost.
+        event.preventDefault();
         window.__haksterInstall.evt = event;
         window.dispatchEvent(new Event('hakster-install-ready'));
       });
@@ -3621,10 +3626,11 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         }
       } catch (e) {}
 
-      // Owner (2026-11-22): "its not even showing pwa now". Hiding our pill and relying on Chrome's
-      // own control left nothing visible to click, so the pill is always shown (unless standalone,
-      // installed, or dismissed inside the last 7 days). We still never preventDefault(), so Chrome's
-      // install control keeps working alongside it — the path confirmed on junkalot.co/phantomide.com.
+      // Owner (2026-11-23): "phantomide and junkalot installed no issue". phantomide shows its
+      // install button ONLY from inside beforeinstallprompt, so a visible button always installs.
+      // Ours appeared at once, so a tap in the ~1-2 s before Chrome armed the event fell through to
+      // the "Got it" instructions card. Gate the pill on the deferred prompt the same way phantomide
+      // does: hidden until beforeinstallprompt has fired, then shown for a real, working install.
       var ua = navigator.userAgent || '';
       var ios = /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
       var android = /android/i.test(ua);
@@ -3633,7 +3639,8 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         : android
           ? 'Open the browser menu (⋮) and choose "Install app" or "Add to Home screen".'
           : 'Click the install icon at the right of the address bar, or open the browser menu (⋮) → "Cast, save, and share" → "Install page as app".';
-      var showPill = function () { if (!dismissed && !state.installed) pill.hidden = false; };
+      // Only offer install once Chrome has actually armed the prompt (state.evt) — phantomide parity.
+      var showPill = function () { if (!dismissed && !state.installed && state.evt) pill.hidden = false; };
       showPill();
       window.addEventListener('hakster-install-ready', showPill);
       window.addEventListener('hakster-install-done', function () {

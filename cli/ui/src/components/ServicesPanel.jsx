@@ -15,12 +15,17 @@ import { otherListening, portLabel } from '../../../smartness.mjs';
  */
 export const CELL_W = 16;
 
-/** Height of this panel at `width` for `count` cells, for the row budget. */
-export function servicesGridRows(width, count) {
+/** Height of this panel at `width` for `count` cells, for the row budget.
+ *  `dense` matches GridPanel's one-line cell mode (auto-compact). */
+export function servicesGridRows(width, count, dense = false) {
   const inner = Math.max(1, (Number(width) || 80) - 4);
   const perRow = Math.max(1, Math.floor(inner / (CELL_W + 1)));
   const rows = Math.max(1, Math.ceil(Math.max(1, Number(count) || 1) / perRow));
-  return 2 + rows * 2; // border 2 + each Cell is a label row + a value row
+  // border 2 + title 1 + one row per wrapped cell row. A two-line Cell is
+  // label-over-value (2), a dense Cell is one `label value` line (1). The
+  // title row is part of the box (GridPanel always draws it) — leaving it out
+  // made every caller one row short, which pushed the status bar off screen.
+  return 3 + rows * (dense ? 1 : 2);
 }
 
 const clip = (s, n) => {
@@ -33,6 +38,8 @@ export default function ServicesPanel({
   services = [],
   scan = null,
   showAll = false,
+  maxCells = 32,
+  dense = false,
 }) {
   const w = Math.max(24, Number(width) || 80);
   const list = Array.isArray(services) ? services : [];
@@ -116,19 +123,32 @@ export default function ServicesPanel({
     });
   }
 
+  // Auto-compact: a grid that would grow taller than `maxCells` keeps the
+  // first cells and summarises the rest in one cell, so the panel's height is
+  // bounded on a short terminal (the dashboard scrolls; this panel does not
+  // get to push its footer off the screen).
+  const capacity = Math.max(2, Math.trunc(Number(maxCells) || 32));
+  const overflow = cells.length - capacity;
+  const shownCells = overflow > 0 ? cells.slice(0, capacity - 1) : cells;
+  const hiddenCells = cells.length - shownCells.length;
+
   return (
     <GridPanel
       title="▣ Services on ports"
       width={w}
       borderColor="gray"
+      dense={dense}
       hint={clip(
         `${up}/${list.length} online${others.length ? ` · ${others.length} other ports` : ''}${scanOk ? '' : ' · scan unavailable'}`,
         Math.max(6, w - 24),
       )}
     >
-      {cells.map((c) => (
-        <Cell key={c.key} label={c.label} value={c.value} w={CELL_W} color={c.color} />
+      {shownCells.map((c) => (
+        <Cell key={c.key} label={c.label} value={c.value} w={CELL_W} color={c.color} dense={dense} />
       ))}
+      {hiddenCells > 0 ? (
+        <Cell key="__more" label="more" value={`+${hiddenCells} cells`} w={CELL_W} color="cyan" dense={dense} />
+      ) : null}
     </GridPanel>
   );
 }

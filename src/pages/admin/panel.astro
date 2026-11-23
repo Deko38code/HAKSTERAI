@@ -1,0 +1,161 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout title="Admin — Phantom Text | haksterAi">
+  <style is:global>
+    .pb-wrap{max-width:1040px;margin:0 auto;padding:26px 18px 80px;color:#e2e8f0;}
+    .pb-eyebrow{font:600 10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em;text-transform:uppercase;color:#64748b;margin:0 0 8px;}
+    .pb-title{font-size:clamp(22px,4vw,32px);font-weight:800;letter-spacing:-.02em;margin:0;}
+    .pb-note{max-width:74ch;color:#94a3b8;font-size:13px;line-height:1.6;margin:10px 0 18px;}
+    .pb-status{font:500 12px/1.5 ui-monospace,monospace;color:#94a3b8;margin-left:auto;text-align:right;}
+    .pb-status b{color:#22c55e;}
+    .pb-card{background:#111118;border:1px solid #1e1e2e;border-radius:14px;padding:14px;}
+    .pb-thread{display:flex;flex-direction:column;gap:10px;max-height:52vh;overflow-y:auto;padding-right:4px;}
+    .pb-msg{border:1px solid #1e1e2e;border-radius:12px;padding:10px 12px;background:#0b0b12;}
+    .pb-msg.out{border-color:#7c3aed55;background:#151022;}
+    .pb-msg.in{border-color:#22c55e44;background:#0a1410;}
+    .pb-msg .tag{font:700 9.5px/1 ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#a78bfa;}
+    .pb-msg.in .tag{color:#4ade80;}
+    .pb-msg .t{font-weight:700;font-size:13px;margin:6px 0 4px;}
+    .pb-msg .b{font-size:12.5px;line-height:1.6;color:#cbd5e1;white-space:pre-wrap;overflow-wrap:anywhere;}
+    .pb-msg .when{font:500 10px/1 ui-monospace,monospace;color:#64748b;margin-top:6px;}
+    .pb-form{margin-top:14px;display:flex;flex-direction:column;gap:8px;}
+    .pb-form input,.pb-form textarea{width:100%;box-sizing:border-box;background:#0b0b12;border:1px solid #2a2a3a;border-radius:10px;color:#e2e8f0;padding:9px 11px;font-size:13px;}
+    .pb-form textarea{min-height:96px;resize:vertical;line-height:1.55;}
+    .pb-form input:focus,.pb-form textarea:focus{outline:none;border-color:#7c3aed;}
+    .pb-row{display:flex;align-items:center;gap:10px;}
+    .pb-send{margin-left:auto;background:#7c3aed;color:#fff;border:0;border-radius:9px;padding:10px 16px;font-weight:700;font-size:13px;cursor:pointer;min-height:44px;}
+    .pb-send:disabled{opacity:.45;cursor:default;}
+    .pb-st{font-size:11.5px;color:#94a3b8;min-width:0;overflow-wrap:anywhere;}
+    @media(max-width:640px){.pb-wrap{padding:18px 20px 70px}.pb-save{padding:18px 20px 70px}}
+  </style>
+
+  <div class="pb-wrap">
+    <p class="pb-eyebrow">Owner only · the line to Susie's panel</p>
+    <h1 class="pb-title">Phantom Text</h1>
+    <div class="pb-row">
+      <p class="pb-note">
+        Phantom Text is our end of Susie's OMP notice panel on junkalot.co. A message sent here appears in her
+        panel within about 12 seconds; her replies appear here on the same refresh. Everything in this
+        channel is client-facing — never put our costs, margins, rates, keys or internal notes in it
+        (CLAUDE.md 25, 30). The channel is stored on junkalot.co; nothing is written into another project.
+      </p>
+      <p class="pb-status" id="pb-live">connecting…</p>
+    </div>
+
+    <section class="pb-card" aria-label="Messages between PhantomIDE and Susie">
+      <div class="pb-thread" id="pb-thread">
+        <p class="pb-st">Loading…</p>
+      </div>
+      <div class="pb-form">
+        <label for="pb-title" class="pb-eyebrow" style="margin:0">Title (optional)</label>
+        <input id="pb-title" type="text" maxlength="120" placeholder="e.g. Tonight's update" />
+        <label for="pb-body" class="pb-eyebrow" style="margin:0">Message to Susie</label>
+        <textarea id="pb-body" maxlength="2000" placeholder="What she should see in her panel…"></textarea>
+        <div class="pb-row">
+          <p class="pb-st" id="pb-status" role="status"></p>
+          <button class="pb-send" id="pb-send" type="button" disabled>Send to her panel</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script is:inline>
+    (function () {
+      var thread = document.getElementById('pb-thread');
+      var status = document.getElementById('pb-status');
+      var live = document.getElementById('pb-live');
+      var sendBtn = document.getElementById('pb-send');
+      var bodyEl = document.getElementById('pb-body');
+      var titleEl = document.getElementById('pb-title');
+
+      function token() {
+        try {
+          return localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || '';
+        } catch (e) { return ''; }
+      }
+
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function when(v) {
+        var ms = Date.parse(String(v || ''));
+        if (!isFinite(ms)) return '';
+        return new Date(ms).toLocaleString();
+      }
+
+      function render(messages) {
+        if (!messages.length) {
+          thread.innerHTML = '<p class="pb-st">Nothing in the channel yet.</p>';
+          return;
+        }
+        thread.innerHTML = messages.map(function (m) {
+          var out = m.dir === 'to-client';
+          return '<article class="pb-msg ' + (out ? 'out' : 'in') + '">' +
+            '<p class="tag">' + (out ? 'Us → Susie' : 'Susie → us') + '</p>' +
+            (m.title ? '<p class="t">' + esc(m.title) + '</p>' : '') +
+            '<p class="b">' + esc(m.body) + '</p>' +
+            '<p class="when">' + esc(when(m.at)) + '</p>' +
+            '</article>';
+        }).join('');
+        thread.scrollTop = thread.scrollHeight;
+      }
+
+      async function load() {
+        var key = token();
+        if (!key) { live.textContent = 'sign in to load'; return; }
+        try {
+          var r = await fetch('/api/admin/panel-bridge', { headers: { 'x-api-key': key }, cache: 'no-store' });
+          var data = await r.json().catch(function () { return null; });
+          if (!r.ok || !data || !data.ok) {
+            live.textContent = 'bridge unavailable' + (data && data.error ? ' · ' + data.error : '');
+            return;
+          }
+          render(Array.isArray(data.messages) ? data.messages : []);
+          live.innerHTML = '<b>live</b> · junkalot.co · ' + esc(when(data.at));
+        } catch (e) {
+          live.textContent = 'bridge unavailable';
+        }
+      }
+
+      function sync() { sendBtn.disabled = !bodyEl.value.trim(); }
+      bodyEl.addEventListener('input', sync);
+
+      sendBtn.addEventListener('click', async function () {
+        var body = bodyEl.value.trim();
+        if (!body) return;
+        var key = token();
+        sendBtn.disabled = true;
+        status.textContent = 'Sending…';
+        try {
+          var r = await fetch('/api/admin/panel-bridge', {
+            method: 'POST',
+            headers: { 'x-api-key': key, 'content-type': 'application/json' },
+            body: JSON.stringify({ title: titleEl.value.trim(), body: body }),
+          });
+          var data = await r.json().catch(function () { return null; });
+          if (!r.ok || !data || !data.ok) {
+            status.textContent = 'Not sent · ' + ((data && data.error) || ('HTTP ' + r.status));
+            sendBtn.disabled = false;
+            return;
+          }
+          status.textContent = 'Sent — it is in her panel now.';
+          bodyEl.value = '';
+          titleEl.value = '';
+          await load();
+        } catch (e) {
+          status.textContent = 'Not sent · the bridge could not be reached.';
+          sendBtn.disabled = false;
+        }
+        sync();
+      });
+
+      load();
+      setInterval(function () { if (!document.hidden) load(); }, 12000);
+    })();
+  </script>
+</Layout>

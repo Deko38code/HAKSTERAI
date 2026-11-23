@@ -28,6 +28,8 @@ const DEFAULTS = {
   updateCheck: true, // background CLI update check
   opaqueBackdrop: false, // false = transparent over the terminal's wallpaper
   intro: true, // the five-line decode splash on start
+  graphics: true, // real logo image in kitty / Ghostty / WezTerm (no-op elsewhere)
+  usageRefresh: 15, // the usage page's poll, seconds (0 = paused)
 };
 
 const KEYS = Object.keys(DEFAULTS);
@@ -78,6 +80,11 @@ function coerce(key, value) {
     if (['1', 'true', 'on', 'yes', 'y'].includes(v)) return true;
     if (['0', 'false', 'off', 'no', 'n'].includes(v)) return false;
     return null;
+  }
+  if (typeof fallback === 'number') {
+    const n = Number(String(value == null ? '' : value).trim());
+    if (!Number.isFinite(n) || n < 0) return null;
+    return Math.min(3600, Math.round(n));
   }
   return String(value == null ? '' : value).trim();
 }

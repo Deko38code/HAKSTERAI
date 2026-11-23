@@ -40,9 +40,25 @@ process.env.HAKSTER_CLI_DIR = process.env.HAKSTER_CLI_DIR || path.dirname(fileUR
 try {
   const mod = await import('./src/updater.js');
   const updater = mod && typeof mod.applyPending === 'function' ? mod : mod && mod.default;
-  const applied = updater && updater.applyPending ? updater.applyPending() : null;
-  if (applied && applied.applied) {
-    process.stderr.write(`✓ CLI updated to v${applied.version} (was v${applied.from})\n`);
+  if (updater) {
+    // The owner's startup choice (2026-11-23): "install now or wait til next
+    // one option on startup if update available". A staged package is applied
+    // here only when the operator says install, or when there is no terminal
+    // to ask (a piped start keeps the old apply-what-was-verified behaviour).
+    let go = true;
+    if (typeof updater.promptStagedUpdate === 'function') {
+      const choice = await updater.promptStagedUpdate();
+      if (choice && choice.action === 'wait') {
+        go = false;
+        process.stderr.write(`⬆ CLI v${choice.pending.version} is staged — will ask again on the next start.\n`);
+      }
+    }
+    const applied = go && typeof updater.applyPending === 'function' ? updater.applyPending() : null;
+    if (applied && applied.applied) {
+      process.stderr.write(`✓ CLI updated to v${applied.version} (was v${applied.from})\n`);
+    } else if (applied && applied.reason && applied.reason !== 'current' && applied.reason !== 'already applied') {
+      process.stderr.write(`⬆ update not applied: ${applied.reason}\n`);
+    }
   }
 } catch {
   /* updater unavailable or stage unusable — open the TUI as it is */

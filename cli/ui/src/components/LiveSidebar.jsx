@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { TextAttributes } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
+import { clampStart, gutterChar, overflows, scrollHint } from '../utils/panel-scroll.js';
+import LiveImageViewer from './LiveImageViewer.jsx';
 
 /* LiveSidebar — the HakTerm side panel, ported to the terminal.
  *
@@ -113,23 +115,9 @@ export function EventLine({ width, line, compact = false }) {
 
 /** Auto-scroll window for a fixed number of rows. `offset === null` means
  *  "follow the newest line"; the value is clamped on every render, so content
- *  arriving while scrolled back never jumps the view. */
-export const clampStart = (offset, total, rows) => {
-  const max = Math.max(0, total - rows);
-  return offset == null ? max : Math.max(0, Math.min(offset, max));
-};
-
-/** One scrollbar column: ▲ when there is more above, ▼ when there is more
- *  below, and a █ thumb between │ rails. The caller hides it when the content
- *  fits, which is the compact case. */
-export const gutterChar = (i, rows, total, start) => {
-  const thumb = Math.max(1, Math.round((rows * rows) / Math.max(1, total)));
-  const maxStart = Math.max(1, total - rows);
-  const thumbTop = Math.round((start / maxStart) * Math.max(0, rows - thumb));
-  if (i === 0 && start > 0) return '▲';
-  if (i === rows - 1 && start + rows < total) return '▼';
-  return i >= thumbTop && i < thumbTop + thumb ? '█' : '│';
-};
+ *  arriving while scrolled back never jumps the view. The maths lives in
+ *  utils/panel-scroll.js so every panel shares one implementation. */
+export { clampStart, gutterChar };
 
 /** A content row plus, when needed, its scrollbar cell. */
 export function ScrollRow({ width, children, gutter }) {
@@ -141,10 +129,10 @@ export function ScrollRow({ width, children, gutter }) {
   );
 }
 
-export function Panel({ width, title, hint, children }) {
+export function Panel({ width, title, hint, children, borderColor = 'gray' }) {
   const inner = Math.max(1, width - 4);
   return (
-    <box style={{ width, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'gray', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
+    <box style={{ width, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor, paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
       <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
         <text fg="cyan" attributes={TextAttributes.BOLD}>{clip(title, inner)}</text>
         {hint ? <text fg="gray">{clip(hint, Math.max(0, inner - title.length - 1))}</text> : null}
@@ -172,6 +160,8 @@ export default function LiveSidebar({
   serverOk = false,
   liveTool = '',
   liveLines = [],
+  liveImage = null,
+  graphics = true,
   busy = false,
   activity = [],
   usage = null,
@@ -292,18 +282,16 @@ export default function LiveSidebar({
     }
   });
 
-  const actGutter = activity.length > activityRows && activityRows > 0;
-  const outGutter = liveLines.length > outputRows && outputRows > 0;
+  const actGutter = overflows(activity.length, activityRows);
+  const outGutter = overflows(liveLines.length, outputRows);
   const actBody = Math.max(1, inner - (actGutter ? 1 : 0));
   const outBody = Math.max(1, inner - (outGutter ? 1 : 0));
   const actHint = !activity.length
     ? busy ? 'waiting' : '0'
-    : actGutter
-      ? `${actStart + 1}-${Math.min(activity.length, actStart + activityRows)}/${activity.length}${actOffset != null ? ' ⇣' : ''}`
-      : `${activity.length}`;
-  const outHint = outGutter
-    ? `${outStart + 1}-${Math.min(liveLines.length, outStart + outputRows)}/${liveLines.length}${outOffset != null ? ' ⇣' : ''}`
-    : busy ? 'live' : 'last';
+    : scrollHint(activity.length, activityRows, actStart, actOffset == null);
+  const outHint = !liveLines.length
+    ? busy ? 'live' : 'last'
+    : scrollHint(liveLines.length, outputRows, outStart, outOffset == null);
 
   return (
     <box style={{ width, flexDirection: 'column', flexShrink: 0 }}>
@@ -393,19 +381,39 @@ export default function LiveSidebar({
       {activityRows ? (
         <Panel width={width} title="⚡ Activity" hint={actHint}>
           {activity.length === 0 ? (
-            <box style={{ width: inner }}>
-              <text fg="gray">{clip(busy ? 'waiting for events…' : '—', inner)}</text>
-            </box>
+            <>
+              <box style={{ width: inner }}>
+                <text fg="gray">{clip(busy ? 'waiting for events…' : '—', inner)}</text>
+              </box>
+              {Array.from({ length: Math.max(0, activityRows - 1) }, (_, i) => (
+                <box key={`apad:${i}`} style={{ width: inner, flexShrink: 0 }}>
+                  <text> </text>
+                </box>
+              ))}
+            </>
           ) : (
-            activity.slice(actStart, actStart + activityRows).map((line, i) => (
-              <ScrollRow
-                key={`e:${line.ts}:${i}`}
-                width={inner}
-                gutter={actGutter ? gutterChar(i, activityRows, activity.length, actStart) : null}
-              >
-                <EventLine width={actBody} line={line} compact={compact} />
-              </ScrollRow>
-            ))
+            // Exactly `activityRows` rows whether two events or twenty have
+            // arrived: the panel (and the bar's track) keeps its height while a
+            // run streams, so the panels below never jump and the thumb keeps
+            // pace with the newest line.
+            Array.from({ length: activityRows }, (_, i) => {
+              const line = activity[actStart + i];
+              return (
+                <ScrollRow
+                  key={`e:${actStart + i}:${i}`}
+                  width={inner}
+                  gutter={actGutter ? gutterChar(i, activityRows, activity.length, actStart) : null}
+                >
+                  {line ? (
+                    <EventLine width={actBody} line={line} compact={compact} />
+                  ) : (
+                    <box style={{ width: actBody }}>
+                      <text> </text>
+                    </box>
+                  )}
+                </ScrollRow>
+              );
+            })
           )}
         </Panel>
       ) : null}
@@ -416,22 +424,44 @@ export default function LiveSidebar({
       {outputRows ? (
         <Panel width={width} title="▶ Output" hint={outHint}>
           <Row width={inner} k="call" v={liveTool ? clip(liveTool, Math.max(1, inner - 5)) : '—'} color={liveTool ? 'cyan' : 'gray'} />
-          {liveLines.length === 0 ? (
-            <box style={{ width: inner }}>
-              <text fg="gray">{clip(busy ? 'waiting for output…' : '—', inner)}</text>
-            </box>
-          ) : (
-            liveLines.slice(outStart, outStart + outputRows).map((line, i) => (
-              <ScrollRow
-                key={`o:${i}`}
-                width={inner}
-                gutter={outGutter ? gutterChar(i, outputRows, liveLines.length, outStart) : null}
-              >
-                <box style={{ width: outBody }}>
-                  <text fg={i === outputRows - 1 ? 'white' : 'gray'}>{clip(line, outBody)}</text>
+          {liveImage && outputRows >= 3 ? (
+            <LiveImageViewer width={inner} height={outputRows} source={liveImage} graphics={graphics} />
+          ) : liveLines.length === 0 ? (
+            <>
+              <box style={{ width: inner }}>
+                <text fg="gray">{clip(busy ? 'waiting for output…' : '—', inner)}</text>
+              </box>
+              {Array.from({ length: Math.max(0, outputRows - 1) }, (_, i) => (
+                <box key={`opad:${i}`} style={{ width: inner, flexShrink: 0 }}>
+                  <text> </text>
                 </box>
-              </ScrollRow>
-            ))
+              ))}
+            </>
+          ) : (
+            // Same contract as Activity: the tail is drawn in a fixed-height
+            // window, padded to `outputRows`, with the ▲/█/▼ bar on every row —
+            // the bar tracks the newest line as output streams instead of
+            // appearing late on a panel that grew to meet it.
+            Array.from({ length: outputRows }, (_, i) => {
+              const index = outStart + i;
+              return (
+                <ScrollRow
+                  key={`o:${index}:${i}`}
+                  width={inner}
+                  gutter={outGutter ? gutterChar(i, outputRows, liveLines.length, outStart) : null}
+                >
+                  {index < liveLines.length ? (
+                    <box style={{ width: outBody }}>
+                      <text fg={index === liveLines.length - 1 ? 'white' : 'gray'}>{clip(liveLines[index], outBody)}</text>
+                    </box>
+                  ) : (
+                    <box style={{ width: outBody }}>
+                      <text> </text>
+                    </box>
+                  )}
+                </ScrollRow>
+              );
+            })
           )}
         </Panel>
       ) : null}

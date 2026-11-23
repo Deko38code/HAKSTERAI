@@ -74,6 +74,20 @@ import Layout from '../../layouts/Layout.astro';
       </div>
     </section>
 
+    <section class="pl-section">
+      <h2>Accounts on the meter &middot; measured tokens at the locked rate</h2>
+      <div class="pl-card" id="pl-user-meter">
+        <p class="pl-empty">Reading each account's measured usage&hellip;</p>
+      </div>
+    </section>
+
+    <section class="pl-section">
+      <h2>Her usage &middot; which key ran it, and when she is on</h2>
+      <div class="pl-card" id="pl-usage-detail">
+        <p class="pl-empty">Reading Junkalot's provider split and hourly pattern&hellip;</p>
+      </div>
+    </section>
+
     <p class="pl-note">Every number here is read from what actually happened: the HaksterAI payment and usage ledgers on this box, and PhantomIDE's own profit ledger on Parrot. Nothing is estimated into a number that was not measured, nothing is billed, and no plan, model or route is changed by this page.</p>
 
     <section class="pl-section">
@@ -401,6 +415,94 @@ import Layout from '../../layouts/Layout.astro';
             '<p class="pl-empty" style="margin-top:10px;">Read live from junkalot.co on every 30 s poll and never cached. Owner only: this card is not rendered anywhere on the client site. Meter, not an invoice, and nothing here charges anyone.</p>';
         } else {
           ratesEl.innerHTML = '<p class="pl-empty">The locked rate card could not be read live from junkalot.co just now (' + (d.ratesState || 'unavailable') + '), so no figure is shown rather than a stale one.</p>';
+        }
+
+        // HaksterAI accounts valued at that same locked card (owner 2026-11-23:
+        // "need all wired at our profit margin rates for billing users etc" /
+        // "to admin"). Computed server-side from measured tokens only; when the
+        // live card could not be read there is no figure at all rather than one
+        // from an invented rate. Meter, not an invoice — nothing is charged and
+        // no plan changes.
+        var umMid = ' \u00b7 ';
+        var umEl = document.getElementById('pl-user-meter');
+        var um = d.userMeter;
+        if (um && um.accounts) {
+          var umLive = um.live === true || d.ratesState === 'live';
+          var head = '<h3>' + um.accountCount + ' account' + (um.accountCount === 1 ? '' : 's') +
+            ' <span class="pl-badge ' + (umLive ? 'live' : 'off') + '">' + (umLive ? 'LIVE' : 'STALE') +
+            umMid + '$' + Number(um.rateInPerMTok).toFixed(2) + ' in / $' + Number(um.rateOutPerMTok).toFixed(2) +
+            ' out per Mtok</span></h3>';
+          var body = um.accounts.length
+            ? um.accounts.map(function (a) {
+                var share = a.shareOfPlanPct == null
+                  ? 'no monthly plan price'
+                  : Number(a.shareOfPlanPct).toFixed(2) + '% of $' + Number(a.planUsdMonth).toFixed(0) + ' plan';
+                var over = Number(a.overageUsd) > 0 ? umMid + 'over by $' + Number(a.overageUsd).toFixed(2) : '';
+                return row(
+                  (a.username || ('#' + a.id)) + (a.plan ? ' · ' + a.plan : '') + umMid + '$' + Number(a.monthMeterUsd).toFixed(2) + ' this 30d',
+                  compact(a.monthInTokens) + ' in + ' + compact(a.monthOutTokens) + ' out · ' + share + over + ' · all-time $' + Number(a.meterUsd).toFixed(2)
+                );
+              }).join('')
+            : '<p class="pl-empty">No account has recorded tokens yet, so there is nothing to meter.</p>';
+          umEl.innerHTML = head + body +
+            row('All accounts', '$' + Number(um.totalMonthMeterUsd || 0).toFixed(2) + ' over ' + um.windowDays + ' days' + umMid + 'all-time $' + Number(um.totalMeterUsd || 0).toFixed(2)) +
+            '<p class="pl-empty" style="margin-top:10px;">' + esc(um.note || 'Meter, not an invoice.') +
+            ' Rates read live from ' + esc(um.source || 'junkalot.co') +
+            (um.checkedAt ? ' at ' + esc(String(um.checkedAt).slice(0, 19).replace('T', ' ') + ' UTC') : '') +
+            '. Owner only: nothing here reaches an account, a client page or the CLI usage view of a non-owner account.</p>';
+        } else {
+          umEl.innerHTML = '<p class="pl-empty">No account meter: ' +
+            (d.ratesState === 'live'
+              ? 'no recorded token usage yet, so there is nothing to value.'
+              : 'the locked rate card could not be read live from junkalot.co, and no figure is computed from an invented rate.') +
+            '</p>';
+        }
+
+        // Which provider/key actually ran her turns, and when she is on the site —
+        // read live from Junkalot's owner-only bridge on every poll. Owner-only: her
+        // Junkalot admin renders none of this (CLAUDE.md 25, 30). The window is
+        // advice for scheduling a live update; nothing here starts one.
+        var udEl = document.getElementById('pl-usage-detail');
+        if (udEl) {
+          var rt2 = d.rates;
+          if (!rt2) {
+            udEl.innerHTML = '<p class="pl-empty">The live card could not be read from junkalot.co just now (' +
+              esc(d.ratesState || 'unavailable') + '), so no provider or usage split is shown rather than a stale one.</p>';
+          } else {
+            var prov = Array.isArray(rt2.providers) ? rt2.providers : [];
+            var scope = rt2.keyScope || null;
+            var sch = rt2.schedule || null;
+            var out = '<h3>Provider split &middot; last ' + Number((sch && sch.windowDays) || 30) + ' days' +
+              (scope ? ' <span class="pl-badge ' + (scope.ownKeyPresent ? 'live' : 'off') + '">' +
+                (scope.primary === 'own-account' ? 'HER OWN KEY' : 'SHARED LAN PEER') + '</span>' : '') + '</h3>';
+            out += prov.length
+              ? prov.map(function (p) {
+                  var testNote = Number(p.ownerTestTurns) > 0 ? ' · ' + Number(p.ownerTestTurns) + ' owner test' : '';
+                  return row(esc(String(p.provider || 'unknown')), Number(p.billableTurns) + ' billed / ' + Number(p.turns) + ' turns' + testNote + ' · ' +
+                    compact((Number(p.inTokens) || 0) + (Number(p.outTokens) || 0)) + ' tokens · $' + Number(p.meteredUsd || 0).toFixed(2));
+                }).join('')
+              : '<p class="pl-empty">No provider rows recorded in the window yet.</p>';
+            if (scope) out += '<p class="pl-empty" style="margin-top:8px;">' + esc(scope.note || '') + '</p>';
+
+            if (sch && Array.isArray(sch.hours) && sch.hours.length === 24) {
+              var bars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+              var maxH = sch.hours.reduce(function (m, h) { return Math.max(m, Number(h.turns) || 0); }, 0);
+              var strip = sch.hours.map(function (h) {
+                if (!maxH || !Number(h.turns)) return '·';
+                return bars[Math.min(bars.length - 1, Math.round((Number(h.turns) / maxH) * (bars.length - 1)))];
+              }).join('');
+              var q = sch.quietestWindow || null;
+              out += '<h3 style="margin-top:14px;">When she is on &middot; ' + esc(sch.timezone || 'server-local') + '</h3>' +
+                row('24 h turns', '<span style="font-family:monospace;letter-spacing:2px;">' + esc(strip) + '</span> <span style="color:#6b7280;">0h → 23h</span>') +
+                row('Busiest', (Array.isArray(sch.busiestHours) && sch.busiestHours.length
+                  ? sch.busiestHours.map(function (b) { return String(b.hour) + ':00 (' + Number(b.turns) + ')'; }).join(' · ')
+                  : 'no turns recorded yet')) +
+                row('Quietest 4 h', q ? String(q.startHour) + ':00–' + String(q.endHour) + ':59 · ' + Number(q.turns) + ' turns recorded' : '—') +
+                '<p class="pl-empty" style="margin-top:8px;">' + esc(sch.note || 'Advice only.') + ' The auto-apply guard already refuses to hand the server over while a client is signed in or messaging, and every staged build lands together in one quiet window.</p>';
+            }
+            out += '<p class="pl-empty" style="margin-top:10px;">Owner only. Her Junkalot admin shows her own turns and tokens — never a provider split, key, cost or schedule (CLAUDE.md 25, 30). Read live from junkalot.co; nothing is written back into that project.</p>';
+            udEl.innerHTML = out;
+          }
         }
 
         // Junkalot client value — owner record only, never rendered on junkalot.co.
