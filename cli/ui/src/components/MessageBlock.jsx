@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { TextAttributes } from '@opentui/core';
 import { clip } from './LiveSidebar.jsx';
 
@@ -37,20 +37,80 @@ const TONE_COLOR = { error: 'red', warn: 'yellow', notice: 'cyan' };
 const lastLine = (s) => String(s || '').replace(/\r/g, '').split('\n').filter((l) => l.trim()).pop() || '';
 
 /** A tool call is still running until its result arrives. In a compact turn
- *  the result is one clipped line instead of the full output. */
+ *  the result is one clipped line instead of the full output.
+ *
+ *  The card behaviours here are ported from the old CLI's ToolPanels
+ *  (cli/ui/src/components/ToolPanels.jsx on the Lenovo box), which the owner
+ *  says read better than the flat rows this TUI had:
+ *    - an animated spinner while the call runs, not a static "…";
+ *    - the call's own measured duration ("1.2s") once it lands;
+ *    - args as `k=v` inside a fixed budget instead of raw JSON, which wrapped
+ *      a six-key args object into several rows and pushed the result away;
+ *    - a failed call drawn in red with ✗, the same success test the server and
+ *      the old CLI use;
+ *    - "waiting for output…" while a running call has produced nothing yet.
+ */
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const ARGS_BUDGET = 64;
+const ARG_VALUE_MAX = 40;
+
+function flattenArgs(args) {
+  if (args === null || args === undefined) return '';
+  if (typeof args === 'string') return args.trim().replace(/\s+/g, ' ');
+  if (Array.isArray(args)) return flattenArgs(args.join(' '));
+  if (typeof args === 'object') {
+    return Object.entries(args)
+      .map(([k, v]) => {
+        let val = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
+        if (val.length > ARG_VALUE_MAX) val = `${val.slice(0, ARG_VALUE_MAX - 1)}…`;
+        return `${k}=${val}`;
+      })
+      .join(' ');
+  }
+  return String(args);
+}
+
+/** The server marks a failed tool result as `Error:` / `❌` — the same test
+ *  smartness.mjs scores with, so the card and the meter agree. */
+const isErrorResult = (result) => /^Error[:\n]|^❌/i.test(String(result == null ? '' : result).trim());
+
+function fmtDur(ms) {
+  const n = Math.max(0, Math.round(Number(ms) || 0));
+  return n < 1000 ? `${n}ms` : `${(n / 1000).toFixed(1)}s`;
+}
+
+/** One shared ticker per pending card — idle turns cost zero renders. */
+function useSpinnerFrame(active) {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!active) return undefined;
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 100);
+    return () => clearInterval(id);
+  }, [active]);
+  return frame;
+}
+
 function ToolRow({ tool, width, compact = false }) {
-  const pending = tool.result === null;
-  const glyph = pending ? '…' : '✓';
-  const colour = pending ? 'yellow' : 'green';
+  const pending = tool.result === null || tool.result === undefined;
+  const frame = useSpinnerFrame(pending);
+  const failed = !pending && isErrorResult(tool.result);
+  const glyph = pending ? SPINNER_FRAMES[frame] : failed ? '✗' : '✓';
+  const colour = pending ? 'yellow' : failed ? 'red' : 'green';
   const name = tool.name || 'tool';
-  const args = tool.args && Object.keys(tool.args).length
-    ? ` ${JSON.stringify(tool.args)}`
-    : '';
+  const args = clip(flattenArgs(tool.args), ARGS_BUDGET);
+  // Live while the call runs (the spinner tick re-renders this row), fixed
+  // once the result stamps `ms` in useAgentStream.
+  const dur = pending
+    ? fmtDur(Date.now() - (Number(tool.t0) || Date.now()))
+    : (tool.ms != null ? fmtDur(tool.ms) : '');
   const nameW = name.length + 2; // glyph + space
-  const head = `${args}`;
-  const shown = tool.result == null
+  const argW = Math.max(4, width - nameW - (args ? dur.length + 3 : 0));
+  // An unclipped result line used to wrap into three rows, so a handful of
+  // calls could fill the whole transcript; ANSI colour is stripped for the
+  // same reason the old cards stripped it — the TUI draws its own colours.
+  const shown = pending
     ? null
-    : String(tool.result).replace(/\r/g, '').split('\n');
+    : String(tool.result).replace(/\x1b\[[0-9;]*m/g, '').replace(/\r/g, '').split('\n');
   const limit = compact ? 1 : RESULT_LINES;
   const lines = shown ? shown.slice(0, limit) : [];
   const hidden = shown ? Math.max(0, shown.length - lines.length) : 0;
@@ -60,14 +120,16 @@ function ToolRow({ tool, width, compact = false }) {
       <text>
         <span fg={colour}>{glyph} </span>
         <span fg="white">{name}</span>
-        {args ? <span fg="gray">{clip(head, Math.max(4, width - nameW))}</span> : null}
+        {args ? <span fg="gray">{` ${clip(args, argW)}`}</span> : null}
+        {dur ? <span fg="gray">{`  ${dur}`}</span> : null}
       </text>
-      {/* One row per line, each clipped to the column: an unclipped 300-char
-          build line used to wrap into three rows, so a handful of calls could
-          fill the whole transcript. */}
+      {/* One row per line, each clipped to the column. */}
       {lines.map((line, i) => (
-        <text key={`r-${i}`} fg="gray">{clip(line.trim() || ' ', Math.max(4, width - 1))}</text>
+        <text key={`r-${i}`} fg={failed ? 'red' : 'gray'}>{clip(line.trim() || ' ', Math.max(4, width - 1))}</text>
       ))}
+      {pending && !lines.length ? (
+        <text fg="gray">{clip('│ waiting for output…', Math.max(4, width))}</text>
+      ) : null}
       {hidden > 0 ? (
         <text fg="gray">{`… +${hidden} more line${hidden === 1 ? '' : 's'} · ▶ Result`}</text>
       ) : null}

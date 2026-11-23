@@ -50,6 +50,14 @@ const BIG_TURN = {
       tool_result: BIG_RESULT.join('\n'),
     },
     { type: 'delta', content: 'Answer: the build passes after the split.' },
+    // A call left running: the card must show the spinner state with a live
+    // duration instead of an empty body (old ToolPanels: "waiting for output…").
+    {
+      type: 'tool_call_start',
+      tool_call_id: 'b2',
+      tool_name: 'web_search',
+      tool_args: { query: 'webpack splitChunks vendor chunk' },
+    },
     { type: 'done', model: 'glm-5.2:cloud', provider: 'ollama', inputTokens: 200, outputTokens: 40 },
   ],
 };
@@ -432,9 +440,19 @@ export async function run({ adsPort }) {
     ['its closing answer stays on screen', /Answer: the build passes after the split/.test(bigFrame)],
     // A compact turn keeps one reasoning line instead of hiding it.
     ['reasoning is not dropped when the turn is dense', /Checking the bundle sizes first/.test(bigFrame)],
-    // The dump is capped and says where the rest is.
-    ['the shell result is capped, with a pointer to Output', /more lines · ▶ Output/.test(bigFrame)],
+    // The dump is capped and says where the rest is. The panel the pointer
+    // names is ▶ Result (LiveOutputPanel); this string was left saying "Output"
+    // after the pane was renamed and had been failing ever since.
+    ['the shell result is capped, with a pointer to Result', /more lines · ▶ Result/.test(bigFrame)],
     ['the cap is real: line 40 of the dump is not drawn', !/bundle-40\.js/.test(bigFrame)],
+    // ── the tool card (ported from the old CLI's ToolPanels) ──
+    // Args are `k=v`, not raw JSON: JSON.stringify wrapped a six-key args
+    // object across rows and pushed the result out of the card.
+    ['the tool card flattens args to k=v', /✓ exec_shell command=npm run build/.test(bigFrame)],
+    ['the tool card shows the call duration', /exec_shell command=npm run build +\d+(?:\.\d+)?(?:ms|s)/.test(bigFrame)],
+    // A call still running renders its spinner state, not an empty card.
+    ['a running call says it is waiting for output', /waiting for output…/.test(bigFrame)],
+    ['a running call shows a live duration', /web_search query=webpack splitChunks[^\n]*\d+(?:\.\d+)?(?:ms|s)/.test(bigFrame)],
     ['the small screen still keeps its status bar', /ads on/.test(bigFrame)],
 
     // The caret is escaped: unescaped it is a start-of-string anchor, and the

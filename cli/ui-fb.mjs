@@ -1277,7 +1277,7 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React24, { useCallback as useCallback5, useEffect as useEffect13, useRef as useRef8, useState as useState16 } from "react";
+import React24, { useCallback as useCallback5, useEffect as useEffect14, useRef as useRef8, useState as useState17 } from "react";
 import fs9 from "node:fs";
 import path7 from "node:path";
 import { useKeyboard as useKeyboard7, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
@@ -3947,11 +3947,11 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
 }
 
 // src/components/Transcript.jsx
-import React23, { useEffect as useEffect7, useRef as useRef4, useState as useState10 } from "react";
+import React23, { useEffect as useEffect8, useRef as useRef4, useState as useState11 } from "react";
 import { useKeyboard as useKeyboard6 } from "@opentui/react";
 
 // src/components/MessageBlock.jsx
-import React22 from "react";
+import React22, { useEffect as useEffect7, useState as useState10 } from "react";
 import { TextAttributes as TextAttributes16 } from "@opentui/core";
 import { Fragment as Fragment8, jsx as jsx22, jsxs as jsxs21 } from "react/jsx-runtime";
 var RESULT_LINES = 3;
@@ -3962,15 +3962,48 @@ var ROLE_STYLE = {
 };
 var TONE_COLOR = { error: "red", warn: "yellow", notice: "cyan" };
 var lastLine = (s) => String(s || "").replace(/\r/g, "").split("\n").filter((l) => l.trim()).pop() || "";
+var SPINNER_FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
+var ARGS_BUDGET = 64;
+var ARG_VALUE_MAX = 40;
+function flattenArgs(args) {
+  if (args === null || args === void 0) return "";
+  if (typeof args === "string") return args.trim().replace(/\s+/g, " ");
+  if (Array.isArray(args)) return flattenArgs(args.join(" "));
+  if (typeof args === "object") {
+    return Object.entries(args).map(([k, v]) => {
+      let val = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+      if (val.length > ARG_VALUE_MAX) val = `${val.slice(0, ARG_VALUE_MAX - 1)}\u2026`;
+      return `${k}=${val}`;
+    }).join(" ");
+  }
+  return String(args);
+}
+var isErrorResult = (result) => /^Error[:\n]|^❌/i.test(String(result == null ? "" : result).trim());
+function fmtDur(ms) {
+  const n = Math.max(0, Math.round(Number(ms) || 0));
+  return n < 1e3 ? `${n}ms` : `${(n / 1e3).toFixed(1)}s`;
+}
+function useSpinnerFrame(active) {
+  const [frame, setFrame] = useState10(0);
+  useEffect7(() => {
+    if (!active) return void 0;
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 100);
+    return () => clearInterval(id);
+  }, [active]);
+  return frame;
+}
 function ToolRow({ tool, width, compact = false }) {
-  const pending = tool.result === null;
-  const glyph = pending ? "\u2026" : "\u2713";
-  const colour = pending ? "yellow" : "green";
+  const pending = tool.result === null || tool.result === void 0;
+  const frame = useSpinnerFrame(pending);
+  const failed = !pending && isErrorResult(tool.result);
+  const glyph = pending ? SPINNER_FRAMES[frame] : failed ? "\u2717" : "\u2713";
+  const colour = pending ? "yellow" : failed ? "red" : "green";
   const name = tool.name || "tool";
-  const args = tool.args && Object.keys(tool.args).length ? ` ${JSON.stringify(tool.args)}` : "";
+  const args = clip(flattenArgs(tool.args), ARGS_BUDGET);
+  const dur = pending ? fmtDur(Date.now() - (Number(tool.t0) || Date.now())) : tool.ms != null ? fmtDur(tool.ms) : "";
   const nameW = name.length + 2;
-  const head = `${args}`;
-  const shown = tool.result == null ? null : String(tool.result).replace(/\r/g, "").split("\n");
+  const argW = Math.max(4, width - nameW - (args ? dur.length + 3 : 0));
+  const shown = pending ? null : String(tool.result).replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "").split("\n");
   const limit = compact ? 1 : RESULT_LINES;
   const lines = shown ? shown.slice(0, limit) : [];
   const hidden = shown ? Math.max(0, shown.length - lines.length) : 0;
@@ -3981,9 +4014,11 @@ function ToolRow({ tool, width, compact = false }) {
         " "
       ] }),
       /* @__PURE__ */ jsx22("span", { fg: "white", children: name }),
-      args ? /* @__PURE__ */ jsx22("span", { fg: "gray", children: clip(head, Math.max(4, width - nameW)) }) : null
+      args ? /* @__PURE__ */ jsx22("span", { fg: "gray", children: ` ${clip(args, argW)}` }) : null,
+      dur ? /* @__PURE__ */ jsx22("span", { fg: "gray", children: `  ${dur}` }) : null
     ] }),
-    lines.map((line, i) => /* @__PURE__ */ jsx22("text", { fg: "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
+    lines.map((line, i) => /* @__PURE__ */ jsx22("text", { fg: failed ? "red" : "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
+    pending && !lines.length ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: clip("\u2502 waiting for output\u2026", Math.max(4, width)) }) : null,
     hidden > 0 ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 \u25B6 Result` }) : null
   ] });
 }
@@ -4039,7 +4074,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef4(null);
-  const [follow, setFollow] = useState10(true);
+  const [follow, setFollow] = useState11(true);
   const tail = list.length ? list[list.length - 1] : null;
   const tailSig = tail ? [
     String(tail.text || "").length,
@@ -4054,7 +4089,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
     if (typeof scrollRef === "function") scrollRef(node);
     else scrollRef.current = node;
   };
-  useEffect7(() => {
+  useEffect8(() => {
     if (!follow) return void 0;
     const box = boxRef.current;
     if (!box) return void 0;
@@ -4124,7 +4159,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
 }
 
 // src/hooks/useAgentStream.js
-import { useCallback as useCallback3, useEffect as useEffect8, useRef as useRef5, useState as useState11 } from "react";
+import { useCallback as useCallback3, useEffect as useEffect9, useRef as useRef5, useState as useState12 } from "react";
 var import_ladder = __toESM(require_ladder());
 var DEFAULT_API2 = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
@@ -4175,28 +4210,28 @@ function useAgentStream({
   // run fails where it failed — no silent model change.
   autoHandoff = true
 } = {}) {
-  const [messages, setMessages] = useState11([]);
+  const [messages, setMessages] = useState12([]);
   const messagesRef = useRef5([]);
-  useEffect8(() => {
+  useEffect9(() => {
     messagesRef.current = messages;
   }, [messages]);
-  const [todos, setTodos] = useState11([]);
-  const [status, setStatus] = useState11("idle");
-  const [error, setError] = useState11(null);
-  const [elapsedMs, setElapsedMs] = useState11(0);
-  const [activity, setActivity] = useState11([]);
-  const [requests, setRequests] = useState11(0);
-  const [tokens, setTokens] = useState11({ in: 0, out: 0, reported: false });
+  const [todos, setTodos] = useState12([]);
+  const [status, setStatus] = useState12("idle");
+  const [error, setError] = useState12(null);
+  const [elapsedMs, setElapsedMs] = useState12(0);
+  const [activity, setActivity] = useState12([]);
+  const [requests, setRequests] = useState12(0);
+  const [tokens, setTokens] = useState12({ in: 0, out: 0, reported: false });
   const requestsRef = useRef5(0);
   const pushActivity = useCallback3((kind, text) => {
     const line = { kind: String(kind || "sys"), text: String(text == null ? "" : text), ts: Date.now() };
     setActivity((prev) => prev.length >= 60 ? [...prev.slice(prev.length - 59), line] : [...prev, line]);
   }, []);
-  const [pendingConfirm, setPendingConfirm] = useState11(null);
+  const [pendingConfirm, setPendingConfirm] = useState12(null);
   const pendingConfirmRef = useRef5(null);
   const meterRef = useRef5(null);
   if (!meterRef.current) meterRef.current = createMeter();
-  const [meters, setMeters] = useState11(() => meterRef.current.snapshot());
+  const [meters, setMeters] = useState12(() => meterRef.current.snapshot());
   const toolMetaRef = useRef5(/* @__PURE__ */ new Map());
   const lastToolRef = useRef5(null);
   const syncMeters = useCallback3(() => setMeters(meterRef.current.snapshot()), []);
@@ -4223,7 +4258,7 @@ function useAgentStream({
     statusRef.current = next;
     setStatus(next);
   }, []);
-  useEffect8(() => {
+  useEffect9(() => {
     const ticking = status === "thinking" || status === "streaming" || status === "approval";
     if (!ticking) return void 0;
     const id = setInterval(() => {
@@ -4269,13 +4304,19 @@ function useAgentStream({
       }
       return idx2;
     };
+    const settled = (entry) => ({
+      ...entry,
+      result,
+      ms: Math.max(0, Date.now() - (Number(entry.t0) || Date.now())),
+      ...mcp ? { mcp: true } : {}
+    });
     const tools = m.tools.slice();
     const idx = pick(tools);
-    if (idx !== -1) tools[idx] = { ...tools[idx], result, ...mcp ? { mcp: true } : {} };
+    if (idx !== -1) tools[idx] = settled(tools[idx]);
     const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => {
       const rt = Array.isArray(r.tools) ? r.tools.slice() : [];
       const at = pick(rt);
-      if (at !== -1) rt[at] = { ...rt[at], result, ...mcp ? { mcp: true } : {} };
+      if (at !== -1) rt[at] = settled(rt[at]);
       return { ...r, tools: rt };
     }) : m.rounds;
     return { ...m, tools, rounds };
@@ -4437,7 +4478,9 @@ function useAgentStream({
                 name,
                 args: evt.tool_args || {},
                 result: null,
-                mcp: name.startsWith("mcp__")
+                mcp: name.startsWith("mcp__"),
+                // Start of the call, for the live duration on its card.
+                t0: Date.now()
               };
               return withRound(
                 { ...m, tools: [...m.tools, call] },
@@ -4714,7 +4757,7 @@ function useAgentStream({
 var useAgentStream_default = useAgentStream;
 
 // src/hooks/useHostStats.js
-import { useEffect as useEffect9, useRef as useRef6, useState as useState12 } from "react";
+import { useEffect as useEffect10, useRef as useRef6, useState as useState13 } from "react";
 import os4 from "node:os";
 import fs7 from "node:fs";
 var readText = (p) => {
@@ -4753,9 +4796,9 @@ function disk() {
   }
 }
 function useHostStats(intervalMs = 5e3) {
-  const [stats, setStats] = useState12(null);
+  const [stats, setStats] = useState13(null);
   const prevRef = useRef6(null);
-  useEffect9(() => {
+  useEffect10(() => {
     const cores = Math.max(1, (os4.cpus() || []).length);
     const sample = () => {
       const now = cpuTimes();
@@ -4801,7 +4844,7 @@ function useHostStats(intervalMs = 5e3) {
 }
 
 // src/hooks/useMemoryBank.js
-import { useEffect as useEffect10, useState as useState13 } from "react";
+import { useEffect as useEffect11, useState as useState14 } from "react";
 import fs8 from "node:fs";
 import os5 from "node:os";
 import path6 from "node:path";
@@ -4846,8 +4889,8 @@ function readMemoryBanks(dir = BANK_DIR) {
   return { banks, total, clusters: tagCounts.size, topTags, newest, sampledAt: Date.now() };
 }
 function useMemoryBank(intervalMs = 1e4) {
-  const [state, setState] = useState13(() => readMemoryBanks());
-  useEffect10(() => {
+  const [state, setState] = useState14(() => readMemoryBanks());
+  useEffect11(() => {
     const tick = () => setState((prev) => readMemoryBanks() || prev);
     const id = setInterval(tick, intervalMs);
     try {
@@ -4862,9 +4905,9 @@ function useMemoryBank(intervalMs = 1e4) {
 // src/hooks/useCliUpdate.js
 var import_updater = __toESM(require_updater());
 var import_prefs = __toESM(require_prefs());
-import { useEffect as useEffect11, useState as useState14 } from "react";
+import { useEffect as useEffect12, useState as useState15 } from "react";
 function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
-  const [state, setState] = useState14(() => {
+  const [state, setState] = useState15(() => {
     try {
       const pending = (0, import_updater.pendingInfo)();
       if (pending && pending.version) {
@@ -4879,7 +4922,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
     }
     return { status: "idle" };
   });
-  useEffect11(() => {
+  useEffect12(() => {
     let alive = true;
     const tick = async () => {
       if (import_prefs.default.load().updateCheck === false) return;
@@ -4913,19 +4956,19 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
 }
 
 // src/hooks/useScriptRunner.js
-import { useCallback as useCallback4, useEffect as useEffect12, useRef as useRef7, useState as useState15 } from "react";
+import { useCallback as useCallback4, useEffect as useEffect13, useRef as useRef7, useState as useState16 } from "react";
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
 var TIMEOUT_MS = 12e4;
 function useScriptRunner() {
-  const [scripts] = useState15(() => {
+  const [scripts] = useState16(() => {
     try {
       return discoverScripts();
     } catch {
       return [];
     }
   });
-  const [run, setRun] = useState15({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
+  const [run, setRun] = useState16({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
   const procRef = useRef7(null);
   const timerRef = useRef7(null);
   const seq2 = useRef7(0);
@@ -4944,7 +4987,7 @@ function useScriptRunner() {
     }
     setRun((r) => r.status === "running" ? { ...r, status: "stopped", endedAt: Date.now() } : r);
   }, []);
-  useEffect12(() => () => {
+  useEffect13(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     const p = procRef.current;
     if (p) {
@@ -5111,40 +5154,40 @@ function readImageAttachment(file) {
 function App({ version = "0.1.0" }) {
   const renderer2 = useRenderer3();
   const { width: cols, height: rows } = useTerminalDimensions();
-  const [view, setView] = useState16("chat");
-  const [focus, setFocus] = useState16("composer");
-  const [adsOn, setAdsOn] = useState16(() => readPrefs().ads !== false);
-  const [dockExpanded, setDockExpanded] = useState16(false);
-  const [draft, setDraft] = useState16("");
-  const [model, setModel] = useState16(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
-  const [provider, setProvider] = useState16(process.env.HAKSTER_PROVIDER || import_ladder2.PRIMARY_PROVIDER);
-  const [modelIdx, setModelIdx] = useState16(0);
+  const [view, setView] = useState17("chat");
+  const [focus, setFocus] = useState17("composer");
+  const [adsOn, setAdsOn] = useState17(() => readPrefs().ads !== false);
+  const [dockExpanded, setDockExpanded] = useState17(false);
+  const [draft, setDraft] = useState17("");
+  const [model, setModel] = useState17(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
+  const [provider, setProvider] = useState17(process.env.HAKSTER_PROVIDER || import_ladder2.PRIMARY_PROVIDER);
+  const [modelIdx, setModelIdx] = useState17(0);
   const prefsRef = useRef8(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
-  const [handoffOn, setHandoffOn] = useState16(() => prefsRef.current.autoHandoff !== false);
-  const [autoMode, setAutoMode] = useState16(() => {
+  const [handoffOn, setHandoffOn] = useState17(() => prefsRef.current.autoHandoff !== false);
+  const [autoMode, setAutoMode] = useState17(() => {
     const saved = String(prefsRef.current.autoMode || "");
     return AUTO_MODES.has(saved) ? saved : "auto-edit";
   });
-  const [usageRefresh, setUsageRefresh] = useState16(() => {
+  const [usageRefresh, setUsageRefresh] = useState17(() => {
     const n = Number(prefsRef.current.usageRefresh);
     return Number.isFinite(n) && n >= 0 ? n : 15;
   });
-  const [introDone, setIntroDone] = useState16(() => process.env.HAKSTER_NO_INTRO === "1" || readPrefs().intro === false);
-  const [status, setStatus] = useState16(null);
-  const [statusErr, setStatusErr] = useState16(null);
-  const [mcp, setMcp] = useState16(null);
-  const [history, setHistory] = useState16([]);
-  const [menuOpen, setMenuOpen] = useState16(false);
-  const [scriptIdx, setScriptIdx] = useState16(0);
-  const [squadIdx, setSquadIdx] = useState16(0);
-  const [menuIndex, setMenuIndex] = useState16(0);
-  const [menuQuery, setMenuQuery] = useState16("");
-  const [notice, setNotice] = useState16(null);
-  const [scan, setScan] = useState16({ ok: false, ports: [], procs: {}, at: 0 });
-  const [guard, setGuard] = useState16(null);
-  const [pointsHistory, setPointsHistory] = useState16([]);
-  const [attachment, setAttachment] = useState16(null);
+  const [introDone, setIntroDone] = useState17(() => process.env.HAKSTER_NO_INTRO === "1" || readPrefs().intro === false);
+  const [status, setStatus] = useState17(null);
+  const [statusErr, setStatusErr] = useState17(null);
+  const [mcp, setMcp] = useState17(null);
+  const [history, setHistory] = useState17([]);
+  const [menuOpen, setMenuOpen] = useState17(false);
+  const [scriptIdx, setScriptIdx] = useState17(0);
+  const [squadIdx, setSquadIdx] = useState17(0);
+  const [menuIndex, setMenuIndex] = useState17(0);
+  const [menuQuery, setMenuQuery] = useState17("");
+  const [notice, setNotice] = useState17(null);
+  const [scan, setScan] = useState17({ ok: false, ports: [], procs: {}, at: 0 });
+  const [guard, setGuard] = useState17(null);
+  const [pointsHistory, setPointsHistory] = useState17([]);
+  const [attachment, setAttachment] = useState17(null);
   const scrollRef = useRef8(null);
   const dashRef = useRef8(null);
   const usageRef = useRef8(null);
@@ -5160,10 +5203,10 @@ function App({ version = "0.1.0" }) {
     approvalMode: autoMode === "suggest" ? void 0 : autoMode
   });
   const usagePage = useServerUsage(usageRefresh, view === "usage");
-  useEffect13(() => {
+  useEffect14(() => {
     writePrefs({ autoHandoff: handoffOn });
   }, [handoffOn]);
-  useEffect13(() => {
+  useEffect14(() => {
     writePrefs({ autoMode });
   }, [autoMode]);
   const load = useCallback5(async () => {
@@ -5178,12 +5221,12 @@ function App({ version = "0.1.0" }) {
       setStatusErr(e.message);
     }
   }, []);
-  useEffect13(() => {
+  useEffect14(() => {
     load();
     const t = setInterval(load, 3e3);
     return () => clearInterval(t);
   }, [load]);
-  useEffect13(() => {
+  useEffect14(() => {
     let alive = true;
     const tick = async () => {
       try {
@@ -5204,7 +5247,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect13(() => {
+  useEffect14(() => {
     let alive = true;
     const tick = async () => {
       const next = await scanPorts();
@@ -5217,7 +5260,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect13(() => {
+  useEffect14(() => {
     const tick = () => {
       try {
         setGuard(fileGuard());
@@ -5229,7 +5272,7 @@ function App({ version = "0.1.0" }) {
     return () => clearInterval(t);
   }, []);
   const meterPoints = Number(agent.meters && agent.meters.points) || 0;
-  useEffect13(() => {
+  useEffect14(() => {
     setPointsHistory((h) => [...h.slice(-59), meterPoints]);
   }, [meterPoints]);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
@@ -5291,7 +5334,7 @@ function App({ version = "0.1.0" }) {
     setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
   }, []);
   const updateAnnounced = useRef8("");
-  useEffect13(() => {
+  useEffect14(() => {
     if (!update || !update.version) return;
     if (update.status !== "staged" && update.status !== "blocked") return;
     const key = `${update.status}:${update.version}`;

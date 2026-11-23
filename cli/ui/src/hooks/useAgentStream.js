@@ -259,14 +259,24 @@ export function useAgentStream({
       }
       return idx;
     };
+    // A landed call carries how long it took. The old CLI's tool cards printed
+    // a measured duration ("1.2s") on every finished call; the timing starts
+    // at tool_call_start (t0) and is stamped here, once, so a re-render never
+    // makes the number drift while the transcript is scrolled.
+    const settled = (entry) => ({
+      ...entry,
+      result,
+      ms: Math.max(0, Date.now() - (Number(entry.t0) || Date.now())),
+      ...(mcp ? { mcp: true } : {}),
+    });
     const tools = m.tools.slice();
     const idx = pick(tools);
-    if (idx !== -1) tools[idx] = { ...tools[idx], result, ...(mcp ? { mcp: true } : {}) };
+    if (idx !== -1) tools[idx] = settled(tools[idx]);
     const rounds = Array.isArray(m.rounds)
       ? m.rounds.map((r) => {
         const rt = Array.isArray(r.tools) ? r.tools.slice() : [];
         const at = pick(rt);
-        if (at !== -1) rt[at] = { ...rt[at], result, ...(mcp ? { mcp: true } : {}) };
+        if (at !== -1) rt[at] = settled(rt[at]);
         return { ...r, tools: rt };
       })
       : m.rounds;
@@ -475,6 +485,8 @@ export function useAgentStream({
                 args: evt.tool_args || {},
                 result: null,
                 mcp: name.startsWith('mcp__'),
+                // Start of the call, for the live duration on its card.
+                t0: Date.now(),
               };
               return withRound(
                 { ...m, tools: [...m.tools, call] },
