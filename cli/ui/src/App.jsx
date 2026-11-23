@@ -9,6 +9,8 @@ import Composer from './components/Composer.jsx';
 import GridLayout from './components/GridLayout.jsx';
 import GridPanel, { Cell, Meter, Spark } from './components/GridPanel.jsx';
 import LiveSidebar from './components/LiveSidebar.jsx';
+import MonitorFeed from './components/MonitorFeed.jsx';
+import DecodeSplash from './components/DecodeSplash.jsx';
 import { MENU_ITEMS } from './components/MenuPalette.jsx';
 import CatalogPopout from './components/CatalogPopout.jsx';
 import ServicesPanel, { servicesGridRows } from './components/ServicesPanel.jsx';
@@ -19,6 +21,9 @@ import TodoPanel from './components/TodoPanel.jsx';
 import Transcript from './components/Transcript.jsx';
 import useAgentStream from './hooks/useAgentStream.js';
 import useHostStats from './hooks/useHostStats.js';
+import useMemoryBank from './hooks/useMemoryBank.js';
+import useCliUpdate from './hooks/useCliUpdate.js';
+import cliPrefs from '../../src/prefs.js';
 import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel } from '../../smartness.mjs';
 import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
@@ -50,21 +55,21 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 /* The auto-handoff switch is the owner's, and it stays where he left it.
  * One small file under ~/.hakster, read at start and rewritten on change; a
  * missing or unreadable file simply means "on" (the default order). */
-const PREFS_PATH = path.join(process.env.HOME || '/home/ghost', '.hakster', 'tui-prefs.json');
+// The CLI's own settings (owner 2026-11-23: "make sure our cli has its own
+// setting prewfrence"): ~/.hakster/cli-prefs.json, written only by this CLI,
+// with the older tui-prefs.json read as a fallback by prefs.load().
 function readPrefs() {
   try {
-    return JSON.parse(fs.readFileSync(PREFS_PATH, 'utf8')) || {};
+    return cliPrefs.load();
   } catch {
     return {};
   }
 }
 function writePrefs(patch) {
   try {
-    const next = { ...readPrefs(), ...patch };
-    fs.mkdirSync(path.dirname(PREFS_PATH), { recursive: true });
-    fs.writeFileSync(PREFS_PATH, `${JSON.stringify(next, null, 2)}\n`);
+    return cliPrefs.save(patch);
   } catch {
-    /* preferences are a convenience; never let them break the session */
+    return null;
   }
 }
 
@@ -148,14 +153,14 @@ export default function App({ version = '0.1.0' }) {
   const renderer = useRenderer();
   const { width: cols, height: rows } = useTerminalDimensions();
 
-  const [view, setView] = useState('chat'); // chat | dashboard | models
+  const [view, setView] = useState('chat'); // chat | dashboard | models | monitor
   const [focus, setFocus] = useState('composer'); // composer | ad
-  const [adsOn, setAdsOn] = useState(true);
+  const [adsOn, setAdsOn] = useState(() => readPrefs().ads !== false);
   const [dockExpanded, setDockExpanded] = useState(false);
   const [draft, setDraft] = useState('');
   // Start on the owner's cheap DeepSeek config; a GLM env tag is the old
   // default and falls through (§22 — the pinned Phantom Flash config).
-  const [model, setModel] = useState(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : PRIMARY_MODEL);
+  const [model, setModel] = useState(() => (process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || PRIMARY_MODEL));
   const [provider, setProvider] = useState(process.env.HAKSTER_PROVIDER || PRIMARY_PROVIDER);
   const [modelIdx, setModelIdx] = useState(0);
   // Auto handoff: DeepSeek Flash → Codex → server waterfall. On unless the
@@ -163,6 +168,9 @@ export default function App({ version = '0.1.0' }) {
   const prefsRef = useRef(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
   const [handoffOn, setHandoffOn] = useState(() => prefsRef.current.autoHandoff !== false);
+  // Start screen: five lines decode together, then the dashboard. Remembered
+  // in cli-prefs (`/settings intro off` skips it).
+  const [introDone, setIntroDone] = useState(() => readPrefs().intro === false);
 
   const [status, setStatus] = useState(null);
   const [statusErr, setStatusErr] = useState(null);
@@ -311,6 +319,13 @@ export default function App({ version = '0.1.0' }) {
   })();
   // This machine's own vitals — cpu, ram, swap, disk, load — sampled in-process.
   const host = useHostStats(5000);
+  // 🧠 Memory: the same banks autolearn writes and the next run recalls,
+  // counted from disk every 10 s (see useMemoryBank — counts only, no text).
+  const memory = useMemoryBank(10000);
+  // ⬆ Update: the Claude Code model — check in the background while this
+  // session runs, download and verify a newer CLI into ~/.hakster/updates and
+  // let the next launch apply it. The session itself is never restarted.
+  const update = useCliUpdate();
   // ◔ Usage, counted from the session itself: tool calls actually streamed,
   // the meter's scored wins and losses, requests sent (handoffs included),
   // operator turns, the turn-reported token totals and the context share. No
@@ -339,6 +354,23 @@ export default function App({ version = '0.1.0' }) {
     setNotice(text);
     setTimeout(() => setNotice((cur) => (cur === text ? null : cur)), 6000);
   }, []);
+
+  // ⬆ Update announcement: say it once per staged version. The swap happens at
+  // the next launch (src/updater.js applies a verified stage before the bundle
+  // loads); a source checkout is only ever told, never written into (§8).
+  const updateAnnounced = useRef('');
+  useEffect(() => {
+    if (!update || !update.version) return;
+    if (update.status !== 'staged' && update.status !== 'blocked') return;
+    const key = `${update.status}:${update.version}`;
+    if (updateAnnounced.current === key) return;
+    updateAnnounced.current = key;
+    showNotice(
+      update.status === 'blocked'
+        ? `⬆ CLI v${update.version} staged — this is a source checkout; nothing was written, pull/install when ready`
+        : `⬆ CLI v${update.version} staged — applies when the CLI restarts`,
+    );
+  }, [update, showNotice]);
 
   // Slash commands from the composer — the terminal counterpart of HakTerm's
   // palette actions. Unknown commands say so instead of being sent to the
@@ -418,17 +450,69 @@ export default function App({ version = '0.1.0' }) {
       case '/dashboard':
         setView('dashboard');
         return;
+      case '/monitor':
+        setView('monitor');
+        return;
       case '/status':
         showNotice(status
           ? `phase ${status.phase} · model ${status.model} · tokens ${status.tokens} · trust ${status.trust} · ${status.connected ? 'connected' : 'offline'}`
           : `server ${statusErr || 'connecting…'}`);
+        return;
+      case '/settings': {
+        // The CLI's own settings (~/.hakster/cli-prefs.json). Bare `/settings`
+        // lists them; `/settings <key> <value>` sets one. Values that the
+        // running view can honour change now; the rest say "next launch".
+        const [key, ...rest] = arg.split(/\s+/).filter(Boolean);
+        if (!key) {
+          // One line that fits beside the sidebar: how many keys, which ones
+          // the owner has changed, and how to read or set one. Reading a key
+          // (`/settings ads`) prints its value on its own.
+          const changed = cliPrefs.list().filter((r) => String(r.value) !== String(r.default)).map((r) => r.key);
+          showNotice(`⚙ ${cliPrefs.KEYS.length} keys · ${changed.length ? `changed: ${changed.join(', ')}` : 'all default'} · /settings <key> [on|off]`);
+          return;
+        }
+        if (!cliPrefs.isKnown(key)) {
+          showNotice(`⚙ settings — unknown key ${key} · known: ${cliPrefs.KEYS.join(', ')}`);
+          return;
+        }
+        if (!rest.length) {
+          const row = cliPrefs.list().find((r) => r.key === key);
+          const show = (v) => (typeof v === 'boolean' ? (v ? 'on' : 'off') : v || '(unset)');
+          showNotice(`⚙ ${key}:${show(row.value)} · default ${show(row.default)}`);
+          return;
+        }
+        const value = cliPrefs.coerce(key, rest.join(' '));
+        if (value === null) {
+          showNotice(`⚙ settings — ${key} takes on/off`);
+          return;
+        }
+        writePrefs({ [key]: value });
+        if (key === 'ads') setAdsOn(!!value);
+        else if (key === 'autoHandoff') setHandoffOn(!!value);
+        else if (key === 'model') setModel(String(value) || PRIMARY_MODEL);
+        else if (key === 'provider') setProvider(String(value) || PRIMARY_PROVIDER);
+        showNotice(`⚙ ${key} → ${typeof value === 'boolean' ? (value ? 'on' : 'off') : value || '(unset)'}${key === 'opaqueBackdrop' || key === 'intro' ? ' — applies on the next launch' : ''}`);
+        return;
+      }
+      case '/update':
+        showNotice(
+          !update || update.status === 'idle' || update.status === 'checking'
+            ? '⬆ update — checking the server for a newer CLI…'
+            : update.status === 'current'
+              ? `⬆ update — up to date (v${update.version || version})`
+              : update.status === 'staged'
+                ? `⬆ update — v${update.version} staged; applies when the CLI restarts`
+                : update.status === 'blocked'
+                  ? `⬆ update — v${update.version} staged; source checkout, not applied (pull/install when ready)`
+                  : `⬆ update — check failed: ${update.reason || 'unknown'}`,
+        );
         return;
       case '/clear':
         agent.clear();
         showNotice('transcript cleared');
         return;
       case '/help':
-        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · m models · c clear · q quit · esc stop — commands: /menu /model /mcp /handoff /ports /attach /dashboard /status /clear /quit');
+        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · c clear · q quit · esc stop — commands: /menu /model /mcp /handoff /ports /attach /dashboard /monitor /status /update /settings /clear /quit');
         return;
       case '/quit':
       case '/exit':
@@ -438,7 +522,7 @@ export default function App({ version = '0.1.0' }) {
       default:
         showNotice(`unknown command ${cmd} — /menu lists them`);
     }
-  }, [agent, models, model, mcp, status, statusErr, renderer, showNotice, services, otherPorts, scan, handoffOn]);
+  }, [agent, models, model, mcp, status, statusErr, renderer, showNotice, services, otherPorts, scan, handoffOn, update, version]);
 
   // ── One catalog: our agents, crush's models, the reference list, the live MCP
   // servers and every slash command. Built from state — nothing invented, and a
@@ -615,6 +699,7 @@ export default function App({ version = '0.1.0' }) {
           const pick = pickerModels[modelIdx] || pickerModels[0];
           setModel(pick.model || '');
           setProvider(pick.provider || PRIMARY_PROVIDER);
+          writePrefs({ model: pick.model || '', provider: pick.provider || PRIMARY_PROVIDER });
           setView('chat');
           showNotice(`model → ${pick.value} · provider ${pick.provider || PRIMARY_PROVIDER}`);
         }
@@ -629,6 +714,7 @@ export default function App({ version = '0.1.0' }) {
 
     if (key.name === 'escape') {
       if (agent.busy) agent.abort();
+      else if (view === 'monitor') setView('chat');
       else if (focus !== 'composer') setFocus('composer');
       return;
     }
@@ -669,9 +755,12 @@ export default function App({ version = '0.1.0' }) {
     if (key.ctrl || key.meta) return;
 
     switch (key.name) {
-      case 'a':
-        setAdsOn((v) => !v);
+      case 'a': {
+        const want = !adsOn;
+        setAdsOn(want);
+        writePrefs({ ads: want });
         break;
+      }
       case 'h': {
         const want = !handoffOn;
         setHandoffOn(want);
@@ -682,6 +771,9 @@ export default function App({ version = '0.1.0' }) {
       }
       case 'd':
         setView((v) => (v === 'chat' ? 'dashboard' : 'chat'));
+        break;
+      case 'v':
+        setView((v) => (v === 'monitor' ? 'chat' : 'monitor'));
         break;
       case 'm':
         setModelIdx(pickerIndexFor(model, provider));
@@ -740,6 +832,12 @@ export default function App({ version = '0.1.0' }) {
   // is the terminal minus the header and the status bar. LiveSidebar fits its
   // own panels (Live → Usage → Activity → Output → MCP) inside that number.
   const sidebarRows = Math.max(0, (rows || 30) - 2);
+  // Live monitor: the system + services rows, then the feed and sidebar fill
+  // everything down to the status bar. No composer, no rail — watch only.
+  const monitorRows = Math.max(
+    8,
+    (rows || 30) - 2 - systemRows - servicesRows - (notice ? 1 : 0),
+  );
 
   // ── Row budget ────────────────────────────────────────────────────────────
   // header 1 · status bar 1 · composer 5 (border 2, input 1, inline ad 1, hint 1)
@@ -811,6 +909,59 @@ export default function App({ version = '0.1.0' }) {
       ],
     },
   ];
+
+  // One sidebar, two placements: beside the transcript and in the monitor
+  // view (where the big feed owns Activity/Output, so feed={false}).
+  const sidebarProps = {
+    width: sideW || 30,
+    height: sidebarRows,
+    agentStatus: agent.status,
+    phase: crushPhase,
+    tool: activeTool?.name || '',
+    turns: userTurns,
+    elapsedMs: agent.elapsedMs,
+    model,
+    version,
+    mcp,
+    serverOk: !statusErr && !!status,
+    liveTool: liveToolTxt,
+    liveLines,
+    busy: agent.busy,
+    activity: agent.activity || [],
+    usage,
+    memory,
+    update,
+  };
+
+  // ── Start screen: five lines decode at once, then the dashboard ───────────
+  // All hooks above have run; this only chooses what the first ~1.2 s shows.
+  // Every line is live state — version, update state, model, server — so the
+  // splash never tells the owner anything the session doesn't know.
+  if (!introDone) {
+    const updateLine =
+      update && update.status === 'blocked'
+        ? `update v${update.version} held · source checkout`
+        : update && update.status === 'staged'
+          ? `update v${update.version} staged · applies on restart`
+          : 'updates check live · apply on restart';
+    return (
+      <DecodeSplash
+        width={cols || 100}
+        height={rows || 30}
+        lines={[
+          { text: '◆ haksterAi', color: 'cyan', bold: true },
+          { text: `CLI v${version} · ${updateLine}`, color: 'gray' },
+          { text: `model ${modelText}`, color: 'yellow' },
+          {
+            text: statusErr ? `server offline — ${statusErr}` : status ? 'server online' : 'connecting…',
+            color: statusErr ? 'red' : status ? 'green' : 'yellow',
+          },
+          { text: 'type a task · /menu commands · v live monitor', color: 'gray' },
+        ]}
+        onDone={() => setIntroDone(true)}
+      />
+    );
+  }
 
   return (
     <box style={{ flexDirection: 'column', width: cols || 100, height: rows || 30, overflow: 'hidden' }}>
@@ -888,6 +1039,32 @@ export default function App({ version = '0.1.0' }) {
             </box>
           </GridPanel>
           <ServicesPanel width={panelW} services={services} scan={scan} showAll />
+        </>
+      ) : view === 'monitor' ? (
+        /* Live monitor — the whole screen watching one run: host meters and
+           services on top, then the big activity feed and live output beside
+           the sidebar. Shift+↑/↓ scrolls the feed, shift+End resumes follow,
+           esc returns to the chat. Nothing runs from here; it only watches. */
+        <>
+          <SystemPanel width={panelW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
+          <ServicesPanel width={panelW} services={services} scan={scan} />
+          <box style={{ flexDirection: 'row', width: panelW, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
+            <box style={{ width: sideW ? Math.max(20, panelW - sideW - 2) : panelW, flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+              <MonitorFeed
+                width={sideW ? Math.max(20, panelW - sideW - 2) : panelW}
+                height={monitorRows}
+                activity={agent.activity || []}
+                liveTool={liveToolTxt}
+                liveLines={liveLines}
+                busy={agent.busy}
+              />
+            </box>
+            {sideW ? (
+              <box style={{ marginLeft: 1 }}>
+                <LiveSidebar {...sidebarProps} height={monitorRows} feed={false} />
+              </box>
+            ) : null}
+          </box>
         </>
       ) : (
         <box style={{ flexDirection: 'row', width: panelW, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
@@ -1013,24 +1190,7 @@ export default function App({ version = '0.1.0' }) {
           </box>
           {sideW ? (
             <box style={{ marginLeft: 1 }}>
-              <LiveSidebar
-                width={sideW}
-                height={sidebarRows}
-                agentStatus={agent.status}
-                phase={crushPhase}
-                tool={activeTool?.name || ''}
-                turns={userTurns}
-                elapsedMs={agent.elapsedMs}
-                model={model}
-                version={version}
-                mcp={mcp}
-                serverOk={!statusErr && !!status}
-                liveTool={liveToolTxt}
-                liveLines={liveLines}
-                busy={agent.busy}
-                activity={agent.activity || []}
-                usage={usage}
-              />
+              <LiveSidebar {...sidebarProps} />
             </box>
           ) : null}
         </box>

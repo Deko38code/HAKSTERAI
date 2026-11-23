@@ -541,12 +541,51 @@ async function offlineAgentLoop(history, sysPrompt, opts = {}) {
 // ── Commands ─────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 
+// Update on launch: a package staged by an earlier session is swapped in here,
+// before any command runs, so the session that starts now is the new CLI
+// (updater.js). Only a verified stage is used and never a source checkout;
+// failures are silent — a broken update must not stop the CLI from opening.
+let _updateApplied = null;
+try {
+  // This file lives in cli/, so __dirname is the CLI directory the updater
+  // checks and updates — and the TUI it spawns inherits the same value.
+  process.env.HAKSTER_CLI_DIR = process.env.HAKSTER_CLI_DIR || __dirname;
+  _updateApplied = require('./src/updater').applyPending();
+} catch (_) {
+  _updateApplied = null;
+}
+if (_updateApplied && _updateApplied.applied) {
+  console.log(`${C.green}✓ CLI updated to v${_updateApplied.version}${C.reset} ${C.gray}(was v${_updateApplied.from}; previous files kept in ${_updateApplied.backupDir})${C.reset}`);
+}
+
 const program = new Command();
 
 program
   .name('hakster')
   .description('haksterAi CLI — manage files, sessions, and agent interactions from the terminal')
   .version(pkg.version);
+
+// ── update: check now, download and stage; the next launch applies it ──────
+program
+  .command('update')
+  .description('Check for a newer CLI, download and verify it (applies on the next launch)')
+  .option('--check', 'Check and report only — do not download')
+  .action(async (opts) => {
+    const updater = require('./src/updater');
+    const running = updater.runningInfo();
+    console.log(`${C.gray}running v${running.version} · ${updater.isSourceCheckout() ? 'source checkout (never rewritten automatically)' : 'installed copy'}${C.reset}`);
+    const pending = updater.pendingInfo();
+    if (pending && !pending.appliedAt) {
+      console.log(`${C.yellow}⬆ staged v${pending.version}${C.reset}${pending.blocked ? ` ${C.gray}(${pending.blocked} — not applied)${C.reset}` : ` ${C.gray}— applies on the next launch${C.reset}`}`);
+    }
+    if (opts.check) return;
+    process.stdout.write(`${C.gray}checking the server…${C.reset}\n`);
+    const res = await updater.checkForUpdate();
+    if (res.status === 'current') console.log(`${C.green}✓ up to date${C.reset} ${C.gray}(v${res.version || running.version})${C.reset}`);
+    else if (res.status === 'staged') console.log(`${C.green}✓ v${res.version} downloaded and verified${C.reset} ${C.gray}— applies on the next launch${C.reset}`);
+    else if (res.status === 'blocked') console.log(`${C.yellow}⬆ v${res.version} downloaded and verified${C.reset} ${C.gray}— source checkout: not applied automatically${C.reset}`);
+    else console.log(`${C.red}✗ update check failed${C.reset} ${C.gray}${res.reason || res.status}${C.reset}`);
+  });
 
 // ── config ──────────────────────────────────────────────────────────────
 const configCmd = program.command('config').description('Manage CLI configuration');

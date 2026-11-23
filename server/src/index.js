@@ -12036,6 +12036,28 @@ if (fs.existsSync(distPath)) {
   // install api also"). The package is served from this box, never npm: the
   // installer fetches the tarball, installs it, and prints the two commands a
   // >$20 account needs. Nothing here reads or writes account state.
+  //
+  // /cli/latest.json (owner 2026-11-23: "the update feat that claude cli
+  // uses") lets a running CLI check for a newer package without downloading
+  // it: the CLI compares this version + bundle hash with its own and only
+  // fetches the tarball when they differ. Public like the package itself.
+  app.get('/cli/latest.json', (_req, res) => {
+    try {
+      const cliRoot = path.join(__dirname, '..', '..', 'cli');
+      const pkg = JSON.parse(fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8'));
+      const bundlePath = path.join(cliRoot, 'ui-fb.mjs');
+      const stat = fs.existsSync(bundlePath) ? fs.statSync(bundlePath) : null;
+      res.set('cache-control', 'no-store');
+      res.json({
+        version: String(pkg.version || ''),
+        bundleSha256: stat ? crypto.createHash('sha256').update(fs.readFileSync(bundlePath)).digest('hex') : '',
+        builtAt: stat ? stat.mtime.toISOString() : null,
+        package: '/cli/pkg.tar.gz',
+      });
+    } catch (e) {
+      res.status(500).json({ error: 'CLI metadata unavailable' });
+    }
+  });
   app.get('/install.sh', (req, res) => {
     const origin = (req.protocol || 'https') + '://' + (req.get('host') || 'haksterai.com');
     res.type('text/plain; charset=utf-8');

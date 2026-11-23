@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { start } from './ui-fb.mjs';
+import { fileURLToPath } from 'node:url';
 
 if (!process.env.HAKSTER_API_KEY) {
   try {
@@ -29,4 +29,37 @@ if (!process.env.HAKSTER_API_KEY) {
   }
 }
 
-start({ version: process.env.HAKSTER_TUI_VERSION || '0.1.0' });
+// Update on launch: if an earlier session downloaded and verified a newer CLI,
+// swap it in before the bundle is imported, so this session runs the new code
+// (the Claude Code model: update in-session, apply on restart). The import is
+// dynamic for exactly that reason — a static import would load the old bundle
+// before this runs. A failed apply must never stop the TUI.
+// The updater is also bundled into ui-fb.mjs, where __dirname is the bundle's
+// directory; this entry knows the real CLI directory, so it tells the updater.
+process.env.HAKSTER_CLI_DIR = process.env.HAKSTER_CLI_DIR || path.dirname(fileURLToPath(import.meta.url));
+try {
+  const mod = await import('./src/updater.js');
+  const updater = mod && typeof mod.applyPending === 'function' ? mod : mod && mod.default;
+  const applied = updater && updater.applyPending ? updater.applyPending() : null;
+  if (applied && applied.applied) {
+    process.stderr.write(`✓ CLI updated to v${applied.version} (was v${applied.from})\n`);
+  }
+} catch {
+  /* updater unavailable or stage unusable — open the TUI as it is */
+}
+
+// Report the version this copy actually carries — the same package.json the
+// installer ships and /cli/latest.json publishes, so the splash, header and
+// widget cannot drift apart.
+function readVersion() {
+  try {
+    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return String(pkg.version || '0.0.0');
+  } catch {
+    return '0.0.0';
+  }
+}
+
+const { start } = await import('./ui-fb.mjs');
+start({ version: process.env.HAKSTER_TUI_VERSION || readVersion() });

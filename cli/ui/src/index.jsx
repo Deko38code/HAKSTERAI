@@ -2,6 +2,7 @@ import React from 'react';
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
 import App from './App.jsx';
+import prefs from '../../src/prefs.js';
 
 /* Entry point for the `hakster tui` command, mirroring how `hakster ui`
  * imports ../ui.mjs and calls start().
@@ -23,6 +24,12 @@ export async function start({ version = '0.1.0' } = {}) {
     exitOnCtrlC: false,
     screenMode: 'alternate-screen',
     hideCursor: true,
+    // Transparent backsplash: the terminal's own background stays visible —
+    // Guake's installed HaksterAI wallpaper with `hakster quake`, or any
+    // terminal wallpaper. OpenTUI's default background is alpha 0, and saying
+    // it here keeps it that way if a future version changes the default.
+    // HAKSTER_TUI_OPAQUE=1 paints solid for terminals that smear transparency.
+    backgroundColor: process.env.HAKSTER_TUI_OPAQUE || prefs.load().opaqueBackdrop ? '#000000' : 'transparent',
   });
 
   root = createRoot(renderer);

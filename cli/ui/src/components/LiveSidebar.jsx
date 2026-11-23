@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { TextAttributes } from '@opentui/core';
+import { useKeyboard } from '@opentui/react';
 
 /* LiveSidebar — the HakTerm side panel, ported to the terminal.
  *
@@ -16,7 +17,7 @@ import { TextAttributes } from '@opentui/core';
 // so clipping by string length overflows the panel and the row wraps. The
 // ranges are the usual wide/emoji blocks; the variation selector and the
 // zero-width joiner take none.
-const isWide = (cp) =>
+export const isWide = (cp) =>
   (cp >= 0x1100 && cp <= 0x115f) ||
   cp === 0x2329 || cp === 0x232a ||
   (cp >= 0x2600 && cp <= 0x27bf) ||
@@ -28,12 +29,12 @@ const isWide = (cp) =>
   (cp >= 0xff00 && cp <= 0xff60) ||
   (cp >= 0xffe0 && cp <= 0xffe6) ||
   (cp >= 0x1f000 && cp <= 0x1faff);
-const cellWidth = (ch) => {
+export const cellWidth = (ch) => {
   const cp = ch.codePointAt(0);
   if (cp === 0xfe0f || cp === 0x200d) return 0;
   return isWide(cp) ? 2 : 1;
 };
-const clip = (s, n) => {
+export const clip = (s, n) => {
   const t = String(s == null ? '—' : s);
   let w = 0;
   for (const ch of t) w += cellWidth(ch);
@@ -59,7 +60,7 @@ function Row({ width, k, v, color = 'white' }) {
   );
 }
 
-const EVENT_COLOR = {
+export const EVENT_COLOR = {
   phase: 'cyan',
   start: 'yellow',
   ok: 'green',
@@ -70,7 +71,7 @@ const EVENT_COLOR = {
   confirm: 'yellow',
   sys: 'gray',
 };
-const EVENT_GLYPH = {
+export const EVENT_GLYPH = {
   phase: '◈',
   start: '⚙',
   ok: '✓',
@@ -89,27 +90,58 @@ const fmtTok = (n) => {
   return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
 };
 
-const clock = (ts) => {
+export const clock = (ts) => {
   const d = new Date(Number(ts) || Date.now());
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
 /** One line of the activity feed: time, glyph, then the event text. One
  *  <text> with spans so it can only ever be one row — three sibling texts
- *  would become three Yoga columns and a long one could wrap. */
-function EventLine({ width, line }) {
+ *  would become three Yoga columns and a long one could wrap. In compact mode
+ *  (a narrow sidebar) the clock is dropped and the glyph carries the time. */
+export function EventLine({ width, line, compact = false }) {
   return (
     <box style={{ width, flexShrink: 0 }}>
       <text>
-        <span fg="gray">{`${clock(line.ts)} `}</span>
+        {compact ? null : <span fg="gray">{`${clock(line.ts)} `}</span>}
         <span fg={EVENT_COLOR[line.kind] || 'white'}>{`${EVENT_GLYPH[line.kind] || '•'} `}</span>
-        <span fg={line.kind === 'err' ? 'red' : 'white'}>{clip(line.text, Math.max(1, width - 8))}</span>
+        <span fg={line.kind === 'err' ? 'red' : 'white'}>{clip(line.text, Math.max(1, width - (compact ? 2 : 8)))}</span>
       </text>
     </box>
   );
 }
 
-function Panel({ width, title, hint, children }) {
+/** Auto-scroll window for a fixed number of rows. `offset === null` means
+ *  "follow the newest line"; the value is clamped on every render, so content
+ *  arriving while scrolled back never jumps the view. */
+export const clampStart = (offset, total, rows) => {
+  const max = Math.max(0, total - rows);
+  return offset == null ? max : Math.max(0, Math.min(offset, max));
+};
+
+/** One scrollbar column: ▲ when there is more above, ▼ when there is more
+ *  below, and a █ thumb between │ rails. The caller hides it when the content
+ *  fits, which is the compact case. */
+export const gutterChar = (i, rows, total, start) => {
+  const thumb = Math.max(1, Math.round((rows * rows) / Math.max(1, total)));
+  const maxStart = Math.max(1, total - rows);
+  const thumbTop = Math.round((start / maxStart) * Math.max(0, rows - thumb));
+  if (i === 0 && start > 0) return '▲';
+  if (i === rows - 1 && start + rows < total) return '▼';
+  return i >= thumbTop && i < thumbTop + thumb ? '█' : '│';
+};
+
+/** A content row plus, when needed, its scrollbar cell. */
+export function ScrollRow({ width, children, gutter }) {
+  return (
+    <box style={{ width, flexDirection: 'row', flexShrink: 0 }}>
+      {children}
+      {gutter ? <text fg="gray">{gutter}</text> : null}
+    </box>
+  );
+}
+
+export function Panel({ width, title, hint, children }) {
   const inner = Math.max(1, width - 4);
   return (
     <box style={{ width, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'gray', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
@@ -143,6 +175,12 @@ export default function LiveSidebar({
   busy = false,
   activity = [],
   usage = null,
+  memory = null,
+  update = null,
+  // The monitor view renders the big Activity/Output columns itself, so it
+  // asks the sidebar for the same panels minus those two; their rows go to
+  // the MCP list instead.
+  feed = true,
 }) {
   const inner = Math.max(1, width - 4);
   const servers = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
@@ -159,15 +197,20 @@ export default function LiveSidebar({
   let left = h - 10; // ◈ Live: 3 + 7 rows
   const showUsage = left >= 9; // ◔ Usage: 3 + 6 rows
   if (showUsage) left -= 9;
+  // 🧠 Memory: 3 + 5 rows. It is the newest panel and the least time-critical,
+  // so it only appears where the taller layout leaves room for the feed, the
+  // output tail and at least a couple of MCP rows beside it.
+  const showMemory = left >= 26;
+  if (showMemory) left -= 8;
   const wantOutput = huge ? 6 : tall ? 4 : 3; // output lines
   const outputCost = wantOutput + 4; // border 2 + title 1 + call row 1 + lines
   const MCP_MIN = 6; // 3 + two servers + the "+N" row
-  const activityMax = huge ? 8 : tall ? 5 : 4;
+  const activityMax = huge ? (showMemory ? 6 : 8) : tall ? 5 : 4;
   const room = left - outputCost - MCP_MIN - 3; // rows left for the feed itself
-  const activityRows = room >= 2 ? Math.min(activityMax, room) : 0;
+  const activityRows = feed && room >= 2 ? Math.min(activityMax, room) : 0;
   if (activityRows) left -= activityRows + 3;
   // ▶ Output: the call row plus the newest lines, fewer if the height shrank.
-  const outputRows = left - 4 >= wantOutput ? wantOutput : left - 4 >= 2 ? left - 4 : 0;
+  const outputRows = feed ? (left - 4 >= wantOutput ? wantOutput : left - 4 >= 2 ? left - 4 : 0) : 0;
   if (outputRows) left -= outputRows + 4;
   // ⬡ MCP: whatever is left. One row is reserved for the "+N" line when the
   // list is longer than the space, so the panel cannot grow by one.
@@ -178,8 +221,90 @@ export default function LiveSidebar({
     const rank = (x) => (x.initialized || (x.toolCount || 0) > 0 ? 0 : x.lazy ? 1 : 2);
     return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name));
   });
-  const shown = ordered.slice(0, Math.max(0, maxServers));
-  const hidden = ordered.length - shown.length;
+
+  // ── Scrolling ───────────────────────────────────────────────────────────
+  // Both feeds auto-scroll to the newest line (offset `null` = follow). Shift+
+  // ↑/↓ scrolls the Activity feed, shift+PgUp/PgDn pages it; when Activity is
+  // not shown the same keys move the Output tail. Alt+↑/↓ (and alt+PgUp/PgDn)
+  // page the MCP list, which follows its top (best-ranked first). Reaching the
+  // bottom hands a feed back to auto-scroll, so a run that is producing output
+  // is never left behind by an old scroll position.
+  const [actOffset, setActOffset] = useState(null);
+  const [outOffset, setOutOffset] = useState(null);
+  const [mcpOffset, setMcpOffset] = useState(null);
+  const actStart = clampStart(actOffset, activity.length, activityRows || 1);
+  const outStart = clampStart(outOffset, liveLines.length, outputRows || 1);
+  const compact = inner < 24;
+
+  // ⬡ MCP window: the allocator's rows, one of which becomes the "more" row
+  // whenever the list is longer than the space.
+  const mcpCapacity = maxServers + 1; // list rows + the "more" row the allocator reserved
+  const mcpOverflow = ordered.length > mcpCapacity;
+  const mcpVisible = Math.max(0, mcpOverflow ? mcpCapacity - 1 : ordered.length);
+  const mcpStart = mcpOffset == null
+    ? 0
+    : Math.max(0, Math.min(mcpOffset, Math.max(0, ordered.length - mcpVisible)));
+  const shownServers = ordered.slice(mcpStart, mcpStart + mcpVisible);
+  const moreAbove = mcpStart;
+  const moreBelow = ordered.length - mcpStart - shownServers.length;
+
+  const scrollBy = (setter, total, rows, delta) => {
+    if (!rows) return;
+    const max = Math.max(0, total - rows);
+    setter((cur) => {
+      const base = cur == null ? max : cur;
+      const next = Math.max(0, Math.min(max, base + delta));
+      return next >= max ? null : next;
+    });
+  };
+
+  useKeyboard((key) => {
+    if (!key || key.ctrl) return;
+    const name = key.name;
+    // Jump: shift+Home = oldest, shift+End = back to the live bottom (which is
+    // also how a feed resumes auto-scroll). alt+Home/End does the same for the
+    // MCP list — alt+End reaches the last server, alt+Home returns to the top.
+    if (name === 'home' || name === 'end') {
+      const bottom = name === 'end';
+      if (key.meta) {
+        setMcpOffset(bottom && !mcpOverflow ? null : bottom ? Math.max(0, ordered.length - mcpVisible) : null);
+      } else if (key.shift) {
+        if (activityRows) setActOffset(bottom ? null : 0);
+        else if (outputRows) setOutOffset(bottom ? null : 0);
+      }
+      return;
+    }
+    if (name !== 'up' && name !== 'down' && name !== 'pageup' && name !== 'pagedown') return;
+    const page = name === 'pageup' ? -1 : name === 'pagedown' ? 1 : 0;
+    // alt+arrows page the MCP list; shift+arrows scroll the feeds.
+    if (key.meta) {
+      const step = page ? page * Math.max(1, mcpVisible) : name === 'up' ? -1 : 1;
+      scrollBy(setMcpOffset, ordered.length, mcpVisible, step);
+      return;
+    }
+    if (!key.shift) return;
+    if (activityRows) {
+      const step = page ? page * Math.max(1, activityRows) : name === 'up' ? -1 : 1;
+      scrollBy(setActOffset, activity.length, activityRows, step);
+    } else if (outputRows) {
+      const step = page ? page * Math.max(1, outputRows) : name === 'up' ? -1 : 1;
+      scrollBy(setOutOffset, liveLines.length, outputRows, step);
+    }
+  });
+
+  const actGutter = activity.length > activityRows && activityRows > 0;
+  const outGutter = liveLines.length > outputRows && outputRows > 0;
+  const actBody = Math.max(1, inner - (actGutter ? 1 : 0));
+  const outBody = Math.max(1, inner - (outGutter ? 1 : 0));
+  const actHint = !activity.length
+    ? busy ? 'waiting' : '0'
+    : actGutter
+      ? `${actStart + 1}-${Math.min(activity.length, actStart + activityRows)}/${activity.length}${actOffset != null ? ' ⇣' : ''}`
+      : `${activity.length}`;
+  const outHint = outGutter
+    ? `${outStart + 1}-${Math.min(liveLines.length, outStart + outputRows)}/${liveLines.length}${outOffset != null ? ' ⇣' : ''}`
+    : busy ? 'live' : 'last';
+
   return (
     <box style={{ width, flexDirection: 'column', flexShrink: 0 }}>
       <Panel width={width} title="◈ Live" hint={serverOk ? 'online' : 'offline'}>
@@ -189,7 +314,16 @@ export default function LiveSidebar({
         <Row width={inner} k="turns" v={turns} />
         <Row width={inner} k="elapsed" v={`${(Number(elapsedMs || 0) / 1000).toFixed(1)}s`} />
         <Row width={inner} k="model" v={model} color="yellow" />
-        <Row width={inner} k="version" v={`tui ${version}`} />
+        <Row
+          width={inner}
+          k="version"
+          v={
+            update && update.version && (update.status === 'staged' || update.status === 'blocked')
+              ? `tui ${version} ${update.status === 'blocked' ? '⟂' : '⬆'}${update.version}`
+              : `tui ${version}`
+          }
+          color={update && update.status === 'blocked' ? 'yellow' : update && update.status === 'staged' ? 'green' : 'white'}
+        />
       </Panel>
       {/* ◔ Usage — the session counted from the same stream events the run
           renders: tool calls actually made, how many the meter scored as wins
@@ -197,7 +331,7 @@ export default function LiveSidebar({
           operator turns, the turn-reported token totals, and context share. */}
       {showUsage ? (
         <Panel width={width} title="◔ Usage" hint={busy ? 'live' : 'session'}>
-          <Row width={inner} k="tools" v={`${Number(usage && usage.tools) || 0} calls`} color="cyan" />
+          <Row width={inner} k="tools" v={compact ? String(Number(usage && usage.tools) || 0) : `${Number(usage && usage.tools) || 0} calls`} color="cyan" />
           <Row
             width={inner}
             k="wins"
@@ -215,57 +349,117 @@ export default function LiveSidebar({
           />
         </Panel>
       ) : null}
+      {/* 🧠 Memory — the banks the server's autolearn writes and the next run
+          recalls (pullMemoryBanks reads the same files), counted here so the
+          session can see what it is starting from. Counts, slugs and tag
+          clusters only; no observation text ever leaves the bank file. */}
+      {showMemory ? (
+        <Panel width={width} title="🧠 Memory" hint={memory ? `${memory.total} entries` : '…'}>
+          {!memory ? (
+            <box style={{ width: inner }}>
+              <text fg="gray">{clip('—', inner)}</text>
+            </box>
+          ) : memory.banks.length === 0 ? (
+            <box style={{ width: inner }}>
+              <text fg="gray">{clip('empty', inner)}</text>
+            </box>
+          ) : (
+            <>
+              {(memory.banks.length > 4 ? memory.banks.slice(0, 4) : memory.banks).map((b) => (
+                <Row
+                  key={b.slug}
+                  width={inner}
+                  k={b.slug}
+                  v={compact ? String(b.entries) : `${b.entries} ${b.entries === 1 ? 'entry' : 'entries'}`}
+                  color="green"
+                />
+              ))}
+              {memory.banks.length < 4 && memory.newest ? (
+                <Row width={inner} k="newest" v={`${memory.newest.slug} ${clock(memory.newest.last)}`} color="gray" />
+              ) : null}
+              <Row
+                width={inner}
+                k="clusters"
+                v={compact ? String(memory.clusters) : `${memory.clusters} tags`}
+                color="cyan"
+              />
+            </>
+          )}
+        </Panel>
+      ) : null}
       {/* ⚡ Activity — HakTerm's live event feed: every phase change, tool start,
           scored result (with its measured duration), handoff, error and turn
           end, newest at the bottom. */}
       {activityRows ? (
-        <Panel width={width} title="⚡ Activity" hint={busy ? 'live' : `${activity.length}`}>
+        <Panel width={width} title="⚡ Activity" hint={actHint}>
           {activity.length === 0 ? (
             <box style={{ width: inner }}>
               <text fg="gray">{clip(busy ? 'waiting for events…' : '—', inner)}</text>
             </box>
           ) : (
-            activity.slice(-activityRows).map((line, i) => (
-              <EventLine key={`e:${line.ts}:${i}`} width={inner} line={line} />
+            activity.slice(actStart, actStart + activityRows).map((line, i) => (
+              <ScrollRow
+                key={`e:${line.ts}:${i}`}
+                width={inner}
+                gutter={actGutter ? gutterChar(i, activityRows, activity.length, actStart) : null}
+              >
+                <EventLine width={actBody} line={line} compact={compact} />
+              </ScrollRow>
             ))
           )}
         </Panel>
       ) : null}
       {/* The run's own output, live — the terminal counterpart of the inline
           tool output in the IDE: the call as it starts, then the tail of what
-          it returned, updated on every stream event. */}
+          it returned, updated on every stream event. The call row stays pinned;
+          the returned lines scroll under it with their own bar. */}
       {outputRows ? (
-        <Panel width={width} title="▶ Output" hint={busy ? 'live' : 'last'}>
+        <Panel width={width} title="▶ Output" hint={outHint}>
           <Row width={inner} k="call" v={liveTool ? clip(liveTool, Math.max(1, inner - 5)) : '—'} color={liveTool ? 'cyan' : 'gray'} />
           {liveLines.length === 0 ? (
             <box style={{ width: inner }}>
               <text fg="gray">{clip(busy ? 'waiting for output…' : '—', inner)}</text>
             </box>
           ) : (
-            liveLines.slice(-outputRows).map((line, i) => (
-              <box key={`o:${i}`} style={{ width: inner }}>
-                <text fg={i === liveLines.slice(-outputRows).length - 1 ? 'white' : 'gray'}>{clip(line, inner)}</text>
-              </box>
+            liveLines.slice(outStart, outStart + outputRows).map((line, i) => (
+              <ScrollRow
+                key={`o:${i}`}
+                width={inner}
+                gutter={outGutter ? gutterChar(i, outputRows, liveLines.length, outStart) : null}
+              >
+                <box style={{ width: outBody }}>
+                  <text fg={i === outputRows - 1 ? 'white' : 'gray'}>{clip(line, outBody)}</text>
+                </box>
+              </ScrollRow>
             ))
           )}
         </Panel>
       ) : null}
       {maxServers > 0 ? (
         <Panel width={width} title="⬡ MCP servers" hint={servers.length ? `${live}/${servers.length}` : '…'}>
-          {shown.map((s) => {
+          {shownServers.map((s, i) => {
             const up = !!s.initialized || (s.toolCount || 0) > 0;
             const lazy = !!s.lazy && !up;
+            const bar = mcpOverflow ? gutterChar(i, mcpVisible, ordered.length, mcpStart) : null;
             return (
-              <Row
-                key={s.name}
-                width={inner}
-                k={s.name}
-                v={up ? `${s.toolCount || 0} tools` : lazy ? 'lazy' : 'down'}
-                color={up ? 'green' : lazy ? 'yellow' : 'red'}
-              />
+              <ScrollRow key={s.name} width={inner} gutter={bar}>
+                <Row
+                  width={Math.max(1, inner - (bar ? 1 : 0))}
+                  k={s.name}
+                  v={up ? `${s.toolCount || 0} tools` : lazy ? 'lazy' : 'down'}
+                  color={up ? 'green' : lazy ? 'yellow' : 'red'}
+                />
+              </ScrollRow>
             );
           })}
-          {hidden > 0 ? <Row width={inner} k="more" v={`+${hidden}`} color="gray" /> : null}
+          {moreAbove || moreBelow ? (
+            <Row
+              width={inner}
+              k="more"
+              v={`${moreAbove ? `▲ ${moreAbove} ` : ''}${moreBelow ? `▼ ${moreBelow}` : ''}`.trim()}
+              color="gray"
+            />
+          ) : null}
         </Panel>
       ) : null}
     </box>
