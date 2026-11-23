@@ -52,14 +52,22 @@ const isPrimary = (model) => String(model || '') === PRIMARY_MODEL;
 /**
  * The attempts one run makes, in order.
  *
- * `model` is the model currently selected in the CLI:
- *  - the primary (or nothing) → the whole ladder, tier 1 first;
- *  - any other explicit pick → that pick alone. Choosing a model by hand is a
+ *  - the primary, or nothing at all → the whole ladder, tier 1 first;
+ *  - no model but a provider named (the picker's "Codex (Pro)") → from that
+ *    tier on, so Codex stays first and the waterfall stays last;
+ *  - any other explicit model → that pick alone. Choosing a model by hand is a
  *    decision, and a handoff must never quietly undo it.
  */
-function attemptsFor(model) {
+function attemptsFor(model, provider) {
   const chosen = String(model || '');
-  if (!chosen || isPrimary(chosen)) return MODEL_LADDER.map((entry) => ({ ...entry }));
+  const prov = String(provider || '');
+  if (!chosen) {
+    const start = MODEL_LADDER.findIndex((entry) => entry.provider && entry.provider === prov);
+    if (start > 0) return MODEL_LADDER.slice(start).map((entry) => ({ ...entry }));
+    if (prov && start === -1) return [{ tier: 0, provider: prov, model: '', label: prov }];
+    return MODEL_LADDER.map((entry) => ({ ...entry }));
+  }
+  if (isPrimary(chosen)) return MODEL_LADDER.map((entry) => ({ ...entry }));
   return [{ tier: 0, provider: null, model: chosen, label: chosen }];
 }
 

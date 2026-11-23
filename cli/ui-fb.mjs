@@ -441,9 +441,16 @@ var require_ladder = __commonJS({
       })
     ]);
     var isPrimary = (model) => String(model || "") === PRIMARY_MODEL2;
-    function attemptsFor2(model) {
+    function attemptsFor2(model, provider) {
       const chosen = String(model || "");
-      if (!chosen || isPrimary(chosen)) return MODEL_LADDER2.map((entry) => ({ ...entry }));
+      const prov = String(provider || "");
+      if (!chosen) {
+        const start2 = MODEL_LADDER2.findIndex((entry) => entry.provider && entry.provider === prov);
+        if (start2 > 0) return MODEL_LADDER2.slice(start2).map((entry) => ({ ...entry }));
+        if (prov && start2 === -1) return [{ tier: 0, provider: prov, model: "", label: prov }];
+        return MODEL_LADDER2.map((entry) => ({ ...entry }));
+      }
+      if (isPrimary(chosen)) return MODEL_LADDER2.map((entry) => ({ ...entry }));
       return [{ tier: 0, provider: null, model: chosen, label: chosen }];
     }
     function labelForModel(model) {
@@ -650,8 +657,8 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React15, { useCallback as useCallback2, useEffect as useEffect5, useRef as useRef2, useState as useState5 } from "react";
-import fs3 from "node:fs";
+import React15, { useCallback as useCallback2, useEffect as useEffect6, useRef as useRef3, useState as useState6 } from "react";
+import fs4 from "node:fs";
 import path3 from "node:path";
 import { useKeyboard as useKeyboard3, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes12 } from "@opentui/core";
@@ -1551,7 +1558,7 @@ var clip4 = (s, n) => {
   const t = String(s == null ? "" : s);
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
 };
-function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1 }) {
+function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host = null }) {
   const w = Math.max(24, Number(width) || 80);
   const score = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
   const points = Math.max(0, Math.round(Number(meters && meters.points) || 0));
@@ -1559,12 +1566,18 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1 }) {
   const ctxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
   const arrow = delta > 0 ? "\u25B2" : delta < 0 ? "\u25BC" : "\u25C6";
   const arrowColor = delta > 0 ? "green" : delta < 0 ? "red" : "gray";
+  const cpuPct = host && host.cpuPct != null ? host.cpuPct : null;
+  const memPct = host && host.memPct != null ? host.memPct : null;
+  const swapPct = host && host.swapPct != null ? host.swapPct : null;
+  const heat = (p) => p == null ? "gray" : p > 85 ? "red" : p > 60 ? "yellow" : "green";
+  const hostTxt = cpuPct == null && memPct == null ? "" : `cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`}  ram ${memPct == null ? "\u2014" : `${memPct}%`}  swap ${swapPct == null ? "\u2014" : `${swapPct}%`}`;
   const sc = barCells(score, 100, 12);
   const ac = barCells(points, 100, 10);
   const cc = barCells(ctxPct, 100, 8);
-  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + 16 + 3 + 4 + 8 + 7;
-  const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p autolearn  ctx ${ctxPct}%`;
-  const terse = `\u{1F9E0} ${score}% \u2726 ${points}p ctx ${ctxPct}%`;
+  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + 16 + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
+  const hostShort = cpuPct == null && memPct == null ? "" : `  cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`} ram ${memPct == null ? "\u2014" : `${memPct}%`}`;
+  const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p autolearn  ctx ${ctxPct}%${hostShort}`;
+  const terse = `\u{1F9E0} ${score}% \u2726 ${points}p ctx ${ctxPct}%${hostShort}`;
   if (fullLen <= w) {
     return /* @__PURE__ */ jsx10("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs10("text", { children: [
       /* @__PURE__ */ jsx10("span", { fg: barColor("smart", score), attributes: TextAttributes9.BOLD, children: "\u{1F9E0} " }),
@@ -1582,7 +1595,11 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1 }) {
       /* @__PURE__ */ jsx10("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "ctx " }),
       /* @__PURE__ */ jsx10("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "\u2588".repeat(cc.filled) }),
       /* @__PURE__ */ jsx10("span", { fg: "gray", children: "\u2591".repeat(cc.empty) }),
-      /* @__PURE__ */ jsx10("span", { fg: "white", children: ` ${ctxPct}%` })
+      /* @__PURE__ */ jsx10("span", { fg: "white", children: ` ${ctxPct}%` }),
+      hostTxt ? /* @__PURE__ */ jsx10("span", { fg: "gray", children: "   " }) : null,
+      hostTxt ? /* @__PURE__ */ jsx10("span", { fg: heat(cpuPct), children: `cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`}` }) : null,
+      hostTxt ? /* @__PURE__ */ jsx10("span", { fg: heat(memPct), children: `  ram ${memPct == null ? "\u2014" : `${memPct}%`}` }) : null,
+      hostTxt ? /* @__PURE__ */ jsx10("span", { fg: heat(swapPct), children: `  swap ${swapPct == null ? "\u2014" : `${swapPct}%`}` }) : null
     ] }) });
   }
   return /* @__PURE__ */ jsx10("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx10("text", { children: /* @__PURE__ */ jsx10("span", { fg: barColor("smart", score), attributes: TextAttributes9.BOLD, children: clip4(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
@@ -1952,7 +1969,7 @@ function useAgentStream({
       } catch {
       }
       toolMetaRef.current.clear();
-      const attempts = (0, import_ladder.attemptsFor)(model);
+      const attempts = (0, import_ladder.attemptsFor)(model, provider);
       if (attempts.length && provider && attempts[0].provider !== provider) {
         attempts[0] = { ...attempts[0], provider };
       }
@@ -2254,6 +2271,93 @@ function useAgentStream({
 }
 var useAgentStream_default = useAgentStream;
 
+// src/hooks/useHostStats.js
+import { useEffect as useEffect5, useRef as useRef2, useState as useState5 } from "react";
+import os3 from "node:os";
+import fs3 from "node:fs";
+var readText = (p) => {
+  try {
+    return fs3.readFileSync(p, "utf8");
+  } catch {
+    return "";
+  }
+};
+function cpuTimes() {
+  const line = (readText("/proc/stat").split("\n")[0] || "").trim();
+  if (!line.startsWith("cpu")) return null;
+  const n = line.split(/\s+/).slice(1).map(Number);
+  if (!n.length || n.some((x) => !Number.isFinite(x))) return null;
+  const idle = (n[3] || 0) + (n[4] || 0);
+  const total = n.reduce((a, b) => a + b, 0);
+  return { idle, total };
+}
+function meminfo() {
+  const out = {};
+  for (const line of readText("/proc/meminfo").split("\n")) {
+    const m = /^(\w+):\s+(\d+)\s*kB/.exec(line);
+    if (m) out[m[1]] = Number(m[2]) * 1024;
+  }
+  return out;
+}
+function disk() {
+  try {
+    const s = fs3.statfsSync("/");
+    const total = Number(s.blocks) * Number(s.bsize);
+    const free = Number(s.bavail) * Number(s.bsize);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    return { total, free, pct: Math.round((1 - free / total) * 100) };
+  } catch {
+    return null;
+  }
+}
+function useHostStats(intervalMs = 5e3) {
+  const [stats, setStats] = useState5(null);
+  const prevRef = useRef2(null);
+  useEffect5(() => {
+    const cores = Math.max(1, (os3.cpus() || []).length);
+    const sample = () => {
+      const now = cpuTimes();
+      let cpuPct = null;
+      const prev = prevRef.current;
+      if (now && prev && now.total > prev.total) {
+        const dt = now.total - prev.total;
+        const idleDelta = now.idle - prev.idle;
+        cpuPct = Math.max(0, Math.min(100, Math.round((1 - idleDelta / dt) * 100)));
+      }
+      if (now) prevRef.current = now;
+      const mi = meminfo();
+      const memTotal = mi.MemTotal || os3.totalmem();
+      const memAvail = mi.MemAvailable != null ? mi.MemAvailable : os3.freemem();
+      const swapTotal = mi.SwapTotal || 0;
+      const swapFree = mi.SwapFree || 0;
+      const d = disk();
+      setStats({
+        cores,
+        cpuPct,
+        load1: Math.round(((os3.loadavg() || [0])[0] || 0) * 100) / 100,
+        memPct: memTotal ? Math.max(0, Math.min(100, Math.round((1 - memAvail / memTotal) * 100))) : null,
+        memUsedGb: memTotal ? (memTotal - memAvail) / 1e9 : null,
+        memTotalGb: memTotal ? memTotal / 1e9 : null,
+        swapPct: swapTotal ? Math.max(0, Math.min(100, Math.round((1 - swapFree / swapTotal) * 100))) : null,
+        swapUsedMb: swapTotal ? Math.round((swapTotal - swapFree) / 1e6) : null,
+        swapTotalMb: swapTotal ? Math.round(swapTotal / 1e6) : null,
+        diskPct: d ? d.pct : null,
+        diskFreeGb: d ? d.free / 1e9 : null,
+        diskTotalGb: d ? d.total / 1e9 : null,
+        uptimeS: Math.round(os3.uptime())
+      });
+    };
+    sample();
+    const warm = setTimeout(sample, 800);
+    const t = setInterval(sample, intervalMs);
+    return () => {
+      clearTimeout(warm);
+      clearInterval(t);
+    };
+  }, [intervalMs]);
+  return stats;
+}
+
 // src/App.jsx
 var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
@@ -2275,7 +2379,7 @@ var MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 var PREFS_PATH = path3.join(process.env.HOME || "/home/ghost", ".hakster", "tui-prefs.json");
 function readPrefs() {
   try {
-    return JSON.parse(fs3.readFileSync(PREFS_PATH, "utf8")) || {};
+    return JSON.parse(fs4.readFileSync(PREFS_PATH, "utf8")) || {};
   } catch {
     return {};
   }
@@ -2283,8 +2387,8 @@ function readPrefs() {
 function writePrefs(patch) {
   try {
     const next = { ...readPrefs(), ...patch };
-    fs3.mkdirSync(path3.dirname(PREFS_PATH), { recursive: true });
-    fs3.writeFileSync(PREFS_PATH, `${JSON.stringify(next, null, 2)}
+    fs4.mkdirSync(path3.dirname(PREFS_PATH), { recursive: true });
+    fs4.writeFileSync(PREFS_PATH, `${JSON.stringify(next, null, 2)}
 `);
   } catch {
   }
@@ -2299,12 +2403,12 @@ function readImageAttachment(file) {
   const abs = path3.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ""));
   const mime = IMAGE_MIME[path3.extname(abs).toLowerCase()];
   if (!mime) throw new Error("not an image (png, jpg, webp, gif, bmp)");
-  const st = fs3.statSync(abs);
+  const st = fs4.statSync(abs);
   if (!st.isFile()) throw new Error("not a file");
   if (st.size > MAX_IMAGE_BYTES) {
     throw new Error(`too large (${Math.round(st.size / 1024 / 1024)}MB, max 12MB)`);
   }
-  const buf = fs3.readFileSync(abs);
+  const buf = fs4.readFileSync(abs);
   return {
     path: abs,
     name: path3.basename(abs),
@@ -2315,30 +2419,30 @@ function readImageAttachment(file) {
 function App({ version = "0.1.0" }) {
   const renderer2 = useRenderer();
   const { width: cols, height: rows } = useTerminalDimensions();
-  const [view, setView] = useState5("chat");
-  const [focus, setFocus] = useState5("composer");
-  const [adsOn, setAdsOn] = useState5(true);
-  const [dockExpanded, setDockExpanded] = useState5(false);
-  const [draft, setDraft] = useState5("");
-  const [model, setModel] = useState5(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : import_ladder2.PRIMARY_MODEL);
-  const [provider, setProvider] = useState5(process.env.HAKSTER_PROVIDER || import_ladder2.PRIMARY_PROVIDER);
-  const [modelIdx, setModelIdx] = useState5(0);
-  const prefsRef = useRef2(null);
+  const [view, setView] = useState6("chat");
+  const [focus, setFocus] = useState6("composer");
+  const [adsOn, setAdsOn] = useState6(true);
+  const [dockExpanded, setDockExpanded] = useState6(false);
+  const [draft, setDraft] = useState6("");
+  const [model, setModel] = useState6(process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : import_ladder2.PRIMARY_MODEL);
+  const [provider, setProvider] = useState6(process.env.HAKSTER_PROVIDER || import_ladder2.PRIMARY_PROVIDER);
+  const [modelIdx, setModelIdx] = useState6(0);
+  const prefsRef = useRef3(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
-  const [handoffOn, setHandoffOn] = useState5(() => prefsRef.current.autoHandoff !== false);
-  const [status, setStatus] = useState5(null);
-  const [statusErr, setStatusErr] = useState5(null);
-  const [mcp, setMcp] = useState5(null);
-  const [history, setHistory] = useState5([]);
-  const [mcpOutputOffset, setMcpOutputOffset] = useState5(0);
-  const [menuOpen, setMenuOpen] = useState5(false);
-  const [menuIndex, setMenuIndex] = useState5(0);
-  const [notice, setNotice] = useState5(null);
-  const [scan, setScan] = useState5({ ok: false, ports: [], procs: {}, at: 0 });
-  const [guard, setGuard] = useState5(null);
-  const [pointsHistory, setPointsHistory] = useState5([]);
-  const [attachment, setAttachment] = useState5(null);
-  const scrollRef = useRef2(null);
+  const [handoffOn, setHandoffOn] = useState6(() => prefsRef.current.autoHandoff !== false);
+  const [status, setStatus] = useState6(null);
+  const [statusErr, setStatusErr] = useState6(null);
+  const [mcp, setMcp] = useState6(null);
+  const [history, setHistory] = useState6([]);
+  const [mcpOutputOffset, setMcpOutputOffset] = useState6(0);
+  const [menuOpen, setMenuOpen] = useState6(false);
+  const [menuIndex, setMenuIndex] = useState6(0);
+  const [notice, setNotice] = useState6(null);
+  const [scan, setScan] = useState6({ ok: false, ports: [], procs: {}, at: 0 });
+  const [guard, setGuard] = useState6(null);
+  const [pointsHistory, setPointsHistory] = useState6([]);
+  const [attachment, setAttachment] = useState6(null);
+  const scrollRef = useRef3(null);
   const agent = useAgentStream_default({
     api: API,
     model,
@@ -2347,7 +2451,7 @@ function App({ version = "0.1.0" }) {
     cwd: process.env.HAKSTER_AGENT_CWD || null,
     autoHandoff: handoffOn
   });
-  useEffect5(() => {
+  useEffect6(() => {
     writePrefs({ autoHandoff: handoffOn });
   }, [handoffOn]);
   const load = useCallback2(async () => {
@@ -2362,12 +2466,12 @@ function App({ version = "0.1.0" }) {
       setStatusErr(e.message);
     }
   }, []);
-  useEffect5(() => {
+  useEffect6(() => {
     load();
     const t = setInterval(load, 3e3);
     return () => clearInterval(t);
   }, [load]);
-  useEffect5(() => {
+  useEffect6(() => {
     let alive = true;
     const tick = async () => {
       try {
@@ -2388,7 +2492,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect5(() => {
+  useEffect6(() => {
     let alive = true;
     const tick = async () => {
       const next = await scanPorts();
@@ -2401,7 +2505,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect5(() => {
+  useEffect6(() => {
     const tick = () => {
       try {
         setGuard(fileGuard());
@@ -2413,13 +2517,24 @@ function App({ version = "0.1.0" }) {
     return () => clearInterval(t);
   }, []);
   const meterPoints = Number(agent.meters && agent.meters.points) || 0;
-  useEffect5(() => {
+  useEffect6(() => {
     setPointsHistory((h) => [...h.slice(-59), meterPoints]);
   }, [meterPoints]);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
-  const ctxMax = import_catalog.default.contextMaxFor(model) || 1;
+  const pickerModels = [
+    { key: "__claude", vendor: "Claude", value: `Claude \xB7 ${import_ladder2.PRIMARY_MODEL}`, model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER },
+    { key: "__codex", vendor: "Codex", value: "Codex (Pro) \xB7 provider default", model: "", provider: "codex-cli" },
+    ...models.map((m) => ({ key: `c:${m.id}`, vendor: m.vendor, value: m.id, model: m.id, provider: import_ladder2.PRIMARY_PROVIDER }))
+  ];
+  const pickerIndexFor = (m, p) => {
+    const i = pickerModels.findIndex((x) => x.model === (m || "") && x.provider === (p || ""));
+    return i < 0 ? 0 : i;
+  };
+  const modelText = model || (provider === "codex-cli" ? "Codex (Pro)" : provider || "auto");
+  const ctxMax = import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
   const ctxUsed = Number(status && (status.tokens || status.contextUsed) || 0);
   const meters = agent.meters || null;
+  const host = useHostStats(5e3);
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
   const showNotice = useCallback2((text) => {
@@ -2454,9 +2569,10 @@ function App({ version = "0.1.0" }) {
       case "/model":
         if (arg) {
           setModel(arg);
-          showNotice(`model \u2192 ${arg}`);
+          setProvider(import_ladder2.PRIMARY_PROVIDER);
+          showNotice(`model \u2192 ${arg} \xB7 provider ${import_ladder2.PRIMARY_PROVIDER}`);
         } else {
-          setModelIdx(Math.max(0, models.findIndex((x) => x.id === model)));
+          setModelIdx(pickerIndexFor(model, provider));
           setView("models");
         }
         return;
@@ -2542,7 +2658,7 @@ function App({ version = "0.1.0" }) {
   });
   const mcpMaxOffset = Math.max(0, mcpOutputLines.length - MCP_OUTPUT_LINES);
   const visibleMcpOutput = mcpOutputLines.slice(mcpOutputOffset, mcpOutputOffset + MCP_OUTPUT_LINES);
-  useEffect5(() => {
+  useEffect6(() => {
     setMcpOutputOffset(0);
   }, [latestMcpTool?.id, latestMcpTool?.result]);
   const crushPhase = activeAssistant?.phase || (agent.status === "thinking" ? "THINK" : agent.status === "connecting" ? "PLAN" : "ACT");
@@ -2558,7 +2674,7 @@ function App({ version = "0.1.0" }) {
   useKeyboard3((key) => {
     if (process.env.HAKSTER_TUI_KEYLOG) {
       try {
-        fs3.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
+        fs4.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
       } catch {
       }
     }
@@ -2594,12 +2710,15 @@ function App({ version = "0.1.0" }) {
         setView("dashboard");
         return;
       }
-      if (models.length) {
-        if (key.name === "up") setModelIdx((i) => (i - 1 + models.length) % models.length);
-        if (key.name === "down") setModelIdx((i) => (i + 1) % models.length);
+      if (pickerModels.length) {
+        if (key.name === "up") setModelIdx((i) => (i - 1 + pickerModels.length) % pickerModels.length);
+        if (key.name === "down") setModelIdx((i) => (i + 1) % pickerModels.length);
         if (key.name === "return") {
-          setModel(models[modelIdx].id);
+          const pick = pickerModels[modelIdx] || pickerModels[0];
+          setModel(pick.model || "");
+          setProvider(pick.provider || import_ladder2.PRIMARY_PROVIDER);
           setView("chat");
+          showNotice(`model \u2192 ${pick.value} \xB7 provider ${pick.provider || import_ladder2.PRIMARY_PROVIDER}`);
         }
       }
       return;
@@ -2644,7 +2763,7 @@ function App({ version = "0.1.0" }) {
         setView((v) => v === "chat" ? "dashboard" : "chat");
         break;
       case "m":
-        setModelIdx(Math.max(0, models.findIndex((x) => x.id === model)));
+        setModelIdx(pickerIndexFor(model, provider));
         setView("models");
         break;
       case "c":
@@ -2664,11 +2783,13 @@ function App({ version = "0.1.0" }) {
   const panelW = Math.max(40, Math.min((cols || 100) - 2, 140));
   const headerState = statusErr ? "OFFLINE" : status ? "ONLINE" : "connecting\u2026";
   const ctxK = Math.round(ctxMax / 1e3);
+  const ctxPart = model ? `ctx ${ctxK}K` : null;
   const headerRightVariants = [
-    `tui ${version} \xB7 ${view} \xB7 ${model} \xB7 ctx ${ctxK}K`,
-    `${view} \xB7 ${model} \xB7 ctx ${ctxK}K`,
-    `${view} \xB7 ctx ${ctxK}K`,
-    `${view}`
+    ["tui " + version, view, modelText, ctxPart].filter(Boolean).join(" \xB7 "),
+    [view, modelText, ctxPart].filter(Boolean).join(" \xB7 "),
+    [view, modelText].filter(Boolean).join(" \xB7 "),
+    [view, ctxPart].filter(Boolean).join(" \xB7 "),
+    view
   ];
   const headerInner = panelW - 2;
   const guardTxt = guard ? `${guard.present}/${guard.total} files` : "";
@@ -2709,12 +2830,25 @@ function App({ version = "0.1.0" }) {
       ]
     },
     {
+      key: "host",
+      title: "Host",
+      hint: "5s refresh",
+      cells: [
+        { label: "cpu", value: host && host.cpuPct != null ? `${host.cpuPct}%` : "\u2014", color: !host || host.cpuPct == null ? "gray" : host.cpuPct > 85 ? "red" : host.cpuPct > 60 ? "yellow" : "green" },
+        { label: "load 1m", value: host ? `${host.load1}/${host.cores}` : "\u2014", color: !host ? "gray" : host.load1 > host.cores ? "red" : host.load1 > host.cores * 0.7 ? "yellow" : "green" },
+        { label: "ram", value: host && host.memPct != null ? `${host.memPct}%` : "\u2014", color: !host || host.memPct == null ? "gray" : host.memPct > 90 ? "red" : host.memPct > 75 ? "yellow" : "green" },
+        { label: "swap", value: host && host.swapTotalMb ? `${host.swapUsedMb}/${host.swapTotalMb}M` : "none", color: !host ? "gray" : host.swapPct > 85 ? "red" : host.swapPct > 50 ? "yellow" : "green" },
+        { label: "disk free", value: host && host.diskFreeGb != null ? `${host.diskFreeGb.toFixed(1)}G / ${host.diskTotalGb.toFixed(0)}G` : "\u2014", color: !host || host.diskPct == null ? "gray" : host.diskPct > 95 ? "red" : host.diskPct > 90 ? "yellow" : "green" },
+        { label: "uptime", value: host ? `${Math.floor(host.uptimeS / 3600)}h ${Math.floor(host.uptimeS % 3600 / 60)}m` : "\u2014" }
+      ]
+    },
+    {
       key: "session",
       title: "Session",
       hint: "3s refresh",
       cells: [
         { label: "tokens", value: ctxUsed },
-        { label: "model", value: model, color: "yellow" },
+        { label: "model", value: modelText, color: "yellow" },
         { label: "ad requests", value: import_ad_client2.default.adSessionSnapshot().adsServed, color: "cyan" },
         { label: "ads held", value: import_ad_client2.default.adSessionSnapshot().adsHeld }
       ]
@@ -2745,15 +2879,15 @@ function App({ version = "0.1.0" }) {
       "server unreachable \u2014 ",
       statusErr
     ] }) }) : null,
-    view === "models" ? /* @__PURE__ */ jsx15(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: models.map((m, i) => /* @__PURE__ */ jsx15(
+    view === "models" ? /* @__PURE__ */ jsx15(GridPanel_default, { title: "Models", width: panelW, hint: "\u2191\u2193 select \xB7 enter apply \xB7 esc back", children: pickerModels.map((m, i) => /* @__PURE__ */ jsx15(
       Cell,
       {
         label: m.vendor,
-        value: `${i === modelIdx ? "\u25B8 " : ""}${m.id}`,
+        value: `${i === modelIdx ? "\u25B8 " : ""}${m.value}`,
         w: Math.max(1, Math.floor((panelW - 6) / 2)),
         color: i === modelIdx ? "yellow" : "white"
       },
-      m.id
+      m.key
     )) }) : view === "dashboard" ? /* @__PURE__ */ jsxs15(Fragment2, { children: [
       /* @__PURE__ */ jsx15(
         GridLayout_default,
@@ -2769,7 +2903,7 @@ function App({ version = "0.1.0" }) {
         {
           title: "\u25C9 Meters",
           width: panelW,
-          hint: `${smartLabel(meters ? meters.score : 0)} \xB7 ${meterPoints}p autolearn \xB7 ${import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: model, vendor: "local", context: null })}`,
+          hint: `${smartLabel(meters ? meters.score : 0)} \xB7 ${meterPoints}p autolearn \xB7 ${import_catalog.default.labelFor(import_catalog.default.findModel(model) || { id: modelText, vendor: "local", context: null })}`,
           children: [
             /* @__PURE__ */ jsxs15("box", { style: { width: Math.max(10, panelW - 4), flexDirection: "row", flexShrink: 0 }, children: [
               /* @__PURE__ */ jsx15("text", { fg: "gray", children: "smartness   " }),
@@ -2852,7 +2986,7 @@ function App({ version = "0.1.0" }) {
           }
         ) }) : null,
         notice ? /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx15("text", { fg: "cyan", children: clipLine(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
-        /* @__PURE__ */ jsx15(SystemPanel, { width: mainW, meters, ctxUsed, ctxMax }),
+        /* @__PURE__ */ jsx15(SystemPanel, { width: mainW, meters, ctxUsed, ctxMax, host }),
         /* @__PURE__ */ jsx15(ServicesPanel, { width: mainW, services, scan }),
         /* @__PURE__ */ jsx15("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx15(MenuPalette, { width: Math.min(mainW, 72), selected: menuIndex }) : /* @__PURE__ */ jsx15(
           Composer,
@@ -2899,7 +3033,7 @@ function App({ version = "0.1.0" }) {
       {
         width: panelW,
         status: agent.status,
-        model,
+        model: modelText,
         cols: cols || 100,
         focus,
         adsOn,

@@ -284,7 +284,7 @@ export function useAgentStream({
       // (src/models/ladder.js). One attempt at a time; an attempt that failed
       // before producing anything hands the same prompt to the next entry when
       // the owner's auto-handoff switch is on.
-      const attempts = attemptsFor(model);
+      const attempts = attemptsFor(model, provider);
       if (attempts.length && provider && attempts[0].provider !== provider) {
         // An explicit HAKSTER_PROVIDER / caller provider wins for tier 1.
         attempts[0] = { ...attempts[0], provider };

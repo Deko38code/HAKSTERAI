@@ -17,6 +17,7 @@ import CrushStatus from './components/CrushStatus.jsx';
 import TodoPanel from './components/TodoPanel.jsx';
 import Transcript from './components/Transcript.jsx';
 import useAgentStream from './hooks/useAgentStream.js';
+import useHostStats from './hooks/useHostStats.js';
 import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel } from '../../smartness.mjs';
 import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
@@ -233,9 +234,27 @@ export default function App({ version = '0.1.0' }) {
   }, [meterPoints]);
 
   const models = catalog.REFERENCE_CATALOG || [];
-  const ctxMax = catalog.contextMaxFor(model) || 1;
+  // The ladder sits at the top of the picker. Tier 1 is not a lookalike of the
+  // owner's Claude CLI config — it is that config: the same wire model and the
+  // same provider, stated literally (§22). Tier 2 is Codex on the Pro plan.
+  // Everything below is the reference catalogue, unchanged.
+  const pickerModels = [
+    { key: '__claude', vendor: 'Claude', value: `Claude · ${PRIMARY_MODEL}`, model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER },
+    { key: '__codex', vendor: 'Codex', value: 'Codex (Pro) · provider default', model: '', provider: 'codex-cli' },
+    ...models.map((m) => ({ key: `c:${m.id}`, vendor: m.vendor, value: m.id, model: m.id, provider: PRIMARY_PROVIDER })),
+  ];
+  const pickerIndexFor = (m, p) => {
+    const i = pickerModels.findIndex((x) => x.model === (m || '') && x.provider === (p || ''));
+    return i < 0 ? 0 : i;
+  };
+  // What the header and the status bar call the current model. Codex is picked
+  // by provider (no model string is invented for it), so it needs its own name.
+  const modelText = model || (provider === 'codex-cli' ? 'Codex (Pro)' : provider || 'auto');
+  const ctxMax = catalog.contextMaxFor(model || PRIMARY_MODEL) || 1;
   const ctxUsed = Number((status && (status.tokens || status.contextUsed)) || 0);
   const meters = agent.meters || null;
+  // This machine's own vitals — cpu, ram, swap, disk, load — sampled in-process.
+  const host = useHostStats(5000);
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
 
@@ -273,9 +292,15 @@ export default function App({ version = '0.1.0' }) {
         return;
       }
       case '/model':
-        if (arg) { setModel(arg); showNotice(`model → ${arg}`); }
+        if (arg) {
+          setModel(arg);
+          // A typed model always runs on the pinned provider — otherwise a
+          // leftover Codex pick would be sent with a different model id.
+          setProvider(PRIMARY_PROVIDER);
+          showNotice(`model → ${arg} · provider ${PRIMARY_PROVIDER}`);
+        }
         else {
-          setModelIdx(Math.max(0, models.findIndex((x) => x.id === model)));
+          setModelIdx(pickerIndexFor(model, provider));
           setView('models');
         }
         return;
@@ -436,12 +461,15 @@ export default function App({ version = '0.1.0' }) {
         setView('dashboard');
         return;
       }
-      if (models.length) {
-        if (key.name === 'up') setModelIdx((i) => (i - 1 + models.length) % models.length);
-        if (key.name === 'down') setModelIdx((i) => (i + 1) % models.length);
+      if (pickerModels.length) {
+        if (key.name === 'up') setModelIdx((i) => (i - 1 + pickerModels.length) % pickerModels.length);
+        if (key.name === 'down') setModelIdx((i) => (i + 1) % pickerModels.length);
         if (key.name === 'return') {
-          setModel(models[modelIdx].id);
+          const pick = pickerModels[modelIdx] || pickerModels[0];
+          setModel(pick.model || '');
+          setProvider(pick.provider || PRIMARY_PROVIDER);
           setView('chat');
+          showNotice(`model → ${pick.value} · provider ${pick.provider || PRIMARY_PROVIDER}`);
         }
       }
       return;
@@ -502,7 +530,7 @@ export default function App({ version = '0.1.0' }) {
         setView((v) => (v === 'chat' ? 'dashboard' : 'chat'));
         break;
       case 'm':
-        setModelIdx(Math.max(0, models.findIndex((x) => x.id === model)));
+        setModelIdx(pickerIndexFor(model, provider));
         setView('models');
         break;
       case 'c':
@@ -527,11 +555,13 @@ export default function App({ version = '0.1.0' }) {
   // right-hand detail because the owner asked for the guard count always on.
   const headerState = statusErr ? 'OFFLINE' : status ? 'ONLINE' : 'connecting…';
   const ctxK = Math.round(ctxMax / 1000);
+  const ctxPart = model ? `ctx ${ctxK}K` : null;
   const headerRightVariants = [
-    `tui ${version} · ${view} · ${model} · ctx ${ctxK}K`,
-    `${view} · ${model} · ctx ${ctxK}K`,
-    `${view} · ctx ${ctxK}K`,
-    `${view}`,
+    ['tui ' + version, view, modelText, ctxPart].filter(Boolean).join(' · '),
+    [view, modelText, ctxPart].filter(Boolean).join(' · '),
+    [view, modelText].filter(Boolean).join(' · '),
+    [view, ctxPart].filter(Boolean).join(' · '),
+    view,
   ];
   const headerInner = panelW - 2;
   const guardTxt = guard ? `${guard.present}/${guard.total} files` : '';
@@ -590,12 +620,25 @@ export default function App({ version = '0.1.0' }) {
       ],
     },
     {
+      key: 'host',
+      title: 'Host',
+      hint: '5s refresh',
+      cells: [
+        { label: 'cpu', value: host && host.cpuPct != null ? `${host.cpuPct}%` : '—', color: !host || host.cpuPct == null ? 'gray' : host.cpuPct > 85 ? 'red' : host.cpuPct > 60 ? 'yellow' : 'green' },
+        { label: 'load 1m', value: host ? `${host.load1}/${host.cores}` : '—', color: !host ? 'gray' : host.load1 > host.cores ? 'red' : host.load1 > host.cores * 0.7 ? 'yellow' : 'green' },
+        { label: 'ram', value: host && host.memPct != null ? `${host.memPct}%` : '—', color: !host || host.memPct == null ? 'gray' : host.memPct > 90 ? 'red' : host.memPct > 75 ? 'yellow' : 'green' },
+        { label: 'swap', value: host && host.swapTotalMb ? `${host.swapUsedMb}/${host.swapTotalMb}M` : 'none', color: !host ? 'gray' : host.swapPct > 85 ? 'red' : host.swapPct > 50 ? 'yellow' : 'green' },
+        { label: 'disk free', value: host && host.diskFreeGb != null ? `${host.diskFreeGb.toFixed(1)}G / ${host.diskTotalGb.toFixed(0)}G` : '—', color: !host || host.diskPct == null ? 'gray' : host.diskPct > 95 ? 'red' : host.diskPct > 90 ? 'yellow' : 'green' },
+        { label: 'uptime', value: host ? `${Math.floor(host.uptimeS / 3600)}h ${Math.floor((host.uptimeS % 3600) / 60)}m` : '—' },
+      ],
+    },
+    {
       key: 'session',
       title: 'Session',
       hint: '3s refresh',
       cells: [
         { label: 'tokens', value: ctxUsed },
-        { label: 'model', value: model, color: 'yellow' },
+        { label: 'model', value: modelText, color: 'yellow' },
         { label: 'ad requests', value: ads.adSessionSnapshot().adsServed, color: 'cyan' },
         { label: 'ads held', value: ads.adSessionSnapshot().adsHeld },
       ],
@@ -638,11 +681,11 @@ export default function App({ version = '0.1.0' }) {
 
       {view === 'models' ? (
         <GridPanel title="Models" width={panelW} hint="↑↓ select · enter apply · esc back">
-          {models.map((m, i) => (
+          {pickerModels.map((m, i) => (
             <Cell
-              key={m.id}
+              key={m.key}
               label={m.vendor}
-              value={`${i === modelIdx ? '▸ ' : ''}${m.id}`}
+              value={`${i === modelIdx ? '▸ ' : ''}${m.value}`}
               w={Math.max(1, Math.floor((panelW - 6) / 2))}
               color={i === modelIdx ? 'yellow' : 'white'}
             />
@@ -667,7 +710,7 @@ export default function App({ version = '0.1.0' }) {
           <GridPanel
             title="◉ Meters"
             width={panelW}
-            hint={`${smartLabel(meters ? meters.score : 0)} · ${meterPoints}p autolearn · ${catalog.labelFor(catalog.findModel(model) || { id: model, vendor: 'local', context: null })}`}
+            hint={`${smartLabel(meters ? meters.score : 0)} · ${meterPoints}p autolearn · ${catalog.labelFor(catalog.findModel(model) || { id: modelText, vendor: 'local', context: null })}`}
           >
             <box style={{ width: Math.max(10, panelW - 4), flexDirection: 'row', flexShrink: 0 }}>
               <text fg="gray">{'smartness   '}</text>
@@ -769,7 +812,7 @@ export default function App({ version = '0.1.0' }) {
             ) : null}
 
             {/* Old CLI's two meters + the context bar, then their ports grid. */}
-            <SystemPanel width={mainW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} />
+            <SystemPanel width={mainW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
             <ServicesPanel width={mainW} services={services} scan={scan} />
 
             <box style={{ flexShrink: 0 }}>
@@ -829,7 +872,7 @@ export default function App({ version = '0.1.0' }) {
         <StatusBar
           width={panelW}
           status={agent.status}
-          model={model}
+          model={modelText}
           cols={cols || 100}
           focus={focus}
           adsOn={adsOn}

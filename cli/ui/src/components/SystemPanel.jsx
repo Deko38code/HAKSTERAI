@@ -19,7 +19,7 @@ const clip = (s, n) => {
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}…`;
 };
 
-export default function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1 }) {
+export default function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host = null }) {
   const w = Math.max(24, Number(width) || 80);
   const score = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
   const points = Math.max(0, Math.round(Number(meters && meters.points) || 0));
@@ -30,15 +30,25 @@ export default function SystemPanel({ width = 100, meters = null, ctxUsed = 0, c
   // The file-guard count lives in the header (always visible, every view), so
   // it is not repeated here.
 
+  // Host vitals (owner: "hes not checking cpu etc"). Same row, own segment.
+  const cpuPct = host && host.cpuPct != null ? host.cpuPct : null;
+  const memPct = host && host.memPct != null ? host.memPct : null;
+  const swapPct = host && host.swapPct != null ? host.swapPct : null;
+  const heat = (p) => (p == null ? 'gray' : p > 85 ? 'red' : p > 60 ? 'yellow' : 'green');
+  const hostTxt = cpuPct == null && memPct == null
+    ? ''
+    : `cpu ${cpuPct == null ? '—' : `${cpuPct}%`}  ram ${memPct == null ? '—' : `${memPct}%`}  swap ${swapPct == null ? '—' : `${swapPct}%`}`;
+
   const sc = barCells(score, 100, 12);
   const ac = barCells(points, 100, 10);
   const cc = barCells(ctxPct, 100, 8);
 
   // Three widths: full bars, bars-less labels, and a terse line for narrow
   // panels. Pick the richest one that provably fits, so the row never wraps.
-  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + 16 + 3 + 4 + 8 + 7;
-  const compact = `🧠 ${score}% ${arrow} ${smartLabel(score)}  ✦ ${points}p autolearn  ctx ${ctxPct}%`;
-  const terse = `🧠 ${score}% ✦ ${points}p ctx ${ctxPct}%`;
+  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + 16 + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
+  const hostShort = cpuPct == null && memPct == null ? '' : `  cpu ${cpuPct == null ? '—' : `${cpuPct}%`} ram ${memPct == null ? '—' : `${memPct}%`}`;
+  const compact = `🧠 ${score}% ${arrow} ${smartLabel(score)}  ✦ ${points}p autolearn  ctx ${ctxPct}%${hostShort}`;
+  const terse = `🧠 ${score}% ✦ ${points}p ctx ${ctxPct}%${hostShort}`;
 
   if (fullLen <= w) {
     return (
@@ -60,6 +70,10 @@ export default function SystemPanel({ width = 100, meters = null, ctxUsed = 0, c
           <span fg={ctxPct > 85 ? 'red' : ctxPct > 60 ? 'yellow' : 'green'}>{'█'.repeat(cc.filled)}</span>
           <span fg="gray">{'░'.repeat(cc.empty)}</span>
           <span fg="white">{` ${ctxPct}%`}</span>
+          {hostTxt ? <span fg="gray">{'   '}</span> : null}
+          {hostTxt ? <span fg={heat(cpuPct)}>{`cpu ${cpuPct == null ? '—' : `${cpuPct}%`}`}</span> : null}
+          {hostTxt ? <span fg={heat(memPct)}>{`  ram ${memPct == null ? '—' : `${memPct}%`}`}</span> : null}
+          {hostTxt ? <span fg={heat(swapPct)}>{`  swap ${swapPct == null ? '—' : `${swapPct}%`}`}</span> : null}
         </text>
       </box>
     );
