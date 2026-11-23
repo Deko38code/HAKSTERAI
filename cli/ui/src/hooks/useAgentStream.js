@@ -46,6 +46,41 @@ const fmtTok = (n) => {
   return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
 };
 
+/* Conversation replay for continuity.
+ *
+ * /api/agent/run runs one request per turn and does not reload stored turns
+ * into the prompt (it only persists the incoming user turn), so the client is
+ * the one holding the conversation. Before this the TUI sent just the newest
+ * prompt, which meant every message started a brand-new conversation: the
+ * agent forgot the task it was halfway through and stopped, and the operator
+ * had to restate it. Sending the transcript back is what makes a run continue
+ * like a CLI session instead of restarting each time.
+ *
+ * Capped by count and by characters so a long session cannot grow the request
+ * without bound. Only real prose is replayed — a turn that produced tools but
+ * no text has nothing a model can read back.
+ */
+const HISTORY_MAX_MESSAGES = 16;
+const HISTORY_MAX_CHARS = 24000;
+const HISTORY_MSG_CHARS = 6000;
+
+function buildHistory(msgs) {
+  if (!Array.isArray(msgs) || msgs.length === 0) return [];
+  const out = [];
+  let chars = 0;
+  for (let i = msgs.length - 1; i >= 0 && out.length < HISTORY_MAX_MESSAGES; i -= 1) {
+    const m = msgs[i];
+    if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
+    const text = String(m.text || '').trim();
+    if (!text) continue;
+    const clipped = text.length > HISTORY_MSG_CHARS ? `${text.slice(0, HISTORY_MSG_CHARS)}…` : text;
+    if (chars + clipped.length > HISTORY_MAX_CHARS) break;
+    chars += clipped.length;
+    out.push({ role: m.role, content: clipped });
+  }
+  return out.reverse();
+}
+
 /** Map the server's todo status vocabulary onto the panel's `{ text, done }`. */
 function normalizeTodos(raw) {
   if (!Array.isArray(raw)) return null;
@@ -72,6 +107,10 @@ export function useAgentStream({
   autoHandoff = true,
 } = {}) {
   const [messages, setMessages] = useState([]);
+  // Mirror of `messages` for send(): the callback is long-lived, so reading the
+  // state variable inside it would replay the history from when it was built.
+  const messagesRef = useRef([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   const [todos, setTodos] = useState([]);
   const [status, setStatus] = useState('idle'); // idle | connecting | thinking | streaming | error
   const [error, setError] = useState(null);
@@ -593,6 +632,9 @@ export function useAgentStream({
             body: JSON.stringify({
               messages: [
                 ...(system ? [{ role: 'system', content: system }] : []),
+                // The conversation so far, so this turn continues the task
+                // instead of starting a fresh one (see buildHistory above).
+                ...buildHistory(messagesRef.current),
                 {
                   role: 'user',
                   content: images.length
@@ -608,6 +650,9 @@ export function useAgentStream({
               ...(cwd ? { cwd } : {}),
               ...(sessionId ? { sessionId } : {}),
               ...(approvalMode ? { approvalMode } : {}),
+              // An autonomous run is allowed the server's full round budget so a
+              // long job is finished in one go rather than stopping at a cap.
+              ...(approvalMode === 'full-auto' || approvalMode === 'auto-edit' ? { maxTurns: 120 } : {}),
             }),
           });
 

@@ -11,6 +11,7 @@ import { TextAttributes } from '@opentui/core';
  */
 export const MENU_ITEMS = [
   { cmd: '/model', label: 'Models', detail: 'switch the model for this session' },
+  { cmd: '/auto', label: 'Autonomy', detail: 'ask · edit · full — how far it runs alone' },
   { cmd: '/mcp', label: 'MCP servers', detail: 'live servers and their tool counts' },
   { cmd: '/handoff', label: 'Auto handoff', detail: 'on/off · DeepSeek → Codex → others' },
   { cmd: '/ports', label: 'Ports', detail: 'services and every listening port' },

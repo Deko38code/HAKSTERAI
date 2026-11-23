@@ -77,6 +77,10 @@ const IMAGE_MIME = {
 };
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
+/* The three amounts of autonomy /api/agent/run understands (server's
+ * agent/approval.js). Stored in cli-prefs as `autoMode`. */
+const AUTO_MODES = new Set(['suggest', 'auto-edit', 'full-auto']);
+
 /* The auto-handoff switch is the owner's, and it stays where he left it.
  * One small file under ~/.hakster, read at start and rewritten on change; a
  * missing or unreadable file simply means "on" (the default order). */
@@ -193,6 +197,15 @@ export default function App({ version = '0.1.0' }) {
   const prefsRef = useRef(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
   const [handoffOn, setHandoffOn] = useState(() => prefsRef.current.autoHandoff !== false);
+  // How much the agent may do without asking. 'auto-edit' is the Claude-CLI
+  // default the owner asked for ("running like u do in claude cli ... finishing
+  // job til the end"): edits, reads and safe commands run themselves, a
+  // dangerous shell command still waits for a yes. 'full-auto' never asks;
+  // 'suggest' asks before anything that changes the box. Remembered.
+  const [autoMode, setAutoMode] = useState(() => {
+    const saved = String(prefsRef.current.autoMode || '');
+    return AUTO_MODES.has(saved) ? saved : 'auto-edit';
+  });
   // The usage page's own poll rate (owner, 2026-11-23: "live graphs refresh
   // rate"). Seconds; 0 pauses. It is a CLI preference, saved on this machine.
   const [usageRefresh, setUsageRefresh] = useState(() => {
@@ -246,6 +259,9 @@ export default function App({ version = '0.1.0' }) {
     system: SYSTEM,
     cwd: process.env.HAKSTER_AGENT_CWD || null,
     autoHandoff: handoffOn,
+    // Autonomy: the server turns this into its autonomous directive + the
+    // "you replied with text only, act" nudge, so a run drives to the end.
+    approvalMode: autoMode === 'suggest' ? undefined : autoMode,
   });
 
   // Per-user usage, only fetched while the page is open (see the hook).
@@ -254,6 +270,10 @@ export default function App({ version = '0.1.0' }) {
   useEffect(() => {
     writePrefs({ autoHandoff: handoffOn });
   }, [handoffOn]);
+
+  useEffect(() => {
+    writePrefs({ autoMode });
+  }, [autoMode]);
 
   // ── Machine status: unchanged contract with the server's /api/tui/status ──
   const load = useCallback(async () => {
@@ -360,11 +380,12 @@ export default function App({ version = '0.1.0' }) {
     if (!lastAssistant) return [];
     const text = String(lastAssistant.text || '').trim();
     const result = lastTool && lastTool.result != null ? String(lastTool.result).trim() : '';
-    // What the agent SAYS wins — prose, then its reasoning, and only then
-    // shell output. A reasoning model spends its tool rounds thinking, so
-    // putting `result` ahead of `thinking` made this panel read as nothing but
-    // shell calls (owner, 2026-11-23).
-    const src = text || String(lastAssistant.thinking || '').trim() || result;
+    // The bottom box is the RESULT, the top box is the REASONING (owner,
+    // 2026-11-23: "top one needs to be reasoning and bottom the final result
+    // output"). So the answer wins, then what the newest tool returned — never
+    // the thinking, which belongs to the transcript above and made this panel
+    // read as a second copy of it.
+    const src = text || result;
     return src ? src.split('\n').filter((l) => l.trim()).slice(-6) : [];
   })();
   // The picture behind live-URL work (owner, 2026-11-23: "live image viewer in
@@ -497,6 +518,26 @@ export default function App({ version = '0.1.0' }) {
         );
         return;
       }
+      case '/auto': {
+        // How much the agent does on its own. The cycle a bare `/auto` walks is
+        // the safe → autonomous order: ask, edit, full — never a jump to
+        // full-auto without saying so.
+        const want = String(arg || '').trim().toLowerCase();
+        const next = want === 'on' ? 'auto-edit'
+          : want === 'off' || want === 'ask' ? 'suggest'
+          : want === 'full' ? 'full-auto'
+          : AUTO_MODES.has(want) ? want
+          : autoMode === 'suggest' ? 'auto-edit' : autoMode === 'auto-edit' ? 'full-auto' : 'suggest';
+        setAutoMode(next);
+        showNotice(
+          next === 'full-auto'
+            ? 'auto FULL — the agent runs and finishes without asking (sudo still confirms)'
+            : next === 'auto-edit'
+              ? 'auto EDIT — it works and finishes on its own; a dangerous shell command still asks'
+              : 'auto ASK — every command that changes the box waits for you',
+        );
+        return;
+      }
       case '/ports': {
         const up = services.filter((s) => s.up).length;
         setView('dashboard');
@@ -595,7 +636,7 @@ export default function App({ version = '0.1.0' }) {
         showNotice('transcript cleared');
         return;
       case '/help':
-        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit');
+        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit');
         return;
       case '/quit':
       case '/exit':
@@ -605,7 +646,7 @@ export default function App({ version = '0.1.0' }) {
       default:
         showNotice(`unknown command ${cmd} — /menu lists them`);
     }
-  }, [agent, models, model, mcp, status, statusErr, renderer, showNotice, services, otherPorts, scan, handoffOn, update, version]);
+  }, [agent, models, model, mcp, status, statusErr, renderer, showNotice, services, otherPorts, scan, handoffOn, autoMode, update, version]);
 
   // ── One catalog: our agents, crush's models, the reference list, the live MCP
   // servers and every slash command. Built from state — nothing invented, and a
@@ -992,7 +1033,14 @@ export default function App({ version = '0.1.0' }) {
   // HakTerm-style live column: only when there is room for it beside a readable
   // transcript (>=96 cols). Narrower terminals keep the panels full width.
   const sideW = (cols || 100) >= 96 ? 30 : 0;
-  const mainW = panelW - (sideW ? sideW + 2 : 0);
+  // The body sits inside the same one-column gutter the header and status bar
+  // pad with, so the panel borders, the header text and the status bar share
+  // one left edge and one right edge instead of drifting a column apart. The
+  // sidebar column also takes a one-column gap, not two, so the row can fill
+  // the padded width exactly (owner, 2026-11-23: "alignment tweaks ... in sync
+  // with output and grids").
+  const bodyW = panelW - 2;
+  const mainW = bodyW - (sideW ? sideW + 1 : 0);
   // The meters row is one line; the services box is its own grid (3 rows when
   // compact, a wrapped grid when wide). Both sit above the composer, so their
   // rows come out of the transcript budget — and out of the sidebar's too.
@@ -1327,12 +1375,14 @@ export default function App({ version = '0.1.0' }) {
            the sidebar. Shift+↑/↓ scrolls the feed, shift+End resumes follow,
            esc returns to the chat. Nothing runs from here; it only watches. */
         <>
-          <SystemPanel width={panelW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
-          <ServicesPanel width={panelW} services={services} scan={scan} dense={dense} maxCells={monitorServicesCapacity} />
-          <box style={{ flexDirection: 'row', width: panelW, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
-            <box style={{ width: sideW ? Math.max(20, panelW - sideW - 2) : panelW, flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+          <box style={{ width: panelW, paddingLeft: 1, paddingRight: 1, flexDirection: 'column', flexShrink: 0 }}>
+            <SystemPanel width={bodyW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
+            <ServicesPanel width={bodyW} services={services} scan={scan} dense={dense} maxCells={monitorServicesCapacity} />
+          </box>
+          <box style={{ flexDirection: 'row', width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
+            <box style={{ width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW, flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
               <MonitorFeed
-                width={sideW ? Math.max(20, panelW - sideW - 2) : panelW}
+                width={sideW ? Math.max(20, bodyW - sideW - 1) : bodyW}
                 height={monitorRows}
                 activity={agent.activity || []}
                 liveTool={liveToolTxt}
@@ -1348,7 +1398,7 @@ export default function App({ version = '0.1.0' }) {
           </box>
         </>
       ) : (
-        <box style={{ flexDirection: 'row', width: panelW, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
+        <box style={{ flexDirection: 'row', width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
           <box style={{ width: mainW, flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
             {agent.todos.length ? (
               <box style={{ flexShrink: 0 }}>
@@ -1509,6 +1559,7 @@ export default function App({ version = '0.1.0' }) {
           adsOn={adsOn}
           elapsedMs={agent.elapsedMs}
           handoff={handoffOn}
+          autoMode={autoMode}
           hint={focus === 'ad' ? 'enter opens · ^O details' : null}
         />
       </box>

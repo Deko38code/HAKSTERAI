@@ -4,15 +4,20 @@ import LiveImageViewer from './LiveImageViewer.jsx';
 import { overflows } from '../utils/panel-scroll.js';
 import { usePanelScroll } from '../hooks/usePanelScroll.js';
 
-/* LiveOutputPanel — the run's output, pinned at the bottom of the transcript
+/* LiveOutputPanel — the run's RESULT, pinned at the bottom of the transcript
  * column so it can be read without looking away from the composer.
  *
  * Owner, 2026-11-23: "need the output showing in panel at the bottom over
  * thinking phrase and input bar so i can see it". The sidebar keeps its own
  * ▶ Output panel for wide terminals; this is the same data, placed where the
- * eye already is while typing. It follows the newest line while a run streams
- * (offset null = follow) and carries the house ▲/█/▼ scrollbar when it
- * overflows.
+ * eye already is while typing.
+ *
+ * Owner, 2026-11-23 (the two boxes): "top one needs to be reasoning and bot
+ * the final result output". The transcript above is the reasoning/history;
+ * this box is only what the run produced — the answer, or the newest tool
+ * result while it is still working. It never repeats the thinking. It follows
+ * the newest line while a run streams (offset null = follow) and carries the
+ * house ▲/█/▼ scrollbar when it overflows.
  *
  * The rendered height is CONSTANT — border 2 + title 1 + call row (one at
  * ≥44 cols, folded into the title below that) + `rows` output lines. The
@@ -47,7 +52,7 @@ export default function LiveOutputPanel({
       : busy ? 'live' : 'last';
 
   return (
-    <Panel width={w} title="▶ Output" hint={hint}>
+    <Panel width={w} title="▶ Result" hint={hint}>
       {callRow ? (
         <box style={{ width: inner, flexShrink: 0 }}>
           <text fg={call ? 'cyan' : 'gray'}>{clip(call || '—', inner)}</text>
@@ -58,7 +63,7 @@ export default function LiveOutputPanel({
       ) : list.length === 0 ? (
         <>
           <box style={{ width: inner, flexShrink: 0 }}>
-            <text fg="gray">{busy ? clip('waiting for output…', inner) : ' '}</text>
+            <text fg="gray">{busy ? clip('waiting for the result…', inner) : ' '}</text>
           </box>
           {Array.from({ length: Math.max(0, r - 1) }, (_, i) => (
             <box key={`pad:${i}`} style={{ width: inner, flexShrink: 0 }}>

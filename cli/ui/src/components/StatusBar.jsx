@@ -36,7 +36,7 @@ function formatElapsed(ms) {
   return `${(n / 1000).toFixed(1)}s`;
 }
 
-export default function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, handoff }) {
+export default function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, handoff, autoMode }) {
   const known = status ? STATUS_STYLES[status] : null;
   // An unrecognised but truthy status is shown verbatim and dim, so a new state
   // is visible the moment it appears instead of vanishing.
@@ -69,6 +69,18 @@ export default function StatusBar({ width, status, model, cols, focus, adsOn, el
     right.push(
       <text key="handoff" fg={handoff ? 'green' : 'red'}>
         {handoff ? 'handoff auto' : 'handoff off'}
+      </text>,
+    );
+  }
+  // How much the agent does without asking (/auto). Green = it works and
+  // finishes on its own, yellow = it will never stop to ask, gray = it asks.
+  if (autoMode) {
+    right.push(
+      <text
+        key="auto"
+        fg={autoMode === 'full-auto' ? 'yellow' : autoMode === 'suggest' ? 'gray' : 'green'}
+      >
+        {autoMode === 'full-auto' ? 'auto full' : autoMode === 'suggest' ? 'auto ask' : 'auto edit'}
       </text>,
     );
   }

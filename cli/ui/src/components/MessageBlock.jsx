@@ -69,7 +69,7 @@ function ToolRow({ tool, width, compact = false }) {
         <text key={`r-${i}`} fg="gray">{clip(line.trim() || ' ', Math.max(4, width - 1))}</text>
       ))}
       {hidden > 0 ? (
-        <text fg="gray">{`… +${hidden} more line${hidden === 1 ? '' : 's'} · ▶ Output`}</text>
+        <text fg="gray">{`… +${hidden} more line${hidden === 1 ? '' : 's'} · ▶ Result`}</text>
       ) : null}
     </box>
   );

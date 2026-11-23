@@ -2487,6 +2487,44 @@ const KNOWN_PROJECTS = [
 const _sysPromptCache = new Map(); // cwd -> { prompt, ts }
 const SYS_PROMPT_CACHE_TTL = 60000; // 60s; prompts are expensive to rebuild
 
+/* Phantom Brain — the merged hakster + phantom knowledge doc, baked into every
+ * agent session. server/src/agent/index.js has its own copy for the REPL prompt;
+ * the TUI and web agent come through buildAgentSystemPrompt, so the same brain
+ * has to be injected here or the dashboard agent answers without the phantom /
+ * IDE / server knowledge it is supposed to carry (owner, 2026-11-24: "make sure
+ * he has the phantom brain merge md"). The full doc is ~570KB, so an excerpt
+ * ships in the prompt and its path is given for read_file on demand. */
+let _phantomBrainCache = null;
+let _phantomBrainMtime = 0;
+let _phantomBrainPath = '';
+function phantomBrainBlock(limit = 6000) {
+  try {
+    const candidates = [
+      path.join(__dirname, '..', '..', 'HAKSTERAI-PHANTOM-MERGED.md'),
+      '/home/ghost/haksterAi/HAKSTERAI-PHANTOM-MERGED.md',
+      '/home/ghost/phantom-knowledge.md',
+    ];
+    for (const pth of candidates) {
+      try {
+        if (!fs.existsSync(pth)) continue;
+        const st = fs.statSync(pth);
+        if (_phantomBrainCache && st.mtimeMs === _phantomBrainMtime && _phantomBrainPath === pth) return _phantomBrainCache;
+        const full = fs.readFileSync(pth, 'utf8');
+        if (!full || !full.trim()) continue;
+        const cap = Math.max(1000, limit);
+        const excerpt = full.length > cap
+          ? `${full.slice(0, cap)}\n\n...[phantom brain excerpt cut at ${cap} chars — full doc is ${Math.round(full.length / 1024)}KB; read_file ${pth} for the rest]`
+          : full;
+        _phantomBrainCache = `\n\n═══ PHANTOM BRAIN (merged hakster + phantom) ═══\nSource: ${pth} (${Math.round(full.length / 1024)}KB). This excerpt is loaded every session; read_file that path when you need deeper phantom IDE, agent-routing or server knowledge.\n\n${excerpt}\n═══ END PHANTOM BRAIN ═══`;
+        _phantomBrainMtime = st.mtimeMs;
+        _phantomBrainPath = pth;
+        return _phantomBrainCache;
+      } catch (_) { /* unreadable candidate — try the next */ }
+    }
+  } catch (_) { /* brain injection is best-effort */ }
+  return '';
+}
+
 function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
   const { lowToken = false } = opts;
   const cacheKey = `${cwd}::${lowToken}`;
@@ -2525,6 +2563,11 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
       prompt += `\n\n═══ PROJECT STEERING (AGENTS.md) ═══\n${agentsMd}\n═══ END STEERING ═══`;
     }
   } catch (e) { /* AGENTS.md injection is best-effort */ }
+
+  // Inject the Phantom Brain (merged hakster + phantom knowledge doc)
+  try {
+    prompt += phantomBrainBlock(lowToken ? 2000 : 6000);
+  } catch (e) { /* phantom brain injection is best-effort */ }
 
   // Inject Codex CLI reference + secrets + gap analysis as agent context
   // These docs encode Codex CLI's architecture, internal prompts, permission

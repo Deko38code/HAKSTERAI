@@ -1595,24 +1595,26 @@ function computeGridLayout(items, availableWidth) {
     return {
       columns: 1,
       columnWidth: Math.max(1, availableWidth),
+      columnWidths: [Math.max(1, availableWidth)],
       columnGroups: [items]
     };
   }
   const maxColumns = WIDTH_THRESHOLDS.filter((t) => availableWidth >= t).length + 1;
   const columns = computeSmartColumns(items.length, maxColumns);
-  let columnWidth;
-  if (columns === 1) {
-    columnWidth = availableWidth;
-  } else {
-    const totalGap = columns - 1;
-    const rawWidth = Math.floor((availableWidth - totalGap) / columns);
-    columnWidth = Math.max(MIN_COLUMN_WIDTH, rawWidth);
-  }
+  const totalGap = columns - 1;
+  const usable = Math.max(1, availableWidth - totalGap);
+  const base = Math.max(1, Math.floor(usable / columns));
+  const remainder = usable - base * columns;
+  const columnWidths = Array.from(
+    { length: columns },
+    (_, i) => Math.max(MIN_COLUMN_WIDTH, base + (i < remainder ? 1 : 0))
+  );
+  const columnWidth = Math.max(...columnWidths);
   const columnGroups = Array.from({ length: columns }, () => []);
   items.forEach((item, idx) => {
     columnGroups[idx % columns].push(item);
   });
-  return { columns, columnWidth, columnGroups };
+  return { columns, columnWidth, columnWidths, columnGroups };
 }
 function useGridLayout(items, availableWidth) {
   return useMemo(
@@ -1624,7 +1626,7 @@ function useGridLayout(items, availableWidth) {
 // src/components/GridLayout.jsx
 import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
 function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, marginTop = 0 }) {
-  const { columns, columnWidth, columnGroups } = useGridLayout(items, availableWidth);
+  const { columns, columnWidths, columnGroups } = useGridLayout(items, availableWidth);
   if (items.length === 0) return null;
   const isMultiColumn = columns > 1;
   return /* @__PURE__ */ jsxs4("box", { style: { flexDirection: "column", gap: isMultiColumn ? 1 : 0, width: availableWidth, marginTop }, children: [
@@ -1639,18 +1641,18 @@ function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, mar
         },
         children: columnGroups.map((columnItems, colIdx) => {
           const columnKey = columnItems[0] ? getItemKey(columnItems[0]) : `col-${colIdx}`;
+          const colWidth = columnWidths[colIdx] ?? availableWidth;
           return /* @__PURE__ */ jsx4(
             "box",
             {
               style: {
                 flexDirection: "column",
                 gap: 0,
-                flexGrow: 1,
-                flexShrink: 1,
-                flexBasis: 0,
+                width: colWidth,
+                flexShrink: 0,
                 minWidth: MIN_COLUMN_WIDTH
               },
-              children: columnItems.map((item, idx) => /* @__PURE__ */ jsx4("box", { style: { width: columnWidth }, children: renderItem(item, idx, columnWidth) }, getItemKey(item)))
+              children: columnItems.map((item, idx) => /* @__PURE__ */ jsx4("box", { style: { width: colWidth }, children: renderItem(item, idx, colWidth) }, getItemKey(item)))
             },
             columnKey
           );
@@ -2342,10 +2344,10 @@ function LiveOutputPanel({
   const gutterOn = overflows(list.length, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
   const hint = image ? `image${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : list.length ? `${state.hint("")}${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : busy ? "live" : "last";
-  return /* @__PURE__ */ jsxs8(Panel, { width: w, title: "\u25B6 Output", hint, children: [
+  return /* @__PURE__ */ jsxs8(Panel, { width: w, title: "\u25B6 Result", hint, children: [
     callRow ? /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: call ? "cyan" : "gray", children: clip(call || "\u2014", inner) }) }) : null,
     image && r >= 3 ? /* @__PURE__ */ jsx8(LiveImageViewer, { width: bodyW, height: r, source: image, graphics }) : list.length === 0 ? /* @__PURE__ */ jsxs8(Fragment4, { children: [
-      /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", children: busy ? clip("waiting for output\u2026", inner) : " " }) }),
+      /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", children: busy ? clip("waiting for the result\u2026", inner) : " " }) }),
       Array.from({ length: Math.max(0, r - 1) }, (_, i) => /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { children: " " }) }, `pad:${i}`))
     ] }) : Array.from({ length: r }, (_, i) => {
       const index = state.start + i;
@@ -2969,6 +2971,7 @@ import { TextAttributes as TextAttributes8 } from "@opentui/core";
 import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 var MENU_ITEMS = [
   { cmd: "/model", label: "Models", detail: "switch the model for this session" },
+  { cmd: "/auto", label: "Autonomy", detail: "ask \xB7 edit \xB7 full \u2014 how far it runs alone" },
   { cmd: "/mcp", label: "MCP servers", detail: "live servers and their tool counts" },
   { cmd: "/handoff", label: "Auto handoff", detail: "on/off \xB7 DeepSeek \u2192 Codex \u2192 others" },
   { cmd: "/ports", label: "Ports", detail: "services and every listening port" },
@@ -3750,7 +3753,7 @@ function formatElapsed(ms) {
   if (!Number.isFinite(n) || n < 0) return null;
   return `${(n / 1e3).toFixed(1)}s`;
 }
-function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, handoff }) {
+function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, handoff, autoMode }) {
   const known = status ? STATUS_STYLES[status] : null;
   const label = known ? known.text : status ? String(status) : "";
   const elapsed = status === "streaming" || status === "thinking" || status === "approval" ? formatElapsed(elapsedMs) : null;
@@ -3769,6 +3772,18 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
   if (handoff !== void 0 && handoff !== null) {
     right.push(
       /* @__PURE__ */ jsx18("text", { fg: handoff ? "green" : "red", children: handoff ? "handoff auto" : "handoff off" }, "handoff")
+    );
+  }
+  if (autoMode) {
+    right.push(
+      /* @__PURE__ */ jsx18(
+        "text",
+        {
+          fg: autoMode === "full-auto" ? "yellow" : autoMode === "suggest" ? "gray" : "green",
+          children: autoMode === "full-auto" ? "auto full" : autoMode === "suggest" ? "auto ask" : "auto edit"
+        },
+        "auto"
+      )
     );
   }
   if (cols !== void 0 && cols !== null) {
@@ -3969,7 +3984,7 @@ function ToolRow({ tool, width, compact = false }) {
       args ? /* @__PURE__ */ jsx22("span", { fg: "gray", children: clip(head, Math.max(4, width - nameW)) }) : null
     ] }),
     lines.map((line, i) => /* @__PURE__ */ jsx22("text", { fg: "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
-    hidden > 0 ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 \u25B6 Output` }) : null
+    hidden > 0 ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 \u25B6 Result` }) : null
   ] });
 }
 function MessageBlock({ message, width, compact = false }) {
@@ -4121,6 +4136,25 @@ var fmtTok2 = (n) => {
   if (!Number.isFinite(v) || v <= 0) return "0";
   return v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v));
 };
+var HISTORY_MAX_MESSAGES = 16;
+var HISTORY_MAX_CHARS = 24e3;
+var HISTORY_MSG_CHARS = 6e3;
+function buildHistory(msgs) {
+  if (!Array.isArray(msgs) || msgs.length === 0) return [];
+  const out = [];
+  let chars = 0;
+  for (let i = msgs.length - 1; i >= 0 && out.length < HISTORY_MAX_MESSAGES; i -= 1) {
+    const m = msgs[i];
+    if (!m || m.role !== "user" && m.role !== "assistant") continue;
+    const text = String(m.text || "").trim();
+    if (!text) continue;
+    const clipped = text.length > HISTORY_MSG_CHARS ? `${text.slice(0, HISTORY_MSG_CHARS)}\u2026` : text;
+    if (chars + clipped.length > HISTORY_MAX_CHARS) break;
+    chars += clipped.length;
+    out.push({ role: m.role, content: clipped });
+  }
+  return out.reverse();
+}
 function normalizeTodos(raw) {
   if (!Array.isArray(raw)) return null;
   return raw.filter((t) => t && typeof t === "object").map((t) => ({
@@ -4142,6 +4176,10 @@ function useAgentStream({
   autoHandoff = true
 } = {}) {
   const [messages, setMessages] = useState11([]);
+  const messagesRef = useRef5([]);
+  useEffect8(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [todos, setTodos] = useState11([]);
   const [status, setStatus] = useState11("idle");
   const [error, setError] = useState11(null);
@@ -4530,6 +4568,9 @@ function useAgentStream({
             body: JSON.stringify({
               messages: [
                 ...system ? [{ role: "system", content: system }] : [],
+                // The conversation so far, so this turn continues the task
+                // instead of starting a fresh one (see buildHistory above).
+                ...buildHistory(messagesRef.current),
                 {
                   role: "user",
                   content: images.length ? [{ type: "text", text: prompt }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))] : prompt
@@ -4542,7 +4583,10 @@ function useAgentStream({
               ...target.model ? { model: target.model } : {},
               ...cwd ? { cwd } : {},
               ...sessionId ? { sessionId } : {},
-              ...approvalMode ? { approvalMode } : {}
+              ...approvalMode ? { approvalMode } : {},
+              // An autonomous run is allowed the server's full round budget so a
+              // long job is finished in one go rather than stopping at a cap.
+              ...approvalMode === "full-auto" || approvalMode === "auto-edit" ? { maxTurns: 120 } : {}
             })
           });
           ctx.status = res.status;
@@ -5002,6 +5046,7 @@ var IMAGE_MIME = {
   ".bmp": "image/bmp"
 };
 var MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+var AUTO_MODES = /* @__PURE__ */ new Set(["suggest", "auto-edit", "full-auto"]);
 function readPrefs() {
   try {
     return import_prefs2.default.load();
@@ -5077,6 +5122,10 @@ function App({ version = "0.1.0" }) {
   const prefsRef = useRef8(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
   const [handoffOn, setHandoffOn] = useState16(() => prefsRef.current.autoHandoff !== false);
+  const [autoMode, setAutoMode] = useState16(() => {
+    const saved = String(prefsRef.current.autoMode || "");
+    return AUTO_MODES.has(saved) ? saved : "auto-edit";
+  });
   const [usageRefresh, setUsageRefresh] = useState16(() => {
     const n = Number(prefsRef.current.usageRefresh);
     return Number.isFinite(n) && n >= 0 ? n : 15;
@@ -5105,12 +5154,18 @@ function App({ version = "0.1.0" }) {
     provider,
     system: SYSTEM,
     cwd: process.env.HAKSTER_AGENT_CWD || null,
-    autoHandoff: handoffOn
+    autoHandoff: handoffOn,
+    // Autonomy: the server turns this into its autonomous directive + the
+    // "you replied with text only, act" nudge, so a run drives to the end.
+    approvalMode: autoMode === "suggest" ? void 0 : autoMode
   });
   const usagePage = useServerUsage(usageRefresh, view === "usage");
   useEffect13(() => {
     writePrefs({ autoHandoff: handoffOn });
   }, [handoffOn]);
+  useEffect13(() => {
+    writePrefs({ autoMode });
+  }, [autoMode]);
   const load = useCallback5(async () => {
     try {
       const r = await fetch(`${API}/api/tui/status`, { signal: AbortSignal.timeout(4e3), headers: { ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} } });
@@ -5203,7 +5258,7 @@ function App({ version = "0.1.0" }) {
     if (!lastAssistant) return [];
     const text = String(lastAssistant.text || "").trim();
     const result = lastTool && lastTool.result != null ? String(lastTool.result).trim() : "";
-    const src = text || String(lastAssistant.thinking || "").trim() || result;
+    const src = text || result;
     return src ? src.split("\n").filter((l) => l.trim()).slice(-6) : [];
   })();
   const liveImage = lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null;
@@ -5302,6 +5357,15 @@ function App({ version = "0.1.0" }) {
         );
         return;
       }
+      case "/auto": {
+        const want = String(arg || "").trim().toLowerCase();
+        const next = want === "on" ? "auto-edit" : want === "off" || want === "ask" ? "suggest" : want === "full" ? "full-auto" : AUTO_MODES.has(want) ? want : autoMode === "suggest" ? "auto-edit" : autoMode === "auto-edit" ? "full-auto" : "suggest";
+        setAutoMode(next);
+        showNotice(
+          next === "full-auto" ? "auto FULL \u2014 the agent runs and finishes without asking (sudo still confirms)" : next === "auto-edit" ? "auto EDIT \u2014 it works and finishes on its own; a dangerous shell command still asks" : "auto ASK \u2014 every command that changes the box waits for you"
+        );
+        return;
+      }
       case "/ports": {
         const up = services.filter((s) => s.up).length;
         setView("dashboard");
@@ -5379,7 +5443,7 @@ function App({ version = "0.1.0" }) {
         showNotice("transcript cleared");
         return;
       case "/help":
-        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit");
+        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit");
         return;
       case "/quit":
       case "/exit":
@@ -5389,7 +5453,7 @@ function App({ version = "0.1.0" }) {
       default:
         showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
     }
-  }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn, update, version]);
+  }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn, autoMode, update, version]);
   const crushModelList = useRef8(null);
   if (!crushModelList.current) crushModelList.current = readCrushModels();
   const catalogRows = (() => {
@@ -5744,7 +5808,8 @@ function App({ version = "0.1.0" }) {
   const headerLeftText = headerLeftLen(showGuard);
   const headerRight = headerRightVariants.find((t) => headerLeftText + t.length + 2 <= headerInner) || "";
   const sideW = (cols || 100) >= 96 ? 30 : 0;
-  const mainW = panelW - (sideW ? sideW + 2 : 0);
+  const bodyW = panelW - 2;
+  const mainW = bodyW - (sideW ? sideW + 1 : 0);
   const dense = (rows || 30) < 34;
   const systemRows = 1;
   const servicesCapacityFor = (w) => Math.max(4, Math.max(1, Math.floor(Math.max(1, w - 4) / 17)) * (dense ? 3 : 2));
@@ -6017,13 +6082,15 @@ function App({ version = "0.1.0" }) {
          the sidebar. Shift+↑/↓ scrolls the feed, shift+End resumes follow,
          esc returns to the chat. Nothing runs from here; it only watches. */
       /* @__PURE__ */ jsxs23(Fragment9, { children: [
-        /* @__PURE__ */ jsx24(SystemPanel, { width: panelW, meters, ctxUsed, ctxMax, host }),
-        /* @__PURE__ */ jsx24(ServicesPanel, { width: panelW, services, scan, dense, maxCells: monitorServicesCapacity }),
-        /* @__PURE__ */ jsxs23("box", { style: { flexDirection: "row", width: panelW, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
-          /* @__PURE__ */ jsx24("box", { style: { width: sideW ? Math.max(20, panelW - sideW - 2) : panelW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx24(
+        /* @__PURE__ */ jsxs23("box", { style: { width: panelW, paddingLeft: 1, paddingRight: 1, flexDirection: "column", flexShrink: 0 }, children: [
+          /* @__PURE__ */ jsx24(SystemPanel, { width: bodyW, meters, ctxUsed, ctxMax, host }),
+          /* @__PURE__ */ jsx24(ServicesPanel, { width: bodyW, services, scan, dense, maxCells: monitorServicesCapacity })
+        ] }),
+        /* @__PURE__ */ jsxs23("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+          /* @__PURE__ */ jsx24("box", { style: { width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx24(
             MonitorFeed,
             {
-              width: sideW ? Math.max(20, panelW - sideW - 2) : panelW,
+              width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW,
               height: monitorRows,
               activity: agent.activity || [],
               liveTool: liveToolTxt,
@@ -6034,7 +6101,7 @@ function App({ version = "0.1.0" }) {
           sideW ? /* @__PURE__ */ jsx24("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx24(LiveSidebar, { ...sidebarProps, height: monitorRows, feed: false }) }) : null
         ] })
       ] })
-    ) : /* @__PURE__ */ jsxs23("box", { style: { flexDirection: "row", width: panelW, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+    ) : /* @__PURE__ */ jsxs23("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
       /* @__PURE__ */ jsxs23("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
         agent.todos.length ? /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx24(
           TodoPanel,
@@ -6160,6 +6227,7 @@ function App({ version = "0.1.0" }) {
         adsOn,
         elapsedMs: agent.elapsedMs,
         handoff: handoffOn,
+        autoMode,
         hint: focus === "ad" ? "enter opens \xB7 ^O details" : null
       }
     ) })

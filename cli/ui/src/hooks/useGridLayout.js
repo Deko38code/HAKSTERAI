@@ -44,6 +44,7 @@ export function computeGridLayout(items, availableWidth) {
     return {
       columns: 1,
       columnWidth: Math.max(1, availableWidth),
+      columnWidths: [Math.max(1, availableWidth)],
       columnGroups: [items],
     };
   }
@@ -53,21 +54,25 @@ export function computeGridLayout(items, availableWidth) {
 
   const columns = computeSmartColumns(items.length, maxColumns);
 
-  let columnWidth;
-  if (columns === 1) {
-    columnWidth = availableWidth;
-  } else {
-    const totalGap = columns - 1;
-    const rawWidth = Math.floor((availableWidth - totalGap) / columns);
-    columnWidth = Math.max(MIN_COLUMN_WIDTH, rawWidth);
-  }
+  // Exact widths, remainder distributed left to right. `floor(w/columns)` alone
+  // left one or two columns unused on the right, so the grid's right edge never
+  // met the panel edge above it — the shear the owner called out ("in sync with
+  // output and grids"). The first `remainder` columns take one extra cell.
+  const totalGap = columns - 1;
+  const usable = Math.max(1, availableWidth - totalGap);
+  const base = Math.max(1, Math.floor(usable / columns));
+  const remainder = usable - base * columns;
+  const columnWidths = Array.from({ length: columns }, (_, i) =>
+    Math.max(MIN_COLUMN_WIDTH, base + (i < remainder ? 1 : 0)),
+  );
+  const columnWidth = Math.max(...columnWidths);
 
   const columnGroups = Array.from({ length: columns }, () => []);
   items.forEach((item, idx) => {
     columnGroups[idx % columns].push(item);
   });
 
-  return { columns, columnWidth, columnGroups };
+  return { columns, columnWidth, columnWidths, columnGroups };
 }
 
 /** Memoised {@link computeGridLayout}, keyed on the items array and the width. */

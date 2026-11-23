@@ -22,7 +22,7 @@ import { MIN_COLUMN_WIDTH } from '../utils/layout-helpers.js';
  * behind an identity check).
  */
 export function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, marginTop = 0 }) {
-  const { columns, columnWidth, columnGroups } = useGridLayout(items, availableWidth);
+  const { columns, columnWidths, columnGroups } = useGridLayout(items, availableWidth);
 
   if (items.length === 0) return null;
 
@@ -44,21 +44,25 @@ export function GridLayout({ items, availableWidth, getItemKey, renderItem, foot
           // Keying by the first item keeps a column stable across re-flows that
           // only reshuffle where the column boundaries land.
           const columnKey = columnItems[0] ? getItemKey(columnItems[0]) : `col-${colIdx}`;
+          // The exact width this column was allocated, drawn on the column and
+          // handed to every item, so the panel edge and the cell grid inside it
+          // are the same number — the row ends flush with the grid's right edge
+          // instead of flex having to guess the last column's width.
+          const colWidth = columnWidths[colIdx] ?? availableWidth;
           return (
             <box
               key={columnKey}
               style={{
                 flexDirection: 'column',
                 gap: 0,
-                flexGrow: 1,
-                flexShrink: 1,
-                flexBasis: 0,
+                width: colWidth,
+                flexShrink: 0,
                 minWidth: MIN_COLUMN_WIDTH,
               }}
             >
               {columnItems.map((item, idx) => (
-                <box key={getItemKey(item)} style={{ width: columnWidth }}>
-                  {renderItem(item, idx, columnWidth)}
+                <box key={getItemKey(item)} style={{ width: colWidth }}>
+                  {renderItem(item, idx, colWidth)}
                 </box>
               ))}
             </box>

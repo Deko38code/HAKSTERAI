@@ -4752,6 +4752,12 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
   }
   const thinking = fastMode ? thinkingParam === true : thinkingParam !== false;
   const effectiveApprovalMode = approvalMode || (fastMode ? 'full-auto' : undefined);
+  // 'auto-edit' and 'full-auto' both mean "work autonomously until the task is
+  // done": they get the same keep-going directive and the same text-only nudge.
+  // They differ only in what still needs a confirmation (approval.js): auto-edit
+  // still asks before a dangerous shell command, full-auto never does. The TUI
+  // defaults to auto-edit — the Claude-CLI behaviour the owner asked for.
+  const isAutonomousMode = effectiveApprovalMode === 'full-auto' || effectiveApprovalMode === 'auto-edit';
   if (isCerebrasValue(provider) || isCerebrasValue(model)) {
     return res.status(400).json({ error: 'Cerebras models are disabled' });
   }
@@ -5370,8 +5376,17 @@ ${dirListing}
   // ── Full-auto directive: instruct model to act autonomously without asking ──
   // Customers have no shell or editing tools, so the "call a tool immediately,
   // never reply with text only" instruction would only produce denials.
-  if (effectiveApprovalMode === 'full-auto' && !customerDirective) {
-    agentMessages[0].content += `\n\n=== AUTONOMOUS MODE (FULL-AUTO) ===\nYou are running in full-auto mode. No human approval is required for any action.\n- Do NOT ask the user for confirmation before running tools, commands, or making changes.\n- Do NOT ask "should I..." or "would you like me to..." — just DO it.\n- Immediately start executing: inspect files, run commands, make edits, verify results.\n- Keep looping through tools until the task is fully complete.\n- Only stop when the task is done or you hit a real blocker (missing credentials, unreachable service, etc.).\n- Never wait for user input mid-task. Act, verify, iterate.\n- For the first user message, immediately start working — do not greet, ask what to do, or say "let me check". CALL A TOOL immediately (list_dir, read_file, exec_shell, etc.).\n- EVERY response MUST include at least one tool call. NEVER respond with only text. If you want to inspect something, call a tool — do not narrate.\n- If the user's request is vague, make a reasonable assumption about what they want and start working. Do not ask for clarification.`;
+  if (isAutonomousMode && !customerDirective) {
+    agentMessages[0].content += `\n\n=== AUTONOMOUS MODE (${effectiveApprovalMode === 'full-auto' ? 'FULL-AUTO' : 'AUTO-EDIT'}) ===\nYou are running in ${effectiveApprovalMode === 'full-auto' ? 'full-auto' : 'auto-edit'} mode. Do the work; do not hand it back half-done.
+- Do NOT ask "should I..." or "would you like me to..." — just DO it.
+- Immediately start executing: inspect files, run commands, make edits, verify results.
+- Keep looping through tools until the task is fully complete.
+- Only stop when the task is done or you hit a real blocker (missing credentials, unreachable service, etc.).
+- Never wait for user input mid-task. Act, verify, iterate.
+- For the first user message, immediately start working — do not greet, ask what to do, or say "let me check". CALL A TOOL immediately (list_dir, read_file, exec_shell, etc.).
+- If the user's request is vague, make a reasonable assumption about what they want and start working. Do not ask for clarification.
+- Use every tool the task needs — shell, files, web_search/browser, MCP — rather than answering from memory.
+- When the task is genuinely finished, STOP and give the short final rundown (what was done, what was verified, any blocker).${effectiveApprovalMode === 'full-auto' ? '' : '\n- A dangerous or privileged shell command (rm -rf, mkfs, dd, sudo) will still be paused for the operator to confirm; that is not you stopping — request it and continue.'}`;
   }
 
   // When "thinking aloud" is enabled for non-Anthropic providers, ask the model to expose
@@ -5863,16 +5878,27 @@ ${dirListing}
           }
         }
 
-        // ── Full-auto nudge: if model replies with text only, push it to act ──
+        // ── Autonomous nudge: if model replies with text only, push it to act ──
         // Extended: nudge on ANY turn where the model talks but doesn't act (not just first 3).
         // This fixes "let me finish sorry" loops where hp-1000 apologizes instead of using tools.
         // Customer chats have no shell/file tools, so nudging them to "call list_dir,
         // exec_shell, write_file" only produced apology loops and repeated answers.
-        if (effectiveApprovalMode === 'full-auto' && !customerDirective && toolCalls.length === 0 && assistantContent.trim().length > 0 && turn < maxTurns - 2) {
+        //
+        // auto-edit nudges only when the reply actually defers work ("let me…",
+        // "I'll…", "next…", "would you like…") rather than ending the task — a
+        // real final answer must be allowed to finish, or the run would never
+        // stop. full-auto keeps the unconditional nudge it has always had.
+        const deferredReply = /^(let me|i'?ll|i will|i'?m going to|i am going to|next[,:]|first[,:]|now i|shall i|would you like|should i|do you want|here'?s what i'?ll)\b/i.test(assistantContent.trim())
+          || /[:…]\s*$/.test(assistantContent.trim());
+        if (
+          isAutonomousMode && !customerDirective && toolCalls.length === 0
+          && assistantContent.trim().length > 0 && turn < maxTurns - 2
+          && (effectiveApprovalMode === 'full-auto' || deferredReply)
+        ) {
           // Count how many times we've nudged already to avoid infinite apologizing
           const nudgeCount = agentMessages.filter(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('You responded with text only')).length;
           if (nudgeCount < 5) {
-            agentMessages.push({ role: 'user', content: 'You responded with text only and did not use any tools. Stop apologizing and DO the work now. Call list_dir, read_file, exec_shell, write_file, or whatever tool is appropriate. Do not explain — execute. The task is NOT done until you have used tools to complete it.' });
+            agentMessages.push({ role: 'user', content: 'You responded with text only and did not use any tools. Do not stop or explain your plan — DO the work now. Call whatever tool the task needs (exec_shell, read_file, write_file, web_search, browser, or an MCP tool). The task is NOT done until you have used tools to complete it and verified the result.' });
             res.write(`data: ${JSON.stringify({ type: 'auto_nudge', turn, message: 'Nudging model to use tools...' })}\n\n`);
             continue;
           }
