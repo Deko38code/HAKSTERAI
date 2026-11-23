@@ -36,6 +36,16 @@ const DEFAULT_TIMEOUT_MS = Math.max(30000, Number(process.env.HAKSTER_AGENT_TIME
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${++seq}`;
 
+/** How long a tool call took, from the start stamp kept with its args. */
+const toolMs = (meta) => (meta && meta.t0 ? ` · ${Math.max(0, Date.now() - meta.t0)}ms` : '');
+
+/** Token counts as the panels print them: 1_234 → 1.2k, 950 → 950. */
+const fmtTok = (n) => {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return '0';
+  return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
+};
+
 /** Map the server's todo status vocabulary onto the panel's `{ text, done }`. */
 function normalizeTodos(raw) {
   if (!Array.isArray(raw)) return null;
@@ -67,6 +77,23 @@ export function useAgentStream({
   const [error, setError] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
+  // ── Activity + usage ──────────────────────────────────────────────────────
+  // HakTerm's right-hand column keeps a live ACTIVITY feed and a USAGE block
+  // beside the terminal. These are their data: every event the stream already
+  // carries (phase change, tool start, tool result with its measured duration,
+  // handoff, error, done) is appended here, and the counters are the same
+  // events counted — never an estimate. The feed is capped so a long session
+  // costs bounded memory; the counters are session totals and only reset on
+  // /clear.
+  const [activity, setActivity] = useState([]);
+  const [requests, setRequests] = useState(0);
+  const [tokens, setTokens] = useState({ in: 0, out: 0, reported: false });
+  const requestsRef = useRef(0);
+  const pushActivity = useCallback((kind, text) => {
+    const line = { kind: String(kind || 'sys'), text: String(text == null ? '' : text), ts: Date.now() };
+    setActivity((prev) => (prev.length >= 60 ? [...prev.slice(prev.length - 59), line] : [...prev, line]));
+  }, []);
+
   // A blocking approval request from the server, or null. Mirrored in a ref as
   // well as state because the answer can come from a key handler, which must
   // not depend on a stale closure to find out what it is answering.
@@ -87,16 +114,18 @@ export function useAgentStream({
   const lastToolRef = useRef(null);
   const syncMeters = useCallback(() => setMeters(meterRef.current.snapshot()), []);
   const scoreTool = useCallback((name, args, result) => {
+    // The server tags a failed tool result as `Error:` / `❌` — the same
+    // success test the old CLI scores with.
+    const text = String(result == null ? '' : result).trim();
+    const ok = !/^Error[:\n]|^❌/i.test(text);
     try {
-      const text = String(result == null ? '' : result).trim();
-      // The server tags a failed tool result as `Error:` / `❌` — the same
-      // success test the old CLI scores with.
-      const ok = !/^Error[:\n]|^❌/i.test(text);
       meterRef.current.tool(name || 'tool', args || {}, ok, text);
       syncMeters();
     } catch {
       /* metering must never break the run */
     }
+    // The caller logs the call as a win or a loss; the test lives in one place.
+    return ok;
   }, [syncMeters]);
 
   const setPending = useCallback((value) => {
@@ -323,13 +352,17 @@ export function useAgentStream({
             break;
 
           case 'phase':
-            if (evt.phase) patch(assistantId, (m) => ({ ...m, phase: evt.phase }));
+            if (evt.phase) {
+              patch(assistantId, (m) => ({ ...m, phase: evt.phase }));
+              pushActivity('phase', evt.phase);
+            }
             break;
 
           case 'tool_call_start': {
             const name = evt.tool_name || 'unknown';
-            lastToolRef.current = { name, args: evt.tool_args || {} };
+            lastToolRef.current = { name, args: evt.tool_args || {}, t0: Date.now() };
             if (evt.tool_call_id) toolMetaRef.current.set(evt.tool_call_id, lastToolRef.current);
+            pushActivity('start', name);
             // The checklist is a tool call, not a panel event, so this is where
             // the panel's data actually comes from.
             if (name === 'update_todo' || name === 'plan') {
@@ -358,7 +391,10 @@ export function useAgentStream({
           case 'mcp_result': {
             const result = String(evt.data == null ? '' : evt.data);
             const meta = (evt.tool_call_id && toolMetaRef.current.get(evt.tool_call_id)) || lastToolRef.current;
-            if (meta) scoreTool(meta.name, meta.args, result);
+            if (meta) {
+              const ok = scoreTool(meta.name, meta.args, result);
+              pushActivity(ok ? 'mcp' : 'err', `${meta.name}${toolMs(meta)}`);
+            }
             patch(assistantId, (m) => {
               const tools = m.tools.slice();
               let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
@@ -381,7 +417,10 @@ export function useAgentStream({
             // Score the call before patching: the meter must move the moment
             // the result arrives, even if the run is about to fail.
             const meta = (evt.tool_call_id && toolMetaRef.current.get(evt.tool_call_id)) || lastToolRef.current;
-            if (meta) scoreTool(meta.name, meta.args, result);
+            if (meta) {
+              const ok = scoreTool(meta.name, meta.args, result);
+              pushActivity(ok ? 'ok' : 'err', `${meta.name}${toolMs(meta)}`);
+            }
             patch(assistantId, (m) => {
               const tools = m.tools.slice();
               // Match by id when the server sent one; otherwise attribute the
@@ -409,6 +448,7 @@ export function useAgentStream({
             // a run is live. The answer has to go back out of band, which is
             // what answerConfirm does.
             setStatusBoth('approval');
+            pushActivity('confirm', `${evt.tool_name || 'tool'} needs approval`);
             setPending({
               toolCallId: evt.tool_call_id || null,
               toolName: evt.tool_name || 'tool',
@@ -422,6 +462,7 @@ export function useAgentStream({
             // A loop break is a real penalty in the old CLI (-10) — the same
             // cost here, so the bar tells the truth about a bad run.
             try { meterRef.current.bump(-10); syncMeters(); } catch { /* metering is best-effort */ }
+            pushActivity('err', 'loop detected');
             append({ id: nextId('sys'), role: 'system', tone: 'warn', text: evt.message || 'loop detected' });
             break;
 
@@ -462,10 +503,25 @@ export function useAgentStream({
             // Recorded, not rendered: the attempt loop decides whether this
             // becomes a handoff to the next model or the turn's final error.
             attemptCtxRef.current.sawError = evt.error || 'agent error';
+            pushActivity('err', evt.error || 'agent error');
             setStatusBoth('error');
             break;
 
-          case 'done':
+          case 'done': {
+            // The turn's own token report is the only honest token count there
+            // is, so the session totals are a sum of exactly these reports.
+            const inTok = Number(evt.inputTokens);
+            const outTok = Number(evt.outputTokens);
+            if (Number.isFinite(inTok) || Number.isFinite(outTok)) {
+              setTokens((t) => ({
+                in: t.in + (Number.isFinite(inTok) ? inTok : 0),
+                out: t.out + (Number.isFinite(outTok) ? outTok : 0),
+                reported: true,
+              }));
+              pushActivity('done', `turn done · ${fmtTok(inTok)} in / ${fmtTok(outTok)} out`);
+            } else {
+              pushActivity('done', 'turn done');
+            }
             patch(assistantId, (m) => ({
               ...m,
               model: evt.model || m.model,
@@ -474,6 +530,7 @@ export function useAgentStream({
                 : m.tokens,
             }));
             break;
+          }
 
           default:
             // Heartbeats, turn_end and any event added later are deliberately
@@ -485,6 +542,11 @@ export function useAgentStream({
 
       /** Run one attempt and report what happened; decide nothing. */
       const runAttempt = async (target) => {
+        // One attempt is one request to /api/agent/run — the session's request
+        // count is these, counted at the moment the request goes out.
+        requestsRef.current += 1;
+        setRequests(requestsRef.current);
+        pushActivity('sys', `→ ${target.label || target.provider || 'auto'}`);
         const controller = new AbortController();
         abortRef.current = controller;
         const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -614,6 +676,7 @@ export function useAgentStream({
           tone: 'warn',
           text: `handoff ${target.label} → ${next.label}: ${res.error}`,
         });
+        pushActivity('handoff', `${target.label} → ${next.label}`);
         patch(assistantId, (m) => ({
           ...m,
           text: '',
@@ -633,7 +696,7 @@ export function useAgentStream({
       setPending(null);
       setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
     },
-    [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, sessionId, setPending, setStatusBoth, system],
+    [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, pushActivity, sessionId, setPending, setStatusBoth, system],
   );
 
   const clear = useCallback(() => {
@@ -643,6 +706,10 @@ export function useAgentStream({
     setTodos([]);
     setError(null);
     setElapsedMs(0);
+    setActivity([]);
+    setRequests(0);
+    setTokens({ in: 0, out: 0, reported: false });
+    requestsRef.current = 0;
     startedAtRef.current = null;
   }, [abort, setPending]);
 
@@ -660,6 +727,9 @@ export function useAgentStream({
     elapsedMs,
     busy,
     meters,
+    activity,
+    requests,
+    tokens,
     pendingConfirm,
     answerConfirm,
     send,

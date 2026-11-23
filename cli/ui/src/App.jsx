@@ -97,6 +97,14 @@ const clipLine = (s, n) => {
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}…`;
 };
 
+/** The short argument a tool call is remembered by (the command, path, …). */
+const toolArgLine = (args) => {
+  if (!args || typeof args !== 'object') return '';
+  const raw = args.command || args.path || args.file || args.query || args.url || args.pattern || '';
+  const s = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+  return s ? ` ${s}` : '';
+};
+
 function readImageAttachment(file) {
   const raw = String(file || '').trim();
   if (!raw) throw new Error('no file given');
@@ -279,8 +287,51 @@ export default function App({ version = '0.1.0' }) {
   const ctxMax = catalog.contextMaxFor(model || PRIMARY_MODEL) || 1;
   const ctxUsed = Number((status && (status.tokens || status.contextUsed)) || 0);
   const meters = agent.meters || null;
+  // The run's live output for the sidebar: the newest tool call and the tail of
+  // whatever it produced (or the answer being streamed). Derived from the same
+  // messages the transcript renders, so the two can never disagree.
+  const lastAssistant = (() => {
+    for (let i = agent.messages.length - 1; i >= 0; i--) {
+      if (agent.messages[i].role === 'assistant') return agent.messages[i];
+    }
+    return null;
+  })();
+  const lastTool = lastAssistant && Array.isArray(lastAssistant.tools) && lastAssistant.tools.length
+    ? lastAssistant.tools[lastAssistant.tools.length - 1]
+    : null;
+  const liveToolTxt = lastTool ? `${lastTool.name}${toolArgLine(lastTool.args)}` : '';
+  const liveLines = (() => {
+    if (!lastAssistant) return [];
+    const text = String(lastAssistant.text || '').trim();
+    const result = lastTool && lastTool.result != null ? String(lastTool.result).trim() : '';
+    // Text wins once the model starts answering; before that the tool output is
+    // the freshest thing on the wire.
+    const src = text || result || String(lastAssistant.thinking || '').trim();
+    return src ? src.split('\n').filter((l) => l.trim()).slice(-6) : [];
+  })();
   // This machine's own vitals — cpu, ram, swap, disk, load — sampled in-process.
   const host = useHostStats(5000);
+  // ◔ Usage, counted from the session itself: tool calls actually streamed,
+  // the meter's scored wins and losses, requests sent (handoffs included),
+  // operator turns, the turn-reported token totals and the context share. No
+  // figure here is estimated; each is a count of something that happened.
+  const userTurns = agent.messages.filter((m) => m.role === 'user').length;
+  const toolCalls = agent.messages.reduce((n, m) => n + (Array.isArray(m.tools) ? m.tools.length : 0), 0);
+  const usage = {
+    tools: toolCalls,
+    ok: Number(meters && meters.successes) || 0,
+    fail: Number(meters && meters.failures) || 0,
+    requests: Number(agent.requests) || 0,
+    turns: userTurns,
+    inTok: agent.tokens ? agent.tokens.in : 0,
+    outTok: agent.tokens ? agent.tokens.out : 0,
+    // The agent stream's `done` event only carries token counts when the
+    // answering path reports them (the claude-cli path does; the plain provider
+    // loop does not). Until one does, the panel says "—" rather than a zero it
+    // cannot stand behind (§10).
+    tokensKnown: !!(agent.tokens && agent.tokens.reported),
+    ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((ctxUsed / ctxMax) * 100))) : null,
+  };
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
 
@@ -685,10 +736,10 @@ export default function App({ version = '0.1.0' }) {
   const systemRows = 1;
   const servicesCellCount = services.length + (otherPorts.length ? 1 : 0);
   const servicesRows = mainW < 96 ? 3 : servicesGridRows(mainW, servicesCellCount);
-  // Live panel = border 2 + 7 rows; MCP panel = border 2 + rows. Both must fit
-  // between the header/status/composer rows or they push the layout apart.
-  const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2 - systemRows - servicesRows);
-  const maxServers = Math.max(0, Math.min(8, sidebarBudget));
+  // The sidebar spans the transcript column's area, so its vertical allowance
+  // is the terminal minus the header and the status bar. LiveSidebar fits its
+  // own panels (Live → Usage → Activity → Output → MCP) inside that number.
+  const sidebarRows = Math.max(0, (rows || 30) - 2);
 
   // ── Row budget ────────────────────────────────────────────────────────────
   // header 1 · status bar 1 · composer 5 (border 2, input 1, inline ad 1, hint 1)
@@ -964,16 +1015,21 @@ export default function App({ version = '0.1.0' }) {
             <box style={{ marginLeft: 1 }}>
               <LiveSidebar
                 width={sideW}
+                height={sidebarRows}
                 agentStatus={agent.status}
                 phase={crushPhase}
                 tool={activeTool?.name || ''}
-                turns={agent.messages.filter((m) => m.role === 'user').length}
+                turns={userTurns}
                 elapsedMs={agent.elapsedMs}
                 model={model}
                 version={version}
                 mcp={mcp}
                 serverOk={!statusErr && !!status}
-                maxServers={maxServers}
+                liveTool={liveToolTxt}
+                liveLines={liveLines}
+                busy={agent.busy}
+                activity={agent.activity || []}
+                usage={usage}
               />
             </box>
           ) : null}

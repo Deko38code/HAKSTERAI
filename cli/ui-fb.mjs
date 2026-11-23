@@ -1086,9 +1086,26 @@ var GridPanel_default = GridPanel;
 import React6 from "react";
 import { TextAttributes as TextAttributes5 } from "@opentui/core";
 import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+var isWide = (cp) => cp >= 4352 && cp <= 4447 || cp === 9001 || cp === 9002 || cp >= 9728 && cp <= 10175 || cp >= 11008 && cp <= 11263 || cp >= 11904 && cp <= 42191 || cp >= 44032 && cp <= 55203 || cp >= 63744 && cp <= 64255 || cp >= 65072 && cp <= 65135 || cp >= 65280 && cp <= 65376 || cp >= 65504 && cp <= 65510 || cp >= 126976 && cp <= 129791;
+var cellWidth = (ch) => {
+  const cp = ch.codePointAt(0);
+  if (cp === 65039 || cp === 8205) return 0;
+  return isWide(cp) ? 2 : 1;
+};
 var clip = (s, n) => {
   const t = String(s == null ? "\u2014" : s);
-  return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
+  let w = 0;
+  for (const ch of t) w += cellWidth(ch);
+  if (w <= n) return t;
+  let out = "";
+  let acc = 0;
+  for (const ch of t) {
+    const c = cellWidth(ch);
+    if (acc + c > Math.max(0, n - 1)) break;
+    out += ch;
+    acc += c;
+  }
+  return `${out}\u2026`;
 };
 function Row({ width, k, v, color = "white" }) {
   const kw = Math.min(10, Math.max(4, Math.floor(width / 3)));
@@ -1096,6 +1113,44 @@ function Row({ width, k, v, color = "white" }) {
     /* @__PURE__ */ jsx6("text", { fg: "gray", children: clip(k, kw) }),
     /* @__PURE__ */ jsx6("text", { fg: color, attributes: TextAttributes5.BOLD, children: clip(v, Math.max(1, width - kw - 1)) })
   ] });
+}
+var EVENT_COLOR = {
+  phase: "cyan",
+  start: "yellow",
+  ok: "green",
+  err: "red",
+  mcp: "blue",
+  done: "green",
+  handoff: "magenta",
+  confirm: "yellow",
+  sys: "gray"
+};
+var EVENT_GLYPH = {
+  phase: "\u25C8",
+  start: "\u2699",
+  ok: "\u2713",
+  err: "\u2717",
+  mcp: "\u2B21",
+  done: "\u25CF",
+  handoff: "\u21C4",
+  confirm: "\u26A0",
+  sys: "\u2022"
+};
+var fmtTok = (n) => {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return "0";
+  return v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v));
+};
+var clock = (ts) => {
+  const d = new Date(Number(ts) || Date.now());
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+function EventLine({ width, line }) {
+  return /* @__PURE__ */ jsx6("box", { style: { width, flexShrink: 0 }, children: /* @__PURE__ */ jsxs6("text", { children: [
+    /* @__PURE__ */ jsx6("span", { fg: "gray", children: `${clock(line.ts)} ` }),
+    /* @__PURE__ */ jsx6("span", { fg: EVENT_COLOR[line.kind] || "white", children: `${EVENT_GLYPH[line.kind] || "\u2022"} ` }),
+    /* @__PURE__ */ jsx6("span", { fg: line.kind === "err" ? "red" : "white", children: clip(line.text, Math.max(1, width - 8)) })
+  ] }) });
 }
 function Panel({ width, title, hint, children }) {
   const inner = Math.max(1, width - 4);
@@ -1109,6 +1164,11 @@ function Panel({ width, title, hint, children }) {
 }
 function LiveSidebar({
   width = 30,
+  // The sidebar's whole vertical allowance, in rows (header + status already
+  // removed by the caller). Every panel is fitted inside it; nothing below is
+  // allowed to push the layout apart, so a short terminal simply shows fewer
+  // panels rather than a broken screen.
+  height = 34,
   agentStatus = "idle",
   phase = "IDLE",
   tool = "",
@@ -1118,10 +1178,30 @@ function LiveSidebar({
   version = "0.1.0",
   mcp = null,
   serverOk = false,
-  maxServers = 8
+  liveTool = "",
+  liveLines = [],
+  busy = false,
+  activity = [],
+  usage = null
 }) {
   const inner = Math.max(1, width - 4);
   const servers = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
+  const h = Math.max(0, Number(height) || 0);
+  const tall = h >= 44;
+  const huge = h >= 50;
+  let left = h - 10;
+  const showUsage = left >= 9;
+  if (showUsage) left -= 9;
+  const wantOutput = huge ? 6 : tall ? 4 : 3;
+  const outputCost = wantOutput + 4;
+  const MCP_MIN = 6;
+  const activityMax = huge ? 8 : tall ? 5 : 4;
+  const room = left - outputCost - MCP_MIN - 3;
+  const activityRows = room >= 2 ? Math.min(activityMax, room) : 0;
+  if (activityRows) left -= activityRows + 3;
+  const outputRows = left - 4 >= wantOutput ? wantOutput : left - 4 >= 2 ? left - 4 : 0;
+  if (outputRows) left -= outputRows + 4;
+  const maxServers = Math.max(0, left - 4);
   const live = servers.filter((s) => s.initialized || (s.toolCount || 0) > 0).length;
   const ordered = [...servers].sort((a, b) => {
     const rank = (x) => x.initialized || (x.toolCount || 0) > 0 ? 0 : x.lazy ? 1 : 2;
@@ -1139,8 +1219,37 @@ function LiveSidebar({
       /* @__PURE__ */ jsx6(Row, { width: inner, k: "model", v: model, color: "yellow" }),
       /* @__PURE__ */ jsx6(Row, { width: inner, k: "version", v: `tui ${version}` })
     ] }),
-    /* @__PURE__ */ jsxs6(Panel, { width, title: "\u2B21 MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
-      shown.length === 0 ? /* @__PURE__ */ jsx6(Row, { width: inner, k: "servers", v: "\u2014", color: "gray" }) : shown.map((s) => {
+    showUsage ? /* @__PURE__ */ jsxs6(Panel, { width, title: "\u25D4 Usage", hint: busy ? "live" : "session", children: [
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "tools", v: `${Number(usage && usage.tools) || 0} calls`, color: "cyan" }),
+      /* @__PURE__ */ jsx6(
+        Row,
+        {
+          width: inner,
+          k: "wins",
+          v: `${Number(usage && usage.ok) || 0}\u2713 ${Number(usage && usage.fail) || 0}\u2717`,
+          color: Number(usage && usage.fail) > 0 ? "yellow" : "green"
+        }
+      ),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "requests", v: Number(usage && usage.requests) || 0 }),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "turns", v: Number(usage && usage.turns) || 0 }),
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "tokens", v: usage && usage.tokensKnown ? `${fmtTok(usage.inTok)} / ${fmtTok(usage.outTok)}` : "\u2014", color: "white" }),
+      /* @__PURE__ */ jsx6(
+        Row,
+        {
+          width: inner,
+          k: "ctx",
+          v: usage && usage.ctxPct != null ? `${usage.ctxPct}%` : "\u2014",
+          color: Number(usage && usage.ctxPct) > 85 ? "red" : Number(usage && usage.ctxPct) > 60 ? "yellow" : "green"
+        }
+      )
+    ] }) : null,
+    activityRows ? /* @__PURE__ */ jsx6(Panel, { width, title: "\u26A1 Activity", hint: busy ? "live" : `${activity.length}`, children: activity.length === 0 ? /* @__PURE__ */ jsx6("box", { style: { width: inner }, children: /* @__PURE__ */ jsx6("text", { fg: "gray", children: clip(busy ? "waiting for events\u2026" : "\u2014", inner) }) }) : activity.slice(-activityRows).map((line, i) => /* @__PURE__ */ jsx6(EventLine, { width: inner, line }, `e:${line.ts}:${i}`)) }) : null,
+    outputRows ? /* @__PURE__ */ jsxs6(Panel, { width, title: "\u25B6 Output", hint: busy ? "live" : "last", children: [
+      /* @__PURE__ */ jsx6(Row, { width: inner, k: "call", v: liveTool ? clip(liveTool, Math.max(1, inner - 5)) : "\u2014", color: liveTool ? "cyan" : "gray" }),
+      liveLines.length === 0 ? /* @__PURE__ */ jsx6("box", { style: { width: inner }, children: /* @__PURE__ */ jsx6("text", { fg: "gray", children: clip(busy ? "waiting for output\u2026" : "\u2014", inner) }) }) : liveLines.slice(-outputRows).map((line, i) => /* @__PURE__ */ jsx6("box", { style: { width: inner }, children: /* @__PURE__ */ jsx6("text", { fg: i === liveLines.slice(-outputRows).length - 1 ? "white" : "gray", children: clip(line, inner) }) }, `o:${i}`))
+    ] }) : null,
+    maxServers > 0 ? /* @__PURE__ */ jsxs6(Panel, { width, title: "\u2B21 MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
+      shown.map((s) => {
         const up = !!s.initialized || (s.toolCount || 0) > 0;
         const lazy = !!s.lazy && !up;
         return /* @__PURE__ */ jsx6(
@@ -1155,7 +1264,7 @@ function LiveSidebar({
         );
       }),
       hidden > 0 ? /* @__PURE__ */ jsx6(Row, { width: inner, k: "more", v: `+${hidden}`, color: "gray" }) : null
-    ] })
+    ] }) : null
   ] });
 }
 
@@ -1831,6 +1940,12 @@ var DEFAULT_API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
 var seq = 0;
 var nextId = (prefix) => `${prefix}-${++seq}`;
+var toolMs = (meta) => meta && meta.t0 ? ` \xB7 ${Math.max(0, Date.now() - meta.t0)}ms` : "";
+var fmtTok2 = (n) => {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return "0";
+  return v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v));
+};
 function normalizeTodos(raw) {
   if (!Array.isArray(raw)) return null;
   return raw.filter((t) => t && typeof t === "object").map((t) => ({
@@ -1856,6 +1971,14 @@ function useAgentStream({
   const [status, setStatus] = useState4("idle");
   const [error, setError] = useState4(null);
   const [elapsedMs, setElapsedMs] = useState4(0);
+  const [activity, setActivity] = useState4([]);
+  const [requests, setRequests] = useState4(0);
+  const [tokens, setTokens] = useState4({ in: 0, out: 0, reported: false });
+  const requestsRef = useRef(0);
+  const pushActivity = useCallback((kind, text) => {
+    const line = { kind: String(kind || "sys"), text: String(text == null ? "" : text), ts: Date.now() };
+    setActivity((prev) => prev.length >= 60 ? [...prev.slice(prev.length - 59), line] : [...prev, line]);
+  }, []);
   const [pendingConfirm, setPendingConfirm] = useState4(null);
   const pendingConfirmRef = useRef(null);
   const meterRef = useRef(null);
@@ -1865,13 +1988,14 @@ function useAgentStream({
   const lastToolRef = useRef(null);
   const syncMeters = useCallback(() => setMeters(meterRef.current.snapshot()), []);
   const scoreTool = useCallback((name, args, result) => {
+    const text = String(result == null ? "" : result).trim();
+    const ok = !/^Error[:\n]|^❌/i.test(text);
     try {
-      const text = String(result == null ? "" : result).trim();
-      const ok = !/^Error[:\n]|^❌/i.test(text);
       meterRef.current.tool(name || "tool", args || {}, ok, text);
       syncMeters();
     } catch {
     }
+    return ok;
   }, [syncMeters]);
   const setPending = useCallback((value) => {
     pendingConfirmRef.current = value;
@@ -2033,12 +2157,16 @@ function useAgentStream({
           case "thinking_end":
             break;
           case "phase":
-            if (evt.phase) patch(assistantId, (m) => ({ ...m, phase: evt.phase }));
+            if (evt.phase) {
+              patch(assistantId, (m) => ({ ...m, phase: evt.phase }));
+              pushActivity("phase", evt.phase);
+            }
             break;
           case "tool_call_start": {
             const name = evt.tool_name || "unknown";
-            lastToolRef.current = { name, args: evt.tool_args || {} };
+            lastToolRef.current = { name, args: evt.tool_args || {}, t0: Date.now() };
             if (evt.tool_call_id) toolMetaRef.current.set(evt.tool_call_id, lastToolRef.current);
+            pushActivity("start", name);
             if (name === "update_todo" || name === "plan") {
               const raw = evt.tool_args && (evt.tool_args.todos || evt.tool_args.steps) || null;
               const next = name === "plan" ? normalizeTodos((raw || []).map((s) => ({ text: s, status: "pending" }))) : normalizeTodos(raw);
@@ -2062,7 +2190,10 @@ function useAgentStream({
           case "mcp_result": {
             const result = String(evt.data == null ? "" : evt.data);
             const meta = evt.tool_call_id && toolMetaRef.current.get(evt.tool_call_id) || lastToolRef.current;
-            if (meta) scoreTool(meta.name, meta.args, result);
+            if (meta) {
+              const ok = scoreTool(meta.name, meta.args, result);
+              pushActivity(ok ? "mcp" : "err", `${meta.name}${toolMs(meta)}`);
+            }
             patch(assistantId, (m) => {
               const tools = m.tools.slice();
               let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
@@ -2085,7 +2216,10 @@ function useAgentStream({
               evt.tool_result != null ? evt.tool_result : evt.result != null ? evt.result : ""
             );
             const meta = evt.tool_call_id && toolMetaRef.current.get(evt.tool_call_id) || lastToolRef.current;
-            if (meta) scoreTool(meta.name, meta.args, result);
+            if (meta) {
+              const ok = scoreTool(meta.name, meta.args, result);
+              pushActivity(ok ? "ok" : "err", `${meta.name}${toolMs(meta)}`);
+            }
             patch(assistantId, (m) => {
               const tools = m.tools.slice();
               let idx = evt.tool_call_id ? tools.findIndex((t) => t.id === evt.tool_call_id) : -1;
@@ -2104,6 +2238,7 @@ function useAgentStream({
           }
           case "needs_confirmation": {
             setStatusBoth("approval");
+            pushActivity("confirm", `${evt.tool_name || "tool"} needs approval`);
             setPending({
               toolCallId: evt.tool_call_id || null,
               toolName: evt.tool_name || "tool",
@@ -2118,6 +2253,7 @@ function useAgentStream({
               syncMeters();
             } catch {
             }
+            pushActivity("err", "loop detected");
             append({ id: nextId("sys"), role: "system", tone: "warn", text: evt.message || "loop detected" });
             break;
           case "auto_nudge":
@@ -2151,20 +2287,37 @@ function useAgentStream({
             break;
           case "error":
             attemptCtxRef.current.sawError = evt.error || "agent error";
+            pushActivity("err", evt.error || "agent error");
             setStatusBoth("error");
             break;
-          case "done":
+          case "done": {
+            const inTok = Number(evt.inputTokens);
+            const outTok = Number(evt.outputTokens);
+            if (Number.isFinite(inTok) || Number.isFinite(outTok)) {
+              setTokens((t) => ({
+                in: t.in + (Number.isFinite(inTok) ? inTok : 0),
+                out: t.out + (Number.isFinite(outTok) ? outTok : 0),
+                reported: true
+              }));
+              pushActivity("done", `turn done \xB7 ${fmtTok2(inTok)} in / ${fmtTok2(outTok)} out`);
+            } else {
+              pushActivity("done", "turn done");
+            }
             patch(assistantId, (m) => ({
               ...m,
               model: evt.model || m.model,
               tokens: evt.inputTokens != null || evt.outputTokens != null ? { in: evt.inputTokens, out: evt.outputTokens } : m.tokens
             }));
             break;
+          }
           default:
             break;
         }
       };
       const runAttempt = async (target) => {
+        requestsRef.current += 1;
+        setRequests(requestsRef.current);
+        pushActivity("sys", `\u2192 ${target.label || target.provider || "auto"}`);
         const controller = new AbortController();
         abortRef.current = controller;
         const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -2264,6 +2417,7 @@ function useAgentStream({
           tone: "warn",
           text: `handoff ${target.label} \u2192 ${next.label}: ${res.error}`
         });
+        pushActivity("handoff", `${target.label} \u2192 ${next.label}`);
         patch(assistantId, (m) => ({
           ...m,
           text: "",
@@ -2280,7 +2434,7 @@ function useAgentStream({
       setPending(null);
       setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
     },
-    [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, sessionId, setPending, setStatusBoth, system]
+    [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, pushActivity, sessionId, setPending, setStatusBoth, system]
   );
   const clear = useCallback(() => {
     abort();
@@ -2289,6 +2443,10 @@ function useAgentStream({
     setTodos([]);
     setError(null);
     setElapsedMs(0);
+    setActivity([]);
+    setRequests(0);
+    setTokens({ in: 0, out: 0, reported: false });
+    requestsRef.current = 0;
     startedAtRef.current = null;
   }, [abort, setPending]);
   const busy = status === "connecting" || status === "streaming" || status === "thinking" || status === "approval";
@@ -2300,6 +2458,9 @@ function useAgentStream({
     elapsedMs,
     busy,
     meters,
+    activity,
+    requests,
+    tokens,
     pendingConfirm,
     answerConfirm,
     send,
@@ -2453,6 +2614,12 @@ var clipLine = (s, n) => {
   const t = String(s == null ? "" : s);
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
 };
+var toolArgLine = (args) => {
+  if (!args || typeof args !== "object") return "";
+  const raw = args.command || args.path || args.file || args.query || args.url || args.pattern || "";
+  const s = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  return s ? ` ${s}` : "";
+};
 function readImageAttachment(file) {
   const raw = String(file || "").trim();
   if (!raw) throw new Error("no file given");
@@ -2591,7 +2758,39 @@ function App({ version = "0.1.0" }) {
   const ctxMax = import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
   const ctxUsed = Number(status && (status.tokens || status.contextUsed) || 0);
   const meters = agent.meters || null;
+  const lastAssistant = (() => {
+    for (let i = agent.messages.length - 1; i >= 0; i--) {
+      if (agent.messages[i].role === "assistant") return agent.messages[i];
+    }
+    return null;
+  })();
+  const lastTool = lastAssistant && Array.isArray(lastAssistant.tools) && lastAssistant.tools.length ? lastAssistant.tools[lastAssistant.tools.length - 1] : null;
+  const liveToolTxt = lastTool ? `${lastTool.name}${toolArgLine(lastTool.args)}` : "";
+  const liveLines = (() => {
+    if (!lastAssistant) return [];
+    const text = String(lastAssistant.text || "").trim();
+    const result = lastTool && lastTool.result != null ? String(lastTool.result).trim() : "";
+    const src = text || result || String(lastAssistant.thinking || "").trim();
+    return src ? src.split("\n").filter((l) => l.trim()).slice(-6) : [];
+  })();
   const host = useHostStats(5e3);
+  const userTurns = agent.messages.filter((m) => m.role === "user").length;
+  const toolCalls = agent.messages.reduce((n, m) => n + (Array.isArray(m.tools) ? m.tools.length : 0), 0);
+  const usage = {
+    tools: toolCalls,
+    ok: Number(meters && meters.successes) || 0,
+    fail: Number(meters && meters.failures) || 0,
+    requests: Number(agent.requests) || 0,
+    turns: userTurns,
+    inTok: agent.tokens ? agent.tokens.in : 0,
+    outTok: agent.tokens ? agent.tokens.out : 0,
+    // The agent stream's `done` event only carries token counts when the
+    // answering path reports them (the claude-cli path does; the plain provider
+    // loop does not). Until one does, the panel says "—" rather than a zero it
+    // cannot stand behind (§10).
+    tokensKnown: !!(agent.tokens && agent.tokens.reported),
+    ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round(ctxUsed / ctxMax * 100))) : null
+  };
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
   const showNotice = useCallback2((text) => {
@@ -2934,8 +3133,7 @@ function App({ version = "0.1.0" }) {
   const systemRows = 1;
   const servicesCellCount = services.length + (otherPorts.length ? 1 : 0);
   const servicesRows = mainW < 96 ? 3 : servicesGridRows(mainW, servicesCellCount);
-  const sidebarBudget = Math.max(0, (rows || 30) - 1 - 1 - 5 - 2 - 7 - 2 - systemRows - servicesRows);
-  const maxServers = Math.max(0, Math.min(8, sidebarBudget));
+  const sidebarRows = Math.max(0, (rows || 30) - 2);
   const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
   const MENU_ROWS = Math.max(10, Math.min(26, (rows || 30) - 12));
   const composerRows = menuOpen ? MENU_ROWS : 5;
@@ -3156,16 +3354,21 @@ function App({ version = "0.1.0" }) {
         LiveSidebar,
         {
           width: sideW,
+          height: sidebarRows,
           agentStatus: agent.status,
           phase: crushPhase,
           tool: activeTool?.name || "",
-          turns: agent.messages.filter((m) => m.role === "user").length,
+          turns: userTurns,
           elapsedMs: agent.elapsedMs,
           model,
           version,
           mcp,
           serverOk: !statusErr && !!status,
-          maxServers
+          liveTool: liveToolTxt,
+          liveLines,
+          busy: agent.busy,
+          activity: agent.activity || [],
+          usage
         }
       ) }) : null
     ] }),
