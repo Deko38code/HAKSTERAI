@@ -40,7 +40,7 @@ import { isSupported as kittyGraphicsSupported } from '../../src/kitty-graphics.
 import ads from '../../src/ads/ad-client.js';
 
 const API = process.env.HAKSTER_API_URL || 'http://localhost:3579';
-const MCP_OUTPUT_LINES = 4;
+const MCP_OUTPUT_LINES = 6;
 const MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
 // The dashboard and models pages are native OpenTUI scroll boxes: the same ▲ /
 // █ / ▼ bar the transcript uses, clickable with the mouse, auto-hidden when the
@@ -1084,6 +1084,10 @@ export default function App({ version = '0.1.0' }) {
   // the panels shrink instead of the transcript disappearing (§ owner's
   // 2026-11-23 panel rule).
   const dense = (rows || 30) < 34;
+  // The dashboard is one scrollable page (dashRows below), so its panels are
+  // not height-constrained: keep the full two-line cells (taller panels) until
+  // the screen is genuinely tiny, instead of folding them a row early.
+  const dashDense = (rows || 30) < 26;
   const systemRows = 1;
   // The services grid is capped so it can never eat the transcript: two rows
   // of cells (three when dense), and the panel summarises the rest as "+N".
@@ -1091,7 +1095,7 @@ export default function App({ version = '0.1.0' }) {
   // the chat column, the monitor page and the dashboard page are three
   // different widths, and a grid budgeted for the wrong one is the classic way
   // this layout pushes its status bar off the screen.
-  const servicesCapacityFor = (w) => Math.max(4, Math.max(1, Math.floor(Math.max(1, w - 4) / 17)) * (dense ? 3 : 2));
+  const servicesCapacityFor = (w, d = dense) => Math.max(4, Math.max(1, Math.floor(Math.max(1, w - 4) / 17)) * (d ? 3 : 2));
   const servicesRowsFor = (w, capacity) => {
     if (w < 96) return 3; // the narrow one-line Services box
     const raw = services.length + (otherPorts.length ? 1 : 0);
@@ -1100,7 +1104,7 @@ export default function App({ version = '0.1.0' }) {
   const servicesCapacity = servicesCapacityFor(mainW);
   const servicesRows = servicesRowsFor(mainW, servicesCapacity);
   const dashServicesWidth = Math.max(1, panelW - 1);
-  const dashServicesCapacity = servicesCapacityFor(dashServicesWidth);
+  const dashServicesCapacity = servicesCapacityFor(dashServicesWidth, dashDense);
   const monitorServicesCapacity = servicesCapacityFor(panelW);
   const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity);
   // The live output panel the owner asked to sit lowest, right above the input
@@ -1108,7 +1112,10 @@ export default function App({ version = '0.1.0' }) {
   // the run must never grow or shrink when a turn starts, or every panel above
   // it moves. This is only the CAP — the row budget below hands it whatever the
   // screen can spare, never starving the transcript.
-  const liveOutputLineCap = (rows || 30) >= 48 ? 8 : (rows || 30) >= 34 ? 5 : 3;
+  // Owner, 2026-11-24: "panels need to be bigger, taller — they're already wide
+  // enough, adjust the grids". Both boxes now scale UP with the terminal
+  // instead of pinning at 8/5/3 rows, so a tall screen fills with real content.
+  const liveOutputLineCap = (rows || 30) >= 48 ? 14 : (rows || 30) >= 34 ? 9 : 6;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
   // border 2 + title 1 + the call row when the column is wide enough
   const liveOutputChrome = 3 + liveOutputCallRows;
@@ -1155,8 +1162,16 @@ export default function App({ version = '0.1.0' }) {
     + approvalRows + systemRows + servicesRows + liveOutputChrome
     + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
   const sharedRows = (rows || 30) - fixedRows;
-  const liveOutputLines = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
-  const transcriptRows = Math.max(6, sharedRows - liveOutputLines);
+  // Owner, 2026-11-24: taller panels. The reasoning transcript keeps a real
+  // floor that GROWS on a tall screen (10 rows at ≥34, 6 below), and the two
+  // boxes can never take each other's last row — the old floors (6 + 3) could
+  // together exceed the budget on a short screen carrying todos, an approval
+  // card and the MCP panel, which pushed the status bar off the bottom.
+  const transcriptFloor = (rows || 30) >= 34 ? 10 : 6;
+  const sharedBudget = Math.max(2, sharedRows);
+  const transcriptTarget = Math.min(transcriptFloor, sharedBudget - 1);
+  const liveOutputLines = Math.min(liveOutputLineCap, sharedBudget - Math.max(1, transcriptTarget));
+  const transcriptRows = sharedBudget - liveOutputLines;
 
   const dashboardItems = [
     {
@@ -1380,9 +1395,9 @@ export default function App({ version = '0.1.0' }) {
                 availableWidth={Math.max(1, panelW - 1)}
                 getItemKey={(item) => item.key}
                 renderItem={(item, index, columnWidth) => (
-                  <GridPanel title={item.title} width={columnWidth} hint={item.hint} dense={dense}>
+                  <GridPanel title={item.title} width={columnWidth} hint={item.hint} dense={dashDense}>
                     {item.cells.map((c) => (
-                      <Cell key={c.label} label={c.label} value={c.value} color={c.color} w={Math.max(1, Math.floor((columnWidth - 6) / 2))} dense={dense} />
+                      <Cell key={c.label} label={c.label} value={c.value} color={c.color} w={Math.max(1, Math.floor((columnWidth - 6) / 2))} dense={dashDense} />
                     ))}
                   </GridPanel>
                 )}
@@ -1413,7 +1428,7 @@ export default function App({ version = '0.1.0' }) {
                   <text fg="white">{` ${Math.round(ctxUsed / ctxMax * 100)}%`}</text>
                 </box>
               </GridPanel>
-              <ServicesPanel width={dashServicesWidth} services={services} scan={scan} showAll dense={dense} maxCells={dashServicesCapacity} />
+              <ServicesPanel width={dashServicesWidth} services={services} scan={scan} showAll dense={dashDense} maxCells={dashServicesCapacity} />
             </box>
           </scrollbox>
         </box>

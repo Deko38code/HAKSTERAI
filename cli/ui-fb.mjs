@@ -2069,10 +2069,10 @@ function LiveSidebar({
   if (showUsage) left -= 9;
   const showMemory = left >= 26;
   if (showMemory) left -= 8;
-  const wantOutput = huge ? 6 : tall ? 4 : 3;
+  const wantOutput = huge ? 10 : tall ? 7 : 4;
   const outputCost = wantOutput + 4;
   const MCP_MIN = 6;
-  const activityMax = huge ? showMemory ? 6 : 8 : tall ? 5 : 4;
+  const activityMax = huge ? showMemory ? 8 : 10 : tall ? 7 : 5;
   const room = left - outputCost - MCP_MIN - 3;
   const activityRows = feed && room >= 2 ? Math.min(activityMax, room) : 0;
   if (activityRows) left -= activityRows + 3;
@@ -5197,7 +5197,7 @@ var import_kitty_graphics3 = __toESM(require_kitty_graphics());
 var import_ad_client2 = __toESM(require_ad_client());
 import { Fragment as Fragment9, jsx as jsx24, jsxs as jsxs23 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
-var MCP_OUTPUT_LINES = 4;
+var MCP_OUTPUT_LINES = 6;
 var MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
 var PAGE_SCROLLBAR = {
   width: 1,
@@ -5996,8 +5996,9 @@ function App({ version = "0.1.0" }) {
   const bodyW = panelW - 2;
   const mainW = bodyW - (sideW ? sideW + 1 : 0);
   const dense = (rows || 30) < 34;
+  const dashDense = (rows || 30) < 26;
   const systemRows = 1;
-  const servicesCapacityFor = (w) => Math.max(4, Math.max(1, Math.floor(Math.max(1, w - 4) / 17)) * (dense ? 3 : 2));
+  const servicesCapacityFor = (w, d = dense) => Math.max(4, Math.max(1, Math.floor(Math.max(1, w - 4) / 17)) * (d ? 3 : 2));
   const servicesRowsFor = (w, capacity) => {
     if (w < 96) return 3;
     const raw = services.length + (otherPorts.length ? 1 : 0);
@@ -6006,10 +6007,10 @@ function App({ version = "0.1.0" }) {
   const servicesCapacity = servicesCapacityFor(mainW);
   const servicesRows = servicesRowsFor(mainW, servicesCapacity);
   const dashServicesWidth = Math.max(1, panelW - 1);
-  const dashServicesCapacity = servicesCapacityFor(dashServicesWidth);
+  const dashServicesCapacity = servicesCapacityFor(dashServicesWidth, dashDense);
   const monitorServicesCapacity = servicesCapacityFor(panelW);
   const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity);
-  const liveOutputLineCap = (rows || 30) >= 48 ? 8 : (rows || 30) >= 34 ? 5 : 3;
+  const liveOutputLineCap = (rows || 30) >= 48 ? 14 : (rows || 30) >= 34 ? 9 : 6;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
   const liveOutputChrome = 3 + liveOutputCallRows;
   const dashRows = Math.max(6, (rows || 30) - 2 - (statusErr ? 3 : 0));
@@ -6028,8 +6029,11 @@ function App({ version = "0.1.0" }) {
   const approvalRows = approving ? 6 : 0;
   const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows + approvalRows + systemRows + servicesRows + liveOutputChrome + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
   const sharedRows = (rows || 30) - fixedRows;
-  const liveOutputLines = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
-  const transcriptRows = Math.max(6, sharedRows - liveOutputLines);
+  const transcriptFloor = (rows || 30) >= 34 ? 10 : 6;
+  const sharedBudget = Math.max(2, sharedRows);
+  const transcriptTarget = Math.min(transcriptFloor, sharedBudget - 1);
+  const liveOutputLines = Math.min(liveOutputLineCap, sharedBudget - Math.max(1, transcriptTarget));
+  const transcriptRows = sharedBudget - liveOutputLines;
   const dashboardItems = [
     {
       key: "system",
@@ -6228,7 +6232,7 @@ function App({ version = "0.1.0" }) {
                 items: dashboardItems,
                 availableWidth: Math.max(1, panelW - 1),
                 getItemKey: (item) => item.key,
-                renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx24(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, dense, children: item.cells.map((c) => /* @__PURE__ */ jsx24(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)), dense }, c.label)) })
+                renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx24(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, dense: dashDense, children: item.cells.map((c) => /* @__PURE__ */ jsx24(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)), dense: dashDense }, c.label)) })
               }
             ),
             /* @__PURE__ */ jsxs23(
@@ -6257,7 +6261,7 @@ function App({ version = "0.1.0" }) {
                 ]
               }
             ),
-            /* @__PURE__ */ jsx24(ServicesPanel, { width: dashServicesWidth, services, scan, showAll: true, dense, maxCells: dashServicesCapacity })
+            /* @__PURE__ */ jsx24(ServicesPanel, { width: dashServicesWidth, services, scan, showAll: true, dense: dashDense, maxCells: dashServicesCapacity })
           ] })
         }
       ) })

@@ -192,10 +192,12 @@ export default function LiveSidebar({
   // output tail and at least a couple of MCP rows beside it.
   const showMemory = left >= 26;
   if (showMemory) left -= 8;
-  const wantOutput = huge ? 6 : tall ? 4 : 3; // output lines
+  const wantOutput = huge ? 10 : tall ? 7 : 4; // output lines
   const outputCost = wantOutput + 4; // border 2 + title 1 + call row 1 + lines
   const MCP_MIN = 6; // 3 + two servers + the "+N" row
-  const activityMax = huge ? (showMemory ? 6 : 8) : tall ? 5 : 4;
+  // Owner, 2026-11-24: the side panels read taller — the feed and the output
+  // tail grow with the terminal instead of pinning at four or five lines.
+  const activityMax = huge ? (showMemory ? 8 : 10) : tall ? 7 : 5;
   const room = left - outputCost - MCP_MIN - 3; // rows left for the feed itself
   const activityRows = feed && room >= 2 ? Math.min(activityMax, room) : 0;
   if (activityRows) left -= activityRows + 3;
