@@ -981,11 +981,18 @@ export default function App({ version = '0.1.0' }) {
     ? `${latestMcpTool.id || latestMcpTool.name || 'mcp'}:${latestMcpTool.result == null ? 'live' : 'done'}`
     : '';
   useEffect(() => {
-    if (!latestMcpTool || latestMcpTool.result == null || agent.busy) {
-      // In flight, or the turn is still working: the panel stays up.
+    // "Live" means the call is still running inside the current turn. A tool with
+    // NO result whose turn has already ended is abandoned — a restored session or
+    // a run that died mid-call — and must not pin the box forever. Owner,
+    // 2026-11-24: "phantom's output is stuck in purple panel" was exactly that: the
+    // old code kept result==null up as if it were still waiting.
+    const live = !!latestMcpTool && latestMcpTool.result == null && agent.busy;
+    if (live) {
+      // In flight: the panel stays up.
       setMcpPanelCleared(false);
       return undefined;
     }
+    if (!latestMcpTool) return undefined;
     // Read at effect time (not module load) so a render probe can shorten the
     // window without touching the shipped default.
     const settleMs = Number(process.env.HAKSTER_MCP_SETTLE_MS) || MCP_PANEL_SETTLE_MS;

@@ -6349,10 +6349,12 @@ function App({ version = "0.1.0" }) {
   const [mcpPanelCleared, setMcpPanelCleared] = useState17(false);
   const mcpToolCallKey = latestMcpTool ? `${latestMcpTool.id || latestMcpTool.name || "mcp"}:${latestMcpTool.result == null ? "live" : "done"}` : "";
   useEffect16(() => {
-    if (!latestMcpTool || latestMcpTool.result == null || agent.busy) {
+    const live = !!latestMcpTool && latestMcpTool.result == null && agent.busy;
+    if (live) {
       setMcpPanelCleared(false);
       return void 0;
     }
+    if (!latestMcpTool) return void 0;
     const settleMs = Number(process.env.HAKSTER_MCP_SETTLE_MS) || MCP_PANEL_SETTLE_MS;
     const timer = setTimeout(() => setMcpPanelCleared(true), settleMs);
     return () => clearTimeout(timer);

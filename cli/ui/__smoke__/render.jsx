@@ -91,6 +91,22 @@ const MCP_TURN = {
   ],
 };
 
+/* A call that never came back: the run ended after the tool_call_start, so the
+ * tool has no result and the turn is over (a restored session, or a peer that
+ * died mid-call). The box must not sit there pretending to wait forever —
+ * owner, 2026-11-24: "phantom's output is stuck in purple panel". */
+const ABANDONED_TURN = {
+  holds: false,
+  pre: [
+    { type: 'phase', phase: 'ACT', turn: 1 },
+    { type: 'thinking_start' },
+    { type: 'thinking', content: 'Waiting on the phantom peer.' },
+    { type: 'thinking_end' },
+    { type: 'tool_call_start', tool_call_id: 'a1', tool_name: 'mcp__phantom__phantom_status', tool_args: {} },
+    { type: 'done', model: 'glm-5.2:cloud', provider: 'ollama', inputTokens: 10, outputTokens: 5 },
+  ],
+};
+
 const TAB = '\t';
 const ENTER = '\r';
 const ESC = '\u001b';
@@ -181,6 +197,7 @@ export async function run({ adsPort }) {
   const runBatch = [];
   let bigMode = false;
   let mcpMode = false;
+  let abandonedMode = false;
   let runIndex = 0;
   let heldController = null;
   let heldRun = null;
@@ -242,6 +259,15 @@ export async function run({ adsPort }) {
         const stream = new ReadableStream({
           start(controller) {
             for (const f of MCP_TURN.pre) controller.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`));
+            controller.close();
+          },
+        });
+        return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }
+      if (abandonedMode) {
+        const stream = new ReadableStream({
+          start(controller) {
+            for (const f of ABANDONED_TURN.pre) controller.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`));
             controller.close();
           },
         });
@@ -439,6 +465,33 @@ export async function run({ adsPort }) {
   mcpRoot.unmount();
   mcpSetup.renderer.destroy();
   mcpMode = false;
+  await settle(50);
+
+  // ── 7b. A sub-agent call that never returns does not pin the panel ─────
+  // The turn ends after the tool_call_start with no result. The box is correct
+  // while the turn runs, but once the turn is over it must clear like any other
+  // finished call instead of waiting on a result that will never arrive.
+  process.env.HAKSTER_MCP_SETTLE_MS = '400';
+  abandonedMode = true;
+  const abSetup = await createTestRenderer({ width: 120, height: 44 });
+  const abRoot = createRoot(abSetup.renderer);
+  flushSync(() => abRoot.render(React.createElement(App, { version: 'smoke' })));
+  await abSetup.flush();
+  await settle(400);
+  flushSync(() => {
+    for (const ch of 'check phantom') abSetup.mockInput.pressKey(ch);
+  });
+  await abSetup.flush();
+  flushSync(() => abSetup.mockInput.pressEnter());
+  await settle(250);
+  await abSetup.flush();
+  const abandonedLiveFrame = abSetup.captureCharFrame();
+  await settle(1400);
+  await abSetup.flush();
+  const abandonedClearFrame = abSetup.captureCharFrame();
+  abRoot.unmount();
+  abSetup.renderer.destroy();
+  abandonedMode = false;
   delete process.env.HAKSTER_MCP_SETTLE_MS;
   await settle(50);
 
@@ -591,6 +644,8 @@ export async function run({ adsPort }) {
     ['the sub-agent panel shows while the call runs', /MCP Output/.test(mcpLiveFrame) && /CODEX-MARKER/.test(mcpLiveFrame)],
     ['the sub-agent panel clears once its output stops', !/MCP Output/.test(mcpClearFrame)],
     ['the workspace keeps the sub-agent output after the panel clears', /CODEX-MARKER/.test(mcpClearFrame)],
+    ['a call with no result still shows while its turn runs', /MCP Output/.test(abandonedLiveFrame)],
+    ['a call that never returns does not pin the panel after the turn ends', !/MCP Output/.test(abandonedClearFrame)],
   ];
 
 
