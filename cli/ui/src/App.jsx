@@ -1726,7 +1726,13 @@ export default function App({ version = '0.1.0' }) {
       <box style={{ flexShrink: 0 }}>
         <StatusBar
           width={panelW}
-          status={agent.status}
+          // The run's state (and its timer) are already on the spinner row
+          // directly above this bar. Repeating it here printed a second
+          // "thinking…" under the spinner (owner, 2026-11-24: "theres another
+          // thinking under our live spinner we can remove"). While the spinner
+          // row is up the bar drops the duplicate and keeps the session facts
+          // (model, handoff, auto, width, ads); elsewhere it still reports it.
+          status={showCrushStatus ? null : agent.status}
           model={modelText}
           cols={cols || 100}
           focus={focus}

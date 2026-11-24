@@ -6528,7 +6528,7 @@ function App({ version = "0.1.0" }) {
       StatusBar,
       {
         width: panelW,
-        status: agent.status,
+        status: showCrushStatus ? null : agent.status,
         model: modelText,
         cols: cols || 100,
         focus,
