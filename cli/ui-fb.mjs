@@ -2375,11 +2375,12 @@ function LiveOutputPanel({
   const gutterOn = overflows(list.length, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
   const liveHint = phase && phase !== "result" ? phase : "live";
+  const emptyHint = phase === "thinking" ? "reasoning above \u2014 the answer lands here" : phase === "running" ? "tool running\u2026" : "waiting for the first token\u2026";
   const hint = image ? `image${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : list.length ? `${state.hint("")}${busy ? ` \xB7 ${liveHint}` : ""}${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : busy ? liveHint : "last";
   return /* @__PURE__ */ jsxs8(Panel, { width: w, title: busy ? "\u25B6 Live" : "\u25B6 Result", hint, children: [
     callRow ? /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: call ? "cyan" : "gray", children: clip(call || "\u2014", inner) }) }) : null,
     image && r >= 3 ? /* @__PURE__ */ jsx8(LiveImageViewer, { width: bodyW, height: r, source: image, graphics }) : list.length === 0 ? /* @__PURE__ */ jsxs8(Fragment4, { children: [
-      /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", children: busy ? clip("waiting for the first token\u2026", inner) : " " }) }),
+      /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", children: busy ? clip(emptyHint, inner) : " " }) }),
       Array.from({ length: Math.max(0, r - 1) }, (_, i) => /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { children: " " }) }, `pad:${i}`))
     ] }) : Array.from({ length: r }, (_, i) => {
       const index = state.start + i;
@@ -5347,15 +5348,8 @@ function App({ version = "0.1.0" }) {
   const liveLines = (() => {
     if (!lastAssistant) return [];
     const toLines = (v) => String(v == null ? "" : v).replace(/\r/g, "").split("\n").filter((l) => l.trim());
-    const thinking = toLines(lastAssistant.thinking);
     const text = toLines(lastAssistant.text);
     const result = lastTool && lastTool.result != null ? toLines(lastTool.result) : [];
-    if (agent.busy) {
-      const live = [...thinking, ...text];
-      if (live.length) return live;
-      if (result.length) return result;
-      return [];
-    }
     return text.length ? text : result;
   })();
   const liveImage = lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null;

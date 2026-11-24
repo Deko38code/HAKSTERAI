@@ -398,21 +398,15 @@ export default function App({ version = '0.1.0' }) {
   const liveLines = (() => {
     if (!lastAssistant) return [];
     const toLines = (v) => String(v == null ? '' : v).replace(/\r/g, '').split('\n').filter((l) => l.trim());
-    const thinking = toLines(lastAssistant.thinking);
     const text = toLines(lastAssistant.text);
     const result = lastTool && lastTool.result != null ? toLines(lastTool.result) : [];
-    // While the run streams the box is LIVE: the reasoning as it is written,
-    // then the words being written under it. Before this it showed only a
-    // finished tool result, so the panel sat on the previous turn's answer
-    // until a call returned — the run looked stalled (owner, 2026-11-24: "the
-    // output dosent reach panels until results are in").
-    if (agent.busy) {
-      const live = [...thinking, ...text];
-      if (live.length) return live;
-      if (result.length) return result;
-      return [];
-    }
-    // Idle: the finished answer, else the newest tool result.
+    // Two boxes, two jobs (owner, 2026-11-24: "its suppose to have agents
+    // reasoning output thinking etc and final word in results … shouldnt say
+    // same in both grids"). The reasoning streams into the thinking area above,
+    // so this box carries the ANSWER and nothing else — while it is being
+    // written, and when the run ends. Reasoning is never copied down here; only
+    // a turn that ends with no prose at all falls back to the newest tool
+    // result, so the box is never blank after work was done.
     return text.length ? text : result;
   })();
   // The picture behind live-URL work (owner, 2026-11-23: "live image viewer in

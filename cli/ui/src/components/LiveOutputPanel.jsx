@@ -18,12 +18,18 @@ import { usePanelScroll } from '../hooks/usePanelScroll.js';
  *
  * Owner, 2026-11-24: "the output dosent reach panels until results are in …
  * live panels rendering in place live". So while a run streams this box is
- * LIVE, not a result: the reasoning as it is written, then the words under it,
- * then the newest tool result — fed by `liveLines`, which prefers reasoning
- * before any prose has arrived. Its height is a fixed budget whether or not a
- * turn is running, so the box never moves the panels above it; only its
- * contents update, newest line at the bottom. It returns to the finished
- * answer (and the ▶ Result title) when the run ends.
+ * LIVE, not a result: the answer as it is written, updating in place, newest
+ * line at the bottom — fed by `liveLines`, which carries the prose ONLY.
+ *
+ * Owner, 2026-11-24 (the duplication): "its suppose to have agents reasoning
+ * output thinking etc and final word in results … shouldnt say same in both
+ * grids". The reasoning is the thinking area's job (it streams into the
+ * transcript above); this box is the final word. It never repeats reasoning —
+ * while the answer has not started it says what the run is doing, then fills
+ * with the answer. Its height is a fixed budget whether or not a turn is
+ * running, so the box never moves the panels above it; only its contents
+ * update. It stays on the finished answer (and the ▶ Result title) when the
+ * run ends.
  *
  * It follows the newest line while a run streams (offset null = follow) and
  * carries the house ▲/█/▼ scrollbar when it overflows; a parked window comes
@@ -56,10 +62,19 @@ export default function LiveOutputPanel({
   const state = usePanelScroll({ total: list.length, rows: r, bindings, enabled: r > 0, autoResume: busy });
   const gutterOn = overflows(list.length, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
-  // While a run is live the box says so, and says what it is showing — the
-  // reasoning, the words being written, or a tool that is still running. A
-  // still box with no label read as a stalled agent (owner, 2026-11-24).
+  // While a run is live the box says so, and says which phase it is in — the
+  // words being written, a tool that is still running, or reasoning happening
+  // above. A still box with no label read as a stalled agent (owner, 2026-11-24).
   const liveHint = phase && phase !== 'result' ? phase : 'live';
+  // While the answer has not started, the box says what the run is doing so a
+  // still box does not read as a stalled agent. It names the phase — it never
+  // copies the reasoning down here (owner, 2026-11-24: the two grids must not
+  // say the same thing).
+  const emptyHint = phase === 'thinking'
+    ? 'reasoning above — the answer lands here'
+    : phase === 'running'
+      ? 'tool running…'
+      : 'waiting for the first token…';
   const hint = image
     ? `image${call && compact ? ` · ${clip(call, Math.max(6, inner - 12))}` : ''}`
     : list.length
@@ -78,7 +93,7 @@ export default function LiveOutputPanel({
       ) : list.length === 0 ? (
         <>
           <box style={{ width: inner, flexShrink: 0 }}>
-            <text fg="gray">{busy ? clip('waiting for the first token…', inner) : ' '}</text>
+            <text fg="gray">{busy ? clip(emptyHint, inner) : ' '}</text>
           </box>
           {Array.from({ length: Math.max(0, r - 1) }, (_, i) => (
             <box key={`pad:${i}`} style={{ width: inner, flexShrink: 0 }}>
