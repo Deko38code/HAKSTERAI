@@ -436,7 +436,7 @@ the server for a static deploy.
 ## Junkalot rulebook index — mapped
 
 Junkalot's index of the MASTERGUARD rules is `/home/ghost694/junkalot/RULEBOOK-INDEX.md` (on Parrot's
-master copy): every section of `/home/ghost/CLAUDE.md` (§1–33) with what it means on that project and where
+master copy): every section of `/home/ghost/CLAUDE.md` (§1–§35) with what it means on that project and where
 this file mirrors it. It is a read-only pointer — HaksterAI never writes a rule, a rate, a key or usage into
 that project (§16) — and it is not a second rulebook: CLAUDE.md wins on any difference.
 
@@ -445,3 +445,23 @@ profit accounting, §22 the locked model configuration, §23 silent secret intak
 internal, §26 locked rates with an advisory index, §27 builds go through the server widget, §30 no profit
 on Junkalot's client admin, §31 client API keys never enter Git, §32 installs only while a client is signed
 out, §33 queue builds in order and verify her email+IP before applying.
+
+## Section Pointer Corrected — §1–§35 (2026-11-24)
+
+_Added: 2026-11-24, owner-approved ("yes go"). One existing parenthetical was corrected; nothing else in
+this file was rewritten, reordered or removed. Backup before the edit: `AGENTS.md.bak-20261124T052355Z`
+(34,933 B, size-verified)._
+
+The rulebook pointer above now reads `/home/ghost/CLAUDE.md` **(§1–§35)** instead of §1–33, because the
+master rulebook grew two sections on 2026-11-24:
+
+- **§34 Nothing Public Ever Points At The Admin** — bare sign-in page, generic errors, `/admin` noindex.
+  This one applies to every project we serve, Junkalot included.
+- **§35 Our Model Is Named HAKSTERAI-FLASH — The Label Only, The Config Untouched** — amends §22.1's
+  *display* name only; the wire model `deepseek-v4.1-flash:cloud`, the `127.0.0.1:11434` relay, the
+  provider, the ladder and every rate stay exactly as §22 locked them. HaksterAI-only; it does not
+  reach Junkalot.
+
+Junkalot's own index was updated to map §1–§35 in the same task
+(`/home/ghost694/junkalot/RULEBOOK-INDEX.md`, Parrot master copy), with a timestamped backup and an
+append-only §20 worklog entry. No rule, rate, key or usage value was written into Junkalot (§16).
