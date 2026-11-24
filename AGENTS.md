@@ -436,7 +436,7 @@ the server for a static deploy.
 ## Junkalot rulebook index — mapped
 
 Junkalot's index of the MASTERGUARD rules is `/home/ghost694/junkalot/RULEBOOK-INDEX.md` (on Parrot's
-master copy): every section of `/home/ghost/CLAUDE.md` (§1–§35) with what it means on that project and where
+master copy): every section of `/home/ghost/CLAUDE.md` (§1–§36) with what it means on that project and where
 this file mirrors it. It is a read-only pointer — HaksterAI never writes a rule, a rate, a key or usage into
 that project (§16) — and it is not a second rulebook: CLAUDE.md wins on any difference.
 
@@ -465,3 +465,28 @@ master rulebook grew two sections on 2026-11-24:
 Junkalot's own index was updated to map §1–§35 in the same task
 (`/home/ghost694/junkalot/RULEBOOK-INDEX.md`, Parrot master copy), with a timestamped backup and an
 append-only §20 worklog entry. No rule, rate, key or usage value was written into Junkalot (§16).
+
+---
+
+## Section 36 Added — Profit Leaves Junkalot (2026-11-24)
+
+_Added: 2026-11-24, owner-directed ("data profit from junkalot always goes to phantomide never display our
+profits in junkalot admin dash only what junkalot owes due etc add rule"). Backup before the edit:
+`AGENTS.md.bak-20261124T054226Z (36,160 B, size-verified)`; master-rulebook backup `CLAUDE.md.bak-20261124T054208Z` (55,777 B,
+size-verified). Nothing above this line was rewritten, reordered or removed — one pointer parenthetical was
+advanced from §1–§35 to §1–§36, exactly as the §35 entry did._
+
+`/home/ghost/CLAUDE.md` is now **§1–§36**. §36 is **"Profit Leaves Junkalot — Its Admin Shows Only What
+Junkalot Owes"**: our profit figures (rate card, meter, margin, cost base, demand index) are produced in
+Junkalot's data and read out by the PhantomIDE and HaksterAI owner dashboards through the existing
+read-only snapshot/bridge — they are never rendered on junkalot.co, in any admin tab or any payload either
+account can read. Junkalot's admin shows her plan, allowance, tokens, meter against her plan, invoices and
+amounts due. It extends §30 (which kept profit out of her *client* view) to the whole project, including
+the owner view, and moves no rate, bill or computation (§19, §24, §26 remain locked).
+
+Verified read-only against the live code on Parrot before writing: `/api/admin/mred-usage` already returns a
+profit-free `selfView` to a non-owner and a profit object only on the owner branch, and
+`src/app/admin/security/page.tsx` renders no rate card, meter or margin — its own comment at the meter tab
+states they "are not rendered on junkalot.co at all". So §36 records existing correct behaviour as a rule
+rather than mandating a code change; `_BusinessTools.tsx` (her own job-pricing margin calculator) is her
+tool, not our disclosure, and stays (§36.5).
