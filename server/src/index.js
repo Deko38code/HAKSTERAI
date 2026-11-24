@@ -1275,6 +1275,9 @@ app.post('/api/tui/model', (req, res) => {
 });
 
 app.get('/api/tui/status', (_req, res) => {
+  // A poll here means a live CLI session. The auto-apply must not restart the
+  // server out from under it (2026-11-24, owner: "no restart").
+  try { serverBuild.noteCliSeen(); } catch (_) {}
   res.json(tuiState.status);
 });
 
@@ -2986,6 +2989,8 @@ app.get('/api/version', (_req, res) => {
         pending: st.pendingCount,
         idle: st.idle,
         applying: st.applying,
+        cliAttached: st.cliAttached,
+        holdReason: st.holdReason,
       };
     } catch (e) {
       serverBuildInfo = { error: e.message };
@@ -4788,6 +4793,29 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
     res.on('close', () => {
       if (agentSteerRuns.has(runId)) agentSteerRuns.delete(runId);
     });
+    // Nothing typed is ever dropped. The turn loop drains this inbox before
+    // each model call, but a run that answers in a single turn ends before
+    // the next drain and the message would vanish with the inbox. On the way
+    // out, hand any steer that never reached the model back to the client as
+    // `steer_undelivered` so it is queued as the next turn instead.
+    const _origEnd = res.end.bind(res);
+    let _steerFlushed = false;
+    res.end = function patchedSteerEnd(...args) {
+      if (!_steerFlushed) {
+        _steerFlushed = true;
+        try {
+          const _left = agentSteerRuns.get(runId);
+          if (_left && _left.items.length) {
+            const _items = _left.items.splice(0);
+            try {
+              res.write(`data: ${JSON.stringify({ type: 'steer_undelivered', items: _items })}\n\n`);
+            } catch (_) { /* response already gone — the log line below is the record */ }
+            console.warn(`[agent] ${_items.length} live steer message(s) returned to client — run ${runId.slice(0, 8)} ended before the next model call`);
+          }
+        } catch (_) {}
+      }
+      return _origEnd(...args);
+    };
   }
   const savedAgent = getHaksterModelConfig();
   const requestedProvider = req.body.provider || savedAgent.provider || null;
@@ -5825,6 +5853,9 @@ ${dirListing}
     runTextChars = line.length;
     res.write(`data: ${JSON.stringify({ type: 'delta', content: line })}\n\n`);
   };
+  // Mid-stream steer interruptions used by this run (bounded, so a chatty
+  // operator cannot pin one turn open forever).
+  let steerInterrupts = 0;
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       // Check abort at start of each iteration
@@ -5963,7 +5994,27 @@ ${dirListing}
       let thinkingActive = false;
       let assistantThinking = ''; // reasoning channel, kept for the empty-reply fallback
 
+      let steerInterrupt = '';
+      try {
       for await (const chunk of stream) {
+        // ── Interruptible steering ─────────────────────────────────────
+        // A steer typed while this reply streams is read at the first
+        // chunk boundary after it lands, so the update reaches the model
+        // BEFORE the answer is finished. Break out, drop the partial
+        // prose, and regenerate this same turn with it applied.
+        if (runId && steerInterrupts < 6) {
+          const _steerBox = agentSteerRuns.get(runId);
+          if (_steerBox && _steerBox.items.length) {
+            steerInterrupt = _steerBox.items.splice(0, 8).map((t) => String(t).trim()).filter(Boolean).join('\n\n').slice(0, 16000);
+            if (steerInterrupt) {
+              steerInterrupts++;
+              _steerBox.at = Date.now();
+              try { streamAbort.abort(); } catch { /* already closed */ }
+              break;
+            }
+          }
+        }
+
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
 
@@ -6016,9 +6067,38 @@ ${dirListing}
           // We'll send usage at the end
         }
       }
+      } catch (_streamErr) {
+        // An abort we issued ourselves to take a steer is not a failure —
+        // the block below regenerates the turn. Every other error keeps
+        // the behaviour it had before this hook existed.
+        if (!steerInterrupt) throw _streamErr;
+      }
 
       // Stream finished successfully
       clearTimeout(streamTimeout);
+
+      // ── A steer arrived while the reply was still streaming ───────────
+      // The partial prose this round already streamed is retracted on the
+      // client (`supersede`) and is never pushed to history; the SAME turn
+      // is then regenerated with the operator's update in front of the
+      // model, so the run gives one answer that already accounts for it
+      // instead of an answer followed by a correction (owner, 2026-11-24:
+      // "i need him to get messages before to do all in one shot").
+      if (steerInterrupt) {
+        if (thinkingActive) {
+          thinkingActive = false;
+          res.write(`data: ${JSON.stringify({ type: 'thinking_end' })}\n\n`);
+        }
+        agentMessages.push({
+          role: 'system',
+          content: `LIVE USER STEERING — the operator typed this while your reply was still streaming; it replaces the partial text you had written, which was discarded. Act on it now and give one complete answer with it applied. Do not restate or repeat the discarded text:\n\n${steerInterrupt}`,
+        });
+        res.write(`data: ${JSON.stringify({ type: 'steer', content: steerInterrupt, supersede: true })}\n\n`);
+        console.log(`[agent] live steer interrupted the reply on turn ${turn}: ${steerInterrupt.slice(0, 60).replace(/\s+/g, ' ')}`);
+        steerInterrupt = '';
+        turn--;   // regenerate the same turn, now steered
+        continue;
+      }
 
       // Close thinking if still active at end of stream
       if (thinkingActive) {
@@ -6058,6 +6138,30 @@ ${dirListing}
       if (toolCalls.length === 0) {
         lastHadToolCalls = false;
         loopDetect.noProgressCount = 0;
+
+        // ── Live steering checkpoint (run end) ─────────────────────────
+        // The drain at the top of the loop only runs when the run takes another
+        // turn. An answer that completes in a single reply ends here, so a
+        // steer typed while it streamed was never read and had to wait for the
+        // next run ("i have to wait til run ends", owner 2026-11-24). Read the
+        // inbox before closing the run: hand the steer to the model and stay
+        // in this run so the correction lands in the answer, not after it.
+        if (runId) {
+          const _inboxEnd = agentSteerRuns.get(runId);
+          if (_inboxEnd && _inboxEnd.items.length) {
+            const _steerEnd = _inboxEnd.items.splice(0, 8).map((t) => String(t).trim()).filter(Boolean).join('\n\n').slice(0, 16000);
+            if (_steerEnd) {
+              _inboxEnd.at = Date.now();
+              agentMessages.push({
+                role: 'system',
+                content: `LIVE USER STEERING — the operator typed this while your reply was streaming. Act on it now, inside this run: correct or change what you just said or did as asked, then finish the task with it applied. Do not end the run without addressing it:\n\n${_steerEnd}`,
+              });
+              res.write(`data: ${JSON.stringify({ type: 'steer', content: _steerEnd })}\n\n`);
+              console.log(`[agent] live steer applied at run end of turn ${turn}: ${_steerEnd.slice(0, 60).replace(/\s+/g, ' ')}`);
+              continue;
+            }
+          }
+        }
 
         // ── Refusal detection ──────────────────────────────────────────
         // glm-5.2:cloud sometimes ignores the operator-relationship policy and outputs
@@ -13257,10 +13361,14 @@ try {
 initWebMcp();
 
 // Graceful port handling infinite retry with capped backoff (prevents PM2 crash loops)
+// Throttle the port-retry warning: an infinite retry must never fill the disk.
+let _portRetry = { count: 0, lastLogAt: 0 };
+
 function startServer(delay = 2000) {
  const MAX_DELAY = 30000; // cap at 30s between retries
 
   server.listen(PORT, () => {
+    if (_portRetry.count) { _portRetry = { count: 0, lastLogAt: 0 }; }
     console.log(`\n  ╔══════════════════════════════════════════╗`);
     console.log(`  ║  haksterAi server v1.0                   ║`);
     console.log(`  ║  http://localhost:${String(PORT).padEnd(5)}                ║`);
@@ -13328,7 +13436,12 @@ function startServer(delay = 2000) {
     }
   }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.warn(`  ⚠ Port ${PORT} in use, retrying in ${Math.min(delay, MAX_DELAY) / 1000}s... (infinite retry, no crash)`);
+      _portRetry.count++;
+      const _nowMs = Date.now();
+      if (_portRetry.count <= 5 || _nowMs - _portRetry.lastLogAt >= 60000) {
+        _portRetry.lastLogAt = _nowMs;
+        console.warn(`  ⚠ Port ${PORT} in use, retrying in ${Math.min(delay, MAX_DELAY) / 1000}s... (infinite retry, no crash; attempt ${_portRetry.count}, log capped to 1/min)`);
+      }
       setTimeout(() => startServer(Math.min(delay * 2, MAX_DELAY)), delay);
     } else {
       console.error(`  ✗ Failed to listen on port ${PORT}:`, err.message);

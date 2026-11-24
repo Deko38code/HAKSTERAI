@@ -26,6 +26,17 @@
   var downSince = 0;
   var retryTimer = 0;
   var probeTimer = 0;
+  // Why the tab believes the server is away. The page sets 'apply' when the
+  // server reports it is applying a build (that drop is deliberate: the
+  // process exits and PM2 respawns it). Without it a planned apply and a real
+  // crash look identical in the banner — which is how a normal update came to
+  // be reported as a crash. Never guessed: only a cause the page was told.
+  var restartCause = '';
+  var restartCauseAt = 0;
+
+  function causeNow() {
+    return restartCause && (Date.now() - restartCauseAt) < 180000 ? restartCause : '';
+  }
 
   function probeUrl() { return '/api/version?t=' + Date.now(); }
 
@@ -106,7 +117,10 @@
         if (downSince) {
           var wasDown = Math.round((Date.now() - downSince) / 1000);
           downSince = 0;
-          banner('Back online after ' + wasDown + 's.', 'ok');
+          banner(causeNow() === 'apply'
+            ? 'Update applied — back on the new build after ' + wasDown + 's.'
+            : 'Back online after ' + wasDown + 's.', 'ok');
+          restartCause = '';
           setTimeout(function () { banner(null); }, 4000);
           // Anything the page fetched while the server was away may be stale.
           try { document.dispatchEvent(new CustomEvent('hakster:server-back')); } catch (e) {}
@@ -117,7 +131,9 @@
         return;
       }
       if (!downSince) downSince = Date.now();
-      banner(pendingUpdate ? 'Updating — waiting for the server…' : 'Server is restarting — reconnecting…');
+      banner(pendingUpdate ? 'Updating — waiting for the server…'
+        : causeNow() === 'apply' ? 'Server is restarting to apply an update — reconnecting…'
+        : 'Server is restarting — reconnecting…');
       scheduleProbe(RETRY_MS);
     });
   }
@@ -129,6 +145,12 @@
     banner('Updating — waiting for the server…');
     clearTimeout(retryTimer);
     probe();
+  };
+  // Set by the page when it learns the server is applying a build, so the
+  // banner can name the cause instead of implying a crash.
+  window.haksterNoteRestart = function (cause) {
+    restartCause = String(cause || '');
+    restartCauseAt = Date.now();
   };
 
   document.addEventListener('visibilitychange', probe);

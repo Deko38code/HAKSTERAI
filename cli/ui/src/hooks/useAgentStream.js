@@ -32,6 +32,61 @@ import { attemptsFor } from '../../../src/models/ladder.js';
 const DEFAULT_API = process.env.HAKSTER_API_URL || 'http://localhost:3579';
 const DEFAULT_TIMEOUT_MS = Math.max(30000, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 300000);
 
+/* Auto-reconnect (owner, 2026-11-24: "and add auto reconnect in tui").
+ *
+ * A server restart — a build hand-off, a PM2 respawn, a crash recovery — leaves
+ * the port refusing connections for a few seconds. That is not a failed turn,
+ * and ending the session on it made a routine restart look like a broken CLI.
+ * The TUI now waits for the port to answer and sends the same turn again.
+ *
+ * It is only ever safe while nothing has been produced: a turn that already
+ * printed prose or ran a tool cannot be replayed without duplicating work the
+ * operator watched happen. That case keeps its output and reports the error
+ * exactly as before.
+ */
+const RECONNECT_WINDOW_MS = Math.max(5000, Number(process.env.HAKSTER_RECONNECT_MS) || 60000);
+const RECONNECT_PROBE_MS = 2500;
+const RECONNECT_MAX_TRIES = 40;
+
+/** Does this thrown value mean "the server was not there", not "the turn was bad"? */
+function isTransportError(e) {
+  if (!e || e.name === 'AbortError') return false;
+  const code = String((e.cause && e.cause.code) || e.code || '');
+  if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|EHOSTUNREACH|ENETUNREACH/.test(code)) return true;
+  const msg = `${e.message || e} ${(e.cause && e.cause.message) || ''}`;
+  return /fetch failed|failed to fetch|network|socket hang up|connection (?:refused|reset|closed)|stream closed/i.test(msg);
+}
+
+/**
+ * Poll the server's own status route until it answers again. Returns true once
+ * the port is serving, false when the window runs out or the operator aborts.
+ * Never throws: a refused connection is the expected state while the process
+ * is down, and it must not surface as a second, different error.
+ */
+async function waitForServer(api, { windowMs = RECONNECT_WINDOW_MS, key, isCancelled } = {}) {
+  const deadline = Date.now() + windowMs;
+  let delay = 300;
+  for (let tries = 0; tries < RECONNECT_MAX_TRIES; tries += 1) {
+    if (isCancelled && isCancelled()) return false;
+    const left = deadline - Date.now();
+    if (left <= 0) return false;
+    try {
+      const r = await fetch(`${api}/api/tui/status`, {
+        method: 'GET',
+        headers: key ? { 'x-api-key': key } : {},
+        signal: AbortSignal.timeout(Math.min(RECONNECT_PROBE_MS, Math.max(500, left))),
+      });
+      if (r && r.ok) return true;
+    } catch {
+      /* still down — try again after the backoff */
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(Math.round(delay * 2), 2500);
+  }
+  return false;
+}
+
 /** A stable id per appended entry, independent of how fast the stream runs. */
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${++seq}`;
@@ -105,14 +160,21 @@ export function useAgentStream({
   // move to the next entry of the ladder (src/models/ladder.js). Off means the
   // run fails where it failed — no silent model change.
   autoHandoff = true,
+  // Called with the messages a run could not deliver: a steer typed during a
+  // run that answered in a single turn ends before the next drain. The server
+  // hands them back on `steer_undelivered`; the TUI queues them as the next
+  // turn so nothing typed is ever dropped (owner, 2026-11-24).
+  onSteerUndelivered,
 } = {}) {
   const [messages, setMessages] = useState([]);
   // Mirror of `messages` for send(): the callback is long-lived, so reading the
   // state variable inside it would replay the history from when it was built.
   const messagesRef = useRef([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+  const onSteerUndeliveredRef = useRef(onSteerUndelivered);
+  useEffect(() => { onSteerUndeliveredRef.current = onSteerUndelivered; }, [onSteerUndelivered]);
   const [todos, setTodos] = useState([]);
-  const [status, setStatus] = useState('idle'); // idle | connecting | thinking | streaming | error
+  const [status, setStatus] = useState('idle'); // idle | connecting | reconnecting | thinking | streaming | approval | error
   const [error, setError] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
@@ -203,15 +265,18 @@ export function useAgentStream({
     // while the request is in flight instead of sitting at 0s until the first
     // thinking/streaming event lands.
     const ticking =
-      status === 'connecting' || status === 'thinking' ||
+      status === 'connecting' || status === 'reconnecting' || status === 'thinking' ||
       status === 'streaming' || status === 'approval';
     if (!ticking) return undefined;
     // Recompute on entry so a status change shows the true elapsed time now,
-    // not after the first 250 ms tick.
+    // not after the first tick. The clock is displayed in whole seconds, so a
+    // 250 ms tick bought no extra information while forcing a full repaint of
+    // the whole scrollback four times a second (owner, 2026-11-24: "bash tools
+    // making cli lagg"). One second is the resolution the row can show.
     if (startedAtRef.current) setElapsedMs(Date.now() - startedAtRef.current);
     const id = setInterval(() => {
       if (startedAtRef.current) setElapsedMs(Date.now() - startedAtRef.current);
-    }, 250);
+    }, 1000);
     return () => clearInterval(id);
   }, [status]);
 
@@ -229,6 +294,17 @@ export function useAgentStream({
   const append = useCallback((entry) => {
     setMessages((prev) => [...prev, entry]);
   }, []);
+
+  /* One system line, owned by the transcript because the transcript is owned
+   * here. Callers name a fact that is not a turn — the server restarted, an
+   * update was applied — and this puts it where the operator will still see it
+   * after a toast has faded. Everything it is given is measured elsewhere; it
+   * adds no wording of its own. */
+  const note = useCallback((text, tone = 'sys') => {
+    const body = String(text == null ? '' : text).trim();
+    if (!body) return;
+    append({ id: nextId('sys'), role: 'system', tone, text: body });
+  }, [append]);
 
   /* A turn is not one text block followed by one list of calls: the model
    * says something, calls a tool, then says the next thing. Flattening that
@@ -382,7 +458,7 @@ export function useAgentStream({
   const runTurn = useCallback(
     async (text, opts = {}) => {
       const prompt = String(text == null ? '' : text).trim();
-      if (!prompt || statusRef.current === 'connecting' || statusRef.current === 'streaming') {
+      if (!prompt || statusRef.current === 'connecting' || statusRef.current === 'reconnecting' || statusRef.current === 'streaming') {
         return;
       }
       // Data URLs supplied by /attach. The server accepts OpenAI-style
@@ -583,14 +659,39 @@ export function useAgentStream({
           }
 
           case 'steer': {
-            // The server read this mid-run and put it in front of the model on
-            // the next round. Shown as the operator's own line, because that is
-            // whose words they are — and because a steer that never appeared
-            // would look like it was dropped.
+            // The server read this mid-run and put it in front of the model.
+            // Shown as the operator's own line, because that is whose words
+            // they are — and because a steer that never appeared would look
+            // like it was dropped.
             const text = String(evt.content || '').trim();
+            if (evt.supersede) {
+              // The server stopped generating to take this steer before the
+              // answer was finished, so the prose it had already streamed for
+              // the current round is retracted here: the regenerated answer
+              // replaces it instead of stacking underneath it (owner,
+              // 2026-11-24 — one answer, not an answer plus a correction).
+              // Completed rounds keep their text and tool rows untouched.
+              patch(assistantId, (m) => {
+                const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => ({ ...r })) : [];
+                const cur = rounds[rounds.length - 1];
+                if (cur) cur.text = '';
+                return { ...m, rounds, text: rounds.map((r) => String(r.text || '')).join('') };
+              });
+            }
             if (text) {
               append({ id: nextId('user'), role: 'user', text });
-              pushActivity('sys', '↳ live steer applied');
+              pushActivity('sys', evt.supersede ? '↳ live steer — reply restarted with it' : '↳ live steer applied');
+            }
+            break;
+          }
+
+          case 'steer_undelivered': {
+            // The run ended before it could read these. Hand them to the TUI's
+            // queue instead of losing them with the run's inbox.
+            const items = Array.isArray(evt.items) ? evt.items.map((t) => String(t)).filter(Boolean) : [];
+            if (items.length) {
+              pushActivity('sys', `\u21ba ${items.length} steer queued for the next run`);
+              try { onSteerUndeliveredRef.current && onSteerUndeliveredRef.current(items); } catch { /* queueing is best-effort */ }
             }
             break;
           }
@@ -633,18 +734,25 @@ export function useAgentStream({
             break;
 
           case 'aborted':
+            attemptCtxRef.current.terminal = true;
             append({ id: nextId('sys'), role: 'system', tone: 'warn', text: 'run aborted' });
             break;
 
           case 'error':
             // Recorded, not rendered: the attempt loop decides whether this
             // becomes a handoff to the next model or the turn's final error.
+            // Terminal for the reconnect path: the server answered, so the
+            // same turn must not be resent to it.
+            attemptCtxRef.current.terminal = true;
             attemptCtxRef.current.sawError = evt.error || 'agent error';
             pushActivity('err', evt.error || 'agent error');
             setStatusBoth('error');
             break;
 
           case 'done': {
+            // A finished turn is terminal: the reconnect path never resends a
+            // turn the server already answered.
+            attemptCtxRef.current.terminal = true;
             // The turn's own token report is the only honest token count there
             // is, so the session totals are a sum of exactly these reports.
             const inTok = Number(evt.inputTokens);
@@ -677,13 +785,8 @@ export function useAgentStream({
         }
       };
 
-      /** Run one attempt and report what happened; decide nothing. */
-      const runAttempt = async (target) => {
-        // One attempt is one request to /api/agent/run — the session's request
-        // count is these, counted at the moment the request goes out.
-        requestsRef.current += 1;
-        setRequests(requestsRef.current);
-        pushActivity('sys', `→ ${target.label || target.provider || 'auto'}`);
+      /** One dispatch of the turn on the wire: reports what happened, decides nothing. */
+      const dispatchOnce = async (target, ctx) => {
         // One id per request: the server registers a steer inbox under it and
         // removes it when the stream closes, so a late steer is refused rather
         // than delivered into a run that already answered.
@@ -692,8 +795,6 @@ export function useAgentStream({
         const controller = new AbortController();
         abortRef.current = controller;
         const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-        const ctx = { produced: false, sawError: null, status: null };
-        attemptCtxRef.current = ctx;
         try {
           const res = await fetch(`${api}/api/agent/run`, {
             method: 'POST',
@@ -766,6 +867,13 @@ export function useAgentStream({
           }
 
           if (ctx.sawError) return { ok: false, aborted: false, ...ctx, error: ctx.sawError };
+          // A stream that closed without a done/error frame and without ever
+          // writing anything did not finish — the process went away under it.
+          // Same condition as a refused connection, so it takes the same path
+          // below instead of being reported as a successful empty turn.
+          if (!ctx.terminal && !ctx.produced && !userAbortRef.current) {
+            throw new Error('stream closed before the turn reported anything');
+          }
           // Only clear the spinner if an error event has not already set one.
           if (statusRef.current !== 'error') setStatusBoth('idle');
           return { ok: true, aborted: false, ...ctx, error: null };
@@ -778,9 +886,71 @@ export function useAgentStream({
               error: userAbortRef.current ? 'run cancelled' : 'timed out',
             };
           }
-          return { ok: false, aborted: false, ...ctx, error: (e && e.message) || 'request failed' };
+          return {
+            ok: false,
+            aborted: false,
+            transport: isTransportError(e),
+            ...ctx,
+            error: (e && e.message) || 'request failed',
+          };
         } finally {
           clearTimeout(timeout);
+        }
+      };
+
+      /* Run one attempt and report what happened; decide nothing.
+       *
+       * A connection that drops while the server restarts is retried on the
+       * same target instead of burning a handoff or ending the session. The
+       * retry is bounded by one window per attempt and only ever allowed while
+       * nothing was produced — once prose or a tool result has been shown,
+       * resending would duplicate work the operator already watched happen, so
+       * that case is returned as an error exactly as it was before.
+       */
+      const runAttempt = async (target) => {
+        const ctx = { produced: false, sawError: null, status: null, terminal: false };
+        attemptCtxRef.current = ctx;
+        pushActivity('sys', `→ ${target.label || target.provider || 'auto'}`);
+        let reconnectUntil = 0;
+        let announced = false;
+
+        for (;;) {
+          // Every dispatch counts against the session's request meter: the
+          // retry after a restart is a request the server really served.
+          requestsRef.current += 1;
+          setRequests(requestsRef.current);
+          const res = await dispatchOnce(target, ctx);
+          if (res.ok || res.aborted) return res;
+          // The server answered and refused the turn (bad request, signed-out
+          // session, entitlement). A resend cannot fix that; the ladder owns
+          // the decision from here.
+          if (res.status >= 400) return res;
+          // Anything already on screen stays as it is — never replay it.
+          if (res.produced || res.sawError || userAbortRef.current) return res;
+          // Only the server's absence is a reconnect. Anything else that is
+          // not a transport failure belongs to the ladder's own decision.
+          if (!res.transport) return res;
+
+          if (!reconnectUntil) reconnectUntil = Date.now() + RECONNECT_WINDOW_MS;
+          if (Date.now() >= reconnectUntil) {
+            return { ...res, error: 'server did not come back — turn not sent' };
+          }
+          setStatusBoth('reconnecting');
+          if (!announced) {
+            append({ id: nextId('sys'), role: 'system', tone: 'warn', text: 'server went away — reconnecting…' });
+            pushActivity('warn', 'server gone · reconnecting');
+            announced = true;
+          }
+          const back = await waitForServer(api, {
+            windowMs: Math.max(1000, reconnectUntil - Date.now()),
+            key: process.env.HAKSTER_API_KEY,
+            isCancelled: () => userAbortRef.current,
+          });
+          if (userAbortRef.current) return { ...res, aborted: true, error: 'run cancelled' };
+          if (!back) return { ...res, error: 'server did not come back — turn not sent' };
+          append({ id: nextId('sys'), role: 'system', tone: 'notice', text: 'reconnected — resending the turn' });
+          pushActivity('sys', 'reconnected · resending');
+          setStatusBoth('connecting');
         }
       };
 
@@ -856,7 +1026,7 @@ export function useAgentStream({
    * queue may never drop what was typed). */
   const send = useCallback((text, opts = {}) => {
     const prompt = String(text == null ? '' : text).trim();
-    if (!prompt || statusRef.current === 'connecting' || statusRef.current === 'streaming') return false;
+    if (!prompt || statusRef.current === 'connecting' || statusRef.current === 'reconnecting' || statusRef.current === 'streaming') return false;
     runTurn(text, opts);
     return true;
   }, [runTurn]);
@@ -899,6 +1069,7 @@ export function useAgentStream({
 
   const busy =
     status === 'connecting' ||
+    status === 'reconnecting' ||
     status === 'streaming' ||
     status === 'thinking' ||
     status === 'approval';
@@ -920,6 +1091,7 @@ export function useAgentStream({
     steer,
     abort,
     clear,
+    note,
   };
 }
 

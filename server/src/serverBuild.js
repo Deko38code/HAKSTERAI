@@ -22,6 +22,7 @@
  * Safety rails, deliberately conservative:
  *  - never within the first 90 s after boot;
  *  - never while any long-lived request (SSE/CLI/chat stream) is open;
+ *  - never while a CLI session is attached (it polls /api/tui/status every 3 s);
  *  - never until a full quiet window has passed since the last one closed;
  *  - one attempt only per process, and every attempt is logged and announced;
  *  - a manual owner route can apply it immediately when the operator asks.
@@ -39,6 +40,11 @@ const STAMP_TTL_MS = 5000;
 const LONG_REQUEST_MS = 5000;   // a request open this long is live work
 const QUIET_MS = 60000;         // idle this long before we apply
 const MIN_UPTIME_MS = 90000;    // never apply in the first 90 s
+// 2026-11-24 (owner): "no restart" while a CLI session is attached. The TUI
+// polls /api/tui/status every 3 s. A poll within this window means a live CLI
+// session, so the auto-apply holds instead of bouncing the process out from
+// under it. The explicit owner route (applyNow) still applies on request.
+const CLI_ATTACH_MS = 25000;    // a CLI tab is attached if seen this recently
 const TICK_MS = 15000;
 const EXIT_DELAY_MS = 1500;
 
@@ -53,6 +59,7 @@ let stampCache = { at: 0, stamp: null, files: [] };
 let inflight = 0;
 let longLived = 0;
 let lastLongEnd = Date.now();
+let lastCliSeen = 0;
 let applying = false;
 let lastApply = null;
 let timer = null;
@@ -127,15 +134,43 @@ function status() {
     inflight,
     longLived,
     secondsSinceLongRequest: Math.max(0, Math.round((Date.now() - lastLongEnd) / 1000)),
+    cliAttached: cliAttached(),
+    secondsSinceCliSeen: lastCliSeen ? Math.max(0, Math.round((Date.now() - lastCliSeen) / 1000)) : null,
+    holdReason: holdReason(),
     idle: isIdle(),
     applying,
     lastApply,
   };
 }
 
+/**
+ * A CLI session is attached when the TUI has polled /api/tui/status inside the
+ * attach window. The server calls noteCliSeen() from that route; nothing here
+ * inspects processes. A dead CLI ages out on its own after CLI_ATTACH_MS.
+ */
+function noteCliSeen() {
+  lastCliSeen = Date.now();
+}
+
+function cliAttached() {
+  return lastCliSeen > 0 && (Date.now() - lastCliSeen) < CLI_ATTACH_MS;
+}
+
+/** Why an apply is being held, for the status payload and the log. */
+function holdReason() {
+  if (longLived > 0) return 'live request open';
+  if (Date.now() - BOOT.at < MIN_UPTIME_MS) return 'booting';
+  if (cliAttached()) return 'CLI session attached';
+  if (Date.now() - lastLongEnd < QUIET_MS) return 'quiet window';
+  return null;
+}
+
 function isIdle() {
   if (longLived > 0) return false;
   if (Date.now() - BOOT.at < MIN_UPTIME_MS) return false;
+  // Never bounce the process while a CLI session is attached: a restart drops
+  // its stream. It applies in the first quiet window after the CLI detaches.
+  if (cliAttached()) return false;
   return Date.now() - lastLongEnd >= QUIET_MS;
 }
 
@@ -223,8 +258,10 @@ module.exports = {
   track,
   status,
   isIdle,
+  noteCliSeen,
+  cliAttached,
   applyNow,
   startAutoApply,
   BOOT,
-  _constants: { LONG_REQUEST_MS, QUIET_MS, MIN_UPTIME_MS, TICK_MS },
+  _constants: { LONG_REQUEST_MS, QUIET_MS, MIN_UPTIME_MS, CLI_ATTACH_MS, TICK_MS },
 };

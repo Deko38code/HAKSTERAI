@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
 
-const FRAMES = ['❄', '✦', '✧', '✶', '✧', '✦'];
-const SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
+/* How often the run's own glyphs change. Every tick is a full-screen repaint
+ * (see the effect's comment), so this is a cost knob, not a taste knob. */
+const SPINNER_MS = 300;
+
+const FRAMES = ['❄', '✦', '✧', '✶', '✧', '✦'];const SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
 const GRADIENT = [51, 87, 117, 153, 117, 87];
 const PHASES = {
   THINK: { color: '#58a6ff', emoji: '◈', phrases: ['Thinking through the problem…', 'Reasoning carefully…', 'Analyzing the request…', 'Connecting concepts…'] },
@@ -20,8 +23,14 @@ function formatElapsed(ms) {
 
 export default function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   const [frame, setFrame] = useState(0);
+  // One commit here repaints the WHOLE screen: OpenTUI lays the frame out as a
+  // unit, so this row's glyphs are priced at the transcript's size. At 80 ms a
+  // live run on a long scrollback cost a full core — 12 repaints a second for a
+  // decoration (owner, 2026-11-24: "bash tools making cli lagg"). 300 ms still
+  // reads as animated and costs a quarter of that. The row is only mounted
+  // while a run is live, so an idle TUI never ticks at all.
   useEffect(() => {
-    const timer = setInterval(() => setFrame((value) => value + 1), 80);
+    const timer = setInterval(() => setFrame((value) => value + 1), SPINNER_MS);
     return () => clearInterval(timer);
   }, []);
 

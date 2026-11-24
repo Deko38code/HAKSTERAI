@@ -129,6 +129,11 @@ function ProseBlock({ text, live, width, compact }) {
  *    - "waiting for output…" while a running call has produced nothing yet.
  */
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+/* A pending card's spinner. Each tick is a full-screen repaint — OpenTUI lays
+ * the frame out as a unit — so on a long scrollback a bash call used to cost a
+ * repaint every 100 ms for a rotating glyph (owner, 2026-11-24: "bash tools
+ * making cli lagg"). 300 ms keeps the motion and cuts the cost to a third. */
+const TOOL_SPINNER_MS = 300;
 const ARGS_BUDGET = 64;
 const ARG_VALUE_MAX = 40;
 
@@ -162,7 +167,7 @@ function useSpinnerFrame(active) {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     if (!active) return undefined;
-    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 100);
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), TOOL_SPINNER_MS);
     return () => clearInterval(id);
   }, [active]);
   return frame;
@@ -218,7 +223,7 @@ function ToolRow({ tool, width, compact = false, outputLabel = '▶ Output' }) {
   );
 }
 
-export default function MessageBlock({ message, width, compact = false, live = false, expandThinking = false, showLiveLabel = true, outputLabel = '▶ Output' }) {
+function MessageBlock({ message, width, compact = false, live = false, expandThinking = false, showLiveLabel = true, outputLabel = '▶ Output' }) {
   if (!message) return null;
 
   const roleStyle = ROLE_STYLE[message.role] || ROLE_STYLE.system;
@@ -319,4 +324,16 @@ export default function MessageBlock({ message, width, compact = false, live = f
   );
 }
 
+/* Memoised on purpose (owner, 2026-11-24: "bash tools making cli lagg").
+ *
+ * A session that has run a few shell calls re-rendered the whole transcript on
+ * every elapsed-clock tick — ~70 ms per frame at 20 turns, ~4 ticks a second
+ * while a run is live. The stream only ever replaces the message it patches
+ * (`withToolResult` / `patch` slice the array and keep every other entry's
+ * identity), so a finished turn's props are referentially identical and this
+ * memo skips its work entirely: a tick now costs one turn, not twenty.
+ * `live` and `width` are the only props that change for finished turns, and
+ * they change rarely (a resize or the turn that starts streaming). */
+const MemoMessageBlock = React.memo(MessageBlock);
+export default MemoMessageBlock;
 export { ToolRow };

@@ -21,7 +21,13 @@ import { estimateRows } from '../utils/transcript-rows.js';
  * role label and reasoning line are dropped and tool output is first-line only,
  * so a small terminal still reads as a transcript instead of two boxes.
  */
-const MAX_TURNS = 80;
+/* How many turns stay mounted. One frame lays out every mounted turn — ~2 ms
+ * per turn at 120x40 — and the screen shows far fewer than this, so the cap is
+ * what keeps a long session's repaints affordable rather than the tick rate
+ * alone (owner, 2026-11-24: "bash tools making cli lagg"). Turns above the cap
+ * are counted in the "earlier turns (PgUp)" row, and the newest 40 turns is a
+ * deep scrollback on a 40-row terminal. */
+const MAX_TURNS = 40;
 
 /** The native scrollbar: one column, arrow ends, a dim track and a bright
  *  thumb. `trackOptions` and `arrowOptions` are the ScrollBar primitive's own
@@ -53,7 +59,7 @@ function turnWeight(message) {
   return n;
 }
 
-export default function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true, outputLabel = '▶ Output' }) {
+function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true, outputLabel = '▶ Output' }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef(null);
@@ -138,7 +144,12 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
 
   if (list.length === 0) {
     return (
-      <box style={{ width, flexDirection: 'column' }}>
+      // Reserve the budgeted rows even when there are no turns yet. Without
+      // the fixed height this box collapsed to the hint's own height, so on a
+      // fresh start the composer floated up under a one-line hint with a big
+      // blank gap beneath it instead of sitting at the bottom of the screen.
+      // The hint is bottom-aligned so it hugs the composer row.
+      <box style={{ width, height: budget, flexShrink: 0, overflow: 'hidden', flexDirection: 'column', justifyContent: 'flex-end' }}>
         <text fg="gray">{emptyHint || 'Ask for something and the agent runs it.'}</text>
       </box>
     );
@@ -192,5 +203,14 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
     </box>
   );
 }
+
+/* Memoised (owner, 2026-11-24: "bash tools making cli lagg"). The transcript is
+ * the expensive node in the tree — one lay-out of 20 turns costs ~70 ms — and
+ * App re-renders on timers that have nothing to do with the scrollback (the
+ * elapsed clock, host stats, the memory bank, the status poll). `messages`
+ * keeps its identity unless the stream actually patched a turn, so those ticks
+ * no longer re-lay-out the whole scrollback; only a real content change does. */
+const MemoTranscript = React.memo(Transcript);
+export default MemoTranscript;
 
 export { estimateRows };

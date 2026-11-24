@@ -27,10 +27,15 @@ import StatusServicesPanel, { statusServicesRows } from './components/StatusServ
 import StatusBar from './components/StatusBar.jsx';
 import SystemPanel from './components/SystemPanel.jsx';
 import CrushStatus from './components/CrushStatus.jsx';
+import Recap from './components/Recap.jsx';
+import DebugView from './components/DebugView.jsx';
 import TodoPanel from './components/TodoPanel.jsx';
 import Transcript from './components/Transcript.jsx';
 import useAgentStream from './hooks/useAgentStream.js';
+import useServerWatch from './hooks/useServerWatch.js';
 import useHostStats from './hooks/useHostStats.js';
+import useDebugStats from './hooks/useDebugStats.js';
+import { noteRenderStart, noteRenderEnd } from './utils/debug-metrics.js';
 import useMemoryBank from './hooks/useMemoryBank.js';
 import useCliUpdate from './hooks/useCliUpdate.js';
 import useScriptRunner from './hooks/useScriptRunner.js';
@@ -38,7 +43,7 @@ import { peersFromMcp } from './utils/squad.js';
 import { countWebCallsInMessages } from './utils/web-usage.js';
 import cliPrefs from '../../src/prefs.js';
 import { appendInputHistory, loadInputHistory } from '../../src/input-history.js';
-import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel, pointsPct, meterArrow as arrowFor, arrowColor as arrowFg } from '../../smartness.mjs';
+import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel, meterArrow as arrowFor, arrowColor as arrowFg } from '../../smartness.mjs';
 import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER, displayModel } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
 import { isSupported as kittyGraphicsSupported } from '../../src/kitty-graphics.js';
@@ -188,8 +193,16 @@ function readImageAttachment(file) {
  *    below and the transcript receives exactly what is left.
  */
 export default function App({ version = '0.1.0' }) {
+  // Debugger timing (owner, 2026-11-24: "add debugger to"). The timestamp is
+  // the first statement in the component so the measured span is the render
+  // itself, and the layout effect below closes it at commit — that pair is the
+  // RENDER block on the /debug page. Nothing else reads it.
+  const renderT0 = noteRenderStart();
   const renderer = useRenderer();
   const { width: cols, height: rows } = useTerminalDimensions();
+  // Sample on every render, not on a timer: a slow frame is exactly what the
+  // debugger exists to catch, and one measurement is two numbers in a buffer.
+  React.useLayoutEffect(() => { noteRenderEnd(renderT0); });
 
   const [view, setView] = useState('chat'); // chat | dashboard | models | monitor
   const [focus, setFocus] = useState('composer'); // composer | ad
@@ -294,8 +307,18 @@ export default function App({ version = '0.1.0' }) {
   // every measured row stays reachable and the bar tracks the page instead of
   // the bottom of the list being clipped (§ all-panels rule).
   const usageRef = useRef(null);
+  // The debugger page scrolls like the dashboard and usage pages (§ all-panels).
+  const debugRef = useRef(null);
 
   const agent = useAgentStream({
+    // A steer the run could not deliver comes back here and joins the same
+    // queue an undelivered POST uses, so it sends with the next run.
+    onSteerUndelivered: (items) => {
+      setSteerQueue((q) => [
+        ...q,
+        ...items.map((text, i) => ({ id: `steer-ud-${Date.now()}-${i}`, text, image: '', imageName: '' })),
+      ]);
+    },
     api: API,
     model,
     provider,
@@ -309,6 +332,9 @@ export default function App({ version = '0.1.0' }) {
 
   // Per-user usage, only fetched while the page is open (see the hook).
   const usagePage = useServerUsage(usageRefresh, view === 'usage');
+  // ◇ Debugger: sampled only while its page is open, so a closed page costs
+  // nothing — no lag timer, no poll, no render.
+  const debugStats = useDebugStats({ enabled: view === 'debug', api: API });
 
   useEffect(() => {
     writePrefs({ autoHandoff: handoffOn });
@@ -413,12 +439,12 @@ export default function App({ version = '0.1.0' }) {
   // The run's live output for the sidebar: the newest tool call and the tail of
   // whatever it produced (or the answer being streamed). Derived from the same
   // messages the transcript renders, so the two can never disagree.
-  const lastAssistant = (() => {
+  const lastAssistant = React.useMemo(() => {
     for (let i = agent.messages.length - 1; i >= 0; i--) {
       if (agent.messages[i].role === 'assistant') return agent.messages[i];
     }
     return null;
-  })();
+  }, [agent.messages]);
   const lastTool = lastAssistant && Array.isArray(lastAssistant.tools) && lastAssistant.tools.length
     ? lastAssistant.tools[lastAssistant.tools.length - 1]
     : null;
@@ -435,7 +461,11 @@ export default function App({ version = '0.1.0' }) {
         : (lastTool && lastTool.result == null)
           ? 'running'
           : 'waiting';
-  const liveLines = (() => {
+  // Re-splitting the newest answer or shell result is only needed when that
+  // value actually changed — the timers that re-render App (elapsed clock,
+  // host stats, memory bank, status poll) must not pay for it on every tick
+  // (owner, 2026-11-24: "bash tools making cli lagg").
+  const liveLines = React.useMemo(() => {
     if (!lastAssistant) return [];
     const toLines = (v) => String(v == null ? '' : v).replace(/\r/g, '').split('\n').filter((l) => l.trim());
     const text = toLines(lastAssistant.text);
@@ -448,14 +478,15 @@ export default function App({ version = '0.1.0' }) {
     // a turn that ends with no prose at all falls back to the newest tool
     // result, so the box is never blank after work was done.
     return text.length ? text : result;
-  })();
+  }, [lastAssistant, lastTool]);
   // The picture behind live-URL work (owner, 2026-11-23: "live image viewer in
   // the output panels when showing live url work"): a screenshot path, an image
   // URL or an inline data: image in what the last tool returned. The panels show
-  // it; this only finds it.
-  const liveImage = lastAssistant
+  // it; this only finds it. This scans the whole result string with regexes, so
+  // it runs only when that result changed.
+  const liveImage = React.useMemo(() => (lastAssistant
     ? findImageSource([lastTool && lastTool.result != null ? String(lastTool.result) : '', String(lastAssistant.text || '')])
-    : null;
+    : null), [lastAssistant, lastTool]);
   // This machine's own vitals — cpu, ram, swap, disk, load — sampled in-process.
   const host = useHostStats(5000);
   // ◈ Memory: the same banks autolearn writes and the next run recalls,
@@ -471,13 +502,22 @@ export default function App({ version = '0.1.0' }) {
   // the meter's scored wins and losses, requests sent (handoffs included),
   // operator turns, the turn-reported token totals and the context share. No
   // figure here is estimated; each is a count of something that happened.
-  const userTurns = agent.messages.filter((m) => m.role === 'user').length;
-  const toolCalls = agent.messages.reduce((n, m) => n + (Array.isArray(m.tools) ? m.tools.length : 0), 0);
-  // Web calls are a subset of `tools`: the search/fetch/scrape calls this
-  // session actually made (owner, 2026-11-24: "add web tool usage in the usage
-  // panel … just for our count"). Counted from the same streamed call events,
-  // so it moves live with the run — a count of calls, never an estimate.
-  const webCalls = countWebCallsInMessages(agent.messages);
+  // Counted once per message-list change, not once per timer tick: each of
+  // these walks every turn and every call it made.
+  const { userTurns, toolCalls, webCalls } = React.useMemo(() => {
+    const msgs = agent.messages;
+    let turns = 0;
+    let calls = 0;
+    for (const m of msgs) {
+      if (m.role === 'user') turns += 1;
+      if (Array.isArray(m.tools)) calls += m.tools.length;
+    }
+    // Web calls are a subset of `tools`: the search/fetch/scrape calls this
+    // session actually made (owner, 2026-11-24: "add web tool usage in the usage
+    // panel … just for our count"). Counted from the same streamed call events,
+    // so it moves live with the run — a count of calls, never an estimate.
+    return { userTurns: turns, toolCalls: calls, webCalls: countWebCallsInMessages(msgs) };
+  }, [agent.messages]);
   const usage = {
     tools: toolCalls,
     web: webCalls,
@@ -502,6 +542,27 @@ export default function App({ version = '0.1.0' }) {
     setNotice(text);
     setTimeout(() => setNotice((cur) => (cur === text ? null : cur)), 6000);
   }, []);
+
+  /* A server restart is now named by its cause (owner, 2026-11-24: "if server
+   * drops after updates"). The panels already recover on their own — the
+   * status poll re-reads every 3 s and a turn in flight reconnects and resends
+   * — but an update landing on the server looked identical to a crash. The
+   * build stamp tells them apart: a changed `server.build` is the update we
+   * just shipped, an unchanged one is a restart of the same code. A restart
+   * during a run is left to the turn's own reconnect lines, so this only
+   * speaks while the session is idle.
+   */
+  useServerWatch({
+    api: API,
+    busy: agent.busy,
+    onRecovered: ({ text, updated }) => {
+      showNotice(text);
+      // Toast for the moment, transcript line for the record. `notice` when a
+      // build landed (expected, good), `warn` when the same code came back
+      // (something restarted it, and that is worth looking at).
+      agent.note(text, updated ? 'notice' : 'warn');
+    },
+  });
 
   // ⬆ Install confirmation (owner, 2026-11-24: "need our updates to show when
   // updates have been installed upon starting cli"). When an earlier start
@@ -701,6 +762,9 @@ export default function App({ version = '0.1.0' }) {
       case '/squad':
         setView('squad');
         return;
+      case '/debug':
+        setView('debug');
+        return;
       case '/status':
         showNotice(status
           ? `phase ${status.phase} · model ${displayModel(status.model)} · tokens ${status.tokens} · trust ${status.trust} · ${status.connected ? 'connected' : 'offline'}`
@@ -777,7 +841,7 @@ export default function App({ version = '0.1.0' }) {
         showNotice('transcript cleared · steer queue emptied');
         return;
       case '/help':
-        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit');
+        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /clear /quit');
         return;
       case '/quit':
       case '/exit':
@@ -948,6 +1012,15 @@ export default function App({ version = '0.1.0' }) {
   // stand-down a `y` meant for the prompt would also reach the shortcut switch.
   const approving = !!agent.pendingConfirm;
   const showCrushStatus = view === 'chat' && agent.busy;
+  // ▣ Recap: the run's receipt, shown while the agent is idle (owner, 2026-11-24:
+  // "add recap in cli when agent is idle"). It takes the SAME row the live
+  // spinner uses, so the chat layout gains no height — the spinner becomes the
+  // recap the moment a run ends, and goes back to animating when the next one
+  // starts. It appears only once something has actually run this session (a
+  // restored transcript or a /clear leaves it off rather than printing a row of
+  // zeros the run never earned).
+  const todosDone = agent.todos.reduce((n, t) => n + (t.done ? 1 : 0), 0);
+  const showRecap = view === 'chat' && !agent.busy && (usage.turns > 0 || usage.tools > 0);
   const activeAssistant = [...agent.messages].reverse().find((message) => message.role === 'assistant');
   const activeTool = activeAssistant?.tools?.slice().reverse().find((tool) => tool.result === null);
   const latestMcpTool = agent.messages
@@ -1002,7 +1075,7 @@ export default function App({ version = '0.1.0' }) {
   }, [mcpToolCallKey, agent.busy]);
 
   const crushPhase = activeAssistant?.phase
-    || (agent.status === 'thinking' ? 'THINK' : agent.status === 'connecting' ? 'PLAN' : 'ACT');
+    || (agent.status === 'thinking' ? 'THINK' : (agent.status === 'connecting' || agent.status === 'reconnecting') ? 'PLAN' : 'ACT');
 
   const answerApproval = useCallback(
     (approved, opts) => {
@@ -1108,6 +1181,20 @@ export default function App({ version = '0.1.0' }) {
           page.scrollBy(key.name === 'up' ? -1 : 1, 'absolute');
           return;
         }
+        if (key.name === 'home') { page.scrollTo(0); return; }
+        if (key.name === 'end') { page.scrollBy(1000, 'viewport'); return; }
+      }
+      return;
+    }
+
+    // ◇ Debugger: r resets the counters, esc leaves, pgup/pgdn/↑/↓ scroll it.
+    if (view === 'debug') {
+      if (key.name === 'escape') { setView('chat'); return; }
+      if (key.name === 'r') { debugStats.reset(); showNotice('◇ debugger — counters reset'); return; }
+      const page = debugRef.current;
+      if (page && typeof page.scrollBy === 'function') {
+        if (key.name === 'pageup' || key.name === 'pagedown') { page.scrollBy(key.name === 'pageup' ? -1 : 1, 'viewport'); return; }
+        if (key.name === 'up' || key.name === 'down') { page.scrollBy(key.name === 'up' ? -1 : 1, 'absolute'); return; }
         if (key.name === 'home') { page.scrollTo(0); return; }
         if (key.name === 'end') { page.scrollBy(1000, 'viewport'); return; }
       }
@@ -1344,7 +1431,7 @@ export default function App({ version = '0.1.0' }) {
   const statusBoxShown = view === 'chat';
   const ctxK = Math.round(ctxMax / 1000);
   const ctxPart = model ? `ctx ${ctxK}K` : null;
-  const headerRightVariants = statusBoxShown
+  const headerDetailVariants = statusBoxShown
     ? // `tui <version>` lives on the status box's top line here, not twice.
       [[view, ctxPart].filter(Boolean).join(' · '), view]
     : [
@@ -1360,6 +1447,50 @@ export default function App({ version = '0.1.0' }) {
   const headerFiles = showGuard ? guardTxt : '';
   const headerLeftText = statusBoxShown ? 0 : headerLeftLen(showGuard);
 
+  // ◈ Memory-bank bar, pinned to the header's right edge (owner, 2026-11-24:
+  // "add a real live bar at top right of tui for our memory bank % to know when
+  // full or low and to keep count"). Fill is the fullest bank measured against
+  // autolearn's per-bank storage cap — BANK_CAP = 300 in
+  // server/src/agent/autolearn.js, the point where the oldest entries start
+  // being dropped — so the bar goes yellow near it and red as a bank fills. The
+  // trailing number is the running total across every bank, counted from disk
+  // by useMemoryBank (counts only; no bank text ever reaches this row).
+  const BANK_CAP = 300;
+  const memBanks = memory && Array.isArray(memory.banks) ? memory.banks : [];
+  const memFullest = memBanks.reduce((m, b) => Math.max(m, Number(b.entries) || 0), 0);
+  const memTotal = memory && Number.isFinite(memory.total) ? memory.total : null;
+  const memPct = !memory
+    ? null
+    : (memBanks.length ? Math.max(0, Math.min(100, Math.round((memFullest / BANK_CAP) * 100))) : 0);
+  const memFg = memPct == null || memPct === 0
+    ? 'gray'
+    : memPct >= 90 ? '#f85149' : memPct >= 70 ? '#d29922' : '#3fb950';
+  const MEMBAR_W = 5;
+  const memFilled = memPct == null ? 0 : Math.round((memPct / 100) * MEMBAR_W);
+  const memParts = memPct == null ? null : [
+    { t: '◈ ', fg: memFg, bold: true },
+    { t: '█'.repeat(memFilled), fg: memFg },
+    { t: '░'.repeat(MEMBAR_W - memFilled), fg: 'gray' },
+    { t: ` ${memPct}%`, fg: memPct >= 90 ? 'red' : memPct === 0 ? 'gray' : 'white', bold: memPct > 0 },
+    ...(memTotal != null ? [{ t: ` ${memTotal}`, fg: 'gray' }] : []),
+  ];
+  // Right side of the header, richest first: the ◈ memory bar leads (the owner
+  // asked to see it at the top right), then the view/ctx detail fills what room
+  // is left. It walks from bar + longest detail down to the bar alone, so the
+  // memory readout outlives the detail on a narrow terminal instead of being
+  // the first thing dropped.
+  const headerRightSets = [];
+  if (memParts) {
+    for (const detail of headerDetailVariants) {
+      const parts = [...memParts];
+      if (detail) parts.push({ t: `  ${detail}`, fg: 'gray' });
+      headerRightSets.push({ parts, text: parts.map((p) => p.t).join('') });
+    }
+  }
+  for (const detail of headerDetailVariants) {
+    if (detail) headerRightSets.push({ parts: [{ t: detail, fg: 'gray' }], text: detail });
+  }
+
   // Meters on the very top line (owner, 2026-11-24: "move the autolearn cpu ram
   // meters up top also"). The readings that had their own line inside the status
   // box move onto the header row itself, so the top box is exactly the status
@@ -1371,9 +1502,10 @@ export default function App({ version = '0.1.0' }) {
   const meterDelta = Number(meters && meters.delta) || 0;
   // Autolearn moves on its own arrow: points keep changing after the 0-100
   // score pins at its ceiling, so `delta` alone showed a flat marker on an
-  // up-move. The percent is the same 0-100 scale the points bar draws.
+  // up-move. No percentage here — the top line already carries one and the
+  // points bar below shows the same scale (owner, 2026-11-24: "a dupe % i
+  // already had one up top").
   const meterPtsDelta = Number(meters && meters.pointsDelta) || 0;
-  const meterPtsPct = pointsPct(meterPts);
   const meterArrowCh = arrowFor(meterDelta);
   const meterArrowFg = arrowFg(meterDelta);
   const meterPtsArrow = arrowFor(meterPtsDelta);
@@ -1426,18 +1558,7 @@ export default function App({ version = '0.1.0' }) {
   };
   const baseMeterVariants = [
     mkMeter([
-      { t: '\u25C8 ', fg: meterFg.smart, bold: true },
-      { t: `${meterScore}% `, fg: 'white', bold: true },
-      { t: meterArrowCh, fg: meterArrowFg },
-      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: ` ${meterPtsPct}%`, fg: meterFg.pts },
-      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green' },
-      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: `  ram ${meterRam}`, fg: meterFg.ram },
-    ]),
-    mkMeter([
-      { t: '\u25C8 ', fg: meterFg.smart, bold: true },
+      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -1447,7 +1568,17 @@ export default function App({ version = '0.1.0' }) {
       { t: `  ram ${meterRam}`, fg: meterFg.ram },
     ]),
     mkMeter([
-      { t: '\u25C8 ', fg: meterFg.smart, bold: true },
+      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
+      { t: `${meterScore}% `, fg: 'white', bold: true },
+      { t: meterArrowCh, fg: meterArrowFg },
+      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
+      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green' },
+      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
+      { t: `  ram ${meterRam}`, fg: meterFg.ram },
+    ]),
+    mkMeter([
+      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -1475,25 +1606,25 @@ export default function App({ version = '0.1.0' }) {
   // Meters outrank the right-hand detail here (the owner just asked for them up
   // top, while the model is repeated on the bottom status bar and the TUI
   // version in the status box): walk the meter forms richest-first and take the
-  // richest right-hand text that still fits beside it. The +2 slack absorbs the
-  // brain emoji measuring two cells wide; only when no right-hand text fits
-  // beside the terse form does the status box keep its own meters line.
-  let headerRight = '';
+  // richest right-hand set that still fits beside it. The +2 slack absorbs the
+  // brain emoji measuring two cells wide; only when nothing fits beside the
+  // terse form does the status box keep its own meters line.
+  let headerRight = null;
   let headerMeter = null;
   if (view === 'chat') {
     for (const meter of headerMeterVariants) {
-      const rightText = headerRightVariants.find((t) => (
-        headerLeftText + 3 + meter.text.length + 2 + (t ? t.length + 2 : 0) + 2 <= headerInner
+      const fit = headerRightSets.find((s) => (
+        headerLeftText + 3 + meter.text.length + 2 + (s.text ? s.text.length + 2 : 0) + 2 <= headerInner
       ));
-      if (rightText !== undefined) {
-        headerRight = rightText;
+      if (fit) {
+        headerRight = fit;
         headerMeter = meter;
         break;
       }
     }
   }
   if (!headerMeter) {
-    headerRight = headerRightVariants.find((t) => headerLeftText + t.length + 2 <= headerInner) || '';
+    headerRight = headerRightSets.find((s) => headerLeftText + s.text.length + 2 <= headerInner) || null;
   }
 
   // HakTerm-style live column: only when there is room for it beside a readable
@@ -1582,7 +1713,9 @@ export default function App({ version = '0.1.0' }) {
   // ── Row budget ────────────────────────────────────────────────────────────
   // header 1 · status bar 1 · composer 5 (border 2, input 1, inline ad 1, hint 1)
   // · rail 1 collapsed or 7 expanded · todos: border 2 + header 1 + rows + hint 1
-  const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
+  // The run row is one row whichever face it wears: the live spinner while it
+  // works, the ▣ recap once it is idle.
+  const CHROME_ROWS = 1 + 1 + (showCrushStatus || showRecap ? 1 : 0);
   // The offline banner is a bordered 3-row box rendered above every view, so it
   // must come out of the row budget — it used to be drawn without being counted,
   // which pushed the status bar off the bottom by exactly its height.
@@ -1703,7 +1836,7 @@ export default function App({ version = '0.1.0' }) {
       title: 'Agent',
       hint: agent.status,
       cells: [
-        { label: 'state', value: agent.status, color: agent.status === 'error' ? 'red' : 'green' },
+        { label: 'state', value: agent.status, color: agent.status === 'error' ? 'red' : agent.status === 'reconnecting' ? 'yellow' : 'green' },
         { label: 'turns', value: agent.messages.filter((m) => m.role === 'user').length },
         { label: 'todos done', value: `${agent.todos.filter((t) => t.done).length}/${agent.todos.length}` },
         { label: 'elapsed', value: `${(agent.elapsedMs / 1000).toFixed(1)}s` },
@@ -1809,7 +1942,13 @@ export default function App({ version = '0.1.0' }) {
             </text>
           ) : null}
         </box>
-        {headerRight ? <text fg="gray">{headerRight}</text> : null}
+        {headerRight ? (
+          <text>
+            {headerRight.parts.map((part, i) => (
+              <span key={i} fg={part.fg} attributes={part.bold ? TextAttributes.BOLD : 0}>{part.t}</span>
+            ))}
+          </text>
+        ) : null}
       </box>
 
       {statusErr ? (
@@ -1898,6 +2037,59 @@ export default function App({ version = '0.1.0' }) {
             />
           </scrollbox>
         </box>
+      ) : view === 'debug' ? (
+        /* ◇ Debugger (owner, 2026-11-24: "add debugger to"): the app's own
+           measurements — render cost, event-loop lag, process, session counts —
+           plus the box's build state from /api/version. Every field is a sample
+           this process took or a value the server reported; "\u2014" is printed
+           where there is no sample yet. */
+        <box style={{ width: panelW, height: dashRows, flexShrink: 0, overflow: 'hidden' }}>
+          <scrollbox
+            ref={debugRef}
+            style={{ width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true }}
+            scrollbarOptions={PAGE_SCROLLBAR}
+          >
+            <DebugView
+              width={Math.max(1, panelW - 1)}
+              stats={debugStats.snap}
+              version={debugStats.version}
+              versionErr={debugStats.versionErr}
+              session={{
+                view,
+                phase: status && status.phase,
+                model: displayModel(model),
+                provider,
+                autoMode,
+                handoff: handoffOn,
+                connected: !!status && !statusErr,
+                turns: usage.turns,
+                tools: usage.tools,
+                ok: usage.ok,
+                fail: usage.fail,
+                web: usage.web,
+                inTok: usage.inTok,
+                outTok: usage.outTok,
+                tokensKnown: usage.tokensKnown,
+                ctxPct: usage.ctxPct,
+                guard,
+                trust: status && status.trust,
+                mcp: (mcp && Array.isArray(mcp.servers))
+                  ? {
+                    up: mcp.servers.filter((x) => !(x.initialized === false && !(Number(x.toolCount) || 0))).length,
+                    total: mcp.servers.length,
+                  }
+                  : null,
+              }}
+              messages={agent.messages}
+              terminal={{
+                cols,
+                rows,
+                graphics: kittyGraphicsSupported(process.env, process.stdout),
+                version,
+              }}
+            />
+          </scrollbox>
+        </box>
       ) : view === 'dashboard' ? (
         /* The dashboard is one scrollable page. Before this it was a fixed
            stack, so a short terminal clipped the services grid and pushed the
@@ -1939,7 +2131,6 @@ export default function App({ version = '0.1.0' }) {
                   <Meter value={Math.min(100, meterPoints)} max={100} w={Math.min(40, Math.max(10, panelW - 40))} color={barColor('points', meterPoints)} />
                   <text fg="white">{` ${meterPoints}p`}</text>
                   <text fg={arrowFg(meters && meters.pointsDelta)}>{arrowFor(meters && meters.pointsDelta)}</text>
-                  <text fg="white">{` ${pointsPct(meterPoints)}%`}</text>
                   <box style={{ marginLeft: 2 }}>
                     <Spark data={pointsHistory} w={Math.min(24, Math.max(8, panelW - 70))} />
                   </box>
@@ -2168,6 +2359,29 @@ export default function App({ version = '0.1.0' }) {
                   activity={activeTool?.name || ''}
                   elapsedMs={agent.elapsedMs}
                   queued={steerQueue.length}
+                />
+              </box>
+            ) : showRecap ? (
+              // Idle: the same row states what the finished run did instead of
+              // leaving it blank (owner, 2026-11-24: "add recap in cli when
+              // agent is idle").
+              <box style={{ flexShrink: 0 }}>
+                <Recap
+                  width={mainW}
+                  turns={usage.turns}
+                  tools={usage.tools}
+                  ok={usage.ok}
+                  fail={usage.fail}
+                  web={usage.web}
+                  requests={usage.requests}
+                  elapsedMs={agent.elapsedMs}
+                  inTok={usage.inTok}
+                  outTok={usage.outTok}
+                  tokensKnown={usage.tokensKnown}
+                  ctxPct={usage.ctxPct}
+                  failed={agent.status === 'error'}
+                  todosDone={todosDone}
+                  todosTotal={agent.todos.length}
                 />
               </box>
             ) : null}

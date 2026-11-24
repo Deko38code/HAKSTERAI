@@ -28,8 +28,15 @@ const BLOCKED = new Set([
   0x23f3 /* ⏳ */, 0x23f8 /* ⏸ */, 0x26e8 /* ⛨ */, 0x2705 /* ✅ */, 0x2b21 /* ⬡ */,
 ]);
 /* ❌ is deliberately kept: smartness.mjs and the tool cards match it in a regex
- * against server output. It is never rendered as text. */
-const ALLOWED = new Set([0x274c]);
+ * against server output. It is never rendered as text.
+ *
+ * 🧠 (U+1F9E0) is deliberately kept too. The owner asked for the brain back on
+ * the meters row (2026-11-24: "you removed my autolearn brain emoji") after the
+ * all-mono pass, so it is the one colour glyph the TUI still prints. It only
+ * ever sits at the head of the meter line, where the header's fit test already
+ * reserves the extra cell a double-width glyph takes (the `+2 slack` in
+ * App.jsx), so it cannot push a column out of place. */
+const ALLOWED = new Set([0x274c, 0x1f9e0]);
 
 const isBlocked = (cp) => {
   if (ALLOWED.has(cp)) return false;

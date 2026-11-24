@@ -1706,9 +1706,9 @@ function SystemPanel({ meters, services, scanOk, cols = 80 }) {
   // node the row can only be one line: it truncates, it never wraps.
   return /* @__PURE__ */ jsxs13(Box12, { flexDirection: "column", width: cols, paddingX: 1, flexShrink: 0, children: [
     narrow
-      ? /* @__PURE__ */ jsx12(Text13, { key: "narrow", wrap: "truncate", children: `◈ ${score}% ${arrow} ${smartLabel(score)}   ✦ ${points}p autolearn` })
+      ? /* @__PURE__ */ jsx12(Text13, { key: "narrow", wrap: "truncate", children: `🧠 ${score}% ${arrow} ${smartLabel(score)}   ✦ ${points}p autolearn` })
       : /* @__PURE__ */ jsxs13(Text13, { key: "bars", wrap: "truncate", children: [
-      /* @__PURE__ */ jsx12(Text13, { key: "b1", color: barColor("smart", score), bold: true, children: "◈ " }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b1", color: barColor("smart", score), bold: true, children: "🧠 " }),
       /* @__PURE__ */ jsx12(Text13, { key: "b2", color: barColor("smart", score), children: "█".repeat(sc.filled) }),
       /* @__PURE__ */ jsx12(Text13, { key: "b3", color: "gray", dim: true, children: "░".repeat(sc.empty) }),
       /* @__PURE__ */ jsx12(Text13, { key: "b4", bold: true, children: ` ${score}% ` }),

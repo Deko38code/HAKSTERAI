@@ -1497,16 +1497,16 @@ var require_catalog = __commonJS({
 });
 
 // src/index.jsx
-import React28 from "react";
+import React30 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React27, { useCallback as useCallback5, useEffect as useEffect16, useRef as useRef11, useState as useState17 } from "react";
+import React29, { useCallback as useCallback6, useEffect as useEffect18, useRef as useRef13, useState as useState18 } from "react";
 import fs9 from "node:fs";
 import path7 from "node:path";
 import { useKeyboard as useKeyboard7, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
-import { TextAttributes as TextAttributes20 } from "@opentui/core";
+import { TextAttributes as TextAttributes21 } from "@opentui/core";
 
 // src/components/DockAd.jsx
 var import_ad_client = __toESM(require_ad_client());
@@ -1909,20 +1909,20 @@ function GridPanel({ title, cols = 4, width, children, borderColor = "gray", hin
   ] });
 }
 function Cell({ label, value, w = 18, color = "white", dense = false }) {
-  const clip7 = (s, n) => {
+  const clip8 = (s, n) => {
     const t = String(s == null ? "\u2014" : s);
     return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
   };
   if (dense) {
     const lw = Math.max(3, Math.min(Math.floor(w / 2), 8));
     return /* @__PURE__ */ jsxs5("box", { style: { width: Math.max(1, w), flexDirection: "row", flexShrink: 0, marginRight: 1 }, children: [
-      /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip7(label, lw) }),
-      /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: ` ${clip7(value, Math.max(1, w - lw - 1))}` })
+      /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip8(label, lw) }),
+      /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: ` ${clip8(value, Math.max(1, w - lw - 1))}` })
     ] });
   }
   return /* @__PURE__ */ jsxs5("box", { style: { width: Math.max(1, w), flexDirection: "column", flexShrink: 0, marginRight: 1 }, children: [
-    /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip7(label, w) }),
-    /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: clip7(value, w) })
+    /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip8(label, w) }),
+    /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: clip8(value, w) })
   ] });
 }
 function Meter({ value, max = 100, w = 16, color = "green" }) {
@@ -3229,6 +3229,7 @@ var MENU_ITEMS = [
   { cmd: "/squad", label: "Sub-agents", detail: "the peer agents the server reports \xB7 enter delegates" },
   { cmd: "/status", label: "Status", detail: "server, phase, tokens" },
   { cmd: "/usage", label: "Usage", detail: "per-user \xB7 daily & weekly graphs \xB7 r refresh \xB7 [ ] rate" },
+  { cmd: "/debug", label: "Debugger", detail: "render times \xB7 event-loop lag \xB7 tools \xB7 server build" },
   { cmd: "/update", label: "Update", detail: "check \xB7 downloads in-session \xB7 applies on restart" },
   { cmd: "/settings", label: "Settings", detail: "every CLI setting \xB7 change it in place" },
   { cmd: "/graphics", label: "Kitty graphics", detail: "real logo image in kitty/Ghostty/WezTerm \xB7 report or on/off" },
@@ -3944,10 +3945,6 @@ function barCells(value, total, len = 16) {
   const filled = Math.round(ratio * len);
   return { filled, empty: Math.max(0, len - filled) };
 }
-function pointsPct(points) {
-  const n = Number(points) || 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
-}
 function meterArrow(delta) {
   const d = Number(delta) || 0;
   return d > 0 ? "\u25B2" : d < 0 ? "\u25BC" : "\u25C6";
@@ -4157,7 +4154,6 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   const pointsDelta = Number(meters && meters.pointsDelta) || 0;
   const ptsArrow = meterArrow(pointsDelta);
   const ptsArrowColor = arrowColor(pointsDelta);
-  const ptsPct = pointsPct(points);
   const ctxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
   const arrow = meterArrow(delta);
   const arrowColorFg = arrowColor(delta);
@@ -4169,14 +4165,14 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   const sc = barCells(score, 100, 12);
   const ac = barCells(points, 100, 10);
   const cc = barCells(ctxPct, 100, 8);
-  const ptsSeg = ` ${points}p${ptsArrow} ${ptsPct}% autolearn   `;
+  const ptsSeg = ` ${points}p${ptsArrow} autolearn   `;
   const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + ptsSeg.length + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
   const hostShort = cpuPct == null && memPct == null ? "" : `  cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`} ram ${memPct == null ? "\u2014" : `${memPct}%`}`;
-  const compact = `\u25C8 ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p${ptsArrow} ${ptsPct}% autolearn  ctx ${ctxPct}%${hostShort}`;
-  const terse = `\u25C8 ${score}% \u2726 ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
+  const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p${ptsArrow} autolearn  ctx ${ctxPct}%${hostShort}`;
+  const terse = `\u{1F9E0} ${score}% \u2726 ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
   if (fullLen <= w) {
     return /* @__PURE__ */ jsx20("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs19("text", { children: [
-      /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), attributes: TextAttributes15.BOLD, children: "\u25C8 " }),
+      /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), attributes: TextAttributes15.BOLD, children: "\u{1F9E0} " }),
       /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), children: "\u2588".repeat(sc.filled) }),
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: "\u2591".repeat(sc.empty) }),
       /* @__PURE__ */ jsx20("span", { fg: "white", attributes: TextAttributes15.BOLD, children: ` ${score}% ` }),
@@ -4188,7 +4184,6 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: "\u2591".repeat(ac.empty) }),
       /* @__PURE__ */ jsx20("span", { fg: "white", attributes: TextAttributes15.BOLD, children: ` ${points}p` }),
       /* @__PURE__ */ jsx20("span", { fg: ptsArrowColor, children: ptsArrow }),
-      /* @__PURE__ */ jsx20("span", { fg: "white", children: ` ${ptsPct}%` }),
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: " autolearn   " }),
       /* @__PURE__ */ jsx20("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "ctx " }),
       /* @__PURE__ */ jsx20("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "\u2588".repeat(cc.filled) }),
@@ -4292,6 +4287,11 @@ import { jsx as jsx22, jsxs as jsxs21 } from "react/jsx-runtime";
 var STATUS_STYLES = {
   idle: { text: "ready", color: "gray" },
   connecting: { text: "can't reach server\u2026", color: "yellow" },
+  // The server dropped mid-turn and the TUI is waiting for the port to answer
+  // before resending. Distinct from `connecting` on purpose: this turn was
+  // already sent, so "can't reach server" would read as a first attempt
+  // (owner, 2026-11-24: "and add auto reconnect in tui").
+  reconnecting: { text: "reconnecting\u2026", color: "yellow" },
   thinking: { text: "thinking\u2026", color: "yellow" },
   streaming: { text: "working\u2026", color: "cyan" },
   // The run is parked on a decision the operator has to make. Naming it here
@@ -4308,7 +4308,7 @@ function formatElapsed(ms) {
 function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, handoff, autoMode }) {
   const known = status ? STATUS_STYLES[status] : null;
   const label = known ? known.text : status ? String(status) : "";
-  const elapsed = status === "connecting" || status === "streaming" || status === "thinking" || status === "approval" ? formatElapsed(elapsedMs) : null;
+  const elapsed = status === "connecting" || status === "reconnecting" || status === "streaming" || status === "thinking" || status === "approval" ? formatElapsed(elapsedMs) : null;
   const segs = [];
   if (label) segs.push({ key: "status", color: known ? known.color : "gray", text: label });
   if (elapsed) segs.push({ key: "elapsed", color: "gray", text: elapsed });
@@ -4344,6 +4344,7 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
 // src/components/CrushStatus.jsx
 import React23, { useEffect as useEffect8, useState as useState9 } from "react";
 import { jsx as jsx23, jsxs as jsxs22 } from "react/jsx-runtime";
+var SPINNER_MS = 300;
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
 var GRADIENT = [51, 87, 117, 153, 117, 87];
@@ -4363,7 +4364,7 @@ function formatElapsed2(ms) {
 function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   const [frame, setFrame] = useState9(0);
   useEffect8(() => {
-    const timer = setInterval(() => setFrame((value) => value + 1), 80);
+    const timer = setInterval(() => setFrame((value) => value + 1), SPINNER_MS);
     return () => clearInterval(timer);
   }, []);
   const normalizedPhase = String(phase || "DEFAULT").toUpperCase();
@@ -4391,10 +4392,230 @@ function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   ] }) });
 }
 
-// src/components/TodoPanel.jsx
+// src/components/Recap.jsx
 import React24 from "react";
+import { jsx as jsx24 } from "react/jsx-runtime";
+function fmtCount(n) {
+  const v = Math.max(0, Number(n) || 0);
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e4) return `${Math.round(v / 1e3)}K`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  return String(Math.round(v));
+}
+function fmtElapsed(ms) {
+  const s = Math.max(0, Number(ms) || 0) / 1e3;
+  if (!Number.isFinite(s) || s < 1) return null;
+  if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m${String(Math.round(s % 60)).padStart(2, "0")}s`;
+}
+var plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
+function Recap({
+  width,
+  turns = 0,
+  tools = 0,
+  ok = 0,
+  fail = 0,
+  web = 0,
+  requests = 0,
+  elapsedMs = 0,
+  inTok = 0,
+  outTok = 0,
+  tokensKnown = false,
+  ctxPct = null,
+  failed = false,
+  todosDone = 0,
+  todosTotal = 0
+}) {
+  const t = Math.max(0, Number(turns) || 0);
+  const tc = Math.max(0, Number(tools) || 0);
+  const bad = Math.max(0, Number(fail) || 0);
+  const good = Math.max(0, Number(ok) || 0);
+  const w = Math.max(0, Number(web) || 0);
+  const req = Math.max(0, Number(requests) || 0);
+  const segs = [
+    { key: "label", fg: failed ? "red" : "#3fb950", text: failed ? "\u25A3 recap \xB7 run failed" : "\u25A3 recap" }
+  ];
+  if (t > 0) segs.push({ key: "turns", fg: "gray", text: plural(t, "turn") });
+  if (tc > 0) {
+    const tail = bad > 0 ? ` (${good} ok \xB7 ${bad} fail)` : good > 0 ? ` (${good} ok)` : "";
+    segs.push({ key: "tools", fg: bad > 0 ? "yellow" : "gray", text: `${plural(tc, "tool")}${tail}` });
+  }
+  if (w > 0) segs.push({ key: "web", fg: "gray", text: `${w} web` });
+  if (req > t) segs.push({ key: "reqs", fg: "gray", text: `${req} req` });
+  const el = fmtElapsed(elapsedMs);
+  if (el) segs.push({ key: "elapsed", fg: "gray", text: el });
+  if (tokensKnown) segs.push({ key: "tokens", fg: "gray", text: `${fmtCount(inTok)} in / ${fmtCount(outTok)} out` });
+  const pct = Number(ctxPct);
+  if (ctxPct !== null && ctxPct !== void 0 && Number.isFinite(pct)) {
+    segs.push({ key: "ctx", fg: "gray", text: `ctx ${Math.max(0, Math.min(100, Math.round(pct)))}%` });
+  }
+  const td = Math.max(0, Number(todosDone) || 0);
+  const tt = Math.max(0, Number(todosTotal) || 0);
+  if (tt > 0) segs.push({ key: "todos", fg: td >= tt ? "#3fb950" : "gray", text: `${td}/${tt} todos` });
+  const barW = Math.max(12, Number(width) || 80);
+  const avail = Math.max(8, barW - 2);
+  const joinedLen = (list) => list.reduce((n, one, i) => n + one.text.length + (i ? 3 : 0), 0);
+  const shown = segs.slice();
+  while (shown.length > 1 && joinedLen(shown) > avail) shown.pop();
+  if (shown.length === 1 && shown[0].text.length > avail) {
+    shown[0] = { ...shown[0], text: `${shown[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
+  }
+  return /* @__PURE__ */ jsx24("box", { style: { width: barW, flexDirection: "row", paddingLeft: 1, overflow: "hidden", flexShrink: 0 }, children: /* @__PURE__ */ jsx24("text", { children: shown.map((seg, i) => /* @__PURE__ */ jsx24("span", { fg: seg.fg, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) }) });
+}
+
+// src/components/DebugView.jsx
+import React25 from "react";
 import { TextAttributes as TextAttributes18 } from "@opentui/core";
-import { jsx as jsx24, jsxs as jsxs23 } from "react/jsx-runtime";
+import { jsx as jsx25, jsxs as jsxs23 } from "react/jsx-runtime";
+var clip7 = (s, n) => {
+  const t = String(s == null ? "" : s);
+  if (n <= 0) return "";
+  return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
+};
+var fmtMs = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "\u2014";
+  return n < 10 ? `${n.toFixed(1)} ms` : `${Math.round(n)} ms`;
+};
+var fmtNum2 = (v) => Number.isFinite(Number(v)) ? String(Math.round(Number(v))) : "\u2014";
+var fmtBytes = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "\u2014";
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.round(n / 1024)} KB`;
+};
+var fmtDur = (sec) => {
+  const n = Math.max(0, Math.round(Number(sec) || 0));
+  if (n < 60) return `${n}s`;
+  const m = Math.floor(n / 60);
+  if (m < 60) return `${m}m ${n % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+};
+var yesNo = (v) => v ? "yes" : "no";
+function Row3({ width, labelW, label, value, color = "white" }) {
+  const valueW = Math.max(4, width - labelW - 4);
+  return /* @__PURE__ */ jsxs23("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx25("text", { fg: "gray", children: `  ${clip7(label, labelW).padEnd(labelW)} ` }),
+    /* @__PURE__ */ jsx25("text", { fg: color, children: clip7(value, valueW) })
+  ] });
+}
+function Section({ width, title, hint }) {
+  return /* @__PURE__ */ jsxs23("box", { style: { width, flexDirection: "row", flexShrink: 0, justifyContent: "space-between" }, children: [
+    /* @__PURE__ */ jsx25("text", { fg: "cyan", attributes: TextAttributes18.BOLD, children: `\u25B8 ${title}` }),
+    hint ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip7(hint, Math.max(0, width - title.length - 8)) }) : null
+  ] });
+}
+function slowestTools(messages, limit = 5) {
+  const out = [];
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (!Array.isArray(m.tools)) continue;
+    for (const t of m.tools) {
+      if (!t || t.ms == null) continue;
+      out.push({ name: String(t.name || "tool"), ms: Number(t.ms) || 0, ok: t.result != null && !t.error });
+    }
+  }
+  out.sort((a, b) => b.ms - a.ms);
+  return out.slice(0, limit);
+}
+function DebugView({
+  width = 72,
+  stats = null,
+  version = null,
+  versionErr = null,
+  session = {},
+  messages = [],
+  terminal = {}
+}) {
+  const w = Math.max(24, Number(width) || 72);
+  const labelW = 13;
+  const render = stats && stats.render ? stats.render : null;
+  const lag = stats && stats.lag ? stats.lag : null;
+  const proc = stats && stats.proc ? stats.proc : null;
+  const srv = version && version.server ? version.server : null;
+  const tools = React25.useMemo(() => slowestTools(messages), [messages]);
+  const ctx = session.ctxPct == null ? "\u2014" : `${session.ctxPct}%`;
+  const tokens = session.tokensKnown ? `${fmtNum2(session.inTok)} in / ${fmtNum2(session.outTok)} out` : "not reported";
+  const auto = session.autoMode || "\u2014";
+  return /* @__PURE__ */ jsxs23("box", { style: { width: w, flexDirection: "column" }, children: [
+    /* @__PURE__ */ jsxs23("box", { style: { width: w, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx25("text", { fg: "cyan", attributes: TextAttributes18.BOLD, children: "\u25C7 Debugger" }),
+      /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip7(stats ? `live \xB7 ${Math.max(0, Math.round((Date.now() - stats.at) / 1e3))}s ago` : "sampling\u2026", Math.max(0, w - 12)) })
+    ] }),
+    /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip7('r reset counters \xB7 pgup/pgdn scroll \xB7 esc back \u2014 every figure is measured, "\u2014" means no sample yet', w - 2) }),
+    /* @__PURE__ */ jsx25(Section, { width: w, title: "RENDER", hint: render ? `${fmtNum2(render.total)} app renders` : "" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "rate", value: render && render.perSec != null ? `${render.perSec.toFixed(1)} / s` : "\u2014", color: render && render.perSec != null && render.perSec > 8 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "last", value: fmtMs(render && render.last), color: render && render.last > 50 ? "red" : "white" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "p50 / p95", value: render ? `${fmtMs(render.p50)} / ${fmtMs(render.p95)}` : "\u2014", color: render && render.p95 > 50 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "max", value: fmtMs(render && render.max), color: render && render.max > 120 ? "red" : "white" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "samples", value: render ? `${fmtNum2(render.samples)} renders in this window` : "\u2014" }),
+    /* @__PURE__ */ jsx25(Section, { width: w, title: "EVENT LOOP", hint: lag ? `${fmtNum2(lag.samples)} samples \xB7 50 ms timer` : "" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "lag p50", value: fmtMs(lag && lag.p50), color: lag && lag.p50 > 20 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "lag p95", value: fmtMs(lag && lag.p95), color: lag && lag.p95 > 40 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "lag max", value: fmtMs(lag && lag.max), color: lag && lag.max > 120 ? "red" : "white" }),
+    /* @__PURE__ */ jsx25(Section, { width: w, title: "PROCESS" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "pid", value: proc ? `${proc.pid} \xB7 up ${fmtDur(proc.uptimeSec)} (page open)` : "\u2014" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "rss / heap", value: proc ? `${fmtBytes(proc.rss)} \xB7 ${fmtBytes(proc.heapUsed)} of ${fmtBytes(proc.heapTotal)}` : "\u2014" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "handles", value: proc ? proc.handles == null ? "unavailable" : fmtNum2(proc.handles) : "\u2014" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "runtime", value: proc ? `node ${proc.node}${proc.bun ? ` \xB7 bun ${proc.bun}` : ""}` : "\u2014" }),
+    /* @__PURE__ */ jsx25(Section, { width: w, title: "TERMINAL" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "size", value: `${fmtNum2(terminal.cols)} x ${fmtNum2(terminal.rows)}` }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "graphics", value: terminal.graphics ? "kitty supported" : "none (half-block only)", color: terminal.graphics ? "green" : "gray" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "bundle", value: terminal.version ? `v${terminal.version}` : "\u2014" }),
+    /* @__PURE__ */ jsx25(Section, { width: w, title: "SESSION", hint: session.connected ? "server connected" : "server offline" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "view \xB7 phase", value: `${session.view || "chat"} \xB7 ${session.phase || "idle"}` }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "model", value: `${session.model || "\u2014"} \xB7 ${session.provider || "\u2014"}` }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "auto \xB7 handoff", value: `${auto}${session.handoff ? " \xB7 handoff on" : " \xB7 handoff off"}` }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "turns \xB7 tools", value: `${fmtNum2(session.turns)} turns \xB7 ${fmtNum2(session.tools)} calls (${fmtNum2(session.ok)} ok, ${fmtNum2(session.fail)} failed) \xB7 ${fmtNum2(session.web)} web` }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "tokens \xB7 ctx", value: `${tokens} \xB7 ctx ${ctx}`, color: session.tokensKnown ? "white" : "gray" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "files", value: session.guard ? `${session.guard.present}/${session.guard.total} guarded` : "\u2014" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "trust", value: session.trust == null ? "\u2014" : fmtNum2(session.trust) }),
+    /* @__PURE__ */ jsx25(Section, { width: w, title: "TOOLS", hint: tools.length ? "slowest calls this session" : "" }),
+    tools.length === 0 ? /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "none", value: "no timed tool calls yet", color: "gray" }) : tools.map((t, i) => /* @__PURE__ */ jsx25(
+      Row3,
+      {
+        width: w,
+        labelW,
+        label: i === 0 ? "slowest" : "",
+        value: `${clip7(t.name, 22).padEnd(22)} ${fmtMs(t.ms).padStart(7)}  ${t.ok ? "ok" : "failed"}`,
+        color: t.ok ? t.ms > 1e4 ? "yellow" : "white" : "red"
+      },
+      `${t.name}-${i}`
+    )),
+    /* @__PURE__ */ jsx25(Section, { width: w, title: "SERVER", hint: versionErr ? "" : version ? "live /api/version" : "" }),
+    versionErr ? /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "error", value: versionErr, color: "red" }) : null,
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "web build", value: version && version.build ? version.build : "\u2014" }),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "server build", value: srv && srv.build ? srv.build : "\u2014" }),
+    /* @__PURE__ */ jsx25(
+      Row3,
+      {
+        width: w,
+        labelW,
+        label: "apply",
+        value: srv ? `${srv.applying ? "applying" : srv.stale ? "stale" : "current"} \xB7 pending ${fmtNum2(srv.pending)} \xB7 idle ${yesNo(srv.idle)}` : "\u2014",
+        color: srv && srv.applying ? "yellow" : srv && srv.stale ? "yellow" : "white"
+      }
+    ),
+    /* @__PURE__ */ jsx25(
+      Row3,
+      {
+        width: w,
+        labelW,
+        label: "cli attach",
+        value: srv ? `${yesNo(srv.cliAttached)} \xB7 ${srv.holdReason || "no hold"}` : "\u2014",
+        color: srv && srv.cliAttached ? "green" : "white"
+      }
+    ),
+    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "mcp", value: session.mcp ? `${fmtNum2(session.mcp.up)}/${fmtNum2(session.mcp.total)} servers up` : "\u2014" }),
+    /* @__PURE__ */ jsx25("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx25("text", { fg: "gray", children: " " }) })
+  ] });
+}
+
+// src/components/TodoPanel.jsx
+import React26 from "react";
+import { TextAttributes as TextAttributes19 } from "@opentui/core";
+import { jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
 var GLYPH_DONE = "\u2713";
 var GLYPH_TODO = "\u25CB";
 var EMPTY_TEXT = "No todos yet \u2014 the agent's checklist appears here once it creates one.";
@@ -4402,7 +4623,7 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   const list = Array.isArray(todos) ? todos : [];
   const completed = list.filter((t) => t && t.done).length;
   const title = width && width < 34 ? `Todos ${completed}/${list.length}` : `Todos \u2014 ${completed}/${list.length} completed`;
-  return /* @__PURE__ */ jsx24(
+  return /* @__PURE__ */ jsx26(
     ScrollPanel_default,
     {
       width,
@@ -4416,9 +4637,9 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
         const todo = list[index] || {};
         const done = !!todo.done;
         const text = clip(todo.text || "", Math.max(1, bodyW - 2));
-        return /* @__PURE__ */ jsxs23("box", { style: { width: bodyW, flexDirection: "row", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx24("text", { fg: done ? "green" : "gray", attributes: done || compact ? 0 : TextAttributes18.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
-          /* @__PURE__ */ jsx24("text", { fg: done ? "white" : "gray", children: ` ${text}` })
+        return /* @__PURE__ */ jsxs24("box", { style: { width: bodyW, flexDirection: "row", flexShrink: 0 }, children: [
+          /* @__PURE__ */ jsx26("text", { fg: done ? "green" : "gray", attributes: done || compact ? 0 : TextAttributes19.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
+          /* @__PURE__ */ jsx26("text", { fg: done ? "white" : "gray", children: ` ${text}` })
         ] });
       }
     }
@@ -4426,13 +4647,13 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
 }
 
 // src/components/Transcript.jsx
-import React26, { useEffect as useEffect10, useRef as useRef6, useState as useState11 } from "react";
+import React28, { useEffect as useEffect10, useRef as useRef6, useState as useState11 } from "react";
 import { useKeyboard as useKeyboard6 } from "@opentui/react";
 
 // src/components/MessageBlock.jsx
-import React25, { useEffect as useEffect9, useState as useState10 } from "react";
-import { TextAttributes as TextAttributes19 } from "@opentui/core";
-import { Fragment as Fragment9, jsx as jsx25, jsxs as jsxs24 } from "react/jsx-runtime";
+import React27, { useEffect as useEffect9, useState as useState10 } from "react";
+import { TextAttributes as TextAttributes20 } from "@opentui/core";
+import { Fragment as Fragment9, jsx as jsx27, jsxs as jsxs25 } from "react/jsx-runtime";
 var RESULT_LINES = 3;
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
@@ -4454,29 +4675,30 @@ function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand,
   const ended = Number(endedAt) || 0;
   if (live) {
     const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
-    return /* @__PURE__ */ jsxs24("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
-      label ? /* @__PURE__ */ jsxs24("text", { children: [
-        /* @__PURE__ */ jsx25("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
-        /* @__PURE__ */ jsx25("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur(Date.now() - started)}` : ""}` })
+    return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
+      label ? /* @__PURE__ */ jsxs25("text", { children: [
+        /* @__PURE__ */ jsx27("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
+        /* @__PURE__ */ jsx27("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur2(Date.now() - started)}` : ""}` })
       ] }) : null,
-      window.lines.map((line, i) => /* @__PURE__ */ jsx25("text", { fg: "gray", children: line.trim() }, `th-${i}`))
+      window.lines.map((line, i) => /* @__PURE__ */ jsx27("text", { fg: "gray", children: line.trim() }, `th-${i}`))
     ] });
   }
   if (!expand) {
     const label2 = started && ended ? thoughtFor(ended - started) : lastLine(text);
-    return /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip(`\u22EF ${label2}`, Math.max(4, width)) });
+    return /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip(`\u22EF ${label2}`, Math.max(4, width)) });
   }
-  return /* @__PURE__ */ jsx25("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: String(text || "").replace(/\r/g, "").split("\n").filter((l) => l.trim()).map((line, i) => /* @__PURE__ */ jsx25("text", { fg: "gray", children: line.trim() }, `td-${i}`)) });
+  return /* @__PURE__ */ jsx27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: String(text || "").replace(/\r/g, "").split("\n").filter((l) => l.trim()).map((line, i) => /* @__PURE__ */ jsx27("text", { fg: "gray", children: line.trim() }, `td-${i}`)) });
 }
 function ProseBlock({ text, live, width, compact }) {
-  if (!live) return /* @__PURE__ */ jsx25("text", { fg: "white", children: String(text) });
+  if (!live) return /* @__PURE__ */ jsx27("text", { fg: "white", children: String(text) });
   const window = tailWindow(text, compact ? 3 : LIVE_TEXT_LINES);
-  return /* @__PURE__ */ jsxs24("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
-    window.hidden ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: `\u22EF ${window.hidden} earlier line${window.hidden === 1 ? "" : "s"} (writing)` }) : null,
-    window.lines.map((line, i) => /* @__PURE__ */ jsx25("text", { fg: "white", children: line.trim() }, `pr-${i}`))
+  return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
+    window.hidden ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: `\u22EF ${window.hidden} earlier line${window.hidden === 1 ? "" : "s"} (writing)` }) : null,
+    window.lines.map((line, i) => /* @__PURE__ */ jsx27("text", { fg: "white", children: line.trim() }, `pr-${i}`))
   ] });
 }
 var SPINNER_FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
+var TOOL_SPINNER_MS = 300;
 var ARGS_BUDGET = 64;
 var ARG_VALUE_MAX = 40;
 function flattenArgs(args) {
@@ -4493,7 +4715,7 @@ function flattenArgs(args) {
   return String(args);
 }
 var isErrorResult = (result) => /^Error[:\n]|^❌/i.test(String(result == null ? "" : result).trim());
-function fmtDur(ms) {
+function fmtDur2(ms) {
   const n = Math.max(0, Math.round(Number(ms) || 0));
   return n < 1e3 ? `${n}ms` : `${(n / 1e3).toFixed(1)}s`;
 }
@@ -4501,7 +4723,7 @@ function useSpinnerFrame(active) {
   const [frame, setFrame] = useState10(0);
   useEffect9(() => {
     if (!active) return void 0;
-    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 100);
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), TOOL_SPINNER_MS);
     return () => clearInterval(id);
   }, [active]);
   return frame;
@@ -4514,30 +4736,30 @@ function ToolRow({ tool, width, compact = false, outputLabel = "\u25B6 Output" }
   const colour = pending ? "yellow" : failed ? "red" : "green";
   const name = tool.name || "tool";
   const args = clip(flattenArgs(tool.args), ARGS_BUDGET);
-  const dur = pending ? fmtDur(Date.now() - (Number(tool.t0) || Date.now())) : tool.ms != null ? fmtDur(tool.ms) : "";
+  const dur = pending ? fmtDur2(Date.now() - (Number(tool.t0) || Date.now())) : tool.ms != null ? fmtDur2(tool.ms) : "";
   const nameW = name.length + 2;
   const argW = Math.max(4, width - nameW - (args ? dur.length + 3 : 0));
   const shown = pending ? null : String(tool.result).replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "").split("\n");
   const limit = compact ? 1 : RESULT_LINES;
   const lines = shown ? shown.slice(0, limit) : [];
   const hidden = shown ? Math.max(0, shown.length - lines.length) : 0;
-  return /* @__PURE__ */ jsxs24("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs24("text", { children: [
-      /* @__PURE__ */ jsxs24("span", { fg: colour, children: [
+  return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs25("text", { children: [
+      /* @__PURE__ */ jsxs25("span", { fg: colour, children: [
         glyph,
         " "
       ] }),
-      /* @__PURE__ */ jsx25("span", { fg: "white", children: name }),
-      args ? /* @__PURE__ */ jsx25("span", { fg: "gray", children: ` ${clip(args, argW)}` }) : null,
-      dur ? /* @__PURE__ */ jsx25("span", { fg: "gray", children: `  ${dur}` }) : null
+      /* @__PURE__ */ jsx27("span", { fg: "white", children: name }),
+      args ? /* @__PURE__ */ jsx27("span", { fg: "gray", children: ` ${clip(args, argW)}` }) : null,
+      dur ? /* @__PURE__ */ jsx27("span", { fg: "gray", children: `  ${dur}` }) : null
     ] }),
-    lines.map((line, i) => /* @__PURE__ */ jsx25("text", { fg: failed ? "red" : "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
-    pending && !lines.length ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip("\u2502 waiting for output\u2026", Math.max(4, width)) }) : null,
+    lines.map((line, i) => /* @__PURE__ */ jsx27("text", { fg: failed ? "red" : "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
+    pending && !lines.length ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip("\u2502 waiting for output\u2026", Math.max(4, width)) }) : null,
     hidden > 0 ? (
       // The pointer names the pane that actually holds the rest: the right
       // ◈ Live → ▶ Output on a wide terminal, the middle ▶ Result box on a
       // narrow one (owner, 2026-11-24: one live panel, on the right).
-      /* @__PURE__ */ jsx25("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 ${outputLabel}` })
+      /* @__PURE__ */ jsx27("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 ${outputLabel}` })
     ) : null
   ] });
 }
@@ -4547,22 +4769,22 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
   const inner = Math.max(8, (width || 80) - 4);
   if (message.role === "system") {
-    return /* @__PURE__ */ jsx25("box", { style: { width, flexShrink: 0, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx25("text", { fg: border, children: String(message.text || "") }) });
+    return /* @__PURE__ */ jsx27("box", { style: { width, flexShrink: 0, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx27("text", { fg: border, children: String(message.text || "") }) });
   }
   const tools = Array.isArray(message.tools) ? message.tools : [];
   const rounds = (Array.isArray(message.rounds) ? message.rounds : []).filter(
     (r) => r && (r.text && String(r.text).trim() || r.thinking && String(r.thinking).trim() || Array.isArray(r.tools) && r.tools.length)
   );
-  return /* @__PURE__ */ jsxs24("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
-    compact ? null : /* @__PURE__ */ jsx25("text", { fg: border, attributes: TextAttributes19.BOLD, children: roleStyle.label }),
-    message.images ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: `\u22B8 ${message.imageName || `${message.images} image`}` }) : null,
+  return /* @__PURE__ */ jsxs25("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
+    compact ? null : /* @__PURE__ */ jsx27("text", { fg: border, attributes: TextAttributes20.BOLD, children: roleStyle.label }),
+    message.images ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: `\u22B8 ${message.imageName || `${message.images} image`}` }) : null,
     rounds.length ? rounds.map((round, i) => {
       const tail = live && i === rounds.length - 1;
       const roundTools = Array.isArray(round.tools) ? round.tools : [];
       const proseLive = tail && roundTools.length === 0;
       const thinkLive = proseLive && String(round.thinking || "").trim() !== "" && String(round.text || "").trim() === "";
-      return /* @__PURE__ */ jsxs24("box", { style: { flexDirection: "column", width: inner, flexShrink: 0 }, children: [
-        round.thinking && String(round.thinking).trim() ? /* @__PURE__ */ jsx25(
+      return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width: inner, flexShrink: 0 }, children: [
+        round.thinking && String(round.thinking).trim() ? /* @__PURE__ */ jsx27(
           ThinkingBlock,
           {
             text: round.thinking,
@@ -4575,11 +4797,11 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
             label: showLiveLabel
           }
         ) : null,
-        round.text && String(round.text).trim() ? /* @__PURE__ */ jsx25(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
-        roundTools.map((tool, j) => /* @__PURE__ */ jsx25(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}-${j}`))
+        round.text && String(round.text).trim() ? /* @__PURE__ */ jsx27(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
+        roundTools.map((tool, j) => /* @__PURE__ */ jsx27(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}-${j}`))
       ] }, `round-${i}`);
-    }) : /* @__PURE__ */ jsxs24(Fragment9, { children: [
-      message.thinking ? /* @__PURE__ */ jsx25(
+    }) : /* @__PURE__ */ jsxs25(Fragment9, { children: [
+      message.thinking ? /* @__PURE__ */ jsx27(
         ThinkingBlock,
         {
           text: message.thinking,
@@ -4592,19 +4814,21 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
           label: showLiveLabel
         }
       ) : null,
-      message.text ? /* @__PURE__ */ jsx25(ProseBlock, { text: message.text, live: live && !tools.length, width: inner, compact }) : !message.thinking && tools.length === 0 ? (
+      message.text ? /* @__PURE__ */ jsx27(ProseBlock, { text: message.text, live: live && !tools.length, width: inner, compact }) : !message.thinking && tools.length === 0 ? (
         // Same duplicate, one row lower: the plain "thinking…" under the
         // live spinner. Only drawn where the spinner row is absent.
-        showLiveLabel ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: "thinking\u2026" }) : null
+        showLiveLabel ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: "thinking\u2026" }) : null
       ) : null,
-      tools.map((tool, i) => /* @__PURE__ */ jsx25(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}`))
+      tools.map((tool, i) => /* @__PURE__ */ jsx27(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}`))
     ] })
   ] });
 }
+var MemoMessageBlock = React27.memo(MessageBlock);
+var MessageBlock_default = MemoMessageBlock;
 
 // src/components/Transcript.jsx
-import { jsx as jsx26, jsxs as jsxs25 } from "react/jsx-runtime";
-var MAX_TURNS = 80;
+import { jsx as jsx28, jsxs as jsxs26 } from "react/jsx-runtime";
+var MAX_TURNS = 40;
 var SCROLLBAR_OPTIONS = {
   width: 1,
   showArrows: true,
@@ -4689,11 +4913,18 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
     }
   });
   if (list.length === 0) {
-    return /* @__PURE__ */ jsx26("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx26("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
+    return (
+      // Reserve the budgeted rows even when there are no turns yet. Without
+      // the fixed height this box collapsed to the hint's own height, so on a
+      // fresh start the composer floated up under a one-line hint with a big
+      // blank gap beneath it instead of sitting at the bottom of the screen.
+      // The hint is bottom-aligned so it hugs the composer row.
+      /* @__PURE__ */ jsx28("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden", flexDirection: "column", justifyContent: "flex-end" }, children: /* @__PURE__ */ jsx28("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) })
+    );
   }
   const contentW = Math.max(8, (Number(width) || 80) - 1);
   const compact = budget < 12 || contentW < 40;
-  return /* @__PURE__ */ jsx26("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsxs25(
+  return /* @__PURE__ */ jsx28("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsxs26(
     "scrollbox",
     {
       ref: setBox,
@@ -4708,9 +4939,9 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
       },
       scrollbarOptions: SCROLLBAR_OPTIONS,
       children: [
-        hidden > 0 ? /* @__PURE__ */ jsx26("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
-        /* @__PURE__ */ jsx26("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message, i) => /* @__PURE__ */ jsx26("box", { style: { marginBottom: compact ? 0 : 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx26(
-          MessageBlock,
+        hidden > 0 ? /* @__PURE__ */ jsx28("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
+        /* @__PURE__ */ jsx28("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message, i) => /* @__PURE__ */ jsx28("box", { style: { marginBottom: compact ? 0 : 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx28(
+          MessageBlock_default,
           {
             message,
             width: contentW,
@@ -4725,12 +4956,46 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
     }
   ) });
 }
+var MemoTranscript = React28.memo(Transcript);
+var Transcript_default = MemoTranscript;
 
 // src/hooks/useAgentStream.js
 import { useCallback as useCallback3, useEffect as useEffect11, useRef as useRef7, useState as useState12 } from "react";
 var import_ladder = __toESM(require_ladder());
 var DEFAULT_API2 = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
+var RECONNECT_WINDOW_MS = Math.max(5e3, Number(process.env.HAKSTER_RECONNECT_MS) || 6e4);
+var RECONNECT_PROBE_MS = 2500;
+var RECONNECT_MAX_TRIES = 40;
+function isTransportError(e) {
+  if (!e || e.name === "AbortError") return false;
+  const code = String(e.cause && e.cause.code || e.code || "");
+  if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|EHOSTUNREACH|ENETUNREACH/.test(code)) return true;
+  const msg = `${e.message || e} ${e.cause && e.cause.message || ""}`;
+  return /fetch failed|failed to fetch|network|socket hang up|connection (?:refused|reset|closed)|stream closed/i.test(msg);
+}
+async function waitForServer(api, { windowMs = RECONNECT_WINDOW_MS, key, isCancelled } = {}) {
+  const deadline = Date.now() + windowMs;
+  let delay = 300;
+  for (let tries = 0; tries < RECONNECT_MAX_TRIES; tries += 1) {
+    if (isCancelled && isCancelled()) return false;
+    const left = deadline - Date.now();
+    if (left <= 0) return false;
+    try {
+      const r = await fetch(`${api}/api/tui/status`, {
+        method: "GET",
+        headers: key ? { "x-api-key": key } : {},
+        signal: AbortSignal.timeout(Math.min(RECONNECT_PROBE_MS, Math.max(500, left)))
+      });
+      if (r && r.ok) return true;
+    } catch {
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(Math.round(delay * 2), 2500);
+  }
+  return false;
+}
 var seq = 0;
 var nextId = (prefix) => `${prefix}-${++seq}`;
 var toolMs = (meta) => meta && meta.t0 ? ` \xB7 ${Math.max(0, Date.now() - meta.t0)}ms` : "";
@@ -4776,13 +5041,22 @@ function useAgentStream({
   // Owner's switch (2026-11-23): when a run fails before producing anything,
   // move to the next entry of the ladder (src/models/ladder.js). Off means the
   // run fails where it failed — no silent model change.
-  autoHandoff = true
+  autoHandoff = true,
+  // Called with the messages a run could not deliver: a steer typed during a
+  // run that answered in a single turn ends before the next drain. The server
+  // hands them back on `steer_undelivered`; the TUI queues them as the next
+  // turn so nothing typed is ever dropped (owner, 2026-11-24).
+  onSteerUndelivered
 } = {}) {
   const [messages, setMessages] = useState12([]);
   const messagesRef = useRef7([]);
   useEffect11(() => {
     messagesRef.current = messages;
   }, [messages]);
+  const onSteerUndeliveredRef = useRef7(onSteerUndelivered);
+  useEffect11(() => {
+    onSteerUndeliveredRef.current = onSteerUndelivered;
+  }, [onSteerUndelivered]);
   const [todos, setTodos] = useState12([]);
   const [status, setStatus] = useState12("idle");
   const [error, setError] = useState12(null);
@@ -4828,12 +5102,12 @@ function useAgentStream({
     setStatus(next);
   }, []);
   useEffect11(() => {
-    const ticking = status === "connecting" || status === "thinking" || status === "streaming" || status === "approval";
+    const ticking = status === "connecting" || status === "reconnecting" || status === "thinking" || status === "streaming" || status === "approval";
     if (!ticking) return void 0;
     if (startedAtRef.current) setElapsedMs(Date.now() - startedAtRef.current);
     const id = setInterval(() => {
       if (startedAtRef.current) setElapsedMs(Date.now() - startedAtRef.current);
-    }, 250);
+    }, 1e3);
     return () => clearInterval(id);
   }, [status]);
   const patch = useCallback3((id, fn) => {
@@ -4848,6 +5122,11 @@ function useAgentStream({
   const append = useCallback3((entry) => {
     setMessages((prev) => [...prev, entry]);
   }, []);
+  const note = useCallback3((text, tone = "sys") => {
+    const body = String(text == null ? "" : text).trim();
+    if (!body) return;
+    append({ id: nextId("sys"), role: "system", tone, text: body });
+  }, [append]);
   const withRound = useCallback3((m, opensNew, mutate) => {
     const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => ({ ...r, tools: Array.isArray(r.tools) ? r.tools.slice() : [] })) : [];
     let cur = rounds[rounds.length - 1];
@@ -4958,7 +5237,7 @@ function useAgentStream({
   const runTurn = useCallback3(
     async (text, opts = {}) => {
       const prompt = String(text == null ? "" : text).trim();
-      if (!prompt || statusRef.current === "connecting" || statusRef.current === "streaming") {
+      if (!prompt || statusRef.current === "connecting" || statusRef.current === "reconnecting" || statusRef.current === "streaming") {
         return;
       }
       const images = Array.isArray(opts && opts.images) ? opts.images.filter((url) => typeof url === "string" && url.startsWith("data:image/")) : [];
@@ -5119,9 +5398,28 @@ function useAgentStream({
           }
           case "steer": {
             const text2 = String(evt.content || "").trim();
+            if (evt.supersede) {
+              patch(assistantId, (m) => {
+                const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => ({ ...r })) : [];
+                const cur = rounds[rounds.length - 1];
+                if (cur) cur.text = "";
+                return { ...m, rounds, text: rounds.map((r) => String(r.text || "")).join("") };
+              });
+            }
             if (text2) {
               append({ id: nextId("user"), role: "user", text: text2 });
-              pushActivity("sys", "\u21B3 live steer applied");
+              pushActivity("sys", evt.supersede ? "\u21B3 live steer \u2014 reply restarted with it" : "\u21B3 live steer applied");
+            }
+            break;
+          }
+          case "steer_undelivered": {
+            const items = Array.isArray(evt.items) ? evt.items.map((t) => String(t)).filter(Boolean) : [];
+            if (items.length) {
+              pushActivity("sys", `\u21BA ${items.length} steer queued for the next run`);
+              try {
+                onSteerUndeliveredRef.current && onSteerUndeliveredRef.current(items);
+              } catch {
+              }
             }
             break;
           }
@@ -5161,14 +5459,17 @@ function useAgentStream({
             });
             break;
           case "aborted":
+            attemptCtxRef.current.terminal = true;
             append({ id: nextId("sys"), role: "system", tone: "warn", text: "run aborted" });
             break;
           case "error":
+            attemptCtxRef.current.terminal = true;
             attemptCtxRef.current.sawError = evt.error || "agent error";
             pushActivity("err", evt.error || "agent error");
             setStatusBoth("error");
             break;
           case "done": {
+            attemptCtxRef.current.terminal = true;
             const inTok = Number(evt.inputTokens);
             const outTok = Number(evt.outputTokens);
             if (Number.isFinite(inTok) || Number.isFinite(outTok)) {
@@ -5192,17 +5493,12 @@ function useAgentStream({
             break;
         }
       };
-      const runAttempt = async (target) => {
-        requestsRef.current += 1;
-        setRequests(requestsRef.current);
-        pushActivity("sys", `\u2192 ${target.label || target.provider || "auto"}`);
+      const dispatchOnce = async (target, ctx) => {
         const runId = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         activeRunIdRef.current = runId;
         const controller = new AbortController();
         abortRef.current = controller;
         const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-        const ctx = { produced: false, sawError: null, status: null };
-        attemptCtxRef.current = ctx;
         try {
           const res = await fetch(`${api}/api/agent/run`, {
             method: "POST",
@@ -5261,6 +5557,9 @@ function useAgentStream({
             }
           }
           if (ctx.sawError) return { ok: false, aborted: false, ...ctx, error: ctx.sawError };
+          if (!ctx.terminal && !ctx.produced && !userAbortRef.current) {
+            throw new Error("stream closed before the turn reported anything");
+          }
           if (statusRef.current !== "error") setStatusBoth("idle");
           return { ok: true, aborted: false, ...ctx, error: null };
         } catch (e) {
@@ -5272,9 +5571,51 @@ function useAgentStream({
               error: userAbortRef.current ? "run cancelled" : "timed out"
             };
           }
-          return { ok: false, aborted: false, ...ctx, error: e && e.message || "request failed" };
+          return {
+            ok: false,
+            aborted: false,
+            transport: isTransportError(e),
+            ...ctx,
+            error: e && e.message || "request failed"
+          };
         } finally {
           clearTimeout(timeout);
+        }
+      };
+      const runAttempt = async (target) => {
+        const ctx = { produced: false, sawError: null, status: null, terminal: false };
+        attemptCtxRef.current = ctx;
+        pushActivity("sys", `\u2192 ${target.label || target.provider || "auto"}`);
+        let reconnectUntil = 0;
+        let announced = false;
+        for (; ; ) {
+          requestsRef.current += 1;
+          setRequests(requestsRef.current);
+          const res = await dispatchOnce(target, ctx);
+          if (res.ok || res.aborted) return res;
+          if (res.status >= 400) return res;
+          if (res.produced || res.sawError || userAbortRef.current) return res;
+          if (!res.transport) return res;
+          if (!reconnectUntil) reconnectUntil = Date.now() + RECONNECT_WINDOW_MS;
+          if (Date.now() >= reconnectUntil) {
+            return { ...res, error: "server did not come back \u2014 turn not sent" };
+          }
+          setStatusBoth("reconnecting");
+          if (!announced) {
+            append({ id: nextId("sys"), role: "system", tone: "warn", text: "server went away \u2014 reconnecting\u2026" });
+            pushActivity("warn", "server gone \xB7 reconnecting");
+            announced = true;
+          }
+          const back = await waitForServer(api, {
+            windowMs: Math.max(1e3, reconnectUntil - Date.now()),
+            key: process.env.HAKSTER_API_KEY,
+            isCancelled: () => userAbortRef.current
+          });
+          if (userAbortRef.current) return { ...res, aborted: true, error: "run cancelled" };
+          if (!back) return { ...res, error: "server did not come back \u2014 turn not sent" };
+          append({ id: nextId("sys"), role: "system", tone: "notice", text: "reconnected \u2014 resending the turn" });
+          pushActivity("sys", "reconnected \xB7 resending");
+          setStatusBoth("connecting");
         }
       };
       let spoke = false;
@@ -5326,7 +5667,7 @@ function useAgentStream({
   );
   const send = useCallback3((text, opts = {}) => {
     const prompt = String(text == null ? "" : text).trim();
-    if (!prompt || statusRef.current === "connecting" || statusRef.current === "streaming") return false;
+    if (!prompt || statusRef.current === "connecting" || statusRef.current === "reconnecting" || statusRef.current === "streaming") return false;
     runTurn(text, opts);
     return true;
   }, [runTurn]);
@@ -5360,7 +5701,7 @@ function useAgentStream({
     requestsRef.current = 0;
     startedAtRef.current = null;
   }, [abort, setPending]);
-  const busy = status === "connecting" || status === "streaming" || status === "thinking" || status === "approval";
+  const busy = status === "connecting" || status === "reconnecting" || status === "streaming" || status === "thinking" || status === "approval";
   return {
     messages,
     todos,
@@ -5377,13 +5718,82 @@ function useAgentStream({
     send,
     steer,
     abort,
-    clear
+    clear,
+    note
   };
 }
 var useAgentStream_default = useAgentStream;
 
+// src/hooks/useServerWatch.js
+import { useEffect as useEffect12, useRef as useRef8 } from "react";
+var HEALTHY_MS = 3e3;
+var DOWN_MS = 1e3;
+var REQUEST_MS = 4e3;
+var authHeaders = () => process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {};
+function shortBuild(build) {
+  const raw = String(build || "");
+  const m = /T(\d{2}:\d{2}:\d{2})/.exec(raw);
+  return m ? m[1] : raw.slice(0, 19);
+}
+var fmtSecs = (ms) => `${(Math.max(0, Number(ms) || 0) / 1e3).toFixed(1)}s`;
+var getJson = async (url) => {
+  const r = await fetch(url, { signal: AbortSignal.timeout(REQUEST_MS), headers: authHeaders() });
+  if (!r.ok) return null;
+  return r.json();
+};
+function useServerWatch({ api, busy = false, onRecovered } = {}) {
+  const busyRef = useRef8(busy);
+  useEffect12(() => {
+    busyRef.current = !!busy;
+  }, [busy]);
+  const onRecoveredRef = useRef8(onRecovered);
+  useEffect12(() => {
+    onRecoveredRef.current = onRecovered;
+  }, [onRecovered]);
+  useEffect12(() => {
+    if (!api) return void 0;
+    let alive = true;
+    let timer = null;
+    const state = { down: false, downAt: 0, build: null };
+    const tick = async () => {
+      if (!alive) return;
+      const [status, version] = await Promise.all([
+        getJson(`${api}/api/tui/status`).catch(() => null),
+        getJson(`${api}/api/version`).catch(() => null)
+      ]);
+      if (!alive) return;
+      const ok = !!status;
+      const build = version && version.server && version.server.build ? String(version.server.build) : null;
+      const prevBuild = state.build;
+      if (!ok) {
+        if (!state.down) {
+          state.down = true;
+          state.downAt = Date.now();
+        }
+      } else {
+        const wasDown = state.down;
+        const downtimeMs = wasDown ? Date.now() - state.downAt : 0;
+        state.down = false;
+        if (build) state.build = build;
+        const updated = !!(prevBuild && build && prevBuild !== build);
+        if ((updated || wasDown) && typeof onRecoveredRef.current === "function") {
+          const text = updated ? `\u2B06 server updated \u2014 ${wasDown ? `restarted in ${fmtSecs(downtimeMs)}` : "now on"} \xB7 build ${shortBuild(build)}` : `server restarted \u2014 back in ${fmtSecs(downtimeMs)}${build ? ` \xB7 build ${shortBuild(build)}` : ""}`;
+          if (!busyRef.current) onRecoveredRef.current({ updated, downtimeMs, build, text });
+        }
+      }
+      if (alive) timer = setTimeout(tick, state.down ? DOWN_MS : HEALTHY_MS);
+    };
+    tick();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [api]);
+}
+var useServerWatch_default = useServerWatch;
+
 // src/hooks/useHostStats.js
-import { useEffect as useEffect12, useRef as useRef8, useState as useState13 } from "react";
+import { useEffect as useEffect13, useRef as useRef9, useState as useState13 } from "react";
 import os4 from "node:os";
 import fs7 from "node:fs";
 var readText = (p) => {
@@ -5423,8 +5833,8 @@ function disk() {
 }
 function useHostStats(intervalMs = 5e3) {
   const [stats, setStats] = useState13(null);
-  const prevRef = useRef8(null);
-  useEffect12(() => {
+  const prevRef = useRef9(null);
+  useEffect13(() => {
     const cores = Math.max(1, (os4.cpus() || []).length);
     const sample = () => {
       const now = cpuTimes();
@@ -5469,8 +5879,167 @@ function useHostStats(intervalMs = 5e3) {
   return stats;
 }
 
+// src/hooks/useDebugStats.js
+import { useCallback as useCallback4, useEffect as useEffect14, useRef as useRef10, useState as useState14 } from "react";
+import process2 from "node:process";
+
+// src/utils/debug-metrics.js
+var RING = 240;
+var RATE_WINDOW_MS = 2e3;
+var renders = [];
+var renderTotal = 0;
+var lags = [];
+var lagTotal = 0;
+var noteRenderStart = () => {
+  renderTotal += 1;
+  return performance.now();
+};
+var noteRenderEnd = (t0) => {
+  if (!Number.isFinite(t0)) return;
+  const ms = Math.max(0, performance.now() - t0);
+  renders.push({ t: Date.now(), ms });
+  if (renders.length > RING) renders.shift();
+};
+var noteLag = (ms) => {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 0) return;
+  lagTotal += 1;
+  lags.push({ t: Date.now(), ms: n });
+  if (lags.length > RING) lags.shift();
+};
+var percentile = (sorted, p) => {
+  if (!sorted.length) return null;
+  const at = Math.min(sorted.length - 1, Math.max(0, Math.ceil(p / 100 * sorted.length) - 1));
+  return sorted[at];
+};
+var summarize = (samples) => {
+  const values = samples.map((s) => s.ms).sort((a, b) => a - b);
+  if (!values.length) {
+    return { samples: 0, last: null, p50: null, p95: null, max: null };
+  }
+  return {
+    samples: values.length,
+    // "last" is the most recent in time, not the largest — a percentile sort
+    // loses ordering, so read it off the ring before sorting.
+    last: samples[samples.length - 1].ms,
+    p50: percentile(values, 50),
+    p95: percentile(values, 95),
+    max: values[values.length - 1]
+  };
+};
+var renderStats = () => {
+  const now = Date.now();
+  const recent = renders.filter((r) => now - r.t <= RATE_WINDOW_MS).length;
+  const span = renders.length ? Math.min(RATE_WINDOW_MS, Math.max(1, now - renders[0].t)) : 0;
+  return {
+    total: renderTotal,
+    ...summarize(renders),
+    // Renders per second over the same 2 s window the count came from; null
+    // until there is a window to divide by.
+    perSec: span > 0 ? recent / (span / 1e3) : null,
+    windowMs: renders.length ? now - renders[0].t : 0
+  };
+};
+var lagStats = () => ({ total: lagTotal, ...summarize(lags) });
+var resetMetrics = () => {
+  renders.length = 0;
+  lags.length = 0;
+  renderTotal = 0;
+  lagTotal = 0;
+};
+
+// src/hooks/useDebugStats.js
+var LAG_TICK_MS = 50;
+var VERSION_POLL_MS = 2e3;
+function processSnapshot(startedAtMs) {
+  let mem = null;
+  try {
+    mem = process2.memoryUsage();
+  } catch {
+    mem = null;
+  }
+  let handles = null;
+  try {
+    handles = typeof process2._getActiveHandles === "function" ? process2._getActiveHandles().length : null;
+  } catch {
+    handles = null;
+  }
+  return {
+    pid: process2.pid,
+    uptimeSec: Math.max(0, Math.round((Date.now() - startedAtMs) / 1e3)),
+    rss: mem ? mem.rss : null,
+    heapUsed: mem ? mem.heapUsed : null,
+    heapTotal: mem ? mem.heapTotal : null,
+    handles,
+    node: process2.version,
+    bun: typeof process2.versions.bun === "string" ? process2.versions.bun : ""
+  };
+}
+function useDebugStats({ enabled = false, api = "http://localhost:3579", refreshMs = 1e3 } = {}) {
+  const [snap, setSnap] = useState14(null);
+  const [version, setVersion] = useState14(null);
+  const [versionErr, setVersionErr] = useState14(null);
+  const openedAt = useRef10(Date.now());
+  const sample = useCallback4(() => {
+    setSnap({
+      at: Date.now(),
+      render: renderStats(),
+      lag: lagStats(),
+      proc: processSnapshot(openedAt.current)
+    });
+  }, []);
+  useEffect14(() => {
+    if (!enabled) return void 0;
+    openedAt.current = Date.now();
+    sample();
+    const id = setInterval(sample, Math.max(250, Number(refreshMs) || 1e3));
+    return () => clearInterval(id);
+  }, [enabled, refreshMs, sample]);
+  useEffect14(() => {
+    if (!enabled) return void 0;
+    let expected = performance.now() + LAG_TICK_MS;
+    const id = setInterval(() => {
+      const now = performance.now();
+      noteLag(Math.max(0, now - expected));
+      expected = now + LAG_TICK_MS;
+    }, LAG_TICK_MS);
+    return () => clearInterval(id);
+  }, [enabled]);
+  useEffect14(() => {
+    if (!enabled) return void 0;
+    let alive = true;
+    const pull = async () => {
+      try {
+        const r = await fetch(`${api}/api/version`, {
+          signal: AbortSignal.timeout(3e3),
+          headers: { ...process2.env.HAKSTER_API_KEY ? { "x-api-key": process2.env.HAKSTER_API_KEY } : {} }
+        });
+        if (!r.ok) throw new Error(`version ${r.status}`);
+        const j = await r.json();
+        if (!alive) return;
+        setVersion(j);
+        setVersionErr(null);
+      } catch (e) {
+        if (alive) setVersionErr(e && e.message || "unreachable");
+      }
+    };
+    pull();
+    const id = setInterval(pull, VERSION_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [enabled, api]);
+  const reset = useCallback4(() => {
+    resetMetrics();
+    openedAt.current = Date.now();
+    sample();
+  }, [sample]);
+  return { snap, version, versionErr, reset };
+}
+
 // src/hooks/useMemoryBank.js
-import { useEffect as useEffect13, useState as useState14 } from "react";
+import { useEffect as useEffect15, useState as useState15 } from "react";
 import fs8 from "node:fs";
 import os5 from "node:os";
 import path6 from "node:path";
@@ -5515,8 +6084,8 @@ function readMemoryBanks(dir = BANK_DIR) {
   return { banks, total, clusters: tagCounts.size, topTags, newest, sampledAt: Date.now() };
 }
 function useMemoryBank(intervalMs = 1e4) {
-  const [state, setState] = useState14(() => readMemoryBanks());
-  useEffect13(() => {
+  const [state, setState] = useState15(() => readMemoryBanks());
+  useEffect15(() => {
     const tick = () => setState((prev) => readMemoryBanks() || prev);
     const id = setInterval(tick, intervalMs);
     try {
@@ -5531,7 +6100,7 @@ function useMemoryBank(intervalMs = 1e4) {
 // src/hooks/useCliUpdate.js
 var import_updater = __toESM(require_updater());
 var import_prefs2 = __toESM(require_prefs());
-import { useEffect as useEffect14, useRef as useRef9, useState as useState15 } from "react";
+import { useEffect as useEffect16, useRef as useRef11, useState as useState16 } from "react";
 function readStartup() {
   try {
     const applied = (0, import_updater.appliedNotice)();
@@ -5561,11 +6130,11 @@ function readStartup() {
   return { applied: null, status: { status: "idle" } };
 }
 function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
-  const startup = useRef9(null);
+  const startup = useRef11(null);
   if (startup.current === null) startup.current = readStartup();
   const applied = startup.current.applied;
-  const [state, setState] = useState15(startup.current.status);
-  useEffect14(() => {
+  const [state, setState] = useState16(startup.current.status);
+  useEffect16(() => {
     let alive = true;
     const tick = async () => {
       if (import_prefs2.default.load().updateCheck === false) return;
@@ -5604,23 +6173,23 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
 }
 
 // src/hooks/useScriptRunner.js
-import { useCallback as useCallback4, useEffect as useEffect15, useRef as useRef10, useState as useState16 } from "react";
+import { useCallback as useCallback5, useEffect as useEffect17, useRef as useRef12, useState as useState17 } from "react";
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
 var TIMEOUT_MS = 12e4;
 function useScriptRunner() {
-  const [scripts] = useState16(() => {
+  const [scripts] = useState17(() => {
     try {
       return discoverScripts();
     } catch {
       return [];
     }
   });
-  const [run, setRun] = useState16({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
-  const procRef = useRef10(null);
-  const timerRef = useRef10(null);
-  const seq2 = useRef10(0);
-  const stop = useCallback4(() => {
+  const [run, setRun] = useState17({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
+  const procRef = useRef12(null);
+  const timerRef = useRef12(null);
+  const seq2 = useRef12(0);
+  const stop = useCallback5(() => {
     const p = procRef.current;
     if (p) {
       procRef.current = null;
@@ -5635,7 +6204,7 @@ function useScriptRunner() {
     }
     setRun((r) => r.status === "running" ? { ...r, status: "stopped", endedAt: Date.now() } : r);
   }, []);
-  useEffect15(() => () => {
+  useEffect17(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     const p = procRef.current;
     if (p) {
@@ -5645,7 +6214,7 @@ function useScriptRunner() {
       }
     }
   }, []);
-  const start2 = useCallback4((entry) => {
+  const start2 = useCallback5((entry) => {
     if (!entry || !Array.isArray(entry.run) || !entry.run.length) return false;
     stop();
     const id = ++seq2.current;
@@ -5759,7 +6328,7 @@ var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
 var import_kitty_graphics3 = __toESM(require_kitty_graphics());
 var import_ad_client2 = __toESM(require_ad_client());
-import { Fragment as Fragment10, jsx as jsx27, jsxs as jsxs26 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx29, jsxs as jsxs27 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 6;
 var MCP_PANEL_SETTLE_MS = 8e3;
@@ -5848,54 +6417,67 @@ function readImageAttachment(file) {
   };
 }
 function App({ version = "0.1.0" }) {
+  const renderT0 = noteRenderStart();
   const renderer2 = useRenderer3();
   const { width: cols, height: rows } = useTerminalDimensions();
-  const [view, setView] = useState17("chat");
-  const [focus, setFocus] = useState17("composer");
-  const [adsOn, setAdsOn] = useState17(() => readPrefs().ads !== false);
-  const [dockExpanded, setDockExpanded] = useState17(false);
-  const [draft, setDraft] = useState17("");
-  const [inputHistory, setInputHistory] = useState17(() => (0, import_input_history.loadInputHistory)());
-  const [histIdx, setHistIdx] = useState17(-1);
-  const draftStash = useRef11("");
-  const [model, setModel] = useState17(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
-  const [provider, setProvider] = useState17(process.env.HAKSTER_PROVIDER || "");
-  const [modelIdx, setModelIdx] = useState17(0);
-  const prefsRef = useRef11(null);
+  React29.useLayoutEffect(() => {
+    noteRenderEnd(renderT0);
+  });
+  const [view, setView] = useState18("chat");
+  const [focus, setFocus] = useState18("composer");
+  const [adsOn, setAdsOn] = useState18(() => readPrefs().ads !== false);
+  const [dockExpanded, setDockExpanded] = useState18(false);
+  const [draft, setDraft] = useState18("");
+  const [inputHistory, setInputHistory] = useState18(() => (0, import_input_history.loadInputHistory)());
+  const [histIdx, setHistIdx] = useState18(-1);
+  const draftStash = useRef13("");
+  const [model, setModel] = useState18(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
+  const [provider, setProvider] = useState18(process.env.HAKSTER_PROVIDER || "");
+  const [modelIdx, setModelIdx] = useState18(0);
+  const prefsRef = useRef13(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
-  const [handoffOn, setHandoffOn] = useState17(() => prefsRef.current.autoHandoff !== false);
-  const [autoMode, setAutoMode] = useState17(() => {
+  const [handoffOn, setHandoffOn] = useState18(() => prefsRef.current.autoHandoff !== false);
+  const [autoMode, setAutoMode] = useState18(() => {
     const saved = String(prefsRef.current.autoMode || "");
     return AUTO_MODES.has(saved) ? saved : "auto-edit";
   });
-  const [expandThinking, setExpandThinking] = useState17(() => prefsRef.current.thinkingExpanded === true);
-  const [usageRefresh, setUsageRefresh] = useState17(() => {
+  const [expandThinking, setExpandThinking] = useState18(() => prefsRef.current.thinkingExpanded === true);
+  const [usageRefresh, setUsageRefresh] = useState18(() => {
     const n = Number(prefsRef.current.usageRefresh);
     return Number.isFinite(n) && n >= 0 ? n : 15;
   });
-  const [introDone, setIntroDone] = useState17(() => process.env.HAKSTER_NO_INTRO === "1" || readPrefs().intro === false);
-  const [status, setStatus] = useState17(null);
-  const [statusErr, setStatusErr] = useState17(null);
-  const [mcp, setMcp] = useState17(null);
-  const [history, setHistory] = useState17([]);
-  const [menuOpen, setMenuOpen] = useState17(false);
-  const [scriptIdx, setScriptIdx] = useState17(0);
-  const [squadIdx, setSquadIdx] = useState17(0);
-  const [menuIndex, setMenuIndex] = useState17(0);
-  const [menuQuery, setMenuQuery] = useState17("");
-  const [settingsIdx, setSettingsIdx] = useState17(0);
-  const [mcpIdx, setMcpIdx] = useState17(0);
-  const [prefsTick, setPrefsTick] = useState17(0);
-  const [notice, setNotice] = useState17(null);
-  const [scan, setScan] = useState17({ ok: false, ports: [], procs: {}, at: 0 });
-  const [guard, setGuard] = useState17(null);
-  const [pointsHistory, setPointsHistory] = useState17([]);
-  const [attachment, setAttachment] = useState17(null);
-  const [steerQueue, setSteerQueue] = useState17([]);
-  const scrollRef = useRef11(null);
-  const dashRef = useRef11(null);
-  const usageRef = useRef11(null);
+  const [introDone, setIntroDone] = useState18(() => process.env.HAKSTER_NO_INTRO === "1" || readPrefs().intro === false);
+  const [status, setStatus] = useState18(null);
+  const [statusErr, setStatusErr] = useState18(null);
+  const [mcp, setMcp] = useState18(null);
+  const [history, setHistory] = useState18([]);
+  const [menuOpen, setMenuOpen] = useState18(false);
+  const [scriptIdx, setScriptIdx] = useState18(0);
+  const [squadIdx, setSquadIdx] = useState18(0);
+  const [menuIndex, setMenuIndex] = useState18(0);
+  const [menuQuery, setMenuQuery] = useState18("");
+  const [settingsIdx, setSettingsIdx] = useState18(0);
+  const [mcpIdx, setMcpIdx] = useState18(0);
+  const [prefsTick, setPrefsTick] = useState18(0);
+  const [notice, setNotice] = useState18(null);
+  const [scan, setScan] = useState18({ ok: false, ports: [], procs: {}, at: 0 });
+  const [guard, setGuard] = useState18(null);
+  const [pointsHistory, setPointsHistory] = useState18([]);
+  const [attachment, setAttachment] = useState18(null);
+  const [steerQueue, setSteerQueue] = useState18([]);
+  const scrollRef = useRef13(null);
+  const dashRef = useRef13(null);
+  const usageRef = useRef13(null);
+  const debugRef = useRef13(null);
   const agent = useAgentStream_default({
+    // A steer the run could not deliver comes back here and joins the same
+    // queue an undelivered POST uses, so it sends with the next run.
+    onSteerUndelivered: (items) => {
+      setSteerQueue((q) => [
+        ...q,
+        ...items.map((text, i) => ({ id: `steer-ud-${Date.now()}-${i}`, text, image: "", imageName: "" }))
+      ]);
+    },
     api: API,
     model,
     provider,
@@ -5907,13 +6489,14 @@ function App({ version = "0.1.0" }) {
     approvalMode: autoMode === "suggest" ? void 0 : autoMode
   });
   const usagePage = useServerUsage(usageRefresh, view === "usage");
-  useEffect16(() => {
+  const debugStats = useDebugStats({ enabled: view === "debug", api: API });
+  useEffect18(() => {
     writePrefs({ autoHandoff: handoffOn });
   }, [handoffOn]);
-  useEffect16(() => {
+  useEffect18(() => {
     writePrefs({ autoMode });
   }, [autoMode]);
-  const load = useCallback5(async () => {
+  const load = useCallback6(async () => {
     try {
       const r = await fetch(`${API}/api/tui/status`, { signal: AbortSignal.timeout(4e3), headers: { ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} } });
       if (!r.ok) throw new Error(`status ${r.status}`);
@@ -5925,13 +6508,13 @@ function App({ version = "0.1.0" }) {
       setStatusErr(e.message);
     }
   }, []);
-  useEffect16(() => {
+  useEffect18(() => {
     load();
     const t = setInterval(load, 3e3);
     return () => clearInterval(t);
   }, [load]);
-  const mcpRefreshRef = useRef11(null);
-  useEffect16(() => {
+  const mcpRefreshRef = useRef13(null);
+  useEffect18(() => {
     let alive = true;
     const tick = async () => {
       try {
@@ -5954,7 +6537,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect16(() => {
+  useEffect18(() => {
     let alive = true;
     const tick = async () => {
       const next = await scanPorts();
@@ -5967,7 +6550,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect16(() => {
+  useEffect18(() => {
     const tick = () => {
       try {
         setGuard(fileGuard());
@@ -5979,7 +6562,7 @@ function App({ version = "0.1.0" }) {
     return () => clearInterval(t);
   }, []);
   const meterPoints = Number(agent.meters && agent.meters.points) || 0;
-  useEffect16(() => {
+  useEffect18(() => {
     setPointsHistory((h) => [...h.slice(-59), meterPoints]);
   }, [meterPoints]);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
@@ -5997,30 +6580,37 @@ function App({ version = "0.1.0" }) {
   const ctxMax = import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
   const ctxUsed = Number(status && (status.tokens || status.contextUsed) || 0);
   const meters = agent.meters || null;
-  const lastAssistant = (() => {
+  const lastAssistant = React29.useMemo(() => {
     for (let i = agent.messages.length - 1; i >= 0; i--) {
       if (agent.messages[i].role === "assistant") return agent.messages[i];
     }
     return null;
-  })();
+  }, [agent.messages]);
   const lastTool = lastAssistant && Array.isArray(lastAssistant.tools) && lastAssistant.tools.length ? lastAssistant.tools[lastAssistant.tools.length - 1] : null;
   const liveToolTxt = lastTool ? `${lastTool.name}${toolArgLine(lastTool.args)}` : "";
   const livePhase = !agent.busy ? "result" : lastAssistant && String(lastAssistant.text || "").trim() ? "writing" : lastAssistant && String(lastAssistant.thinking || "").trim() ? "thinking" : lastTool && lastTool.result == null ? "running" : "waiting";
-  const liveLines = (() => {
+  const liveLines = React29.useMemo(() => {
     if (!lastAssistant) return [];
     const toLines = (v) => String(v == null ? "" : v).replace(/\r/g, "").split("\n").filter((l) => l.trim());
     const text = toLines(lastAssistant.text);
     const result = lastTool && lastTool.result != null ? toLines(lastTool.result) : [];
     return text.length ? text : result;
-  })();
-  const liveImage = lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null;
+  }, [lastAssistant, lastTool]);
+  const liveImage = React29.useMemo(() => lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null, [lastAssistant, lastTool]);
   const host = useHostStats(5e3);
   const memory = useMemoryBank(1e4);
   const update = useCliUpdate();
   const runner = useScriptRunner_default();
-  const userTurns = agent.messages.filter((m) => m.role === "user").length;
-  const toolCalls = agent.messages.reduce((n, m) => n + (Array.isArray(m.tools) ? m.tools.length : 0), 0);
-  const webCalls = countWebCallsInMessages(agent.messages);
+  const { userTurns, toolCalls, webCalls } = React29.useMemo(() => {
+    const msgs = agent.messages;
+    let turns = 0;
+    let calls = 0;
+    for (const m of msgs) {
+      if (m.role === "user") turns += 1;
+      if (Array.isArray(m.tools)) calls += m.tools.length;
+    }
+    return { userTurns: turns, toolCalls: calls, webCalls: countWebCallsInMessages(msgs) };
+  }, [agent.messages]);
   const usage = {
     tools: toolCalls,
     web: webCalls,
@@ -6040,20 +6630,28 @@ function App({ version = "0.1.0" }) {
   const peers = peersFromMcp(mcp);
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
-  const showNotice = useCallback5((text) => {
+  const showNotice = useCallback6((text) => {
     setNotice(text);
     setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
   }, []);
-  const installedAnnounced = useRef11(false);
-  useEffect16(() => {
+  useServerWatch_default({
+    api: API,
+    busy: agent.busy,
+    onRecovered: ({ text, updated }) => {
+      showNotice(text);
+      agent.note(text, updated ? "notice" : "warn");
+    }
+  });
+  const installedAnnounced = useRef13(false);
+  useEffect18(() => {
     if (installedAnnounced.current) return;
     if (!update || !update.applied || !update.applied.version) return;
     installedAnnounced.current = true;
     const from = update.applied.from && update.applied.from !== update.applied.version ? ` (was v${update.applied.from})` : " (newer build, same version)";
     showNotice(`\u2713 CLI updated to v${update.applied.version}${from} \u2014 installed on this start`);
   }, [update, showNotice]);
-  const updateAnnounced = useRef11("");
-  useEffect16(() => {
+  const updateAnnounced = useRef13("");
+  useEffect18(() => {
     if (update && update.applied) return;
     if (!update || !update.version) return;
     if (update.status !== "staged" && update.status !== "blocked") return;
@@ -6064,7 +6662,7 @@ function App({ version = "0.1.0" }) {
       update.status === "blocked" ? `\u2B06 CLI v${update.version} staged \u2014 this is a source checkout; nothing was written, pull/install when ready` : `\u2B06 CLI v${update.version} staged \u2014 applies when the CLI restarts`
     );
   }, [update, showNotice]);
-  const settingsRows = React27.useMemo(() => {
+  const settingsRows = React29.useMemo(() => {
     void prefsTick;
     let rows2 = [];
     try {
@@ -6080,7 +6678,7 @@ function App({ version = "0.1.0" }) {
       return r;
     });
   }, [prefsTick, adsOn, handoffOn, usageRefresh]);
-  const applySetting = useCallback5((key, value) => {
+  const applySetting = useCallback6((key, value) => {
     writePrefs({ [key]: value });
     prefsRef.current = { ...prefsRef.current, [key]: value };
     if (key === "ads") setAdsOn(!!value);
@@ -6094,7 +6692,7 @@ function App({ version = "0.1.0" }) {
     const shown = typeof value === "boolean" ? value ? "on" : "off" : value === "" ? "(default)" : value;
     showNotice(`\u2699 ${key} \u2192 ${shown}${key === "opaqueBackdrop" || key === "intro" ? " \u2014 applies on the next launch" : ""}`);
   }, [showNotice]);
-  const changeSetting = useCallback5((key) => {
+  const changeSetting = useCallback6((key) => {
     const row = settingsRows.find((r) => r.key === key);
     if (!row) return;
     if (typeof row.value === "boolean") {
@@ -6113,7 +6711,7 @@ function App({ version = "0.1.0" }) {
     }
     showNotice(`\u2699 ${key} is text \u2014 set it with /settings ${key} <value>`);
   }, [settingsRows, applySetting, showNotice]);
-  const runCommand = useCallback5((raw) => {
+  const runCommand = useCallback6((raw) => {
     const parts = String(raw || "").trim().split(/\s+/);
     const cmd = (parts[0] || "").toLowerCase();
     const arg = parts.slice(1).join(" ");
@@ -6204,6 +6802,9 @@ function App({ version = "0.1.0" }) {
       case "/squad":
         setView("squad");
         return;
+      case "/debug":
+        setView("debug");
+        return;
       case "/status":
         showNotice(status ? `phase ${status.phase} \xB7 model ${(0, import_ladder2.displayModel)(status.model)} \xB7 tokens ${status.tokens} \xB7 trust ${status.trust} \xB7 ${status.connected ? "connected" : "offline"}` : `server ${statusErr || "connecting\u2026"}`);
         return;
@@ -6259,7 +6860,7 @@ function App({ version = "0.1.0" }) {
         showNotice("transcript cleared \xB7 steer queue emptied");
         return;
       case "/help":
-        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit");
+        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /clear /quit");
         return;
       case "/quit":
       case "/exit":
@@ -6270,7 +6871,7 @@ function App({ version = "0.1.0" }) {
         showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
     }
   }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn, autoMode, update, version]);
-  const crushModelList = useRef11(null);
+  const crushModelList = useRef13(null);
   if (!crushModelList.current) crushModelList.current = readCrushModels();
   const catalogRows = (() => {
     const q = menuQuery.trim().toLowerCase();
@@ -6320,7 +6921,7 @@ function App({ version = "0.1.0" }) {
     return rows2;
   })();
   const catalogSelectable = catalogRows.map((r, i) => r.kind === "header" ? -1 : i).filter((i) => i >= 0);
-  const applyCatalogRow = useCallback5((row) => {
+  const applyCatalogRow = useCallback6((row) => {
     if (!row || !row.action) return;
     if ("model" in row.action) {
       setModel(row.action.model || "");
@@ -6340,7 +6941,7 @@ function App({ version = "0.1.0" }) {
     }
     if (row.action.cmd) runCommand(row.action.cmd);
   }, [runCommand, showNotice, changeSetting, mcp]);
-  const submit = useCallback5(
+  const submit = useCallback6(
     (text) => {
       const v = String(text == null ? "" : text).trim();
       if (!v) return;
@@ -6387,8 +6988,8 @@ function App({ version = "0.1.0" }) {
     },
     [agent, attachment, runCommand, showNotice, steerQueue.length]
   );
-  const steerFlushLock = useRef11(false);
-  useEffect16(() => {
+  const steerFlushLock = useRef13(false);
+  useEffect18(() => {
     if (agent.busy) {
       steerFlushLock.current = false;
       return;
@@ -6401,6 +7002,8 @@ function App({ version = "0.1.0" }) {
   }, [agent.busy, steerQueue]);
   const approving = !!agent.pendingConfirm;
   const showCrushStatus = view === "chat" && agent.busy;
+  const todosDone = agent.todos.reduce((n, t) => n + (t.done ? 1 : 0), 0);
+  const showRecap = view === "chat" && !agent.busy && (usage.turns > 0 || usage.tools > 0);
   const activeAssistant = [...agent.messages].reverse().find((message) => message.role === "assistant");
   const activeTool = activeAssistant?.tools?.slice().reverse().find((tool) => tool.result === null);
   const latestMcpTool = agent.messages.filter((message) => message.role === "assistant").flatMap((message) => message.tools || []).filter((tool) => tool.mcp || String(tool.name || "").startsWith("mcp__")).slice(-1)[0] || null;
@@ -6414,9 +7017,9 @@ function App({ version = "0.1.0" }) {
     for (let i = 0; i < line.length; i += mcpPanelWidth) rows2.push(line.slice(i, i + mcpPanelWidth));
     return rows2;
   });
-  const [mcpPanelCleared, setMcpPanelCleared] = useState17(false);
+  const [mcpPanelCleared, setMcpPanelCleared] = useState18(false);
   const mcpToolCallKey = latestMcpTool ? `${latestMcpTool.id || latestMcpTool.name || "mcp"}:${latestMcpTool.result == null ? "live" : "done"}` : "";
-  useEffect16(() => {
+  useEffect18(() => {
     const live = !!latestMcpTool && latestMcpTool.result == null && agent.busy;
     if (live) {
       setMcpPanelCleared(false);
@@ -6427,14 +7030,14 @@ function App({ version = "0.1.0" }) {
     const timer = setTimeout(() => setMcpPanelCleared(true), settleMs);
     return () => clearTimeout(timer);
   }, [mcpToolCallKey, agent.busy]);
-  const crushPhase = activeAssistant?.phase || (agent.status === "thinking" ? "THINK" : agent.status === "connecting" ? "PLAN" : "ACT");
-  const answerApproval = useCallback5(
+  const crushPhase = activeAssistant?.phase || (agent.status === "thinking" ? "THINK" : agent.status === "connecting" || agent.status === "reconnecting" ? "PLAN" : "ACT");
+  const answerApproval = useCallback6(
     (approved, opts) => {
       agent.answerConfirm(approved, opts);
     },
     [agent]
   );
-  const cycleFocus = useCallback5(() => {
+  const cycleFocus = useCallback6(() => {
     setFocus((f) => f === "composer" ? "ad" : "composer");
   }, []);
   useKeyboard7((key) => {
@@ -6532,6 +7135,37 @@ function App({ version = "0.1.0" }) {
         return;
       }
       const page = usageRef.current;
+      if (page && typeof page.scrollBy === "function") {
+        if (key.name === "pageup" || key.name === "pagedown") {
+          page.scrollBy(key.name === "pageup" ? -1 : 1, "viewport");
+          return;
+        }
+        if (key.name === "up" || key.name === "down") {
+          page.scrollBy(key.name === "up" ? -1 : 1, "absolute");
+          return;
+        }
+        if (key.name === "home") {
+          page.scrollTo(0);
+          return;
+        }
+        if (key.name === "end") {
+          page.scrollBy(1e3, "viewport");
+          return;
+        }
+      }
+      return;
+    }
+    if (view === "debug") {
+      if (key.name === "escape") {
+        setView("chat");
+        return;
+      }
+      if (key.name === "r") {
+        debugStats.reset();
+        showNotice("\u25C7 debugger \u2014 counters reset");
+        return;
+      }
+      const page = debugRef.current;
       if (page && typeof page.scrollBy === "function") {
         if (key.name === "pageup" || key.name === "pagedown") {
           page.scrollBy(key.name === "pageup" ? -1 : 1, "viewport");
@@ -6759,7 +7393,7 @@ function App({ version = "0.1.0" }) {
   const statusBoxShown = view === "chat";
   const ctxK = Math.round(ctxMax / 1e3);
   const ctxPart = model ? `ctx ${ctxK}K` : null;
-  const headerRightVariants = statusBoxShown ? (
+  const headerDetailVariants = statusBoxShown ? (
     // `tui <version>` lives on the status box's top line here, not twice.
     [[view, ctxPart].filter(Boolean).join(" \xB7 "), view]
   ) : [
@@ -6773,11 +7407,36 @@ function App({ version = "0.1.0" }) {
   const showGuard = !statusBoxShown && !!guardTxt && headerLeftLen(true) + 8 <= headerInner;
   const headerFiles = showGuard ? guardTxt : "";
   const headerLeftText = statusBoxShown ? 0 : headerLeftLen(showGuard);
+  const BANK_CAP = 300;
+  const memBanks = memory && Array.isArray(memory.banks) ? memory.banks : [];
+  const memFullest = memBanks.reduce((m, b) => Math.max(m, Number(b.entries) || 0), 0);
+  const memTotal = memory && Number.isFinite(memory.total) ? memory.total : null;
+  const memPct = !memory ? null : memBanks.length ? Math.max(0, Math.min(100, Math.round(memFullest / BANK_CAP * 100))) : 0;
+  const memFg = memPct == null || memPct === 0 ? "gray" : memPct >= 90 ? "#f85149" : memPct >= 70 ? "#d29922" : "#3fb950";
+  const MEMBAR_W = 5;
+  const memFilled = memPct == null ? 0 : Math.round(memPct / 100 * MEMBAR_W);
+  const memParts = memPct == null ? null : [
+    { t: "\u25C8 ", fg: memFg, bold: true },
+    { t: "\u2588".repeat(memFilled), fg: memFg },
+    { t: "\u2591".repeat(MEMBAR_W - memFilled), fg: "gray" },
+    { t: ` ${memPct}%`, fg: memPct >= 90 ? "red" : memPct === 0 ? "gray" : "white", bold: memPct > 0 },
+    ...memTotal != null ? [{ t: ` ${memTotal}`, fg: "gray" }] : []
+  ];
+  const headerRightSets = [];
+  if (memParts) {
+    for (const detail of headerDetailVariants) {
+      const parts = [...memParts];
+      if (detail) parts.push({ t: `  ${detail}`, fg: "gray" });
+      headerRightSets.push({ parts, text: parts.map((p) => p.t).join("") });
+    }
+  }
+  for (const detail of headerDetailVariants) {
+    if (detail) headerRightSets.push({ parts: [{ t: detail, fg: "gray" }], text: detail });
+  }
   const meterScore = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
   const meterPts = Math.max(0, Math.round(Number(meters && meters.points) || 0));
   const meterDelta = Number(meters && meters.delta) || 0;
   const meterPtsDelta = Number(meters && meters.pointsDelta) || 0;
-  const meterPtsPct = pointsPct(meterPts);
   const meterArrowCh = meterArrow(meterDelta);
   const meterArrowFg = arrowColor(meterDelta);
   const meterPtsArrow = meterArrow(meterPtsDelta);
@@ -6812,18 +7471,7 @@ function App({ version = "0.1.0" }) {
   };
   const baseMeterVariants = [
     mkMeter([
-      { t: "\u25C8 ", fg: meterFg.smart, bold: true },
-      { t: `${meterScore}% `, fg: "white", bold: true },
-      { t: meterArrowCh, fg: meterArrowFg },
-      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: ` ${meterPtsPct}%`, fg: meterFg.pts },
-      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? "red" : meterCtxPct > 60 ? "yellow" : "green" },
-      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: `  ram ${meterRam}`, fg: meterFg.ram }
-    ]),
-    mkMeter([
-      { t: "\u25C8 ", fg: meterFg.smart, bold: true },
+      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -6833,7 +7481,17 @@ function App({ version = "0.1.0" }) {
       { t: `  ram ${meterRam}`, fg: meterFg.ram }
     ]),
     mkMeter([
-      { t: "\u25C8 ", fg: meterFg.smart, bold: true },
+      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
+      { t: `${meterScore}% `, fg: "white", bold: true },
+      { t: meterArrowCh, fg: meterArrowFg },
+      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
+      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? "red" : meterCtxPct > 60 ? "yellow" : "green" },
+      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
+      { t: `  ram ${meterRam}`, fg: meterFg.ram }
+    ]),
+    mkMeter([
+      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -6855,20 +7513,20 @@ function App({ version = "0.1.0" }) {
   if (updatePending) {
     for (const badge of updateBadgeVariants) headerMeterVariants.push(withBadge(mkMeter([]), badge));
   }
-  let headerRight = "";
+  let headerRight = null;
   let headerMeter = null;
   if (view === "chat") {
     for (const meter of headerMeterVariants) {
-      const rightText = headerRightVariants.find((t) => headerLeftText + 3 + meter.text.length + 2 + (t ? t.length + 2 : 0) + 2 <= headerInner);
-      if (rightText !== void 0) {
-        headerRight = rightText;
+      const fit = headerRightSets.find((s) => headerLeftText + 3 + meter.text.length + 2 + (s.text ? s.text.length + 2 : 0) + 2 <= headerInner);
+      if (fit) {
+        headerRight = fit;
         headerMeter = meter;
         break;
       }
     }
   }
   if (!headerMeter) {
-    headerRight = headerRightVariants.find((t) => headerLeftText + t.length + 2 <= headerInner) || "";
+    headerRight = headerRightSets.find((s) => headerLeftText + s.text.length + 2 <= headerInner) || null;
   }
   const sideW = (cols || 100) >= 96 ? 30 : 0;
   const bodyW = panelW - 2;
@@ -6899,7 +7557,7 @@ function App({ version = "0.1.0" }) {
     8,
     (rows || 30) - 2 - systemRows - monitorServicesRows - (notice ? 1 : 0)
   );
-  const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
+  const CHROME_ROWS = 1 + 1 + (showCrushStatus || showRecap ? 1 : 0);
   const errRows = statusErr ? 3 : 0;
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
@@ -6974,7 +7632,7 @@ function App({ version = "0.1.0" }) {
       title: "Agent",
       hint: agent.status,
       cells: [
-        { label: "state", value: agent.status, color: agent.status === "error" ? "red" : "green" },
+        { label: "state", value: agent.status, color: agent.status === "error" ? "red" : agent.status === "reconnecting" ? "yellow" : "green" },
         { label: "turns", value: agent.messages.filter((m) => m.role === "user").length },
         { label: "todos done", value: `${agent.todos.filter((t) => t.done).length}/${agent.todos.length}` },
         { label: "elapsed", value: `${(agent.elapsedMs / 1e3).toFixed(1)}s` }
@@ -7008,7 +7666,7 @@ function App({ version = "0.1.0" }) {
       color: "#00ff41",
       bold: true
     } : update && update.status === "blocked" ? { text: `update v${update.version} held \xB7 source checkout`, color: "gray" } : update && update.status === "staged" ? { text: `update v${update.version} staged \xB7 applies on restart`, color: "yellow" } : { text: "up to date \xB7 updates check live", color: "gray" };
-    return /* @__PURE__ */ jsx27(
+    return /* @__PURE__ */ jsx29(
       DecodeSplash,
       {
         width: cols || 100,
@@ -7030,27 +7688,27 @@ function App({ version = "0.1.0" }) {
       }
     );
   }
-  return /* @__PURE__ */ jsxs26("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
-    /* @__PURE__ */ jsxs26("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
-      /* @__PURE__ */ jsxs26("box", { style: { flexDirection: "row" }, children: [
-        statusBoxShown ? null : /* @__PURE__ */ jsxs26(Fragment10, { children: [
-          /* @__PURE__ */ jsx27("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes20.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
-          /* @__PURE__ */ jsx27("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: "\u25C6 haksterAi" }),
-          /* @__PURE__ */ jsx27("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
-          headerFiles ? /* @__PURE__ */ jsx27("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
+  return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
+    /* @__PURE__ */ jsxs27("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
+      /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "row" }, children: [
+        statusBoxShown ? null : /* @__PURE__ */ jsxs27(Fragment10, { children: [
+          /* @__PURE__ */ jsx29("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes21.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
+          /* @__PURE__ */ jsx29("text", { fg: "cyan", attributes: TextAttributes21.BOLD, children: "\u25C6 haksterAi" }),
+          /* @__PURE__ */ jsx29("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
+          headerFiles ? /* @__PURE__ */ jsx29("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
         ] }),
-        headerMeter ? /* @__PURE__ */ jsxs26("text", { children: [
-          statusBoxShown ? null : /* @__PURE__ */ jsx27("span", { fg: "gray", children: "   " }),
-          headerMeter.parts.map((part, i) => /* @__PURE__ */ jsx27("span", { fg: part.fg, attributes: part.bold ? TextAttributes20.BOLD : 0, children: part.t }, i))
+        headerMeter ? /* @__PURE__ */ jsxs27("text", { children: [
+          statusBoxShown ? null : /* @__PURE__ */ jsx29("span", { fg: "gray", children: "   " }),
+          headerMeter.parts.map((part, i) => /* @__PURE__ */ jsx29("span", { fg: part.fg, attributes: part.bold ? TextAttributes21.BOLD : 0, children: part.t }, i))
         ] }) : null
       ] }),
-      headerRight ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: headerRight }) : null
+      headerRight ? /* @__PURE__ */ jsx29("text", { children: headerRight.parts.map((part, i) => /* @__PURE__ */ jsx29("span", { fg: part.fg, attributes: part.bold ? TextAttributes21.BOLD : 0, children: part.t }, i)) }) : null
     ] }),
-    statusErr ? /* @__PURE__ */ jsx27("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs26("text", { fg: "red", children: [
+    statusErr ? /* @__PURE__ */ jsx29("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs27("text", { fg: "red", children: [
       "server unreachable \u2014 ",
       statusErr
     ] }) }) : null,
-    view === "models" ? /* @__PURE__ */ jsx27(
+    view === "models" ? /* @__PURE__ */ jsx29(
       ScrollPanel_default,
       {
         width: panelW,
@@ -7065,9 +7723,9 @@ function App({ version = "0.1.0" }) {
           const pick = pickerModels[index];
           const active = index === modelIdx;
           const vendorW = compact ? 7 : 11;
-          return /* @__PURE__ */ jsxs26("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
-            /* @__PURE__ */ jsx27("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes20.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clipLine2(pick.vendor, vendorW)}` }),
-            /* @__PURE__ */ jsx27("text", { fg: active ? "yellow" : "white", children: ` ${clipLine2(pick.value, Math.max(4, rowW - vendorW - 3))}` })
+          return /* @__PURE__ */ jsxs27("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
+            /* @__PURE__ */ jsx29("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes21.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clipLine2(pick.vendor, vendorW)}` }),
+            /* @__PURE__ */ jsx29("text", { fg: active ? "yellow" : "white", children: ` ${clipLine2(pick.value, Math.max(4, rowW - vendorW - 3))}` })
           ] });
         }
       }
@@ -7075,7 +7733,7 @@ function App({ version = "0.1.0" }) {
       /* The full settings page: every key in cli-prefs.json, its live value
          and what it does. Same row budget as the models picker so the status
          bar never moves. */
-      /* @__PURE__ */ jsx27(
+      /* @__PURE__ */ jsx29(
         SettingsView,
         {
           width: panelW,
@@ -7087,7 +7745,7 @@ function App({ version = "0.1.0" }) {
     ) : view === "mcp" ? (
       /* The MCP server manager: each server's real state from
          /api/agent/mcp-status, with the selected server's tool names. */
-      /* @__PURE__ */ jsx27(
+      /* @__PURE__ */ jsx29(
         McpView,
         {
           width: panelW,
@@ -7096,7 +7754,7 @@ function App({ version = "0.1.0" }) {
           selected: mcpIdx
         }
       )
-    ) : view === "scripts" ? /* @__PURE__ */ jsx27(
+    ) : view === "scripts" ? /* @__PURE__ */ jsx29(
       ScriptsView,
       {
         width: panelW,
@@ -7105,7 +7763,7 @@ function App({ version = "0.1.0" }) {
         selected: scriptIdx,
         run: runner.run
       }
-    ) : view === "squad" ? /* @__PURE__ */ jsx27(
+    ) : view === "squad" ? /* @__PURE__ */ jsx29(
       SquadView,
       {
         width: panelW,
@@ -7117,13 +7775,13 @@ function App({ version = "0.1.0" }) {
       /* One scrollable page, like the dashboard: the page can be taller than
          a short terminal, so it scrolls with OpenTUI's own ▲/█/▼ bar instead
          of clipping the last measured rows (§ all-panels rule). */
-      /* @__PURE__ */ jsx27("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx27(
+      /* @__PURE__ */ jsx29("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
         "scrollbox",
         {
           ref: usageRef,
           style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
           scrollbarOptions: PAGE_SCROLLBAR,
-          children: /* @__PURE__ */ jsx27(
+          children: /* @__PURE__ */ jsx29(
             UsageView,
             {
               width: Math.max(1, panelW - 1),
@@ -7135,56 +7793,109 @@ function App({ version = "0.1.0" }) {
           )
         }
       ) })
+    ) : view === "debug" ? (
+      /* ◇ Debugger (owner, 2026-11-24: "add debugger to"): the app's own
+         measurements — render cost, event-loop lag, process, session counts —
+         plus the box's build state from /api/version. Every field is a sample
+         this process took or a value the server reported; "\u2014" is printed
+         where there is no sample yet. */
+      /* @__PURE__ */ jsx29("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
+        "scrollbox",
+        {
+          ref: debugRef,
+          style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
+          scrollbarOptions: PAGE_SCROLLBAR,
+          children: /* @__PURE__ */ jsx29(
+            DebugView,
+            {
+              width: Math.max(1, panelW - 1),
+              stats: debugStats.snap,
+              version: debugStats.version,
+              versionErr: debugStats.versionErr,
+              session: {
+                view,
+                phase: status && status.phase,
+                model: (0, import_ladder2.displayModel)(model),
+                provider,
+                autoMode,
+                handoff: handoffOn,
+                connected: !!status && !statusErr,
+                turns: usage.turns,
+                tools: usage.tools,
+                ok: usage.ok,
+                fail: usage.fail,
+                web: usage.web,
+                inTok: usage.inTok,
+                outTok: usage.outTok,
+                tokensKnown: usage.tokensKnown,
+                ctxPct: usage.ctxPct,
+                guard,
+                trust: status && status.trust,
+                mcp: mcp && Array.isArray(mcp.servers) ? {
+                  up: mcp.servers.filter((x) => !(x.initialized === false && !(Number(x.toolCount) || 0))).length,
+                  total: mcp.servers.length
+                } : null
+              },
+              messages: agent.messages,
+              terminal: {
+                cols,
+                rows,
+                graphics: (0, import_kitty_graphics3.isSupported)(process.env, process.stdout),
+                version
+              }
+            }
+          )
+        }
+      ) })
     ) : view === "dashboard" ? (
       /* The dashboard is one scrollable page. Before this it was a fixed
          stack, so a short terminal clipped the services grid and pushed the
          status bar off the bottom. PgUp/PgDn (and ↑/↓, Home/End) scroll it;
          the panel cells auto-compact to one line on a short screen. */
-      /* @__PURE__ */ jsx27("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx27(
+      /* @__PURE__ */ jsx29("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
         "scrollbox",
         {
           ref: dashRef,
           style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
           scrollbarOptions: PAGE_SCROLLBAR,
-          children: /* @__PURE__ */ jsxs26("box", { style: { width: Math.max(1, panelW - 1), flexDirection: "column" }, children: [
-            /* @__PURE__ */ jsx27(
+          children: /* @__PURE__ */ jsxs27("box", { style: { width: Math.max(1, panelW - 1), flexDirection: "column" }, children: [
+            /* @__PURE__ */ jsx29(
               GridLayout_default,
               {
                 items: dashboardItems,
                 availableWidth: Math.max(1, panelW - 1),
                 getItemKey: (item) => item.key,
-                renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx27(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, dense: dashDense, children: item.cells.map((c) => /* @__PURE__ */ jsx27(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)), dense: dashDense }, c.label)) })
+                renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx29(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, dense: dashDense, children: item.cells.map((c) => /* @__PURE__ */ jsx29(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)), dense: dashDense }, c.label)) })
               }
             ),
-            /* @__PURE__ */ jsxs26(
+            /* @__PURE__ */ jsxs27(
               GridPanel_default,
               {
                 title: "\u25C9 Meters",
                 width: Math.max(1, panelW - 1),
                 hint: `${smartLabel(meters ? meters.score : 0)} \xB7 ${meterPoints}p autolearn`,
                 children: [
-                  /* @__PURE__ */ jsxs26("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx27("text", { fg: "gray", children: "smartness   " }),
-                    /* @__PURE__ */ jsx27(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
-                    /* @__PURE__ */ jsx27("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
+                  /* @__PURE__ */ jsxs27("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
+                    /* @__PURE__ */ jsx29("text", { fg: "gray", children: "smartness   " }),
+                    /* @__PURE__ */ jsx29(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
+                    /* @__PURE__ */ jsx29("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
                   ] }),
-                  /* @__PURE__ */ jsxs26("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx27("text", { fg: "gray", children: "autolearn   " }),
-                    /* @__PURE__ */ jsx27(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
-                    /* @__PURE__ */ jsx27("text", { fg: "white", children: ` ${meterPoints}p` }),
-                    /* @__PURE__ */ jsx27("text", { fg: arrowColor(meters && meters.pointsDelta), children: meterArrow(meters && meters.pointsDelta) }),
-                    /* @__PURE__ */ jsx27("text", { fg: "white", children: ` ${pointsPct(meterPoints)}%` }),
-                    /* @__PURE__ */ jsx27("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx27(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
+                  /* @__PURE__ */ jsxs27("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
+                    /* @__PURE__ */ jsx29("text", { fg: "gray", children: "autolearn   " }),
+                    /* @__PURE__ */ jsx29(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
+                    /* @__PURE__ */ jsx29("text", { fg: "white", children: ` ${meterPoints}p` }),
+                    /* @__PURE__ */ jsx29("text", { fg: arrowColor(meters && meters.pointsDelta), children: meterArrow(meters && meters.pointsDelta) }),
+                    /* @__PURE__ */ jsx29("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx29(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
                   ] }),
-                  /* @__PURE__ */ jsxs26("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx27("text", { fg: "gray", children: "context     " }),
-                    /* @__PURE__ */ jsx27(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
-                    /* @__PURE__ */ jsx27("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
+                  /* @__PURE__ */ jsxs27("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
+                    /* @__PURE__ */ jsx29("text", { fg: "gray", children: "context     " }),
+                    /* @__PURE__ */ jsx29(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
+                    /* @__PURE__ */ jsx29("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
                   ] })
                 ]
               }
             ),
-            /* @__PURE__ */ jsx27(ServicesPanel, { width: dashServicesWidth, services, scan, showAll: true, dense: dashDense, maxCells: dashServicesCapacity })
+            /* @__PURE__ */ jsx29(ServicesPanel, { width: dashServicesWidth, services, scan, showAll: true, dense: dashDense, maxCells: dashServicesCapacity })
           ] })
         }
       ) })
@@ -7193,13 +7904,13 @@ function App({ version = "0.1.0" }) {
          services on top, then the big activity feed and live output beside
          the sidebar. Shift+↑/↓ scrolls the feed, shift+End resumes follow,
          esc returns to the chat. Nothing runs from here; it only watches. */
-      /* @__PURE__ */ jsxs26(Fragment10, { children: [
-        /* @__PURE__ */ jsxs26("box", { style: { width: panelW, paddingLeft: 1, paddingRight: 1, flexDirection: "column", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx27(SystemPanel, { width: bodyW, meters, ctxUsed, ctxMax, host }),
-          /* @__PURE__ */ jsx27(ServicesPanel, { width: bodyW, services, scan, dense, maxCells: monitorServicesCapacity })
+      /* @__PURE__ */ jsxs27(Fragment10, { children: [
+        /* @__PURE__ */ jsxs27("box", { style: { width: panelW, paddingLeft: 1, paddingRight: 1, flexDirection: "column", flexShrink: 0 }, children: [
+          /* @__PURE__ */ jsx29(SystemPanel, { width: bodyW, meters, ctxUsed, ctxMax, host }),
+          /* @__PURE__ */ jsx29(ServicesPanel, { width: bodyW, services, scan, dense, maxCells: monitorServicesCapacity })
         ] }),
-        /* @__PURE__ */ jsxs26("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
-          /* @__PURE__ */ jsx27("box", { style: { width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx27(
+        /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+          /* @__PURE__ */ jsx29("box", { style: { width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
             MonitorFeed,
             {
               width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW,
@@ -7210,12 +7921,12 @@ function App({ version = "0.1.0" }) {
               busy: agent.busy
             }
           ) }),
-          sideW ? /* @__PURE__ */ jsx27("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx27(LiveSidebar, { ...sidebarProps, height: monitorRows, feed: false }) }) : null
+          sideW ? /* @__PURE__ */ jsx29("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx29(LiveSidebar, { ...sidebarProps, height: monitorRows, feed: false }) }) : null
         ] })
       ] })
-    ) : /* @__PURE__ */ jsxs26("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
-      /* @__PURE__ */ jsxs26("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
-        /* @__PURE__ */ jsx27(
+    ) : /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+      /* @__PURE__ */ jsxs27("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
+        /* @__PURE__ */ jsx29(
           StatusServicesPanel,
           {
             width: mainW,
@@ -7232,7 +7943,7 @@ function App({ version = "0.1.0" }) {
             dense: true
           }
         ),
-        showTodo ? /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx27(
+        showTodo ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
           TodoPanel,
           {
             todos: agent.todos,
@@ -7241,7 +7952,7 @@ function App({ version = "0.1.0" }) {
             maxVisibleRows: Math.min(agent.todos.length, todoVisible)
           }
         ) }) : null,
-        showLiveBox ? /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx27(
+        showLiveBox ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
           LiveOutputPanel,
           {
             width: mainW,
@@ -7255,7 +7966,7 @@ function App({ version = "0.1.0" }) {
             bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
           }
         ) }) : null,
-        showMcpPanel ? /* @__PURE__ */ jsx27(
+        showMcpPanel ? /* @__PURE__ */ jsx29(
           ScrollPanel_default,
           {
             width: mainW,
@@ -7267,11 +7978,11 @@ function App({ version = "0.1.0" }) {
             bindings: { up: "ctrl", down: "ctrl", pageup: "ctrl", pagedown: "ctrl", home: "ctrl", end: "ctrl" },
             empty: "Waiting for MCP server output\u2026",
             borderColor: "magenta",
-            children: (index, { width: rowW }) => /* @__PURE__ */ jsx27("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx27("text", { fg: "white", children: clipLine2(String(mcpOutputLines[index] || " "), rowW) }) })
+            children: (index, { width: rowW }) => /* @__PURE__ */ jsx29("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx29("text", { fg: "white", children: clipLine2(String(mcpOutputLines[index] || " "), rowW) }) })
           },
           latestMcpTool.id || latestMcpTool.name || "mcp"
         ) : null,
-        /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx27(
+        /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
           DockAd,
           {
             width: mainW,
@@ -7281,7 +7992,7 @@ function App({ version = "0.1.0" }) {
             expanded: dockExpanded
           }
         ) }),
-        approving ? /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx27(
+        approving ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
           ApprovalPrompt,
           {
             width: mainW,
@@ -7289,9 +8000,9 @@ function App({ version = "0.1.0" }) {
             onAnswer: answerApproval
           }
         ) }) : null,
-        notice ? /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx27("text", { fg: "cyan", children: clipLine2(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
-        /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx27(
-          Transcript,
+        notice ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx29("text", { fg: "cyan", children: clipLine2(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
+        /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
+          Transcript_default,
           {
             messages: agent.messages,
             width: mainW,
@@ -7304,7 +8015,7 @@ function App({ version = "0.1.0" }) {
             emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
           }
         ) }),
-        /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx27(
+        /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx29(
           CatalogPopout,
           {
             width: mainW,
@@ -7314,7 +8025,7 @@ function App({ version = "0.1.0" }) {
             selected: menuIndex,
             query: menuQuery
           }
-        ) : /* @__PURE__ */ jsx27(
+        ) : /* @__PURE__ */ jsx29(
           Composer,
           {
             width: mainW,
@@ -7324,7 +8035,7 @@ function App({ version = "0.1.0" }) {
             focused: focus === "composer" && !approving,
             disabled: false,
             hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u22B8 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 \u2191 history \xB7 /menu commands \xB7 /attach \xB7 pgup scroll \xB7 q quit",
-            adSlot: /* @__PURE__ */ jsx27(
+            adSlot: /* @__PURE__ */ jsx29(
               DockAd,
               {
                 width: Math.max(8, mainW - 4),
@@ -7336,7 +8047,7 @@ function App({ version = "0.1.0" }) {
             )
           }
         ) }),
-        showCrushStatus ? /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx27(
+        showCrushStatus ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
           CrushStatus,
           {
             width: mainW,
@@ -7345,11 +8056,35 @@ function App({ version = "0.1.0" }) {
             elapsedMs: agent.elapsedMs,
             queued: steerQueue.length
           }
-        ) }) : null
+        ) }) : showRecap ? (
+          // Idle: the same row states what the finished run did instead of
+          // leaving it blank (owner, 2026-11-24: "add recap in cli when
+          // agent is idle").
+          /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
+            Recap,
+            {
+              width: mainW,
+              turns: usage.turns,
+              tools: usage.tools,
+              ok: usage.ok,
+              fail: usage.fail,
+              web: usage.web,
+              requests: usage.requests,
+              elapsedMs: agent.elapsedMs,
+              inTok: usage.inTok,
+              outTok: usage.outTok,
+              tokensKnown: usage.tokensKnown,
+              ctxPct: usage.ctxPct,
+              failed: agent.status === "error",
+              todosDone,
+              todosTotal: agent.todos.length
+            }
+          ) })
+        ) : null
       ] }),
-      sideW ? /* @__PURE__ */ jsx27("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx27(LiveSidebar, { ...sidebarProps }) }) : null
+      sideW ? /* @__PURE__ */ jsx29("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx29(LiveSidebar, { ...sidebarProps }) }) : null
     ] }),
-    /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx27(
+    /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
       StatusBar,
       {
         width: panelW,
@@ -7385,7 +8120,7 @@ async function start({ version = "0.1.0" } = {}) {
     backgroundColor: process.env.HAKSTER_TUI_OPAQUE || import_prefs4.default.load().opaqueBackdrop ? "#000000" : "transparent"
   });
   root = createRoot(renderer);
-  root.render(React28.createElement(App, { version }));
+  root.render(React30.createElement(App, { version }));
   return {
     unmount() {
       if (root) {

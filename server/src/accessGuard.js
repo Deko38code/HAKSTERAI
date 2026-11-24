@@ -390,12 +390,25 @@ function recordDecision({ ip, user, route, surface, action, reason, plan, paidUn
   const db = getDb();
   try {
     const settings = loadSettings();
+    // SQLite binds only numbers, strings, bigints, buffers and null. A decoded
+    // token can carry an id/plan/surface/email as an object, which threw
+    // "SQLite3 can only bind numbers, strings, bigints, buffers, and null" and
+    // silently dropped the decision (the access_decisions table stayed empty
+    // while the error log filled up). Coerce each bound value to the column's
+    // own type so a decision is always recorded.
+    const prim = (v) => {
+      if (v == null) return null;
+      if (typeof v === 'object') return (v.id != null ? v.id : (v.name != null ? v.name : JSON.stringify(v)));
+      if (typeof v === 'boolean') return v ? 1 : 0;
+      return v;
+    };
+    const text = (v) => (v == null ? null : String(prim(v)).slice(0, 200));
     db.prepare(
       `INSERT INTO access_decisions (at, ip, user_id, email, surface, route, action, reason, plan, paid_until, mode)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(now(), normalizeIp(ip), (user && user.id) || null, (user && user.email) || null,
-      surface || null, String(route || '').slice(0, 120), action, String(reason || '').slice(0, 200),
-      plan || null, paidUntil || null, settings.mode);
+    ).run(now(), normalizeIp(ip), prim(user && user.id), text(user && user.email),
+      text(surface), String(route || '').slice(0, 120), text(action), String(reason || '').slice(0, 200),
+      text(plan), typeof paidUntil === 'number' ? paidUntil : (paidUntil ? 1 : null), text(settings.mode) || 'observe');
   } catch (e) { console.error('[accessguard] record failed:', e.message); }
 }
 

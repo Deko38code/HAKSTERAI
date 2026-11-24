@@ -20,6 +20,11 @@ import { TextAttributes } from '@opentui/core';
 const STATUS_STYLES = {
   idle: { text: 'ready', color: 'gray' },
   connecting: { text: "can't reach server…", color: 'yellow' },
+  // The server dropped mid-turn and the TUI is waiting for the port to answer
+  // before resending. Distinct from `connecting` on purpose: this turn was
+  // already sent, so "can't reach server" would read as a first attempt
+  // (owner, 2026-11-24: "and add auto reconnect in tui").
+  reconnecting: { text: 'reconnecting…', color: 'yellow' },
   thinking: { text: 'thinking…', color: 'yellow' },
   streaming: { text: 'working…', color: 'cyan' },
   // The run is parked on a decision the operator has to make. Naming it here
@@ -46,7 +51,7 @@ export default function StatusBar({ width, status, model, cols, focus, adsOn, el
   // "0.0s" next to "ready" would read as a stalled request. 'connecting' counts
   // — the turn is on the wire from the moment it is sent (owner, 2026-11-24).
   const elapsed =
-    status === 'connecting' || status === 'streaming' ||
+    status === 'connecting' || status === 'reconnecting' || status === 'streaming' ||
     status === 'thinking' || status === 'approval'
       ? formatElapsed(elapsedMs)
       : null;

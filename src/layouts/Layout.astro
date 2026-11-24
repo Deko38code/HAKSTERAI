@@ -420,6 +420,14 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
         #phantom-server-applet[data-state="ready"] .psa-state,#phantom-server-applet[data-state="applying"] .psa-state{background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.45);color:#f5cf7a}
         #phantom-server-applet[data-state="offline"] .psa-state{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.5);color:#ff9b9b}
         #phantom-server-applet .psa-detail{display:none}
+        /* The one exception: a build the server is holding says why, on the
+           card itself. Reading "Held — CLI attached" without the reason is
+           what made a planned wait look like a stall. Scoped to the held
+           queued state, so every other state keeps the minimal card. */
+        #phantom-server-applet[data-state="queued"][data-held="1"] .psa-detail{
+          display:block;font-size:9px;line-height:1.5;color:#9a9a9a;
+          margin:4px 0 2px;text-align:left;white-space:normal;overflow-wrap:anywhere;
+        }
         #phantom-server-applet .psa-grid{display:none}
         #phantom-server-applet .psa-grid b{color:#ececec;font-weight:600}
         #phantom-server-applet .psa-actions{display:none}
@@ -784,6 +792,14 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
 
         let state = 'checking';
         let serverApplying = false;
+        // A build the server is deliberately NOT applying yet. The server now
+        // reports `cliAttached` and a `holdReason` (serverBuild.js: a queued
+        // build waits out a live CLI session instead of bouncing it). Showing
+        // that honestly matters: a held build that reads as "waiting" looks
+        // stuck, and the drop that follows a forced apply looks like a crash
+        // from the sofa. Null when nothing is holding. Never inferred — the
+        // reason string comes from the server's own report.
+        let serverHold = null;
         let misses = 0;
         let wasOffline = false;
         let lastCheck = 0;
@@ -1321,12 +1337,20 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             setMode('tab');
           }
           const icon = { checking: '●', live: '✓', restored: '✓', ready: '▲', queued: '▲', applying: '⚙', offline: '⚠', building: '⚙', failed: '✗' }[next] || '●';
+          // A queued build that a CLI session is holding says so wherever the
+          // applet names it — title, edge tab, chip — so "nothing is happening"
+          // never reads as "stuck" or "down".
+          const queuedHeld = next === 'queued' && !!serverHold;
+          // Only the held state reveals the card's detail sentence (see the
+          // data-held rule in the stylesheet). Every other state keeps the
+          // minimal card exactly as it was.
+          root.dataset.held = queuedHeld ? '1' : '0';
           const title = {
             checking: 'haksterai.com — checking',
             live: 'haksterai.com is up to date',
             restored: 'haksterai.com is answering again',
             ready: 'Update ready',
-            queued: 'Update queued on the server',
+            queued: queuedHeld ? 'Held — CLI attached' : 'Update queued on the server',
             applying: 'Update applying on the server',
             offline: 'haksterai.com is not answering',
             building: 'Build running',
@@ -1342,7 +1366,9 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           if (tabEl) {
             const tabLabel = {
               ready: 'Update ready — open to update',
-              queued: 'Update queued on the server — open for details',
+              queued: queuedHeld
+                ? 'Update held — a CLI session is attached — open for details'
+                : 'Update queued on the server — open for details',
               applying: 'Update applying on the server — open for details',
               building: 'Build running — open for progress',
               failed: 'Build failed — open for the log',
@@ -1360,7 +1386,7 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             // or failing site never reads "Up to date".
             chipTitleEl.textContent = {
               ready: 'Update ready',
-              queued: 'Build queued',
+              queued: queuedHeld ? 'Held · CLI' : 'Build queued',
               offline: 'Offline',
               failed: 'Build failed',
               applying: 'Updating',
@@ -1487,9 +1513,14 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
           paintState('queued');
           if (barEl) barEl.hidden = true;
           if (actionsEl) actionsEl.hidden = true;
-          if (detailEl) detailEl.textContent = 'Update queued on the server — '
-            + (count ? count + ' file' + (count === 1 ? '' : 's') : 'server changes')
-            + ' waiting to be applied; it applies itself when the server is idle.';
+          if (detailEl) detailEl.textContent = serverHold
+            ? 'Update queued on the server — '
+              + (count ? count + ' file' + (count === 1 ? '' : 's') : 'server changes')
+              + ' waiting. Held while a CLI session is attached (' + serverHold.reason
+              + ') — it applies as soon as that session ends.'
+            : 'Update queued on the server — '
+              + (count ? count + ' file' + (count === 1 ? '' : 's') : 'server changes')
+              + ' waiting to be applied; it applies itself when the server is idle.';
           // Kept for the "just finished applying" retraction in check(); the
           // card itself stays exactly where it is (the resting edge tab — a
           // queued update never opens the card, Junkalot parity 2026-11-22).
@@ -1510,6 +1541,13 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
             firstVersionCheck = false;
             const server = (data && data.server) || {};
             serverApplying = !!server.applying;
+            serverHold = server.cliAttached
+              ? {
+                  cli: true,
+                  reason: String(server.holdReason || 'CLI session attached'),
+                  seenSec: Number(server.secondsSinceCliSeen) || 0,
+                }
+              : null;
             lastCheck = Date.now();
             misses = 0;
             if (siteBuildEl) { siteBuildEl.textContent = shortClock(data && data.build); siteBuildEl.title = String((data && data.build) || ''); }
@@ -1521,7 +1559,9 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
               const pendingN = Number(server.pending);
               pendingEl.textContent = Number.isFinite(pendingN) && pendingN > 0
                 ? pendingN + ' file' + (pendingN === 1 ? '' : 's')
-                : (server.applying ? 'applying' : server.stale ? 'waiting' : 'up to date');
+                : (server.applying ? 'applying'
+                  : server.cliAttached ? 'held · CLI'
+                  : server.stale ? 'waiting' : 'up to date');
             }
             if (checkedEl) checkedEl.textContent = ago(lastCheck);
             if (chipCodeEl) chipCodeEl.textContent = shortClock(data && data.build);
@@ -1571,6 +1611,12 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
               verifyWindow = null;
               clearTimeout(dockTimer); clearTimeout(hideTimer); dockPending = false; dockDelay = 0;
               queuedShown = 'queued';
+              // The socket is about to drop because the server is applying, not
+              // because it died. Tell the resume helper the cause so its banner
+              // says "restarting to apply an update" instead of reading as a
+              // crash (owner, 2026-11-24: "something is doing it making it
+              // crash" — it was this apply, labelled badly).
+              if (typeof window.haksterNoteRestart === 'function') window.haksterNoteRestart('apply');
               paintState('applying');
               if (actionsEl) actionsEl.hidden = true;
               if (barEl) barEl.hidden = false;

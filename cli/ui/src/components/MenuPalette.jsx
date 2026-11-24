@@ -22,6 +22,7 @@ export const MENU_ITEMS = [
   { cmd: '/squad', label: 'Sub-agents', detail: 'the peer agents the server reports · enter delegates' },
   { cmd: '/status', label: 'Status', detail: 'server, phase, tokens' },
   { cmd: '/usage', label: 'Usage', detail: 'per-user · daily & weekly graphs · r refresh · [ ] rate' },
+  { cmd: '/debug', label: 'Debugger', detail: 'render times · event-loop lag · tools · server build' },
   { cmd: '/update', label: 'Update', detail: 'check · downloads in-session · applies on restart' },
   { cmd: '/settings', label: 'Settings', detail: 'every CLI setting · change it in place' },
   { cmd: '/graphics', label: 'Kitty graphics', detail: 'real logo image in kitty/Ghostty/WezTerm · report or on/off' },
