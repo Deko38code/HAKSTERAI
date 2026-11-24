@@ -39,7 +39,7 @@ import { countWebCallsInMessages } from './utils/web-usage.js';
 import cliPrefs from '../../src/prefs.js';
 import { appendInputHistory, loadInputHistory } from '../../src/input-history.js';
 import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel, pointsPct, meterArrow as arrowFor, arrowColor as arrowFg } from '../../smartness.mjs';
-import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER } from '../../src/models/ladder.js';
+import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER, displayModel } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
 import { isSupported as kittyGraphicsSupported } from '../../src/kitty-graphics.js';
 import ads from '../../src/ads/ad-client.js';
@@ -206,7 +206,8 @@ export default function App({ version = '0.1.0' }) {
   const [histIdx, setHistIdx] = useState(-1);
   const draftStash = useRef('');
   // Start on the owner's cheap DeepSeek config; a GLM env tag is the old
-  // default and falls through (§22 — the pinned Phantom Flash config).
+  // default and falls through (§22 — the pinned HAKSTERAI-FLASH config;
+  // the wire model and relay are unchanged, only the display name moved).
   const [model, setModel] = useState(() => (process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || PRIMARY_MODEL));
   // No provider pin by default: the ladder's tier 1 picks the engine (the
   // Claude Code CLI on the pinned DeepSeek route). Pinning PRIMARY_PROVIDER
@@ -216,7 +217,7 @@ export default function App({ version = '0.1.0' }) {
   // model picked in /model still wins.
   const [provider, setProvider] = useState(process.env.HAKSTER_PROVIDER || '');
   const [modelIdx, setModelIdx] = useState(0);
-  // Auto handoff: DeepSeek Flash → Codex → server waterfall. On unless the
+  // Auto handoff: HAKSTERAI-FLASH → Codex → server waterfall. On unless the
   // owner turned it off; the choice is remembered between sessions.
   const prefsRef = useRef(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
@@ -394,8 +395,8 @@ export default function App({ version = '0.1.0' }) {
   // same provider, stated literally (§22). Tier 2 is Codex on the Pro plan.
   // Everything below is the reference catalogue, unchanged.
   const pickerModels = [
-    { key: '__claude', vendor: 'Claude', value: `Claude Code · ${PRIMARY_MODEL}`, model: PRIMARY_MODEL, provider: 'claude-cli' },
-    { key: '__deepseek', vendor: 'DeepSeek', value: `DeepSeek relay · ${PRIMARY_MODEL}`, model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER },
+    { key: '__claude', vendor: 'Claude', value: `Claude Code · ${displayModel(PRIMARY_MODEL)}`, model: PRIMARY_MODEL, provider: 'claude-cli' },
+    { key: '__deepseek', vendor: 'DeepSeek', value: `DeepSeek relay · ${displayModel(PRIMARY_MODEL)}`, model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER },
     { key: '__codex', vendor: 'Codex', value: 'Codex (Pro) · provider default', model: '', provider: 'codex-cli' },
     ...models.map((m) => ({ key: `c:${m.id}`, vendor: m.vendor, value: m.id, model: m.id, provider: PRIMARY_PROVIDER })),
   ];
@@ -405,7 +406,7 @@ export default function App({ version = '0.1.0' }) {
   };
   // What the header and the status bar call the current model. Codex is picked
   // by provider (no model string is invented for it), so it needs its own name.
-  const modelText = model || (provider === 'codex-cli' ? 'Codex (Pro)' : provider || 'auto');
+  const modelText = model ? displayModel(model) : (provider === 'codex-cli' ? 'Codex (Pro)' : provider || 'auto');
   const ctxMax = catalog.contextMaxFor(model || PRIMARY_MODEL) || 1;
   const ctxUsed = Number((status && (status.tokens || status.contextUsed)) || 0);
   const meters = agent.meters || null;
@@ -702,7 +703,7 @@ export default function App({ version = '0.1.0' }) {
         return;
       case '/status':
         showNotice(status
-          ? `phase ${status.phase} · model ${status.model} · tokens ${status.tokens} · trust ${status.trust} · ${status.connected ? 'connected' : 'offline'}`
+          ? `phase ${status.phase} · model ${displayModel(status.model)} · tokens ${status.tokens} · trust ${status.trust} · ${status.connected ? 'connected' : 'offline'}`
           : `server ${statusErr || 'connecting…'}`);
         return;
       case '/settings': {
@@ -804,7 +805,7 @@ export default function App({ version = '0.1.0' }) {
       rows.push(...hits);
     };
     pushSection('AGENTS', [
-      { kind: 'agent', label: `Claude · ${PRIMARY_MODEL}`, detail: 'our config · ollama', action: { model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER } },
+      { kind: 'agent', label: `Claude · ${displayModel(PRIMARY_MODEL)}`, detail: 'our config · ollama', action: { model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER } },
       { kind: 'agent', label: 'Codex (Pro)', detail: 'provider default · ladder 2', action: { model: '', provider: 'codex-cli' } },
       ...(crushModelList.current || []).map((c) => ({
         kind: 'agent',
@@ -1614,7 +1615,7 @@ export default function App({ version = '0.1.0' }) {
       cells: [
         { label: 'phase', value: status ? status.phase : '—', color: 'cyan' },
         { label: 'connected', value: status ? (status.connected ? 'yes' : 'no') : '—', color: status && status.connected ? 'green' : 'red' },
-        { label: 'server model', value: status ? status.model : '—' },
+        { label: 'server model', value: status ? displayModel(status.model) : '—' },
         { label: 'trust', value: status ? status.trust : '—' },
         { label: 'file guards', value: guard ? `${guard.present}/${guard.total}` : '…', color: guard && guard.missing && guard.missing.length ? 'red' : 'green' },
       ],

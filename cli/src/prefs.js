@@ -35,7 +35,7 @@ const DEFAULTS = {
 /* What each key means, shown in the settings panel and the /menu catalog. This
  * is display metadata only — it never changes a default or a stored value. */
 const META = {
-  model: { label: 'Model', detail: 'blank = the pinned Phantom Flash config' },
+  model: { label: 'Model', detail: 'blank = the pinned HAKSTERAI-FLASH config' },
   provider: { label: 'Provider', detail: 'blank = the pinned provider (ollama)' },
   autoHandoff: { label: 'Auto handoff', detail: 'a failed run moves down the model ladder' },
   ads: { label: 'Ad rail', detail: 'the sponsor line under the chat column' },

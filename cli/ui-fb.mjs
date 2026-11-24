@@ -665,7 +665,7 @@ var require_prefs = __commonJS({
       // the usage page's poll, seconds (0 = paused)
     };
     var META2 = {
-      model: { label: "Model", detail: "blank = the pinned Phantom Flash config" },
+      model: { label: "Model", detail: "blank = the pinned HAKSTERAI-FLASH config" },
       provider: { label: "Provider", detail: "blank = the pinned provider (ollama)" },
       autoHandoff: { label: "Auto handoff", detail: "a failed run moves down the model ladder" },
       ads: { label: "Ad rail", detail: "the sponsor line under the chat column" },
@@ -742,6 +742,7 @@ var require_ladder = __commonJS({
     "use strict";
     var PRIMARY_MODEL2 = "deepseek-v4.1-flash:cloud";
     var PRIMARY_PROVIDER2 = "ollama";
+    var MODEL_DISPLAY_NAME = "HAKSTERAI-FLASH";
     var MODEL_LADDER2 = Object.freeze([
       Object.freeze({
         tier: 1,
@@ -754,7 +755,7 @@ var require_ladder = __commonJS({
         // which keeps going across tool rounds instead of stopping after one).
         provider: "claude-cli",
         model: PRIMARY_MODEL2,
-        label: "DeepSeek Flash"
+        label: MODEL_DISPLAY_NAME
       }),
       Object.freeze({
         tier: 2,
@@ -763,7 +764,7 @@ var require_ladder = __commonJS({
         // retries on this route before any other lane is tried.
         provider: PRIMARY_PROVIDER2,
         model: PRIMARY_MODEL2,
-        label: "DeepSeek direct"
+        label: `${MODEL_DISPLAY_NAME} direct`
       }),
       Object.freeze({
         tier: 3,
@@ -796,7 +797,12 @@ var require_ladder = __commonJS({
     function labelForModel(model) {
       const chosen = String(model || "");
       const hit = MODEL_LADDER2.find((entry) => entry.model && entry.model === chosen);
-      return hit ? hit.label : chosen || PRIMARY_MODEL2;
+      return hit ? hit.label : displayModel2(chosen);
+    }
+    function displayModel2(model) {
+      const chosen = String(model || "");
+      if (!chosen || isPrimary(chosen)) return MODEL_DISPLAY_NAME;
+      return chosen;
     }
     function tierOf(model) {
       const chosen = String(model || "");
@@ -809,6 +815,8 @@ var require_ladder = __commonJS({
       PRIMARY_PROVIDER: PRIMARY_PROVIDER2,
       attemptsFor: attemptsFor2,
       labelForModel,
+      displayModel: displayModel2,
+      MODEL_DISPLAY_NAME,
       tierOf,
       isPrimary
     };
@@ -5946,8 +5954,8 @@ function App({ version = "0.1.0" }) {
   }, [meterPoints]);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
   const pickerModels = [
-    { key: "__claude", vendor: "Claude", value: `Claude Code \xB7 ${import_ladder2.PRIMARY_MODEL}`, model: import_ladder2.PRIMARY_MODEL, provider: "claude-cli" },
-    { key: "__deepseek", vendor: "DeepSeek", value: `DeepSeek relay \xB7 ${import_ladder2.PRIMARY_MODEL}`, model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER },
+    { key: "__claude", vendor: "Claude", value: `Claude Code \xB7 ${(0, import_ladder2.displayModel)(import_ladder2.PRIMARY_MODEL)}`, model: import_ladder2.PRIMARY_MODEL, provider: "claude-cli" },
+    { key: "__deepseek", vendor: "DeepSeek", value: `DeepSeek relay \xB7 ${(0, import_ladder2.displayModel)(import_ladder2.PRIMARY_MODEL)}`, model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER },
     { key: "__codex", vendor: "Codex", value: "Codex (Pro) \xB7 provider default", model: "", provider: "codex-cli" },
     ...models.map((m) => ({ key: `c:${m.id}`, vendor: m.vendor, value: m.id, model: m.id, provider: import_ladder2.PRIMARY_PROVIDER }))
   ];
@@ -5955,7 +5963,7 @@ function App({ version = "0.1.0" }) {
     const i = pickerModels.findIndex((x) => x.model === (m || "") && x.provider === (p || ""));
     return i < 0 ? 0 : i;
   };
-  const modelText = model || (provider === "codex-cli" ? "Codex (Pro)" : provider || "auto");
+  const modelText = model ? (0, import_ladder2.displayModel)(model) : provider === "codex-cli" ? "Codex (Pro)" : provider || "auto";
   const ctxMax = import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
   const ctxUsed = Number(status && (status.tokens || status.contextUsed) || 0);
   const meters = agent.meters || null;
@@ -6167,7 +6175,7 @@ function App({ version = "0.1.0" }) {
         setView("squad");
         return;
       case "/status":
-        showNotice(status ? `phase ${status.phase} \xB7 model ${status.model} \xB7 tokens ${status.tokens} \xB7 trust ${status.trust} \xB7 ${status.connected ? "connected" : "offline"}` : `server ${statusErr || "connecting\u2026"}`);
+        showNotice(status ? `phase ${status.phase} \xB7 model ${(0, import_ladder2.displayModel)(status.model)} \xB7 tokens ${status.tokens} \xB7 trust ${status.trust} \xB7 ${status.connected ? "connected" : "offline"}` : `server ${statusErr || "connecting\u2026"}`);
         return;
       case "/settings": {
         const [key, ...rest] = arg.split(/\s+/).filter(Boolean);
@@ -6245,7 +6253,7 @@ function App({ version = "0.1.0" }) {
       rows2.push(...hits);
     };
     pushSection("AGENTS", [
-      { kind: "agent", label: `Claude \xB7 ${import_ladder2.PRIMARY_MODEL}`, detail: "our config \xB7 ollama", action: { model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER } },
+      { kind: "agent", label: `Claude \xB7 ${(0, import_ladder2.displayModel)(import_ladder2.PRIMARY_MODEL)}`, detail: "our config \xB7 ollama", action: { model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER } },
       { kind: "agent", label: "Codex (Pro)", detail: "provider default \xB7 ladder 2", action: { model: "", provider: "codex-cli" } },
       ...(crushModelList.current || []).map((c) => ({
         kind: "agent",
@@ -6869,7 +6877,7 @@ function App({ version = "0.1.0" }) {
       cells: [
         { label: "phase", value: status ? status.phase : "\u2014", color: "cyan" },
         { label: "connected", value: status ? status.connected ? "yes" : "no" : "\u2014", color: status && status.connected ? "green" : "red" },
-        { label: "server model", value: status ? status.model : "\u2014" },
+        { label: "server model", value: status ? (0, import_ladder2.displayModel)(status.model) : "\u2014" },
         { label: "trust", value: status ? status.trust : "\u2014" },
         { label: "file guards", value: guard ? `${guard.present}/${guard.total}` : "\u2026", color: guard && guard.missing && guard.missing.length ? "red" : "green" }
       ]

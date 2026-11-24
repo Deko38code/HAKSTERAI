@@ -788,10 +788,10 @@ var PROVIDERS = [
     // Our own config first — the same model and relay the Claude CLI runs on.
     // Everything below this entry is a backup in the waterfall.
     id: "hakster",
-    name: "HaksterAI — Phantom Flash",
+    name: "HaksterAI — HAKSTERAI-FLASH",
     needsKey: false,
     models: [
-      { id: "deepseek-v4.1-flash:cloud", name: "Phantom Flash (DeepSeek v4.1 Flash)" }
+      { id: "deepseek-v4.1-flash:cloud", name: "HAKSTERAI-FLASH" }
     ]
   },
   {

@@ -13,7 +13,8 @@
  *   attemptsFor(model)    the attempts a run may make, current model first
  *   labelForModel(model)  the short name shown in the status bar and notices
  *
- * Tier 1 is the pinned Phantom Flash config (CLAUDE.md §22), driven by the
+ * Tier 1 is the pinned HAKSTERAI-FLASH config (CLAUDE.md §22 — same wire model,
+ * same relay; only the name the TUI prints changed), driven by the
  * Claude Code CLI on the same wire model and relay this box's Claude Code
  * session runs on — the harness that keeps working through tool rounds. Tier 2
  * retries the identical turn on that relay through the server's own loop, Codex
@@ -25,6 +26,13 @@
 /** Tier 1 model — the cheap DeepSeek line, stated literally (§22). */
 const PRIMARY_MODEL = 'deepseek-v4.1-flash:cloud';
 const PRIMARY_PROVIDER = 'ollama';
+
+/**
+ * The name the TUI prints for the pinned model (owner, 2026-11-24: "name it
+ * HAKSTERAI-FLASH"). This is a label only — PRIMARY_MODEL, the relay and the
+ * provider above are unchanged, so nothing about the config or its cost moves.
+ */
+const MODEL_DISPLAY_NAME = 'HAKSTERAI-FLASH';
 
 const MODEL_LADDER = Object.freeze([
   Object.freeze({
@@ -38,7 +46,7 @@ const MODEL_LADDER = Object.freeze([
     // which keeps going across tool rounds instead of stopping after one).
     provider: 'claude-cli',
     model: PRIMARY_MODEL,
-    label: 'DeepSeek Flash',
+    label: MODEL_DISPLAY_NAME,
   }),
   Object.freeze({
     tier: 2,
@@ -47,7 +55,7 @@ const MODEL_LADDER = Object.freeze([
     // retries on this route before any other lane is tried.
     provider: PRIMARY_PROVIDER,
     model: PRIMARY_MODEL,
-    label: 'DeepSeek direct',
+    label: `${MODEL_DISPLAY_NAME} direct`,
   }),
   Object.freeze({
     tier: 3,
@@ -93,7 +101,18 @@ function attemptsFor(model, provider) {
 function labelForModel(model) {
   const chosen = String(model || '');
   const hit = MODEL_LADDER.find((entry) => entry.model && entry.model === chosen);
-  return hit ? hit.label : chosen || PRIMARY_MODEL;
+  return hit ? hit.label : displayModel(chosen);
+}
+
+/**
+ * Human name for any model id, for the status bar, headers and pickers. The
+ * pinned model prints as HAKSTERAI-FLASH; anything else prints as-is. The id
+ * sent on the wire is never changed by this — it is display only.
+ */
+function displayModel(model) {
+  const chosen = String(model || '');
+  if (!chosen || isPrimary(chosen)) return MODEL_DISPLAY_NAME;
+  return chosen;
 }
 
 /** Which ladder tier a failure may hand off from — 1 = primary only. */
@@ -109,6 +128,8 @@ module.exports = {
   PRIMARY_PROVIDER,
   attemptsFor,
   labelForModel,
+  displayModel,
+  MODEL_DISPLAY_NAME,
   tierOf,
   isPrimary,
 };
