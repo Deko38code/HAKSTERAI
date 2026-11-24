@@ -436,7 +436,7 @@ the server for a static deploy.
 ## Junkalot rulebook index — mapped
 
 Junkalot's index of the MASTERGUARD rules is `/home/ghost694/junkalot/RULEBOOK-INDEX.md` (on Parrot's
-master copy): every section of `/home/ghost/CLAUDE.md` (§1–§36) with what it means on that project and where
+master copy): every section of `/home/ghost/CLAUDE.md` (§1–§37) with what it means on that project and where
 this file mirrors it. It is a read-only pointer — HaksterAI never writes a rule, a rate, a key or usage into
 that project (§16) — and it is not a second rulebook: CLAUDE.md wins on any difference.
 
@@ -490,3 +490,23 @@ profit-free `selfView` to a non-owner and a profit object only on the owner bran
 states they "are not rendered on junkalot.co at all". So §36 records existing correct behaviour as a rule
 rather than mandating a code change; `_BusinessTools.tsx` (her own job-pricing margin calculator) is her
 tool, not our disclosure, and stays (§36.5).
+
+---
+
+## Section 37 Added — No Client-Server Restart While She Is Active (2026-11-24)
+
+_Added: 2026-11-24, owner-directed ("and we never restart clients server while shes active in admin dash in
+junkalot with 1junkalot and her susie email add rule always when offline we update server etc"). Backup
+before the edit: `AGENTS.md.bak-20261124T054429Z (38034 B, size-verified)`; master-rulebook backup
+`CLAUDE.md.bak-20261124T054413Z` (58,732 B, size-verified). Nothing above this line was rewritten,
+reordered or removed — one pointer parenthetical was advanced from §1–§36 to §1–§37, exactly as the §35 and
+§36 entries did._
+
+`/home/ghost/CLAUDE.md` is now **§1–§37**. §37 is **"Never Restart The Client's Server While She Is Active —
+Update Only When Offline"**: it extends §32 (installs only while she is signed out) and §33 (queue builds,
+verify her email+IP) to *every* restart of Junkalot's server process — a PM2 restart for an env or config
+change, a crash-recovery loop, a hand-run bounce — not only a staged build hand-off. Activity is measured
+read-only via `scripts/client-activity.mjs` over `data/admin-sessions.jsonl`, naming her by email and IP
+(`1junkalot@gmail.com`, `susanschlamp53@gmail.com`); the owner's account never counts. A held restart is
+reported as held, never as done, and nothing overrides her session on a timer. No rate, bill, model or
+computation moves (§19, §24, §26, §22 remain locked).
