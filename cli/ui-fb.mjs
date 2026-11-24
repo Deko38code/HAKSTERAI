@@ -2064,7 +2064,8 @@ function LiveSidebar({
   const h = Math.max(0, Number(height) || 0);
   const tall = h >= 44;
   const huge = h >= 50;
-  let left = h - 10;
+  const liveRows = Math.min(7, Math.max(0, h - 3));
+  let left = h - (3 + liveRows);
   const showUsage = left >= 9;
   if (showUsage) left -= 9;
   const showMemory = left >= 26;
@@ -2151,13 +2152,13 @@ function LiveSidebar({
   const outHint = !liveLines.length ? busy ? "live" : "last" : scrollHint(liveLines.length, outputRows, outStart, outOffset == null);
   return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25C8 Live", hint: serverOk ? "online" : "offline", children: [
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "status", v: agentStatus || "idle", color: agentStatus === "error" ? "red" : agentStatus === "idle" ? "gray" : "green" }),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "phase", v: phase || "IDLE", color: "cyan" }),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "tool", v: tool || "\u2014" }),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "turns", v: turns }),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "elapsed", v: `${(Number(elapsedMs || 0) / 1e3).toFixed(1)}s` }),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "model", v: model, color: "yellow" }),
-      /* @__PURE__ */ jsx7(
+      liveRows >= 1 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "status", v: agentStatus || "idle", color: agentStatus === "error" ? "red" : agentStatus === "idle" ? "gray" : "green" }) : null,
+      liveRows >= 2 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "phase", v: phase || "IDLE", color: "cyan" }) : null,
+      liveRows >= 3 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "tool", v: tool || "\u2014" }) : null,
+      liveRows >= 4 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "turns", v: turns }) : null,
+      liveRows >= 5 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "elapsed", v: `${(Number(elapsedMs || 0) / 1e3).toFixed(1)}s` }) : null,
+      liveRows >= 6 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "model", v: model, color: "yellow" }) : null,
+      liveRows >= 7 ? /* @__PURE__ */ jsx7(
         Row,
         {
           width: inner,
@@ -2165,7 +2166,7 @@ function LiveSidebar({
           v: update && update.version && (update.status === "staged" || update.status === "blocked") ? `tui ${version} ${update.status === "blocked" ? "\u27C2" : "\u2B06"}${update.version}` : `tui ${version}`,
           color: update && update.status === "blocked" ? "yellow" : update && update.status === "staged" ? "green" : "white"
         }
-      )
+      ) : null
     ] }),
     showUsage ? /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25D4 Usage", hint: busy ? "live" : "session", children: [
       /* @__PURE__ */ jsx7(Row, { width: inner, k: "tools", v: compact ? String(Number(usage && usage.tools) || 0) : `${Number(usage && usage.tools) || 0} calls`, color: "cyan" }),
@@ -3738,13 +3739,6 @@ function ServicesPanel({
         color: "cyan"
       });
     }
-  } else if (others.length) {
-    cells.push({
-      key: "more",
-      label: "other",
-      value: `+${others.length} ports`,
-      color: "cyan"
-    });
   }
   const capacity = Math.max(2, Math.trunc(Number(maxCells) || 32));
   const overflow = cells.length - capacity;
@@ -5186,7 +5180,6 @@ var import_ad_client2 = __toESM(require_ad_client());
 import { Fragment as Fragment9, jsx as jsx24, jsxs as jsxs23 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 6;
-var MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
 var PAGE_SCROLLBAR = {
   width: 1,
   showArrows: true,
@@ -6012,18 +6005,19 @@ function App({ version = "0.1.0" }) {
   const dashDense = (rows || 30) < 26;
   const systemRows = 1;
   const servicesCapacityFor = (w, d = dense) => Math.max(4, Math.max(1, Math.floor(Math.max(1, w - 4) / 17)) * (d ? 3 : 2));
-  const servicesRowsFor = (w, capacity) => {
+  const servicesRowsFor = (w, capacity, rawCount) => {
     if (w < 96) return 3;
-    const raw = services.length + (otherPorts.length ? 1 : 0);
-    return servicesGridRows(w, Math.min(raw, capacity), dense);
+    return servicesGridRows(w, Math.min(Math.max(1, rawCount), capacity), dense);
   };
+  const servicesRaw = Math.max(1, services.length);
+  const servicesRawAll = services.length + (otherPorts.length ? 1 : 0);
   const servicesCapacity = servicesCapacityFor(mainW);
-  const servicesRows = servicesRowsFor(mainW, servicesCapacity);
+  const servicesRows = servicesRowsFor(mainW, servicesCapacity, servicesRaw);
   const dashServicesWidth = Math.max(1, panelW - 1);
   const dashServicesCapacity = servicesCapacityFor(dashServicesWidth, dashDense);
   const monitorServicesCapacity = servicesCapacityFor(panelW);
-  const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity);
-  const liveOutputLineCap = (rows || 30) >= 48 ? 14 : (rows || 30) >= 34 ? 9 : 6;
+  const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity, servicesRawAll);
+  const liveOutputLineCap = (rows || 30) >= 48 ? 18 : (rows || 30) >= 34 ? 12 : 8;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
   const liveOutputChrome = 3 + liveOutputCallRows;
   const dashRows = Math.max(6, (rows || 30) - 2 - (statusErr ? 3 : 0));
@@ -6034,19 +6028,21 @@ function App({ version = "0.1.0" }) {
     (rows || 30) - 2 - systemRows - monitorServicesRows - (notice ? 1 : 0)
   );
   const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
-  const MENU_ROWS = Math.max(10, Math.min(26, (rows || 30) - 12));
-  const composerRows = menuOpen ? MENU_ROWS : 5;
+  const errRows = statusErr ? 3 : 0;
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
   const approvalRows = approving ? 6 : 0;
+  const chromeNoComposer = CHROME_ROWS + errRows + noticeRows + railRows + approvalRows + systemRows + servicesRows + liveOutputChrome;
+  const MENU_ROWS = Math.max(6, Math.min(26, (rows || 30) - 12, (rows || 30) - chromeNoComposer - 2));
+  const composerRows = menuOpen ? MENU_ROWS : 5;
   const todoVisible = (rows || 30) >= 34 ? 6 : 3;
-  const mandatoryRows = CHROME_ROWS + noticeRows + composerRows + railRows + approvalRows + systemRows + servicesRows + liveOutputChrome + 2;
+  const mandatoryRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + approvalRows + systemRows + servicesRows + liveOutputChrome + 2;
   const optionalBudget = (rows || 30) - mandatoryRows;
   const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
   const showTodo = wantTodoRows > 0 && optionalBudget >= wantTodoRows;
   const todoRows = showTodo ? wantTodoRows : 0;
   const showMcpPanel = !!latestMcpTool && optionalBudget - todoRows >= mcpPanelRows;
-  const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows + approvalRows + systemRows + servicesRows + liveOutputChrome + (showMcpPanel ? mcpPanelRows : 0);
+  const fixedRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + todoRows + approvalRows + systemRows + servicesRows + liveOutputChrome + (showMcpPanel ? mcpPanelRows : 0);
   const sharedRows = (rows || 30) - fixedRows;
   const sharedBudget = Math.max(2, sharedRows);
   const liveFloor = sharedBudget >= 24 ? 6 : sharedBudget >= 14 ? 4 : 2;

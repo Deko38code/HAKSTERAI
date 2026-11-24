@@ -114,14 +114,11 @@ export default function ServicesPanel({
         color: 'cyan',
       });
     }
-  } else if (others.length) {
-    cells.push({
-      key: 'more',
-      label: 'other',
-      value: `+${others.length} ports`,
-      color: 'cyan',
-    });
   }
+  // Chat (showAll=false) keeps the other-port count in the title hint rather
+  // than adding a "other / +N ports" cell. On a 5-per-row grid that cell was
+  // forced onto a SECOND grid row — two lines taken from the middle boxes just
+  // to repeat a number the hint already shows.
 
   // Auto-compact: a grid that would grow taller than `maxCells` keeps the
   // first cells and summarises the rest in one cell, so the panel's height is

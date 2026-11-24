@@ -41,7 +41,6 @@ import ads from '../../src/ads/ad-client.js';
 
 const API = process.env.HAKSTER_API_URL || 'http://localhost:3579';
 const MCP_OUTPUT_LINES = 6;
-const MCP_OUTPUT_PANEL_ROWS = MCP_OUTPUT_LINES + 3;
 // The dashboard and models pages are native OpenTUI scroll boxes: the same ▲ /
 // █ / ▼ bar the transcript uses, clickable with the mouse, auto-hidden when the
 // page fits (owner's 2026-11-23 all-panels rule).
@@ -1136,17 +1135,21 @@ export default function App({ version = '0.1.0' }) {
   // different widths, and a grid budgeted for the wrong one is the classic way
   // this layout pushes its status bar off the screen.
   const servicesCapacityFor = (w, d = dense) => Math.max(4, Math.max(1, Math.floor(Math.max(1, w - 4) / 17)) * (d ? 3 : 2));
-  const servicesRowsFor = (w, capacity) => {
+  const servicesRowsFor = (w, capacity, rawCount) => {
     if (w < 96) return 3; // the narrow one-line Services box
-    const raw = services.length + (otherPorts.length ? 1 : 0);
-    return servicesGridRows(w, Math.min(raw, capacity), dense);
+    return servicesGridRows(w, Math.min(Math.max(1, rawCount), capacity), dense);
   };
+  // Chat folds the "other ports" count into the panel's title hint instead of
+  // spending a whole extra grid row on it — those two rows go to the middle
+  // boxes. The dashboard/monitor still list every other port as cells.
+  const servicesRaw = Math.max(1, services.length);
+  const servicesRawAll = services.length + (otherPorts.length ? 1 : 0);
   const servicesCapacity = servicesCapacityFor(mainW);
-  const servicesRows = servicesRowsFor(mainW, servicesCapacity);
+  const servicesRows = servicesRowsFor(mainW, servicesCapacity, servicesRaw);
   const dashServicesWidth = Math.max(1, panelW - 1);
   const dashServicesCapacity = servicesCapacityFor(dashServicesWidth, dashDense);
   const monitorServicesCapacity = servicesCapacityFor(panelW);
-  const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity);
+  const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity, servicesRawAll);
   // The live output panel the owner asked to sit lowest, right above the input
   // bar. Its height is a FIXED budget, not a streaming one: the box that shows
   // the run must never grow or shrink when a turn starts, or every panel above
@@ -1155,7 +1158,7 @@ export default function App({ version = '0.1.0' }) {
   // Owner, 2026-11-24: "panels need to be bigger, taller — they're already wide
   // enough, adjust the grids". Both boxes now scale UP with the terminal
   // instead of pinning at 8/5/3 rows, so a tall screen fills with real content.
-  const liveOutputLineCap = (rows || 30) >= 48 ? 14 : (rows || 30) >= 34 ? 9 : 6;
+  const liveOutputLineCap = (rows || 30) >= 48 ? 18 : (rows || 30) >= 34 ? 12 : 8;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
   // border 2 + title 1 + the call row when the column is wide enough
   const liveOutputChrome = 3 + liveOutputCallRows;
@@ -1180,16 +1183,24 @@ export default function App({ version = '0.1.0' }) {
   // header 1 · status bar 1 · composer 5 (border 2, input 1, inline ad 1, hint 1)
   // · rail 1 collapsed or 7 expanded · todos: border 2 + header 1 + rows + hint 1
   const CHROME_ROWS = 1 + 1 + (showCrushStatus ? 1 : 0);
-  // The /menu popout takes the composer's slot, so its height is budgeted in
-  // the same place: border 2 + header 1 + one row per command + hint 1.
-  // The catalog popout: bordered, title + filter + list + footer. It windows
-  // its own rows, so it is capped by the terminal rather than by catalog size.
-  const MENU_ROWS = Math.max(10, Math.min(26, (rows || 30) - 12));
-  const composerRows = menuOpen ? MENU_ROWS : 5;
+  // The offline banner is a bordered 3-row box rendered above every view, so it
+  // must come out of the row budget — it used to be drawn without being counted,
+  // which pushed the status bar off the bottom by exactly its height.
+  const errRows = statusErr ? 3 : 0;
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
   // approval: border 2 + header 1 + reason 1 + command 1 + answer row 1
   const approvalRows = approving ? 6 : 0;
+  // Everything the chat column draws before the composer and the two middle
+  // boxes. Used to cap the /menu popout so it can never grow past the screen.
+  const chromeNoComposer = CHROME_ROWS + errRows + noticeRows + railRows
+    + approvalRows + systemRows + servicesRows + liveOutputChrome;
+  // The /menu popout takes the composer's slot: bordered, title + filter + list
+  // + footer. It is capped by what the terminal can spare AFTER the chrome and
+  // two rows for the middle boxes, so a short window shrinks the popout instead
+  // of pushing the status bar off the bottom (it windows its own list anyway).
+  const MENU_ROWS = Math.max(6, Math.min(26, (rows || 30) - 12, (rows || 30) - chromeNoComposer - 2));
+  const composerRows = menuOpen ? MENU_ROWS : 5;
   // A short terminal gets a shorter checklist rather than a status bar that has
   // been pushed off the bottom — the panel scrolls, so nothing is hidden.
   const todoVisible = (rows || 30) >= 34 ? 6 : 3;
@@ -1200,7 +1211,7 @@ export default function App({ version = '0.1.0' }) {
   // (first, it is the agent's own plan) and then the MCP output box — so a
   // 20-row window with a todo list open shows the list and drops the MCP panel
   // instead of running off the bottom of the screen.
-  const mandatoryRows = CHROME_ROWS + noticeRows + composerRows + railRows
+  const mandatoryRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows
     + approvalRows + systemRows + servicesRows + liveOutputChrome + 2;
   const optionalBudget = (rows || 30) - mandatoryRows;
   const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
@@ -1214,7 +1225,7 @@ export default function App({ version = '0.1.0' }) {
   // So the live box keeps a small, readable cap and the transcript takes the
   // leftover (large) rows; a screen carrying a big todo list, an approval card
   // and the MCP panel shrinks them instead of pushing the status bar off.
-  const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows
+  const fixedRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + todoRows
     + approvalRows + systemRows + servicesRows + liveOutputChrome
     + (showMcpPanel ? mcpPanelRows : 0);
   const sharedRows = (rows || 30) - fixedRows;

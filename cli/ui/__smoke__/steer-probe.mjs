@@ -25,7 +25,12 @@ const events2 = [
 
 globalThis.fetch = async (url) => {
   const u = String(url);
-  if (u.includes('/api/tui/status')) return new Response(JSON.stringify({ phase: 'ACT', connected: true, model: 'phantom-flash', trust: 3, tokens: 1000 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  if (u.includes('/api/tui/status')) {
+    // PROBE_OFFLINE simulates an unreachable server: the red 3-row banner
+    // renders above every view and must be in the row budget.
+    if (process.env.PROBE_OFFLINE === '1') throw new Error('ECONNREFUSED');
+    return new Response(JSON.stringify({ phase: 'ACT', connected: true, model: 'phantom-flash', trust: 3, tokens: 1000 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
   if (u.includes('/api/agent/mcp-status')) return new Response(JSON.stringify({ servers: [] }), { status: 200 });
   if (u.includes('/api/agent/run')) {
     const first = !globalThis.__second;
@@ -50,6 +55,46 @@ const root = createRoot(setup.renderer);
 flushSync(() => root.render(React.createElement(App, { version: 'probe' })));
 await setup.flush();
 await settle(300);
+
+// Geometry check for a static frame: the status bar must be the last drawn row
+// and the frame must never exceed the terminal height.
+const geometry = (frame) => {
+  const lines = frame.split('\n');
+  const lastNonEmpty = lines.reduce((acc, l, i) => (l.trim() ? i : acc), -1);
+  const statusRow = lines.findIndex((l) => l.includes('⟪ composer ⟫') || l.includes('⟪ ad ⟫'));
+  // captureCharFrame appends a trailing newline, so the frame reports ROWS+1
+  // lines. Fit means the LAST DRAWN row index is inside the terminal (≤ ROWS-1).
+  return { frameRows: lines.length, lastNonEmpty, statusRow, statusIsLast: statusRow === lastNonEmpty, noOverflow: lastNonEmpty <= ROWS - 1 };
+};
+
+// PROBE_MENU: open the /menu popout and verify it still fits.
+if (process.env.PROBE_MENU === '1') {
+  flushSync(() => { for (const ch of '/menu') setup.mockInput.pressKey(ch); });
+  flushSync(() => setup.mockInput.pressEnter());
+  await settle(300);
+  await setup.flush();
+  const frame = setup.captureCharFrame();
+  console.log(frame);
+  console.log('---');
+  console.log(JSON.stringify({ ROWS, mode: 'menu', ...geometry(frame) }, null, 2));
+  root.unmount();
+  setup.renderer.destroy();
+  process.exit(geometry(frame).statusIsLast && geometry(frame).noOverflow ? 0 : 1);
+}
+
+// PROBE_OFFLINE: an unreachable server shows the red banner above the chat.
+if (process.env.PROBE_OFFLINE === '1') {
+  await settle(400);
+  await setup.flush();
+  const frame = setup.captureCharFrame();
+  console.log(frame);
+  console.log('---');
+  const g = geometry(frame);
+  console.log(JSON.stringify({ ROWS, mode: 'offline', bannerShown: frame.includes('server unreachable'), ...g }, null, 2));
+  root.unmount();
+  setup.renderer.destroy();
+  process.exit(g.statusIsLast && g.noOverflow ? 0 : 1);
+}
 
 // 1. start a run
 flushSync(() => { for (const ch of 'start the job') setup.mockInput.pressKey(ch); });

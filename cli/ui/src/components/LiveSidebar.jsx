@@ -184,7 +184,11 @@ export default function LiveSidebar({
   const h = Math.max(0, Number(height) || 0);
   const tall = h >= 44; // room for five output lines and a longer feed
   const huge = h >= 50;
-  let left = h - 10; // ◈ Live: 3 + 7 rows
+  // ◈ Live: border 2 + title 1 + its seven info rows. On a terminal too short
+  // for all seven, the panel gives rows up from the bottom instead of pushing
+  // the status bar off the screen (its own budget, so `left` stays truthful).
+  const liveRows = Math.min(7, Math.max(0, h - 3));
+  let left = h - (3 + liveRows);
   const showUsage = left >= 9; // ◔ Usage: 3 + 6 rows
   if (showUsage) left -= 9;
   // 🧠 Memory: 3 + 5 rows. It is the newest panel and the least time-critical,
@@ -310,12 +314,25 @@ export default function LiveSidebar({
   return (
     <box style={{ width, flexDirection: 'column', flexShrink: 0 }}>
       <Panel width={width} title="◈ Live" hint={serverOk ? 'online' : 'offline'}>
-        <Row width={inner} k="status" v={agentStatus || 'idle'} color={agentStatus === 'error' ? 'red' : agentStatus === 'idle' ? 'gray' : 'green'} />
-        <Row width={inner} k="phase" v={phase || 'IDLE'} color="cyan" />
-        <Row width={inner} k="tool" v={tool || '—'} />
-        <Row width={inner} k="turns" v={turns} />
-        <Row width={inner} k="elapsed" v={`${(Number(elapsedMs || 0) / 1000).toFixed(1)}s`} />
-        <Row width={inner} k="model" v={model} color="yellow" />
+        {liveRows >= 1 ? (
+          <Row width={inner} k="status" v={agentStatus || 'idle'} color={agentStatus === 'error' ? 'red' : agentStatus === 'idle' ? 'gray' : 'green'} />
+        ) : null}
+        {liveRows >= 2 ? (
+          <Row width={inner} k="phase" v={phase || 'IDLE'} color="cyan" />
+        ) : null}
+        {liveRows >= 3 ? (
+          <Row width={inner} k="tool" v={tool || '—'} />
+        ) : null}
+        {liveRows >= 4 ? (
+          <Row width={inner} k="turns" v={turns} />
+        ) : null}
+        {liveRows >= 5 ? (
+          <Row width={inner} k="elapsed" v={`${(Number(elapsedMs || 0) / 1000).toFixed(1)}s`} />
+        ) : null}
+        {liveRows >= 6 ? (
+          <Row width={inner} k="model" v={model} color="yellow" />
+        ) : null}
+        {liveRows >= 7 ? (
         <Row
           width={inner}
           k="version"
@@ -326,6 +343,7 @@ export default function LiveSidebar({
           }
           color={update && update.status === 'blocked' ? 'yellow' : update && update.status === 'staged' ? 'green' : 'white'}
         />
+        ) : null}
       </Panel>
       {/* ◔ Usage — the session counted from the same stream events the run
           renders: tool calls actually made, how many the meter scored as wins
