@@ -200,10 +200,21 @@ export default function LiveSidebar({
   // ▶ Output instead. On a terminal too short for the two, the panel gives
   // rows up from the bottom instead of pushing the status bar off the screen
   // (its own budget, so `left` stays truthful).
-  const liveRows = Math.min(2, Math.max(0, h - 3));
+  //
+  // ◈ Live — not ▶ Output — pays for ◔ Usage's web row (owner, 2026-11-24:
+  // "no dont change outputs rows use the live row … never touch output bottom
+  // right"). ◔ Usage needs 3 + 7 rows, and that extra row comes out of ◈ Live's
+  // second content row: the panel keeps the running tool, and the version line
+  // it loses is already printed by the status box (`tui <version>`), with the
+  // ⬆ staged / ⟂ blocked marker moved onto this panel's title row, so nothing is
+  // dropped. Everything below the two panels is therefore fitted exactly as it
+  // was before the web row existed — ▶ Output and ⚡ Activity keep their rows at
+  // every height. On a terminal too short for ◔ Usage the row is not spent and
+  // both Live rows come back, as before.
+  const showUsage = h - 3 - 2 >= 10; // ◔ Usage fits beside a two-row ◈ Live
+  const liveRows = showUsage ? 1 : Math.min(2, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
-  const showUsage = left >= 10; // ◔ Usage: 3 + 7 rows
-  if (showUsage) left -= 10;
+  if (showUsage) left -= 10; // ◔ Usage: 3 + 7 rows
   // 🧠 Memory: 3 + 5 rows. It is the newest panel and the least time-critical,
   // so it only appears where the taller layout leaves room for the feed, the
   // output tail and at least a couple of MCP rows beside it.
@@ -267,6 +278,14 @@ export default function LiveSidebar({
   const actStart = clampStart(actOffset, activity.length, activityRows || 1);
   const outStart = clampStart(outOffset, liveLines.length, outputRows || 1);
   const compact = inner < 24;
+  // ⬆ staged / ⟂ blocked update marker. It rides ◈ Live's title row whenever the
+  // panel is down to its single content row — the row ◔ Usage's web count is
+  // paid with — so even the shortest Live panel still says an update is waiting.
+  // A DOWN server keeps saying `offline` beside it.
+  const updateMark = update && update.version && (update.status === 'staged' || update.status === 'blocked')
+    ? `${update.status === 'blocked' ? '⟂' : '⬆'}${update.version}`
+    : '';
+  const liveHint = [serverOk ? '' : 'offline', liveRows < 2 ? updateMark : ''].filter(Boolean).join(' ');
 
   // ⬡ MCP window: the allocator's rows, one of which becomes the "more" row
   // whenever the list is longer than the space.
@@ -341,7 +360,7 @@ export default function LiveSidebar({
           server state, so printing it again here is the dupe the owner flagged
           (2026-11-24: "you have dupes 13/13 files online"). A DOWN server stays
           visible here as `offline`, because that is the case worth flagging. */}
-      <Panel width={width} title="◈ Live" hint={serverOk ? '' : 'offline'}>
+      <Panel width={width} title="◈ Live" hint={liveHint}>
         {liveRows >= 1 ? (
           <Row width={inner} k="tool" v={tool || '—'} />
         ) : null}
@@ -352,9 +371,12 @@ export default function LiveSidebar({
             No elapsed row either: the run's spinner row under the composer is
             the single home for the timer (owner, 2026-11-24: "the elaspse time
             twice in bottom spinner and time in right panel").
-            No turns row: ◔ Usage keeps the count, and this row is what makes
-            ▶ Output taller (owner, 2026-11-24). The version row stays — it is
-            the one place that carries the ⬆ staged update marker. */}
+            No turns row: ◔ Usage keeps the count (owner, 2026-11-24). The
+            version row only draws where ◈ Live still has two content rows — a
+            terminal too short for ◔ Usage; everywhere else that row pays for
+            ◔ Usage's web count instead and the ⬆ marker moves onto the title
+            hint above (owner, 2026-11-24: "use the live row … never touch
+            output bottom right"). */}
         {liveRows >= 2 ? (
         <Row
           width={inner}

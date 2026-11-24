@@ -2243,9 +2243,9 @@ function LiveSidebar({
   const h = Math.max(0, Number(height) || 0);
   const tall = h >= 44;
   const huge = h >= 50;
-  const liveRows = Math.min(2, Math.max(0, h - 3));
+  const showUsage = h - 3 - 2 >= 10;
+  const liveRows = showUsage ? 1 : Math.min(2, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
-  const showUsage = left >= 10;
   if (showUsage) left -= 10;
   const showMemory = left >= 26;
   if (showMemory) left -= 8;
@@ -2280,6 +2280,8 @@ function LiveSidebar({
   const actStart = clampStart(actOffset, activity.length, activityRows || 1);
   const outStart = clampStart(outOffset, liveLines.length, outputRows || 1);
   const compact = inner < 24;
+  const updateMark = update && update.version && (update.status === "staged" || update.status === "blocked") ? `${update.status === "blocked" ? "\u27C2" : "\u2B06"}${update.version}` : "";
+  const liveHint = [serverOk ? "" : "offline", liveRows < 2 ? updateMark : ""].filter(Boolean).join(" ");
   const mcpCapacity = maxServers + 1;
   const mcpOverflow = ordered.length > mcpCapacity;
   const mcpVisible = Math.max(0, mcpOverflow ? mcpCapacity - 1 : ordered.length);
@@ -2332,7 +2334,7 @@ function LiveSidebar({
   const actHint = !activity.length ? busy ? "waiting" : "0" : scrollHint(activity.length, activityRows, actStart, actOffset == null);
   const outHint = !liveLines.length ? busy ? "live" : "last" : scrollHint(liveLines.length, outputRows, outStart, outOffset == null);
   return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25C8 Live", hint: serverOk ? "" : "offline", children: [
+    /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25C8 Live", hint: liveHint, children: [
       liveRows >= 1 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "tool", v: tool || "\u2014" }) : null,
       liveRows >= 2 ? /* @__PURE__ */ jsx7(
         Row,
