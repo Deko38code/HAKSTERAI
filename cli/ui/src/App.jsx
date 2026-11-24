@@ -34,6 +34,7 @@ import useCliUpdate from './hooks/useCliUpdate.js';
 import useScriptRunner from './hooks/useScriptRunner.js';
 import { peersFromMcp } from './utils/squad.js';
 import cliPrefs from '../../src/prefs.js';
+import { appendInputHistory, loadInputHistory } from '../../src/input-history.js';
 import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel } from '../../smartness.mjs';
 import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
@@ -187,6 +188,15 @@ export default function App({ version = '0.1.0' }) {
   const [adsOn, setAdsOn] = useState(() => readPrefs().ads !== false);
   const [dockExpanded, setDockExpanded] = useState(false);
   const [draft, setDraft] = useState('');
+  // Input recall (owner, 2026-11-24: "fix my history in input for my previous
+  // typed commands chats etc"): the typed lines from ~/.hakster/history, read
+  // oldest→newest and walked with ↑/↓ while the composer holds focus.
+  // `histIdx` is -1 while composing new text; otherwise it points at the entry
+  // on screen. `draftStash` keeps what you were writing before ↑ walked back,
+  // so ↓ past the newest entry restores it instead of losing it.
+  const [inputHistory, setInputHistory] = useState(() => loadInputHistory());
+  const [histIdx, setHistIdx] = useState(-1);
+  const draftStash = useRef('');
   // Start on the owner's cheap DeepSeek config; a GLM env tag is the old
   // default and falls through (§22 — the pinned Phantom Flash config).
   const [model, setModel] = useState(() => (process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || PRIMARY_MODEL));
@@ -768,6 +778,18 @@ export default function App({ version = '0.1.0' }) {
     (text) => {
       const v = String(text == null ? '' : text).trim();
       if (!v) return;
+      // Every line the operator sends is recallable — slash commands and
+      // prompts alike. appendInputHistory refuses junk and anything that looks
+      // like a secret, so recall can never echo a credential back (§9, §23).
+      if (appendInputHistory(v)) {
+        setInputHistory((h) => {
+          const next = h.filter((x) => x !== v);
+          next.push(v);
+          return next.slice(-200);
+        });
+      }
+      setHistIdx(-1);
+      draftStash.current = '';
       // Commands run even while a turn is streaming — /quit and /clear must
       // always be reachable.
       if (v.startsWith('/')) {
@@ -1024,6 +1046,30 @@ export default function App({ version = '0.1.0' }) {
     // window and has to park or re-arm its follow-the-tail state with them.
     // A second handler here fought it row-for-row.
     if (key.name === 'pageup' || key.name === 'pagedown') return;
+
+    // ↑/↓ in the composer walk the typed-line history (the one place in the
+    // chat view an arrow is not a scroll — the transcript owns PgUp/PgDn, and a
+    // single-line input has no vertical cursor to move). Shift/Ctrl/Alt chords
+    // are left for other bindings.
+    if (focus === 'composer' && !key.ctrl && !key.meta && !key.shift
+      && (key.name === 'up' || key.name === 'down') && inputHistory.length > 0) {
+      if (key.name === 'up') {
+        if (histIdx === -1) draftStash.current = draft;
+        const next = histIdx === -1 ? inputHistory.length - 1 : Math.max(0, histIdx - 1);
+        setHistIdx(next);
+        setDraft(inputHistory[next]);
+      } else if (histIdx !== -1) {
+        if (histIdx < inputHistory.length - 1) {
+          setHistIdx(histIdx + 1);
+          setDraft(inputHistory[histIdx + 1]);
+        } else {
+          setHistIdx(-1);
+          setDraft(draftStash.current || '');
+          draftStash.current = '';
+        }
+      }
+      return;
+    }
 
     // While the composer has focus, printable keys belong to the input and the
     // shortcut layer below must stay out of the way.
@@ -1803,7 +1849,7 @@ export default function App({ version = '0.1.0' }) {
                         ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ''} · it sends when this run ends · esc stop`
                         : attachment
                           ? `📎 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K · enter sends it · /attach clear`
-                          : 'enter send · /menu commands · /attach image · pgup scroll · q quit'
+                          : 'enter send · ↑ history · /menu commands · /attach · pgup scroll · q quit'
                   }
                   adSlot={
                     <AdRailSlot

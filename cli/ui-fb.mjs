@@ -1132,6 +1132,103 @@ var require_prefs = __commonJS({
   }
 });
 
+// ../src/input-history.js
+var require_input_history = __commonJS({
+  "../src/input-history.js"(exports, module) {
+    var fs10 = __require("fs");
+    var os6 = __require("os");
+    var path8 = __require("path");
+    var MAX_KEEP = 500;
+    var MAX_RECALL = 200;
+    function historyPath() {
+      return path8.join(process.env.HAKSTER_HOME || path8.join(os6.homedir(), ".hakster"), "history");
+    }
+    var TERMINAL_JUNK = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\x1b|rgb:|VTE\(|[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋]|;\d+\$y|\[\?/;
+    var BOX_ONLY = /^[\s│┃|]+|[\s│┃|]+$/;
+    var SECRET_SHAPES = [
+      /\bsk-[A-Za-z0-9_-]{12,}/,
+      // OpenAI-style
+      /\bsk_(live|test)_[A-Za-z0-9]{10,}/,
+      // Stripe secret
+      /\bpk_(live|test)_[A-Za-z0-9]{10,}/,
+      // Stripe publishable
+      /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+      // GitHub tokens
+      /\bgithub_pat_[A-Za-z0-9_]{20,}/,
+      /\bAKIA[0-9A-Z]{16}\b/,
+      // AWS access key id
+      /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+      // Slack
+      /\bBearer\s+[A-Za-z0-9._-]{20,}/,
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+      /\b(api[_-]?key|secret|token|passwd|password|pass|client[_-]?secret)\s*[:=]\s*\S{8,}/i,
+      /\b[A-Fa-f0-9]{40,}\b/
+      // long hex blobs (digests / keys)
+    ];
+    function looksSecret(line) {
+      return SECRET_SHAPES.some((re) => re.test(line));
+    }
+    function isKept(raw) {
+      if (typeof raw !== "string") return false;
+      const line = raw.replace(/\r/g, "").trim();
+      if (line.length < 3) return false;
+      if (TERMINAL_JUNK.test(line)) return false;
+      if (BOX_ONLY.test(line) && !/[A-Za-z]/.test(line.replace(/[│┃|]/g, ""))) return false;
+      if (looksSecret(line)) return false;
+      if (/^Tool execution results:/i.test(line)) return false;
+      if (/^Session resumed from disk\./i.test(line)) return false;
+      if (/^Continue based on these results\.?$/i.test(line)) return false;
+      if (/^\[(trimmed|truncated|\.\.\.|…)\]$/i.test(line)) return false;
+      return true;
+    }
+    function sanitizeLines(lines) {
+      const out = [];
+      for (const raw of lines || []) {
+        if (!isKept(raw)) continue;
+        const line = raw.replace(/\r/g, "").trim();
+        if (out.length && out[out.length - 1] === line) continue;
+        out.push(line);
+      }
+      return out.slice(-MAX_KEEP);
+    }
+    function loadInputHistory2(limit = MAX_RECALL) {
+      try {
+        const lines = fs10.readFileSync(historyPath(), "utf8").split("\n");
+        return sanitizeLines(lines).slice(-Math.max(0, limit));
+      } catch {
+        return [];
+      }
+    }
+    function appendInputHistory2(line, limit = MAX_KEEP) {
+      if (process.env.HAKSTER_NO_HISTORY === "1") return false;
+      if (!isKept(line)) return false;
+      const value = String(line).replace(/\r/g, "").trim();
+      try {
+        const file = historyPath();
+        const dir = path8.dirname(file);
+        if (!fs10.existsSync(dir)) fs10.mkdirSync(dir, { recursive: true });
+        const existing = sanitizeLines(
+          fs10.existsSync(file) ? fs10.readFileSync(file, "utf8").split("\n") : []
+        );
+        const next = existing.filter((h) => h !== value);
+        next.push(value);
+        fs10.writeFileSync(file, next.slice(-limit).join("\n") + "\n");
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    module.exports = {
+      historyPath,
+      isKept,
+      looksSecret,
+      sanitizeLines,
+      loadInputHistory: loadInputHistory2,
+      appendInputHistory: appendInputHistory2
+    };
+  }
+});
+
 // ../src/models/catalog.js
 var require_catalog = __commonJS({
   "../src/models/catalog.js"(exports, module) {
@@ -5305,6 +5402,7 @@ var useScriptRunner_default = useScriptRunner;
 
 // src/App.jsx
 var import_prefs2 = __toESM(require_prefs());
+var import_input_history = __toESM(require_input_history());
 var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
 var import_kitty_graphics3 = __toESM(require_kitty_graphics());
@@ -5404,6 +5502,9 @@ function App({ version = "0.1.0" }) {
   const [adsOn, setAdsOn] = useState17(() => readPrefs().ads !== false);
   const [dockExpanded, setDockExpanded] = useState17(false);
   const [draft, setDraft] = useState17("");
+  const [inputHistory, setInputHistory] = useState17(() => (0, import_input_history.loadInputHistory)());
+  const [histIdx, setHistIdx] = useState17(-1);
+  const draftStash = useRef11("");
   const [model, setModel] = useState17(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
   const [provider, setProvider] = useState17(process.env.HAKSTER_PROVIDER || "");
   const [modelIdx, setModelIdx] = useState17(0);
@@ -5814,6 +5915,15 @@ function App({ version = "0.1.0" }) {
     (text) => {
       const v = String(text == null ? "" : text).trim();
       if (!v) return;
+      if ((0, import_input_history.appendInputHistory)(v)) {
+        setInputHistory((h) => {
+          const next = h.filter((x) => x !== v);
+          next.push(v);
+          return next.slice(-200);
+        });
+      }
+      setHistIdx(-1);
+      draftStash.current = "";
       if (v.startsWith("/")) {
         setDraft("");
         runCommand(v);
@@ -6056,6 +6166,24 @@ function App({ version = "0.1.0" }) {
       }
     }
     if (key.name === "pageup" || key.name === "pagedown") return;
+    if (focus === "composer" && !key.ctrl && !key.meta && !key.shift && (key.name === "up" || key.name === "down") && inputHistory.length > 0) {
+      if (key.name === "up") {
+        if (histIdx === -1) draftStash.current = draft;
+        const next = histIdx === -1 ? inputHistory.length - 1 : Math.max(0, histIdx - 1);
+        setHistIdx(next);
+        setDraft(inputHistory[next]);
+      } else if (histIdx !== -1) {
+        if (histIdx < inputHistory.length - 1) {
+          setHistIdx(histIdx + 1);
+          setDraft(inputHistory[histIdx + 1]);
+        } else {
+          setHistIdx(-1);
+          setDraft(draftStash.current || "");
+          draftStash.current = "";
+        }
+      }
+      return;
+    }
     if (focus === "composer" && !key.ctrl && !key.meta) return;
     if (key.ctrl && key.name === "p") {
       setMenuQuery("");
@@ -6621,7 +6749,7 @@ function App({ version = "0.1.0" }) {
             onSubmit: submit,
             focused: focus === "composer" && !approving,
             disabled: false,
-            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u{1F4CE} ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 /menu commands \xB7 /attach image \xB7 pgup scroll \xB7 q quit",
+            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u{1F4CE} ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 \u2191 history \xB7 /menu commands \xB7 /attach \xB7 pgup scroll \xB7 q quit",
             adSlot: /* @__PURE__ */ jsx25(
               DockAd,
               {

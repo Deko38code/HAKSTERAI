@@ -72,6 +72,8 @@ mountAds(app);
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const { port } = server.address();
 process.env.HAKSTER_ADS_URL = `http://127.0.0.1:${port}`;
+// Scripted prompts must never reach the operator's real ~/.hakster/history.
+process.env.HAKSTER_NO_HISTORY = '1';
 
 const outfile = path.join(here, '__smoke__', '.render.bundle.mjs');
 

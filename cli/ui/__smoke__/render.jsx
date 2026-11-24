@@ -20,6 +20,8 @@ const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 // with the owner's prefs it lasts ~1.6 s and would swallow the first keystrokes.
 // App honours this flag once, for this process only.
 process.env.HAKSTER_NO_INTRO = '1';
+// Scripted prompts must never reach the operator's real ~/.hakster/history.
+process.env.HAKSTER_NO_HISTORY = '1';
 
 /* A turn the way a real agent run looks on a small screen: reasoning, a
  * couple of spoken lines, then one shell call whose result is 40 long lines.
