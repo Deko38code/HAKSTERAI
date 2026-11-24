@@ -149,8 +149,11 @@ export default function LiveSidebar({
   // allowed to push the layout apart, so a short terminal simply shows fewer
   // panels rather than a broken screen.
   height = 34,
-  agentStatus = 'idle',
-  phase = 'IDLE',
+  // agentStatus / phase are still accepted so both call sites keep working,
+  // but they no longer draw a row: the spinner row, the status bar and the
+  // monitor feed own the run state and the phase (owner, 2026-11-24).
+  agentStatus: _agentStatus = 'idle',
+  phase: _phase = 'IDLE',
   tool = '',
   turns = 0,
   elapsedMs = 0,
@@ -171,6 +174,8 @@ export default function LiveSidebar({
   // the MCP list instead.
   feed = true,
 }) {
+  // Kept in the signature for call-site compatibility; nothing below reads them.
+  void _agentStatus; void _phase;
   const inner = Math.max(1, width - 4);
   const servers = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
 
@@ -183,10 +188,17 @@ export default function LiveSidebar({
   const h = Math.max(0, Number(height) || 0);
   const tall = h >= 44; // room for five output lines and a longer feed
   const huge = h >= 50;
-  // ◈ Live: border 2 + title 1 + its six info rows. On a terminal too short
-  // for all six, the panel gives rows up from the bottom instead of pushing
-  // the status bar off the screen (its own budget, so `left` stays truthful).
-  const liveRows = Math.min(6, Math.max(0, h - 3));
+  // ◈ Live: border 2 + title 1 + its three info rows (tool · turns · version).
+  // The status and phase rows are gone (owner, 2026-11-24: "all those lines
+  // that are dupes can be more room for our panels"): the spinner row under
+  // the composer already names the phase and the run state, the status bar
+  // repeats the run state in every view, and the monitor's activity feed
+  // carries the phase events — so those two rows cost three lines and said
+  // nothing new. They are now room for the panels below. On a terminal too
+  // short for the three, the panel gives rows up from the bottom instead of
+  // pushing the status bar off the screen (its own budget, so `left` stays
+  // truthful).
+  const liveRows = Math.min(3, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
   const showUsage = left >= 9; // ◔ Usage: 3 + 6 rows
   if (showUsage) left -= 9;
@@ -314,21 +326,19 @@ export default function LiveSidebar({
     <box style={{ width, flexDirection: 'column', flexShrink: 0 }}>
       <Panel width={width} title="◈ Live" hint={serverOk ? 'online' : 'offline'}>
         {liveRows >= 1 ? (
-          <Row width={inner} k="status" v={agentStatus || 'idle'} color={agentStatus === 'error' ? 'red' : agentStatus === 'idle' ? 'gray' : 'green'} />
-        ) : null}
-        {liveRows >= 2 ? (
-          <Row width={inner} k="phase" v={phase || 'IDLE'} color="cyan" />
-        ) : null}
-        {liveRows >= 3 ? (
           <Row width={inner} k="tool" v={tool || '—'} />
         ) : null}
-        {liveRows >= 4 ? (
+        {liveRows >= 2 ? (
           <Row width={inner} k="turns" v={turns} />
         ) : null}
-        {/* No elapsed row: the run's spinner row under the composer is the
-            single home for the timer (owner, 2026-11-24: "the elaspse time
+        {/* No status or phase row: the run state is on the spinner row and the
+            status bar, and the phase is on the spinner row (and in the
+            monitor's feed) — printing them here again was the duplication the
+            owner asked to trade for panel room (owner, 2026-11-24).
+            No elapsed row either: the run's spinner row under the composer is
+            the single home for the timer (owner, 2026-11-24: "the elaspse time
             twice in bottom spinner and time in right panel"). */}
-        {liveRows >= 5 ? (
+        {liveRows >= 3 ? (
         <Row
           width={inner}
           k="version"

@@ -62,10 +62,11 @@ export default function LiveOutputPanel({
   const state = usePanelScroll({ total: list.length, rows: r, bindings, enabled: r > 0, autoResume: busy });
   const gutterOn = overflows(list.length, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
-  // While a run is live the box says so, and says which phase it is in — the
-  // words being written, a tool that is still running, or reasoning happening
-  // above. A still box with no label read as a stalled agent (owner, 2026-11-24).
-  const liveHint = phase && phase !== 'result' ? phase : 'live';
+  // The box no longer repeats the phase in its title (owner, 2026-11-24: "all
+  // those lines that are dupes can be more room for our panels"): the spinner
+  // row under the composer already names the phase, and the title itself
+  // already says ▶ Live. The body keeps the one line that is not said
+  // anywhere else — what this box is waiting for.
   // While the answer has not started, the box says what the run is doing so a
   // still box does not read as a stalled agent. It names the phase — it never
   // copies the reasoning down here (owner, 2026-11-24: the two grids must not
@@ -78,8 +79,8 @@ export default function LiveOutputPanel({
   const hint = image
     ? `image${call && compact ? ` · ${clip(call, Math.max(6, inner - 12))}` : ''}`
     : list.length
-      ? `${state.hint('')}${busy ? ` · ${liveHint}` : ''}${call && compact ? ` · ${clip(call, Math.max(6, inner - 12))}` : ''}`
-      : busy ? liveHint : 'last';
+      ? `${state.hint('')}${call && compact ? ` · ${clip(call, Math.max(6, inner - 12))}` : ''}`
+      : busy ? '' : 'last';
 
   return (
     <Panel width={w} title={busy ? '▶ Live' : '▶ Result'} hint={hint}>

@@ -2057,8 +2057,11 @@ function LiveSidebar({
   // allowed to push the layout apart, so a short terminal simply shows fewer
   // panels rather than a broken screen.
   height = 34,
-  agentStatus = "idle",
-  phase = "IDLE",
+  // agentStatus / phase are still accepted so both call sites keep working,
+  // but they no longer draw a row: the spinner row, the status bar and the
+  // monitor feed own the run state and the phase (owner, 2026-11-24).
+  agentStatus: _agentStatus = "idle",
+  phase: _phase = "IDLE",
   tool = "",
   turns = 0,
   elapsedMs = 0,
@@ -2079,12 +2082,14 @@ function LiveSidebar({
   // the MCP list instead.
   feed = true
 }) {
+  void _agentStatus;
+  void _phase;
   const inner = Math.max(1, width - 4);
   const servers = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
   const h = Math.max(0, Number(height) || 0);
   const tall = h >= 44;
   const huge = h >= 50;
-  const liveRows = Math.min(6, Math.max(0, h - 3));
+  const liveRows = Math.min(3, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
   const showUsage = left >= 9;
   if (showUsage) left -= 9;
@@ -2172,11 +2177,9 @@ function LiveSidebar({
   const outHint = !liveLines.length ? busy ? "live" : "last" : scrollHint(liveLines.length, outputRows, outStart, outOffset == null);
   return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25C8 Live", hint: serverOk ? "online" : "offline", children: [
-      liveRows >= 1 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "status", v: agentStatus || "idle", color: agentStatus === "error" ? "red" : agentStatus === "idle" ? "gray" : "green" }) : null,
-      liveRows >= 2 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "phase", v: phase || "IDLE", color: "cyan" }) : null,
-      liveRows >= 3 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "tool", v: tool || "\u2014" }) : null,
-      liveRows >= 4 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "turns", v: turns }) : null,
-      liveRows >= 5 ? /* @__PURE__ */ jsx7(
+      liveRows >= 1 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "tool", v: tool || "\u2014" }) : null,
+      liveRows >= 2 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "turns", v: turns }) : null,
+      liveRows >= 3 ? /* @__PURE__ */ jsx7(
         Row,
         {
           width: inner,
@@ -2393,9 +2396,8 @@ function LiveOutputPanel({
   const state = usePanelScroll({ total: list.length, rows: r, bindings, enabled: r > 0, autoResume: busy });
   const gutterOn = overflows(list.length, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
-  const liveHint = phase && phase !== "result" ? phase : "live";
   const emptyHint = phase === "thinking" ? "reasoning above \u2014 the answer lands here" : phase === "running" ? "tool running\u2026" : "waiting for the first token\u2026";
-  const hint = image ? `image${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : list.length ? `${state.hint("")}${busy ? ` \xB7 ${liveHint}` : ""}${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : busy ? liveHint : "last";
+  const hint = image ? `image${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : list.length ? `${state.hint("")}${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : busy ? "" : "last";
   return /* @__PURE__ */ jsxs8(Panel, { width: w, title: busy ? "\u25B6 Live" : "\u25B6 Result", hint, children: [
     callRow ? /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: call ? "cyan" : "gray", children: clip(call || "\u2014", inner) }) }) : null,
     image && r >= 3 ? /* @__PURE__ */ jsx8(LiveImageViewer, { width: bodyW, height: r, source: image, graphics }) : list.length === 0 ? /* @__PURE__ */ jsxs8(Fragment4, { children: [
