@@ -1766,6 +1766,10 @@ export default function App({ version = '0.1.0' }) {
                 scrollRef={scrollRef}
                 live={agent.status !== 'idle'}
                 expandThinking={expandThinking}
+                // The spinner row under the composer owns the live label and
+                // timer; the transcript only repeats them when that row is not
+                // on screen (short terminal / non-chat view).
+                liveLabel={!showCrushStatus}
                 emptyHint="Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
               />
             </box>

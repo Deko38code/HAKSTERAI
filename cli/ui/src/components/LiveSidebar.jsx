@@ -183,10 +183,10 @@ export default function LiveSidebar({
   const h = Math.max(0, Number(height) || 0);
   const tall = h >= 44; // room for five output lines and a longer feed
   const huge = h >= 50;
-  // ◈ Live: border 2 + title 1 + its seven info rows. On a terminal too short
-  // for all seven, the panel gives rows up from the bottom instead of pushing
+  // ◈ Live: border 2 + title 1 + its six info rows. On a terminal too short
+  // for all six, the panel gives rows up from the bottom instead of pushing
   // the status bar off the screen (its own budget, so `left` stays truthful).
-  const liveRows = Math.min(7, Math.max(0, h - 3));
+  const liveRows = Math.min(6, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
   const showUsage = left >= 9; // ◔ Usage: 3 + 6 rows
   if (showUsage) left -= 9;
@@ -325,10 +325,10 @@ export default function LiveSidebar({
         {liveRows >= 4 ? (
           <Row width={inner} k="turns" v={turns} />
         ) : null}
+        {/* No elapsed row: the run's spinner row under the composer is the
+            single home for the timer (owner, 2026-11-24: "the elaspse time
+            twice in bottom spinner and time in right panel"). */}
         {liveRows >= 5 ? (
-          <Row width={inner} k="elapsed" v={`${(Number(elapsedMs || 0) / 1000).toFixed(1)}s`} />
-        ) : null}
-        {liveRows >= 6 ? (
         <Row
           width={inner}
           k="version"

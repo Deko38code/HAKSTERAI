@@ -57,7 +57,7 @@ const thoughtFor = (ms) => `Thought for ${Math.max(1, Math.round((Number(ms) || 
 
 /** One reasoning block. Live while it is being written (spinner, elapsed, tail
  *  of the text); finished it is one line unless `expand` is on. */
-function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand }) {
+function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand, label = true }) {
   const frame = useSpinnerFrame(live);
   const started = Number(startedAt) || 0;
   const ended = Number(endedAt) || 0;
@@ -65,10 +65,17 @@ function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand 
     const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
     return (
       <box style={{ flexDirection: 'column', width, flexShrink: 0 }}>
-        <text>
-          <span fg="yellow">{`${SPINNER_FRAMES[frame]} `}</span>
-          <span fg="gray">{`thinking…${started ? ` ${fmtDur(Date.now() - started)}` : ''}`}</span>
-        </text>
+        {/* The run's own spinner row under the composer already states the
+            phase, the activity and the elapsed time. When that row is on
+            screen (owner, 2026-11-24: "the live spinner phrase then theres 1
+            under that not live just says what agents doing") this block keeps
+            the reasoning text and drops the duplicate label + timer. */}
+        {label ? (
+          <text>
+            <span fg="yellow">{`${SPINNER_FRAMES[frame]} `}</span>
+            <span fg="gray">{`thinking…${started ? ` ${fmtDur(Date.now() - started)}` : ''}`}</span>
+          </text>
+        ) : null}
         {/* Not clipped: reasoning is prose and must keep its words; the count is
             what stays bounded while it streams. */}
         {window.lines.map((line, i) => (
@@ -208,7 +215,7 @@ function ToolRow({ tool, width, compact = false }) {
   );
 }
 
-export default function MessageBlock({ message, width, compact = false, live = false, expandThinking = false }) {
+export default function MessageBlock({ message, width, compact = false, live = false, expandThinking = false, showLiveLabel = true }) {
   if (!message) return null;
 
   const roleStyle = ROLE_STYLE[message.role] || ROLE_STYLE.system;
@@ -267,6 +274,7 @@ export default function MessageBlock({ message, width, compact = false, live = f
                   width={inner}
                   compact={compact}
                   expand={expandThinking}
+                  label={showLiveLabel}
                 />
               ) : null}
               {round.text && String(round.text).trim() ? (
@@ -289,12 +297,15 @@ export default function MessageBlock({ message, width, compact = false, live = f
               width={inner}
               compact={compact}
               expand={expandThinking}
+              label={showLiveLabel}
             />
           ) : null}
           {message.text ? (
             <ProseBlock text={message.text} live={live && !tools.length} width={inner} compact={compact} />
           ) : !message.thinking && tools.length === 0 ? (
-            <text fg="gray">thinking…</text>
+            // Same duplicate, one row lower: the plain "thinking…" under the
+            // live spinner. Only drawn where the spinner row is absent.
+            showLiveLabel ? <text fg="gray">thinking…</text> : null
           ) : null}
           {tools.map((tool, i) => (
             <ToolRow key={`tool-${i}`} tool={tool} width={inner} compact={compact} />
