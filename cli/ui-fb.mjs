@@ -1145,6 +1145,22 @@ var require_input_history = __commonJS({
     }
     var TERMINAL_JUNK = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\x1b|rgb:|VTE\(|[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋]|;\d+\$y|\[\?/;
     var BOX_ONLY = /^[\s│┃|]+|[\s│┃|]+$/;
+    var NON_TYPED = [
+      /^Captured:\s*\d{4}-\d{2}-\d{2}T/,
+      // issue-report header block
+      /^Page:\s*https?:\/\//,
+      //
+      /^Browser:\s*Mozilla\//,
+      //
+      /^Total issues this session:/i,
+      //
+      /^Recent messages:?$/i,
+      //
+      /^\d+\.\s*\[\d{1,2}:\d{2}:\d{2}\s*[AP]M\]/,
+      // "1. [2:20 PM] notice: …"
+      /^⚠️?\s/
+      // library notice captured mid-turn
+    ];
     var SECRET_SHAPES = [
       /\bsk-[A-Za-z0-9_-]{12,}/,
       // OpenAI-style
@@ -1175,18 +1191,46 @@ var require_input_history = __commonJS({
       if (TERMINAL_JUNK.test(line)) return false;
       if (BOX_ONLY.test(line) && !/[A-Za-z]/.test(line.replace(/[│┃|]/g, ""))) return false;
       if (looksSecret(line)) return false;
+      if (NON_TYPED.some((re) => re.test(line))) return false;
       if (/^Tool execution results:/i.test(line)) return false;
       if (/^Session resumed from disk\./i.test(line)) return false;
       if (/^Continue based on these results\.?$/i.test(line)) return false;
       if (/^\[(trimmed|truncated|\.\.\.|…)\]$/i.test(line)) return false;
       return true;
     }
+    function isTruncationOf(a, b) {
+      if (a.length < 40 || b.length < 40) return false;
+      const long = a.length >= b.length ? a : b;
+      const short = a.length >= b.length ? b : a;
+      if (!long.startsWith(short)) return false;
+      return short.length >= long.length * 0.35;
+    }
+    var NOTICE_HEAD = /^⚠️?\s/;
     function sanitizeLines(lines) {
       const out = [];
+      let noticeTail = 0;
       for (const raw of lines || []) {
-        if (!isKept(raw)) continue;
+        if (typeof raw !== "string") continue;
         const line = raw.replace(/\r/g, "").trim();
+        if (noticeTail > 0) {
+          noticeTail -= 1;
+          if (/[.!?]$/.test(line)) noticeTail = 0;
+          continue;
+        }
+        if (NOTICE_HEAD.test(line)) {
+          noticeTail = 4;
+          continue;
+        }
+        if (!isKept(line)) continue;
         if (out.length && out[out.length - 1] === line) continue;
+        const prior = out.findIndex((h) => isTruncationOf(h, line));
+        if (prior !== -1) {
+          if (out[prior].length < line.length) {
+            out.splice(prior, 1);
+            out.push(line);
+          }
+          continue;
+        }
         out.push(line);
       }
       return out.slice(-MAX_KEEP);
