@@ -5352,12 +5352,11 @@ function App({ version = "0.1.0" }) {
     const result = lastTool && lastTool.result != null ? toLines(lastTool.result) : [];
     if (agent.busy) {
       const live = [...thinking, ...text];
-      if (live.length) return live.slice(-40);
-      if (result.length) return result.slice(-40);
+      if (live.length) return live;
+      if (result.length) return result;
       return [];
     }
-    const done = text.length ? text : result;
-    return done.slice(-40);
+    return text.length ? text : result;
   })();
   const liveImage = lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null;
   const host = useHostStats(5e3);
@@ -5922,9 +5921,9 @@ function App({ version = "0.1.0" }) {
   const dashServicesCapacity = servicesCapacityFor(dashServicesWidth);
   const monitorServicesCapacity = servicesCapacityFor(panelW);
   const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity);
-  const liveOutputLines = (rows || 30) >= 48 ? 8 : (rows || 30) >= 34 ? 5 : 3;
+  const liveOutputLineCap = (rows || 30) >= 48 ? 8 : (rows || 30) >= 34 ? 5 : 3;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
-  const liveOutputRows = liveOutputLines + 3 + liveOutputCallRows;
+  const liveOutputChrome = 3 + liveOutputCallRows;
   const dashRows = Math.max(6, (rows || 30) - 2 - (statusErr ? 3 : 0));
   const modelRows = Math.max(3, (rows || 30) - 5);
   const sidebarRows = Math.max(0, (rows || 30) - 2);
@@ -5939,10 +5938,10 @@ function App({ version = "0.1.0" }) {
   const railRows = dockExpanded ? 7 : 1;
   const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 3 : 0;
   const approvalRows = approving ? 6 : 0;
-  const transcriptRows = Math.max(
-    4,
-    (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows - approvalRows - systemRows - servicesRows - liveOutputRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0)
-  );
+  const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows + approvalRows + systemRows + servicesRows + liveOutputChrome + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
+  const sharedRows = (rows || 30) - fixedRows;
+  const liveOutputLines = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
+  const transcriptRows = Math.max(4, sharedRows - liveOutputLines);
   const dashboardItems = [
     {
       key: "system",

@@ -1280,7 +1280,19 @@ app.get('/api/tui/status', (_req, res) => {
 
 global.__tuiUpdate = (state) => { Object.assign(tuiState, state); };
 
-app.use(compression());
+// SSE must never be compressed: gzip/brotli holds small chunks until the
+// stream ends, so a live agent turn reached the TUI as ONE lump after the run
+// finished. Measured 2026-11-24 on /api/agent/run: with `accept-encoding:
+// gzip` the first byte arrived at 14 s (the end of the run); with `identity`
+// at 54 ms. Every panel was therefore "slow" until results were in — the
+// stream was fine, the encoder was buffering it.
+app.use(compression({
+  filter: (req, res) => {
+    const type = String(res.getHeader('Content-Type') || '');
+    if (type.includes('text/event-stream')) return false;
+    return compression.filter(req, res);
+  },
+}));
 app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
 
 // ── Stripe webhook — MUST be before express.json() for raw body verification ──

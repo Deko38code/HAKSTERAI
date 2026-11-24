@@ -408,13 +408,12 @@ export default function App({ version = '0.1.0' }) {
     // output dosent reach panels until results are in").
     if (agent.busy) {
       const live = [...thinking, ...text];
-      if (live.length) return live.slice(-40);
-      if (result.length) return result.slice(-40);
+      if (live.length) return live;
+      if (result.length) return result;
       return [];
     }
     // Idle: the finished answer, else the newest tool result.
-    const done = text.length ? text : result;
-    return done.slice(-40);
+    return text.length ? text : result;
   })();
   // The picture behind live-URL work (owner, 2026-11-23: "live image viewer in
   // the output panels when showing live url work"): a screenshot path, an image
@@ -1098,11 +1097,12 @@ export default function App({ version = '0.1.0' }) {
   // The live output panel the owner asked to sit lowest, right above the input
   // bar. Its height is a FIXED budget, not a streaming one: the box that shows
   // the run must never grow or shrink when a turn starts, or every panel above
-  // it moves. Taller terminals get a bigger window so the reasoning and the
-  // words being written are readable as they arrive.
-  const liveOutputLines = (rows || 30) >= 48 ? 8 : (rows || 30) >= 34 ? 5 : 3;
+  // it moves. This is only the CAP — the row budget below hands it whatever the
+  // screen can spare, never starving the transcript.
+  const liveOutputLineCap = (rows || 30) >= 48 ? 8 : (rows || 30) >= 34 ? 5 : 3;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
-  const liveOutputRows = liveOutputLines + 3 + liveOutputCallRows; // border 2 + title 1
+  // border 2 + title 1 + the call row when the column is wide enough
+  const liveOutputChrome = 3 + liveOutputCallRows;
   // Dashboard scroll box: the whole page scrolls, so a short terminal cannot
   // push the status bar off the bottom. Header + status bar are the fixed
   // chrome; the offline banner takes its own rows when it is showing.
@@ -1135,11 +1135,17 @@ export default function App({ version = '0.1.0' }) {
   const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 3 : 0;
   // approval: border 2 + header 1 + reason 1 + command 1 + answer row 1
   const approvalRows = approving ? 6 : 0;
-  const transcriptRows = Math.max(
-    4,
-    (rows || 30) - CHROME_ROWS - noticeRows - composerRows - railRows - todoRows
-      - approvalRows - systemRows - servicesRows - liveOutputRows - (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0),
-  );
+  // Everything except the transcript and the live box. Whatever is left is
+  // shared between them: the live box takes its cap (8/5/3 output lines) but
+  // never at the cost of a readable transcript, so a screen carrying a big
+  // todo list, an approval card and the MCP panel shrinks it instead of
+  // pushing the status bar off the bottom (audit, 2026-11-24).
+  const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows
+    + approvalRows + systemRows + servicesRows + liveOutputChrome
+    + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
+  const sharedRows = (rows || 30) - fixedRows;
+  const liveOutputLines = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
+  const transcriptRows = Math.max(4, sharedRows - liveOutputLines);
 
   const dashboardItems = [
     {
