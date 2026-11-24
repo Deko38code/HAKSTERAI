@@ -1452,6 +1452,14 @@ export default function App({ version = '0.1.0' }) {
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
   // border 2 + title 1 + the call row when the column is wide enough
   const liveOutputChrome = 3 + liveOutputCallRows;
+  // Owner, 2026-11-24: "we have 2 live panels 1 on right and middle keep right
+  // one remove middle live panel make our reasoning panel replace live middle
+  // to be taller". The right ◈ Live sidebar already carries the run's output,
+  // activity, live image and meters, so the middle ▶ Live/Result box is only
+  // drawn where that sidebar cannot be (narrower than 96 cols, sideW = 0).
+  // Everywhere both could show, the middle box is gone and its rows go to the
+  // reasoning transcript instead of leaving a hole in the column.
+  const showLiveBox = sideW === 0;
   // Dashboard scroll box: the whole page scrolls, so a short terminal cannot
   // push the status bar off the bottom. Header + status bar are the fixed
   // chrome; the offline banner takes its own rows when it is showing.
@@ -1484,7 +1492,7 @@ export default function App({ version = '0.1.0' }) {
   // Everything the chat column draws before the composer and the two middle
   // boxes. Used to cap the /menu popout so it can never grow past the screen.
   const chromeNoComposer = CHROME_ROWS + errRows + noticeRows + railRows
-    + approvalRows + statusRows + liveOutputChrome;
+    + approvalRows + statusRows + (showLiveBox ? liveOutputChrome : 0);
   // The /menu popout takes the composer's slot: bordered, title + filter + list
   // + footer. It is capped by what the terminal can spare AFTER the chrome and
   // two rows for the middle boxes, so a short window shrinks the popout instead
@@ -1502,7 +1510,7 @@ export default function App({ version = '0.1.0' }) {
   // 20-row window with a todo list open shows the list and drops the MCP panel
   // instead of running off the bottom of the screen.
   const mandatoryRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows
-    + approvalRows + statusRows + liveOutputChrome + 2;
+    + approvalRows + statusRows + (showLiveBox ? liveOutputChrome : 0) + 2;
   const optionalBudget = (rows || 30) - mandatoryRows;
   const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
   const showTodo = wantTodoRows > 0 && optionalBudget >= wantTodoRows;
@@ -1516,7 +1524,7 @@ export default function App({ version = '0.1.0' }) {
   // leftover (large) rows; a screen carrying a big todo list, an approval card
   // and the MCP panel shrinks them instead of pushing the status bar off.
   const fixedRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + todoRows
-    + approvalRows + statusRows + liveOutputChrome
+    + approvalRows + statusRows + (showLiveBox ? liveOutputChrome : 0)
     + (showMcpPanel ? mcpPanelRows : 0);
   const sharedRows = (rows || 30) - fixedRows;
   // Owner, 2026-11-24: taller panels. The reasoning transcript keeps a real
@@ -1531,10 +1539,15 @@ export default function App({ version = '0.1.0' }) {
   // the strip a single row when a todo list, an approval card and the MCP panel
   // were all up; this one cannot starve either box.
   const liveFloor = sharedBudget >= 24 ? 6 : sharedBudget >= 14 ? 4 : 2;
-  const liveOutputLines = Math.max(
-    1,
-    Math.min(liveOutputLineCap, sharedBudget - 1, Math.max(liveFloor, Math.round(sharedBudget * 0.35))),
-  );
+  // Where the middle box is gone, the reasoning transcript takes the whole
+  // budget — that is the "make our reasoning panel replace live middle to be
+  // taller" half of the same request.
+  const liveOutputLines = showLiveBox
+    ? Math.max(
+      1,
+      Math.min(liveOutputLineCap, sharedBudget - 1, Math.max(liveFloor, Math.round(sharedBudget * 0.35))),
+    )
+    : 0;
   const transcriptRows = Math.max(1, sharedBudget - liveOutputLines);
 
   const dashboardItems = [
@@ -1898,25 +1911,28 @@ export default function App({ version = '0.1.0' }) {
               </box>
             ) : null}
 
-            {/* ▶ Result — the compact strip at the top of the column (owner,
-                2026-11-24: the thinking and result boxes swapped, so the
-                result sits up here as a short strip and the reasoning
-                transcript takes the large area below). It follows the newest
+            {/* ▶ Result — the compact strip at the top of the column. Only
+                drawn when the right ◈ Live sidebar is not on screen (owner,
+                2026-11-24: keep the right live panel, drop the middle one, so
+                the reasoning transcript is the tall box). Narrow terminals
+                keep this box as the fallback live view. It follows the newest
                 line while the run streams; shift+↑/↓ pages it when the
                 sidebar is hidden (the sidebar owns those keys when wide). */}
-            <box style={{ flexShrink: 0, overflow: 'hidden' }}>
-              <LiveOutputPanel
-                width={mainW}
-                rows={liveOutputLines}
-                lines={liveLines}
-                image={liveImage}
-                graphics={prefsRef.current.graphics !== false}
-                call={liveToolTxt}
-                busy={agent.busy}
-                phase={livePhase}
-                bindings={sideW ? null : { up: 'shift', down: 'shift', pageup: 'shift', pagedown: 'shift', home: 'shift', end: 'shift' }}
-              />
-            </box>
+            {showLiveBox ? (
+              <box style={{ flexShrink: 0, overflow: 'hidden' }}>
+                <LiveOutputPanel
+                  width={mainW}
+                  rows={liveOutputLines}
+                  lines={liveLines}
+                  image={liveImage}
+                  graphics={prefsRef.current.graphics !== false}
+                  call={liveToolTxt}
+                  busy={agent.busy}
+                  phase={livePhase}
+                  bindings={sideW ? null : { up: 'shift', down: 'shift', pageup: 'shift', pagedown: 'shift', home: 'shift', end: 'shift' }}
+                />
+              </box>
+            ) : null}
 
             {showMcpPanel ? (
               <ScrollPanel
@@ -1967,11 +1983,13 @@ export default function App({ version = '0.1.0' }) {
               </box>
             ) : null}
 
-            {/* The THINKING transcript is now the LARGE area, sitting lowest
-                directly over the input bar (owner, 2026-11-24: swapped with
-                the result box and given the big rows, so the reasoning fills
-                the column bottom while the result stays a strip on top).
-                PgUp/PgDn page it and Ctrl+T opens the full reasoning. */}
+            {/* The THINKING transcript is the tall box at the bottom of the
+                column, directly over the input bar. It now owns the rows the
+                middle live box used to take (owner, 2026-11-24: one live panel,
+                on the right), so the reasoning is the large area on every wide
+                screen. PgUp/PgDn page it and Ctrl+T opens the full reasoning;
+                a capped tool result points at the pane that holds the rest —
+                ▶ Output in the right sidebar, ▶ Result on a narrow terminal. */}
             <box style={{ flexShrink: 0, overflow: 'hidden' }}>
               <Transcript
                 messages={agent.messages}
@@ -1984,6 +2002,7 @@ export default function App({ version = '0.1.0' }) {
                 // timer; the transcript only repeats them when that row is not
                 // on screen (short terminal / non-chat view).
                 liveLabel={!showCrushStatus}
+                outputLabel={showLiveBox ? '▶ Result' : '▶ Output'}
                 emptyHint="Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
               />
             </box>

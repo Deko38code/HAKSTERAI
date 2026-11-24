@@ -451,10 +451,10 @@ export async function run({ adsPort }) {
     ['its closing answer stays on screen', /Answer: the build passes after the split/.test(bigFrame)],
     // A dense turn still states its reasoning — as the fold line, not silently.
     ['a dense turn still states its reasoning', /⋯ Thought for \d+s/.test(bigFrame)],
-    // The dump is capped and says where the rest is. The panel the pointer
-    // names is ▶ Result (LiveOutputPanel); this string was left saying "Output"
-    // after the pane was renamed and had been failing ever since.
-    ['the shell result is capped, with a pointer to Result', /more lines · ▶ Result/.test(bigFrame)],
+    // The dump is capped and says where the rest is. On a wide terminal the
+    // only live panel is the right sidebar's ▶ Output (owner, 2026-11-24: "keep
+    // right one remove middle live panel"), so the pointer names that pane.
+    ['the shell result is capped, with a pointer to the live pane', /more lines · ▶ Output/.test(bigFrame)],
     ['the cap is real: line 40 of the dump is not drawn', !/bundle-40\.js/.test(bigFrame)],
     // ── the tool card (ported from the old CLI's ToolPanels) ──
     // Args are `k=v`, not raw JSON: JSON.stringify wrapped a six-key args

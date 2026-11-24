@@ -4439,7 +4439,7 @@ function useSpinnerFrame(active) {
   }, [active]);
   return frame;
 }
-function ToolRow({ tool, width, compact = false }) {
+function ToolRow({ tool, width, compact = false, outputLabel = "\u25B6 Output" }) {
   const pending = tool.result === null || tool.result === void 0;
   const frame = useSpinnerFrame(pending);
   const failed = !pending && isErrorResult(tool.result);
@@ -4466,10 +4466,15 @@ function ToolRow({ tool, width, compact = false }) {
     ] }),
     lines.map((line, i) => /* @__PURE__ */ jsx25("text", { fg: failed ? "red" : "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
     pending && !lines.length ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip("\u2502 waiting for output\u2026", Math.max(4, width)) }) : null,
-    hidden > 0 ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 \u25B6 Result` }) : null
+    hidden > 0 ? (
+      // The pointer names the pane that actually holds the rest: the right
+      // ◈ Live → ▶ Output on a wide terminal, the middle ▶ Result box on a
+      // narrow one (owner, 2026-11-24: one live panel, on the right).
+      /* @__PURE__ */ jsx25("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 ${outputLabel}` })
+    ) : null
   ] });
 }
-function MessageBlock({ message, width, compact = false, live = false, expandThinking = false, showLiveLabel = true }) {
+function MessageBlock({ message, width, compact = false, live = false, expandThinking = false, showLiveLabel = true, outputLabel = "\u25B6 Output" }) {
   if (!message) return null;
   const roleStyle = ROLE_STYLE[message.role] || ROLE_STYLE.system;
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
@@ -4504,7 +4509,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
           }
         ) : null,
         round.text && String(round.text).trim() ? /* @__PURE__ */ jsx25(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
-        roundTools.map((tool, j) => /* @__PURE__ */ jsx25(ToolRow, { tool, width: inner, compact }, `tool-${i}-${j}`))
+        roundTools.map((tool, j) => /* @__PURE__ */ jsx25(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}-${j}`))
       ] }, `round-${i}`);
     }) : /* @__PURE__ */ jsxs24(Fragment9, { children: [
       message.thinking ? /* @__PURE__ */ jsx25(
@@ -4525,7 +4530,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
         // live spinner. Only drawn where the spinner row is absent.
         showLiveLabel ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: "thinking\u2026" }) : null
       ) : null,
-      tools.map((tool, i) => /* @__PURE__ */ jsx25(ToolRow, { tool, width: inner, compact }, `tool-${i}`))
+      tools.map((tool, i) => /* @__PURE__ */ jsx25(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}`))
     ] })
   ] });
 }
@@ -4556,7 +4561,7 @@ function turnWeight(message) {
   }
   return n;
 }
-function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true }) {
+function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true, outputLabel = "\u25B6 Output" }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef6(null);
@@ -4645,7 +4650,8 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
             compact,
             live: live && i === capped.length - 1 && message.role === "assistant",
             expandThinking,
-            showLiveLabel: liveLabel
+            showLiveLabel: liveLabel,
+            outputLabel
           }
         ) }, message.id)) })
       ]
@@ -6717,6 +6723,7 @@ function App({ version = "0.1.0" }) {
   const liveOutputLineCap = (rows || 30) >= 48 ? 18 : (rows || 30) >= 34 ? 12 : 8;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
   const liveOutputChrome = 3 + liveOutputCallRows;
+  const showLiveBox = sideW === 0;
   const dashRows = Math.max(6, (rows || 30) - 2 - (statusErr ? 3 : 0));
   const modelRows = Math.max(3, (rows || 30) - 5);
   const sidebarRows = Math.max(0, (rows || 30) - 2);
@@ -6729,24 +6736,24 @@ function App({ version = "0.1.0" }) {
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
   const approvalRows = approving ? 6 : 0;
-  const chromeNoComposer = CHROME_ROWS + errRows + noticeRows + railRows + approvalRows + statusRows + liveOutputChrome;
+  const chromeNoComposer = CHROME_ROWS + errRows + noticeRows + railRows + approvalRows + statusRows + (showLiveBox ? liveOutputChrome : 0);
   const MENU_ROWS = Math.max(6, Math.min(26, (rows || 30) - 12, (rows || 30) - chromeNoComposer - 2));
   const composerRows = menuOpen ? MENU_ROWS : 5;
   const todoVisible = (rows || 30) >= 34 ? 6 : 3;
-  const mandatoryRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + approvalRows + statusRows + liveOutputChrome + 2;
+  const mandatoryRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + approvalRows + statusRows + (showLiveBox ? liveOutputChrome : 0) + 2;
   const optionalBudget = (rows || 30) - mandatoryRows;
   const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
   const showTodo = wantTodoRows > 0 && optionalBudget >= wantTodoRows;
   const todoRows = showTodo ? wantTodoRows : 0;
   const showMcpPanel = !!latestMcpTool && optionalBudget - todoRows >= mcpPanelRows;
-  const fixedRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + todoRows + approvalRows + statusRows + liveOutputChrome + (showMcpPanel ? mcpPanelRows : 0);
+  const fixedRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + todoRows + approvalRows + statusRows + (showLiveBox ? liveOutputChrome : 0) + (showMcpPanel ? mcpPanelRows : 0);
   const sharedRows = (rows || 30) - fixedRows;
   const sharedBudget = Math.max(2, sharedRows);
   const liveFloor = sharedBudget >= 24 ? 6 : sharedBudget >= 14 ? 4 : 2;
-  const liveOutputLines = Math.max(
+  const liveOutputLines = showLiveBox ? Math.max(
     1,
     Math.min(liveOutputLineCap, sharedBudget - 1, Math.max(liveFloor, Math.round(sharedBudget * 0.35)))
-  );
+  ) : 0;
   const transcriptRows = Math.max(1, sharedBudget - liveOutputLines);
   const dashboardItems = [
     {
@@ -7064,7 +7071,7 @@ function App({ version = "0.1.0" }) {
             maxVisibleRows: Math.min(agent.todos.length, todoVisible)
           }
         ) }) : null,
-        /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx27(
+        showLiveBox ? /* @__PURE__ */ jsx27("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx27(
           LiveOutputPanel,
           {
             width: mainW,
@@ -7077,7 +7084,7 @@ function App({ version = "0.1.0" }) {
             phase: livePhase,
             bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
           }
-        ) }),
+        ) }) : null,
         showMcpPanel ? /* @__PURE__ */ jsx27(
           ScrollPanel_default,
           {
@@ -7123,6 +7130,7 @@ function App({ version = "0.1.0" }) {
             live: agent.status !== "idle",
             expandThinking,
             liveLabel: !showCrushStatus,
+            outputLabel: showLiveBox ? "\u25B6 Result" : "\u25B6 Output",
             emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
           }
         ) }),

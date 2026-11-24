@@ -168,7 +168,7 @@ function useSpinnerFrame(active) {
   return frame;
 }
 
-function ToolRow({ tool, width, compact = false }) {
+function ToolRow({ tool, width, compact = false, outputLabel = '▶ Output' }) {
   const pending = tool.result === null || tool.result === undefined;
   const frame = useSpinnerFrame(pending);
   const failed = !pending && isErrorResult(tool.result);
@@ -209,13 +209,16 @@ function ToolRow({ tool, width, compact = false }) {
         <text fg="gray">{clip('│ waiting for output…', Math.max(4, width))}</text>
       ) : null}
       {hidden > 0 ? (
-        <text fg="gray">{`… +${hidden} more line${hidden === 1 ? '' : 's'} · ▶ Result`}</text>
+        // The pointer names the pane that actually holds the rest: the right
+        // ◈ Live → ▶ Output on a wide terminal, the middle ▶ Result box on a
+        // narrow one (owner, 2026-11-24: one live panel, on the right).
+        <text fg="gray">{`… +${hidden} more line${hidden === 1 ? '' : 's'} · ${outputLabel}`}</text>
       ) : null}
     </box>
   );
 }
 
-export default function MessageBlock({ message, width, compact = false, live = false, expandThinking = false, showLiveLabel = true }) {
+export default function MessageBlock({ message, width, compact = false, live = false, expandThinking = false, showLiveLabel = true, outputLabel = '▶ Output' }) {
   if (!message) return null;
 
   const roleStyle = ROLE_STYLE[message.role] || ROLE_STYLE.system;
@@ -281,7 +284,7 @@ export default function MessageBlock({ message, width, compact = false, live = f
                 <ProseBlock text={round.text} live={proseLive} width={inner} compact={compact} />
               ) : null}
               {roundTools.map((tool, j) => (
-                <ToolRow key={`tool-${i}-${j}`} tool={tool} width={inner} compact={compact} />
+                <ToolRow key={`tool-${i}-${j}`} tool={tool} width={inner} compact={compact} outputLabel={outputLabel} />
               ))}
             </box>
           );
@@ -308,7 +311,7 @@ export default function MessageBlock({ message, width, compact = false, live = f
             showLiveLabel ? <text fg="gray">thinking…</text> : null
           ) : null}
           {tools.map((tool, i) => (
-            <ToolRow key={`tool-${i}`} tool={tool} width={inner} compact={compact} />
+            <ToolRow key={`tool-${i}`} tool={tool} width={inner} compact={compact} outputLabel={outputLabel} />
           ))}
         </>
       )}

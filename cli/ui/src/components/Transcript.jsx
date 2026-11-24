@@ -53,7 +53,7 @@ function turnWeight(message) {
   return n;
 }
 
-export default function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true }) {
+export default function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true, outputLabel = '▶ Output' }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef(null);
@@ -183,6 +183,7 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
                 live={live && i === capped.length - 1 && message.role === 'assistant'}
                 expandThinking={expandThinking}
                 showLiveLabel={liveLabel}
+                outputLabel={outputLabel}
               />
             </box>
           ))}
