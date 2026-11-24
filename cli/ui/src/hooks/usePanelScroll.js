@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
 import {
   clampStart,
@@ -32,6 +32,7 @@ export function usePanelScroll({
   enabled = true,
   initial = 'follow',
   selected = null,
+  autoResume = false,
 }) {
   const [offset, setOffsetState] = useState(initial === 'top' ? 0 : null);
 
@@ -39,6 +40,18 @@ export function usePanelScroll({
   const r = Math.max(0, Math.trunc(Number(rows) || 0));
   const start = selected == null ? clampStart(offset, n, r) : nearestStart(selected, n, r);
   const following = selected != null ? true : offset == null;
+
+  // A live feed must not be left behind by an old scroll position. While
+  // `autoResume` is on (a run is producing output) every new row hands the
+  // window back to follow — before this the panel only returned to the tail if
+  // the operator paged it there, so a parked panel looked stuck until it was
+  // clicked or scrolled by hand (owner, 2026-11-24: "make sure the scroll is
+  // working auto not just when i click it — in all panels").
+  const prevTotal = useRef(n);
+  useEffect(() => {
+    if (autoResume && n > prevTotal.current && offset != null) setOffsetState(null);
+    prevTotal.current = n;
+  }, [n, autoResume, offset]);
 
   const setOffset = useCallback((value) => {
     setOffsetState((cur) => (typeof value === 'function' ? value(cur) : value));

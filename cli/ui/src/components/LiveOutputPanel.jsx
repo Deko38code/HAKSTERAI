@@ -14,10 +14,20 @@ import { usePanelScroll } from '../hooks/usePanelScroll.js';
  *
  * Owner, 2026-11-23 (the two boxes): "top one needs to be reasoning and bot
  * the final result output". The transcript above is the reasoning/history;
- * this box is only what the run produced — the answer, or the newest tool
- * result while it is still working. It never repeats the thinking. It follows
- * the newest line while a run streams (offset null = follow) and carries the
- * house ▲/█/▼ scrollbar when it overflows.
+ * this box is what the run is producing.
+ *
+ * Owner, 2026-11-24: "the output dosent reach panels until results are in …
+ * live panels rendering in place live". So while a run streams this box is
+ * LIVE, not a result: the reasoning as it is written, then the words under it,
+ * then the newest tool result — fed by `liveLines`, which prefers reasoning
+ * before any prose has arrived. Its height is a fixed budget whether or not a
+ * turn is running, so the box never moves the panels above it; only its
+ * contents update, newest line at the bottom. It returns to the finished
+ * answer (and the ▶ Result title) when the run ends.
+ *
+ * It follows the newest line while a run streams (offset null = follow) and
+ * carries the house ▲/█/▼ scrollbar when it overflows; a parked window comes
+ * back to the tail by itself as new lines land (`autoResume`).
  *
  * The rendered height is CONSTANT — border 2 + title 1 + call row (one at
  * ≥44 cols, folded into the title below that) + `rows` output lines. The
@@ -34,6 +44,7 @@ export default function LiveOutputPanel({
   bindings = null,
   image = null,
   graphics = true,
+  phase = '',
 }) {
   const w = Math.max(20, Number(width) || 80);
   const inner = Math.max(1, w - 4);
@@ -42,17 +53,21 @@ export default function LiveOutputPanel({
   // Same threshold App.jsx budgets the extra call row with.
   const callRow = w >= 44;
   const compact = !callRow;
-  const state = usePanelScroll({ total: list.length, rows: r, bindings, enabled: r > 0 });
+  const state = usePanelScroll({ total: list.length, rows: r, bindings, enabled: r > 0, autoResume: busy });
   const gutterOn = overflows(list.length, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
+  // While a run is live the box says so, and says what it is showing — the
+  // reasoning, the words being written, or a tool that is still running. A
+  // still box with no label read as a stalled agent (owner, 2026-11-24).
+  const liveHint = phase && phase !== 'result' ? phase : 'live';
   const hint = image
     ? `image${call && compact ? ` · ${clip(call, Math.max(6, inner - 12))}` : ''}`
     : list.length
-      ? `${state.hint('')}${call && compact ? ` · ${clip(call, Math.max(6, inner - 12))}` : ''}`
-      : busy ? 'live' : 'last';
+      ? `${state.hint('')}${busy ? ` · ${liveHint}` : ''}${call && compact ? ` · ${clip(call, Math.max(6, inner - 12))}` : ''}`
+      : busy ? liveHint : 'last';
 
   return (
-    <Panel width={w} title="▶ Result" hint={hint}>
+    <Panel width={w} title={busy ? '▶ Live' : '▶ Result'} hint={hint}>
       {callRow ? (
         <box style={{ width: inner, flexShrink: 0 }}>
           <text fg={call ? 'cyan' : 'gray'}>{clip(call || '—', inner)}</text>
@@ -63,7 +78,7 @@ export default function LiveOutputPanel({
       ) : list.length === 0 ? (
         <>
           <box style={{ width: inner, flexShrink: 0 }}>
-            <text fg="gray">{busy ? clip('waiting for the result…', inner) : ' '}</text>
+            <text fg="gray">{busy ? clip('waiting for the first token…', inner) : ' '}</text>
           </box>
           {Array.from({ length: Math.max(0, r - 1) }, (_, i) => (
             <box key={`pad:${i}`} style={{ width: inner, flexShrink: 0 }}>

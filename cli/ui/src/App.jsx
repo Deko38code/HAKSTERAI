@@ -383,17 +383,38 @@ export default function App({ version = '0.1.0' }) {
     ? lastAssistant.tools[lastAssistant.tools.length - 1]
     : null;
   const liveToolTxt = lastTool ? `${lastTool.name}${toolArgLine(lastTool.args)}` : '';
+  // Which half of the run the panel is showing, so the box can say it: the
+  // operator reads "thinking" and knows the model is working even when no
+  // words have arrived yet (a slow first token looked like a dead panel).
+  const livePhase = !agent.busy
+    ? 'result'
+    : (lastAssistant && String(lastAssistant.text || '').trim())
+      ? 'writing'
+      : (lastAssistant && String(lastAssistant.thinking || '').trim())
+        ? 'thinking'
+        : (lastTool && lastTool.result == null)
+          ? 'running'
+          : 'waiting';
   const liveLines = (() => {
     if (!lastAssistant) return [];
-    const text = String(lastAssistant.text || '').trim();
-    const result = lastTool && lastTool.result != null ? String(lastTool.result).trim() : '';
-    // The bottom box is the RESULT, the top box is the REASONING (owner,
-    // 2026-11-23: "top one needs to be reasoning and bottom the final result
-    // output"). So the answer wins, then what the newest tool returned — never
-    // the thinking, which belongs to the transcript above and made this panel
-    // read as a second copy of it.
-    const src = text || result;
-    return src ? src.split('\n').filter((l) => l.trim()).slice(-6) : [];
+    const toLines = (v) => String(v == null ? '' : v).replace(/\r/g, '').split('\n').filter((l) => l.trim());
+    const thinking = toLines(lastAssistant.thinking);
+    const text = toLines(lastAssistant.text);
+    const result = lastTool && lastTool.result != null ? toLines(lastTool.result) : [];
+    // While the run streams the box is LIVE: the reasoning as it is written,
+    // then the words being written under it. Before this it showed only a
+    // finished tool result, so the panel sat on the previous turn's answer
+    // until a call returned — the run looked stalled (owner, 2026-11-24: "the
+    // output dosent reach panels until results are in").
+    if (agent.busy) {
+      const live = [...thinking, ...text];
+      if (live.length) return live.slice(-40);
+      if (result.length) return result.slice(-40);
+      return [];
+    }
+    // Idle: the finished answer, else the newest tool result.
+    const done = text.length ? text : result;
+    return done.slice(-40);
   })();
   // The picture behind live-URL work (owner, 2026-11-23: "live image viewer in
   // the output panels when showing live url work"): a screenshot path, an image
@@ -1075,8 +1096,11 @@ export default function App({ version = '0.1.0' }) {
   const monitorServicesCapacity = servicesCapacityFor(panelW);
   const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity);
   // The live output panel the owner asked to sit lowest, right above the input
-  // bar: a short window that follows the newest line while a run streams.
-  const liveOutputLines = (rows || 30) >= 48 ? 4 : 3;
+  // bar. Its height is a FIXED budget, not a streaming one: the box that shows
+  // the run must never grow or shrink when a turn starts, or every panel above
+  // it moves. Taller terminals get a bigger window so the reasoning and the
+  // words being written are readable as they arrive.
+  const liveOutputLines = (rows || 30) >= 48 ? 8 : (rows || 30) >= 34 ? 5 : 3;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
   const liveOutputRows = liveOutputLines + 3 + liveOutputCallRows; // border 2 + title 1
   // Dashboard scroll box: the whole page scrolls, so a short terminal cannot
@@ -1506,6 +1530,7 @@ export default function App({ version = '0.1.0' }) {
               graphics={prefsRef.current.graphics !== false}
               call={liveToolTxt}
               busy={agent.busy}
+              phase={livePhase}
               bindings={sideW ? null : { up: 'shift', down: 'shift', pageup: 'shift', pagedown: 'shift', home: 'shift', end: 'shift' }}
             />
 

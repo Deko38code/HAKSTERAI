@@ -47,6 +47,9 @@ export function ScrollPanel({
     enabled: r > 0,
     initial,
     selected,
+    // A panel fed by a running agent returns to the tail on its own; a static
+    // list (scripts, squad) keeps wherever the operator put it.
+    autoResume: busy && initial === 'follow',
   });
   const gutterOn = selected == null && r > 0 && overflows(n, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TextAttributes } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { clampStart, gutterChar, overflows, scrollHint } from '../utils/panel-scroll.js';
@@ -222,6 +222,18 @@ export default function LiveSidebar({
   const [actOffset, setActOffset] = useState(null);
   const [outOffset, setOutOffset] = useState(null);
   const [mcpOffset, setMcpOffset] = useState(null);
+  // While a run is producing output the feeds come back to the tail by
+  // themselves — a parked window used to need a key or a click before it
+  // followed again (owner, 2026-11-24: "the scroll is working auto not just
+  // when i click it — in all panels").
+  const prevAct = useRef(activity.length);
+  const prevOut = useRef(liveLines.length);
+  useEffect(() => {
+    if (busy && activity.length > prevAct.current) setActOffset(null);
+    if (busy && liveLines.length > prevOut.current) setOutOffset(null);
+    prevAct.current = activity.length;
+    prevOut.current = liveLines.length;
+  }, [activity.length, liveLines.length, busy]);
   const actStart = clampStart(actOffset, activity.length, activityRows || 1);
   const outStart = clampStart(outOffset, liveLines.length, outputRows || 1);
   const compact = inner < 24;

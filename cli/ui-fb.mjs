@@ -1293,7 +1293,7 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React24, { useCallback as useCallback5, useEffect as useEffect14, useRef as useRef8, useState as useState17 } from "react";
+import React24, { useCallback as useCallback5, useEffect as useEffect16, useRef as useRef10, useState as useState17 } from "react";
 import fs9 from "node:fs";
 import path7 from "node:path";
 import { useKeyboard as useKeyboard7, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
@@ -1740,7 +1740,7 @@ function Spark({ data = [], w = 24 }) {
 var GridPanel_default = GridPanel;
 
 // src/components/LiveSidebar.jsx
-import React7, { useState as useState4 } from "react";
+import React7, { useEffect as useEffect4, useRef as useRef2, useState as useState4 } from "react";
 import { TextAttributes as TextAttributes5 } from "@opentui/core";
 import { useKeyboard as useKeyboard3 } from "@opentui/react";
 
@@ -2087,6 +2087,14 @@ function LiveSidebar({
   const [actOffset, setActOffset] = useState4(null);
   const [outOffset, setOutOffset] = useState4(null);
   const [mcpOffset, setMcpOffset] = useState4(null);
+  const prevAct = useRef2(activity.length);
+  const prevOut = useRef2(liveLines.length);
+  useEffect4(() => {
+    if (busy && activity.length > prevAct.current) setActOffset(null);
+    if (busy && liveLines.length > prevOut.current) setOutOffset(null);
+    prevAct.current = activity.length;
+    prevOut.current = liveLines.length;
+  }, [activity.length, liveLines.length, busy]);
   const actStart = clampStart(actOffset, activity.length, activityRows || 1);
   const outStart = clampStart(outOffset, liveLines.length, outputRows || 1);
   const compact = inner < 24;
@@ -2282,7 +2290,7 @@ function LiveSidebar({
 import React8 from "react";
 
 // src/hooks/usePanelScroll.js
-import { useCallback, useState as useState5 } from "react";
+import { useCallback, useEffect as useEffect5, useRef as useRef3, useState as useState5 } from "react";
 import { useKeyboard as useKeyboard4 } from "@opentui/react";
 function usePanelScroll({
   total = 0,
@@ -2290,13 +2298,19 @@ function usePanelScroll({
   bindings = null,
   enabled = true,
   initial = "follow",
-  selected = null
+  selected = null,
+  autoResume = false
 }) {
   const [offset, setOffsetState] = useState5(initial === "top" ? 0 : null);
   const n = Math.max(0, Math.trunc(Number(total) || 0));
   const r = Math.max(0, Math.trunc(Number(rows) || 0));
   const start2 = selected == null ? clampStart(offset, n, r) : nearestStart(selected, n, r);
   const following = selected != null ? true : offset == null;
+  const prevTotal = useRef3(n);
+  useEffect5(() => {
+    if (autoResume && n > prevTotal.current && offset != null) setOffsetState(null);
+    prevTotal.current = n;
+  }, [n, autoResume, offset]);
   const setOffset = useCallback((value) => {
     setOffsetState((cur) => typeof value === "function" ? value(cur) : value);
   }, []);
@@ -2348,7 +2362,8 @@ function LiveOutputPanel({
   busy = false,
   bindings = null,
   image = null,
-  graphics = true
+  graphics = true,
+  phase = ""
 }) {
   const w = Math.max(20, Number(width) || 80);
   const inner = Math.max(1, w - 4);
@@ -2356,14 +2371,15 @@ function LiveOutputPanel({
   const list = Array.isArray(lines) ? lines : [];
   const callRow = w >= 44;
   const compact = !callRow;
-  const state = usePanelScroll({ total: list.length, rows: r, bindings, enabled: r > 0 });
+  const state = usePanelScroll({ total: list.length, rows: r, bindings, enabled: r > 0, autoResume: busy });
   const gutterOn = overflows(list.length, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
-  const hint = image ? `image${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : list.length ? `${state.hint("")}${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : busy ? "live" : "last";
-  return /* @__PURE__ */ jsxs8(Panel, { width: w, title: "\u25B6 Result", hint, children: [
+  const liveHint = phase && phase !== "result" ? phase : "live";
+  const hint = image ? `image${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : list.length ? `${state.hint("")}${busy ? ` \xB7 ${liveHint}` : ""}${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : busy ? liveHint : "last";
+  return /* @__PURE__ */ jsxs8(Panel, { width: w, title: busy ? "\u25B6 Live" : "\u25B6 Result", hint, children: [
     callRow ? /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: call ? "cyan" : "gray", children: clip(call || "\u2014", inner) }) }) : null,
     image && r >= 3 ? /* @__PURE__ */ jsx8(LiveImageViewer, { width: bodyW, height: r, source: image, graphics }) : list.length === 0 ? /* @__PURE__ */ jsxs8(Fragment4, { children: [
-      /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", children: busy ? clip("waiting for the result\u2026", inner) : " " }) }),
+      /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", children: busy ? clip("waiting for the first token\u2026", inner) : " " }) }),
       Array.from({ length: Math.max(0, r - 1) }, (_, i) => /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { children: " " }) }, `pad:${i}`))
     ] }) : Array.from({ length: r }, (_, i) => {
       const index = state.start + i;
@@ -2513,7 +2529,7 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
 }
 
 // src/hooks/useServerUsage.js
-import { useCallback as useCallback2, useEffect as useEffect4, useRef as useRef2, useState as useState6 } from "react";
+import { useCallback as useCallback2, useEffect as useEffect6, useRef as useRef4, useState as useState6 } from "react";
 import fs3 from "node:fs";
 import os2 from "node:os";
 import path2 from "node:path";
@@ -2529,8 +2545,8 @@ function configuredServer() {
 }
 function useServerUsage(refreshSeconds = 15, enabled = true) {
   const [state, setState] = useState6({ data: null, error: null, updatedAt: null, loading: true });
-  const timerRef = useRef2(null);
-  const aliveRef = useRef2(true);
+  const timerRef = useRef4(null);
+  const aliveRef = useRef4(true);
   const load = useCallback2(async () => {
     const key = process.env.HAKSTER_API_KEY || "";
     const base = configuredServer();
@@ -2555,7 +2571,7 @@ function useServerUsage(refreshSeconds = 15, enabled = true) {
       setState((s) => ({ ...s, loading: false, error: `usage unavailable (${e && e.message || "network"})` }));
     }
   }, []);
-  useEffect4(() => {
+  useEffect6(() => {
     aliveRef.current = true;
     if (!enabled) return void 0;
     load();
@@ -2673,7 +2689,7 @@ function MonitorFeed({
 
 // src/components/DecodeSplash.jsx
 var import_kitty_graphics2 = __toESM(require_kitty_graphics());
-import React11, { useEffect as useEffect5, useRef as useRef3, useState as useState8 } from "react";
+import React11, { useEffect as useEffect7, useRef as useRef5, useState as useState8 } from "react";
 import fs4 from "node:fs";
 import path3 from "node:path";
 import { TextAttributes as TextAttributes7 } from "@opentui/core";
@@ -2840,7 +2856,7 @@ function scrambleLine(text, reveal, frame) {
 function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55, graphics = true }) {
   const [frame, setFrame] = useState8(0);
   const renderer2 = useRenderer2();
-  const doneRef = useRef3(onDone);
+  const doneRef = useRef5(onDone);
   doneRef.current = onDone;
   const longest = lines.reduce((n, l) => Math.max(n, String(l.text || "").length), 1);
   const revealStep = 2.4;
@@ -2858,21 +2874,21 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
   const artFit = !imageAllowed || heroFailed ? artSize(width, height, lines.length + 3) : { cols: 0, rows: 0 };
   const showArt = artFit.cols >= 24 && artFit.rows >= 8;
   const showWordmark = !showArt && (!heroAsset || heroFailed);
-  useEffect5(() => {
+  useEffect7(() => {
     if (done) return void 0;
     const id = setInterval(() => {
       setFrame((f) => f + 1 >= settleAt ? settleAt : f + 1);
     }, stepMs);
     return () => clearInterval(id);
   }, [done, settleAt, stepMs]);
-  useEffect5(() => {
+  useEffect7(() => {
     if (!done) return void 0;
     const id = setTimeout(() => {
       if (typeof doneRef.current === "function") doneRef.current();
     }, 260);
     return () => clearTimeout(id);
   }, [done]);
-  useEffect5(() => {
+  useEffect7(() => {
     if (!graphics || !(0, import_kitty_graphics2.isSupported)(process.env, process.stdout)) return void 0;
     let placed = null;
     let row = 1;
@@ -3105,7 +3121,10 @@ function ScrollPanel({
     bindings,
     enabled: r > 0,
     initial,
-    selected
+    selected,
+    // A panel fed by a running agent returns to the tail on its own; a static
+    // list (scripts, squad) keeps wherever the operator put it.
+    autoResume: busy && initial === "follow"
   });
   const gutterOn = selected == null && r > 0 && overflows(n, r);
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
@@ -3880,7 +3899,7 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
 }
 
 // src/components/CrushStatus.jsx
-import React20, { useEffect as useEffect6, useState as useState9 } from "react";
+import React20, { useEffect as useEffect8, useState as useState9 } from "react";
 import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
@@ -3900,7 +3919,7 @@ function formatElapsed2(ms) {
 }
 function CrushStatus({ width, phase, activity, elapsedMs }) {
   const [frame, setFrame] = useState9(0);
-  useEffect6(() => {
+  useEffect8(() => {
     const timer = setInterval(() => setFrame((value) => value + 1), 80);
     return () => clearInterval(timer);
   }, []);
@@ -3963,11 +3982,11 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
 }
 
 // src/components/Transcript.jsx
-import React23, { useEffect as useEffect8, useRef as useRef4, useState as useState11 } from "react";
+import React23, { useEffect as useEffect10, useRef as useRef6, useState as useState11 } from "react";
 import { useKeyboard as useKeyboard6 } from "@opentui/react";
 
 // src/components/MessageBlock.jsx
-import React22, { useEffect as useEffect7, useState as useState10 } from "react";
+import React22, { useEffect as useEffect9, useState as useState10 } from "react";
 import { TextAttributes as TextAttributes16 } from "@opentui/core";
 import { Fragment as Fragment8, jsx as jsx22, jsxs as jsxs21 } from "react/jsx-runtime";
 var RESULT_LINES = 3;
@@ -4001,7 +4020,7 @@ function fmtDur(ms) {
 }
 function useSpinnerFrame(active) {
   const [frame, setFrame] = useState10(0);
-  useEffect7(() => {
+  useEffect9(() => {
     if (!active) return void 0;
     const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 100);
     return () => clearInterval(id);
@@ -4100,7 +4119,7 @@ function turnWeight(message) {
 function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
-  const boxRef = useRef4(null);
+  const boxRef = useRef6(null);
   const [follow, setFollow] = useState11(true);
   const capped = list.slice(-MAX_TURNS);
   const hidden = list.length - capped.length;
@@ -4120,7 +4139,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
     if (max <= 0) return;
     if (box.scrollTop < max) box.scrollTo(max);
   };
-  useEffect8(() => {
+  useEffect10(() => {
     if (!follow) return void 0;
     pinToTail();
     const t1 = setTimeout(pinToTail, 0);
@@ -4130,7 +4149,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
       clearTimeout(t2);
     };
   }, [listSig, budget, follow]);
-  useEffect8(() => {
+  useEffect10(() => {
     if (!follow || !live) return void 0;
     const id = setInterval(pinToTail, 100);
     return () => clearInterval(id);
@@ -4185,7 +4204,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
 }
 
 // src/hooks/useAgentStream.js
-import { useCallback as useCallback3, useEffect as useEffect9, useRef as useRef5, useState as useState12 } from "react";
+import { useCallback as useCallback3, useEffect as useEffect11, useRef as useRef7, useState as useState12 } from "react";
 var import_ladder = __toESM(require_ladder());
 var DEFAULT_API2 = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
@@ -4237,8 +4256,8 @@ function useAgentStream({
   autoHandoff = true
 } = {}) {
   const [messages, setMessages] = useState12([]);
-  const messagesRef = useRef5([]);
-  useEffect9(() => {
+  const messagesRef = useRef7([]);
+  useEffect11(() => {
     messagesRef.current = messages;
   }, [messages]);
   const [todos, setTodos] = useState12([]);
@@ -4248,18 +4267,18 @@ function useAgentStream({
   const [activity, setActivity] = useState12([]);
   const [requests, setRequests] = useState12(0);
   const [tokens, setTokens] = useState12({ in: 0, out: 0, reported: false });
-  const requestsRef = useRef5(0);
+  const requestsRef = useRef7(0);
   const pushActivity = useCallback3((kind, text) => {
     const line = { kind: String(kind || "sys"), text: String(text == null ? "" : text), ts: Date.now() };
     setActivity((prev) => prev.length >= 60 ? [...prev.slice(prev.length - 59), line] : [...prev, line]);
   }, []);
   const [pendingConfirm, setPendingConfirm] = useState12(null);
-  const pendingConfirmRef = useRef5(null);
-  const meterRef = useRef5(null);
+  const pendingConfirmRef = useRef7(null);
+  const meterRef = useRef7(null);
   if (!meterRef.current) meterRef.current = createMeter();
   const [meters, setMeters] = useState12(() => meterRef.current.snapshot());
-  const toolMetaRef = useRef5(/* @__PURE__ */ new Map());
-  const lastToolRef = useRef5(null);
+  const toolMetaRef = useRef7(/* @__PURE__ */ new Map());
+  const lastToolRef = useRef7(null);
   const syncMeters = useCallback3(() => setMeters(meterRef.current.snapshot()), []);
   const scoreTool = useCallback3((name, args, result) => {
     const text = String(result == null ? "" : result).trim();
@@ -4275,16 +4294,16 @@ function useAgentStream({
     pendingConfirmRef.current = value;
     setPendingConfirm(value);
   }, []);
-  const abortRef = useRef5(null);
-  const userAbortRef = useRef5(false);
-  const attemptCtxRef = useRef5({ produced: false, sawError: null, status: null });
-  const startedAtRef = useRef5(null);
-  const statusRef = useRef5("idle");
+  const abortRef = useRef7(null);
+  const userAbortRef = useRef7(false);
+  const attemptCtxRef = useRef7({ produced: false, sawError: null, status: null });
+  const startedAtRef = useRef7(null);
+  const statusRef = useRef7("idle");
   const setStatusBoth = useCallback3((next) => {
     statusRef.current = next;
     setStatus(next);
   }, []);
-  useEffect9(() => {
+  useEffect11(() => {
     const ticking = status === "thinking" || status === "streaming" || status === "approval";
     if (!ticking) return void 0;
     const id = setInterval(() => {
@@ -4783,7 +4802,7 @@ function useAgentStream({
 var useAgentStream_default = useAgentStream;
 
 // src/hooks/useHostStats.js
-import { useEffect as useEffect10, useRef as useRef6, useState as useState13 } from "react";
+import { useEffect as useEffect12, useRef as useRef8, useState as useState13 } from "react";
 import os4 from "node:os";
 import fs7 from "node:fs";
 var readText = (p) => {
@@ -4823,8 +4842,8 @@ function disk() {
 }
 function useHostStats(intervalMs = 5e3) {
   const [stats, setStats] = useState13(null);
-  const prevRef = useRef6(null);
-  useEffect10(() => {
+  const prevRef = useRef8(null);
+  useEffect12(() => {
     const cores = Math.max(1, (os4.cpus() || []).length);
     const sample = () => {
       const now = cpuTimes();
@@ -4870,7 +4889,7 @@ function useHostStats(intervalMs = 5e3) {
 }
 
 // src/hooks/useMemoryBank.js
-import { useEffect as useEffect11, useState as useState14 } from "react";
+import { useEffect as useEffect13, useState as useState14 } from "react";
 import fs8 from "node:fs";
 import os5 from "node:os";
 import path6 from "node:path";
@@ -4916,7 +4935,7 @@ function readMemoryBanks(dir = BANK_DIR) {
 }
 function useMemoryBank(intervalMs = 1e4) {
   const [state, setState] = useState14(() => readMemoryBanks());
-  useEffect11(() => {
+  useEffect13(() => {
     const tick = () => setState((prev) => readMemoryBanks() || prev);
     const id = setInterval(tick, intervalMs);
     try {
@@ -4931,7 +4950,7 @@ function useMemoryBank(intervalMs = 1e4) {
 // src/hooks/useCliUpdate.js
 var import_updater = __toESM(require_updater());
 var import_prefs = __toESM(require_prefs());
-import { useEffect as useEffect12, useState as useState15 } from "react";
+import { useEffect as useEffect14, useState as useState15 } from "react";
 function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
   const [state, setState] = useState15(() => {
     try {
@@ -4948,7 +4967,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
     }
     return { status: "idle" };
   });
-  useEffect12(() => {
+  useEffect14(() => {
     let alive = true;
     const tick = async () => {
       if (import_prefs.default.load().updateCheck === false) return;
@@ -4982,7 +5001,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
 }
 
 // src/hooks/useScriptRunner.js
-import { useCallback as useCallback4, useEffect as useEffect13, useRef as useRef7, useState as useState16 } from "react";
+import { useCallback as useCallback4, useEffect as useEffect15, useRef as useRef9, useState as useState16 } from "react";
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
 var TIMEOUT_MS = 12e4;
@@ -4995,9 +5014,9 @@ function useScriptRunner() {
     }
   });
   const [run, setRun] = useState16({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
-  const procRef = useRef7(null);
-  const timerRef = useRef7(null);
-  const seq2 = useRef7(0);
+  const procRef = useRef9(null);
+  const timerRef = useRef9(null);
+  const seq2 = useRef9(0);
   const stop = useCallback4(() => {
     const p = procRef.current;
     if (p) {
@@ -5013,7 +5032,7 @@ function useScriptRunner() {
     }
     setRun((r) => r.status === "running" ? { ...r, status: "stopped", endedAt: Date.now() } : r);
   }, []);
-  useEffect13(() => () => {
+  useEffect15(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     const p = procRef.current;
     if (p) {
@@ -5188,7 +5207,7 @@ function App({ version = "0.1.0" }) {
   const [model, setModel] = useState17(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
   const [provider, setProvider] = useState17(process.env.HAKSTER_PROVIDER || "");
   const [modelIdx, setModelIdx] = useState17(0);
-  const prefsRef = useRef8(null);
+  const prefsRef = useRef10(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
   const [handoffOn, setHandoffOn] = useState17(() => prefsRef.current.autoHandoff !== false);
   const [autoMode, setAutoMode] = useState17(() => {
@@ -5214,9 +5233,9 @@ function App({ version = "0.1.0" }) {
   const [guard, setGuard] = useState17(null);
   const [pointsHistory, setPointsHistory] = useState17([]);
   const [attachment, setAttachment] = useState17(null);
-  const scrollRef = useRef8(null);
-  const dashRef = useRef8(null);
-  const usageRef = useRef8(null);
+  const scrollRef = useRef10(null);
+  const dashRef = useRef10(null);
+  const usageRef = useRef10(null);
   const agent = useAgentStream_default({
     api: API,
     model,
@@ -5229,10 +5248,10 @@ function App({ version = "0.1.0" }) {
     approvalMode: autoMode === "suggest" ? void 0 : autoMode
   });
   const usagePage = useServerUsage(usageRefresh, view === "usage");
-  useEffect14(() => {
+  useEffect16(() => {
     writePrefs({ autoHandoff: handoffOn });
   }, [handoffOn]);
-  useEffect14(() => {
+  useEffect16(() => {
     writePrefs({ autoMode });
   }, [autoMode]);
   const load = useCallback5(async () => {
@@ -5247,12 +5266,12 @@ function App({ version = "0.1.0" }) {
       setStatusErr(e.message);
     }
   }, []);
-  useEffect14(() => {
+  useEffect16(() => {
     load();
     const t = setInterval(load, 3e3);
     return () => clearInterval(t);
   }, [load]);
-  useEffect14(() => {
+  useEffect16(() => {
     let alive = true;
     const tick = async () => {
       try {
@@ -5273,7 +5292,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect14(() => {
+  useEffect16(() => {
     let alive = true;
     const tick = async () => {
       const next = await scanPorts();
@@ -5286,7 +5305,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect14(() => {
+  useEffect16(() => {
     const tick = () => {
       try {
         setGuard(fileGuard());
@@ -5298,7 +5317,7 @@ function App({ version = "0.1.0" }) {
     return () => clearInterval(t);
   }, []);
   const meterPoints = Number(agent.meters && agent.meters.points) || 0;
-  useEffect14(() => {
+  useEffect16(() => {
     setPointsHistory((h) => [...h.slice(-59), meterPoints]);
   }, [meterPoints]);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
@@ -5324,12 +5343,21 @@ function App({ version = "0.1.0" }) {
   })();
   const lastTool = lastAssistant && Array.isArray(lastAssistant.tools) && lastAssistant.tools.length ? lastAssistant.tools[lastAssistant.tools.length - 1] : null;
   const liveToolTxt = lastTool ? `${lastTool.name}${toolArgLine(lastTool.args)}` : "";
+  const livePhase = !agent.busy ? "result" : lastAssistant && String(lastAssistant.text || "").trim() ? "writing" : lastAssistant && String(lastAssistant.thinking || "").trim() ? "thinking" : lastTool && lastTool.result == null ? "running" : "waiting";
   const liveLines = (() => {
     if (!lastAssistant) return [];
-    const text = String(lastAssistant.text || "").trim();
-    const result = lastTool && lastTool.result != null ? String(lastTool.result).trim() : "";
-    const src = text || result;
-    return src ? src.split("\n").filter((l) => l.trim()).slice(-6) : [];
+    const toLines = (v) => String(v == null ? "" : v).replace(/\r/g, "").split("\n").filter((l) => l.trim());
+    const thinking = toLines(lastAssistant.thinking);
+    const text = toLines(lastAssistant.text);
+    const result = lastTool && lastTool.result != null ? toLines(lastTool.result) : [];
+    if (agent.busy) {
+      const live = [...thinking, ...text];
+      if (live.length) return live.slice(-40);
+      if (result.length) return result.slice(-40);
+      return [];
+    }
+    const done = text.length ? text : result;
+    return done.slice(-40);
   })();
   const liveImage = lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null;
   const host = useHostStats(5e3);
@@ -5360,8 +5388,8 @@ function App({ version = "0.1.0" }) {
     setNotice(text);
     setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
   }, []);
-  const updateAnnounced = useRef8("");
-  useEffect14(() => {
+  const updateAnnounced = useRef10("");
+  useEffect16(() => {
     if (!update || !update.version) return;
     if (update.status !== "staged" && update.status !== "blocked") return;
     const key = `${update.status}:${update.version}`;
@@ -5524,7 +5552,7 @@ function App({ version = "0.1.0" }) {
         showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
     }
   }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn, autoMode, update, version]);
-  const crushModelList = useRef8(null);
+  const crushModelList = useRef10(null);
   if (!crushModelList.current) crushModelList.current = readCrushModels();
   const catalogRows = (() => {
     const q = menuQuery.trim().toLowerCase();
@@ -5894,7 +5922,7 @@ function App({ version = "0.1.0" }) {
   const dashServicesCapacity = servicesCapacityFor(dashServicesWidth);
   const monitorServicesCapacity = servicesCapacityFor(panelW);
   const monitorServicesRows = servicesRowsFor(panelW, monitorServicesCapacity);
-  const liveOutputLines = (rows || 30) >= 48 ? 4 : 3;
+  const liveOutputLines = (rows || 30) >= 48 ? 8 : (rows || 30) >= 34 ? 5 : 3;
   const liveOutputCallRows = mainW >= 44 ? 1 : 0;
   const liveOutputRows = liveOutputLines + 3 + liveOutputCallRows;
   const dashRows = Math.max(6, (rows || 30) - 2 - (statusErr ? 3 : 0));
@@ -6249,6 +6277,7 @@ function App({ version = "0.1.0" }) {
             graphics: prefsRef.current.graphics !== false,
             call: liveToolTxt,
             busy: agent.busy,
+            phase: livePhase,
             bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
           }
         ),
