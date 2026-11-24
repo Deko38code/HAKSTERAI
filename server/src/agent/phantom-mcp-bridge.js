@@ -20,24 +20,60 @@
 'use strict';
 const http = require('http');
 
-const PHANTOM_HOST = 'localhost';
-const PHANTOM_PORT = 4000;
-// Phantom identifies localhost as the owner — no token needed
+const PHANTOM_HOST = process.env.PHANTOM_HOST || 'localhost';
+const PHANTOM_PORT = Number(process.env.PHANTOM_PORT || 4000);
+// Hosts tried in order: the configured host first, then LAN fallbacks. The live
+// Phantom IDE can run on another box (Parrot), so when localhost is not listening
+// the bridge falls through to the LAN address instead of failing outright.
+const PHANTOM_HOSTS = [PHANTOM_HOST];
+for (const h of String(process.env.PHANTOM_FALLBACK_HOSTS || '10.0.0.251').split(',').map(s => s.trim()).filter(Boolean)) {
+  if (!PHANTOM_HOSTS.includes(h)) PHANTOM_HOSTS.push(h);
+}
+
+// Owner token — the same secret Phantom keeps in .phantom-owner-token. Read from the
+// environment first, else ~/.phantom-owner-token (mode 600). Never printed or logged.
+function loadOwnerToken() {
+  if (process.env.PHANTOM_OWNER_TOKEN) return String(process.env.PHANTOM_OWNER_TOKEN).trim();
+  try {
+    const path = require('path'), fs = require('fs');
+    const candidates = [
+      path.join(require('os').homedir(), '.phantom-owner-token'),
+      '/home/ghost/.phantom-owner-token',
+      '/root/.phantom-owner-token',
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) { const t = fs.readFileSync(p, 'utf8').trim(); if (t) return t; }
+    }
+  } catch (_) {}
+  return '';
+}
+const OWNER_TOKEN = loadOwnerToken();
+
+// Base headers. Phantom treats a localhost request as the owner; the owner token
+// carries that same authority when the call arrives from another host (the paywall
+// answers 402 without it).
 const OWNER_HEADERS = {
   'Content-Type': 'application/json',
   'x-phantom-terminal': '1',
   'x-owner-email': 'deezykc1nun37@yahoo.com',
 };
+if (OWNER_TOKEN) OWNER_HEADERS['x-owner-token'] = OWNER_TOKEN;
 
-function phantomRequest(method, path, body) {
+let _activeHost = null;
+function hostOrder() {
+  const list = PHANTOM_HOSTS.slice();
+  if (_activeHost) { const i = list.indexOf(_activeHost); if (i > 0) { list.splice(i, 1); list.unshift(_activeHost); } }
+  return list;
+}
+
+function requestOnce(host, method, path, data) {
   return new Promise((resolve, reject) => {
-    const data = body ? JSON.stringify(body) : null;
     const headers = { ...OWNER_HEADERS };
     if (!data) delete headers['Content-Type'];
     else headers['Content-Length'] = String(Buffer.byteLength(data));
 
     const req = http.request(
-      { hostname: PHANTOM_HOST, port: PHANTOM_PORT, path, method, headers, timeout: 45000 },
+      { hostname: host, port: PHANTOM_PORT, path, method, headers, timeout: 45000 },
       (res) => {
         let out = '';
         res.on('data', (d) => { out += d.toString(); });
@@ -54,10 +90,27 @@ function phantomRequest(method, path, body) {
   });
 }
 
+async function phantomRequest(method, path, body) {
+  const data = body ? JSON.stringify(body) : null;
+  const hosts = hostOrder();
+  let lastErr = null;
+  for (let i = 0; i < hosts.length; i++) {
+    const host = hosts[i];
+    try {
+      const r = await requestOnce(host, method, path, data);
+      // 402 means the owner token did not match on this host — try the next one.
+      if (r.status === 402 && OWNER_TOKEN && i < hosts.length - 1) { lastErr = new Error('Phantom paywall on ' + host); continue; }
+      if (r.status !== 402) _activeHost = host;
+      return r;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('Phantom API unreachable');
+}
+
 const TOOLS = [
   {
     name: 'phantom_read_file',
-    description: 'Read a file from Phantom IDE (localhost:4000). Supports line ranges for large files.',
+    description: 'Read a file from Phantom IDE. Supports line ranges for large files.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -98,7 +151,7 @@ const TOOLS = [
   },
   {
     name: 'phantom_run_command',
-    description: 'Execute a shell command via Phantom IDE (localhost:4000). Returns stdout + stderr.',
+    description: 'Execute a shell command via Phantom IDE. Returns stdout + stderr.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -323,7 +376,7 @@ rl.on('line', async (line) => {
           break;
         }
         case 'phantom_run_command': {
-          const r = await phantomRequest('POST', '/api/agent/run', { cmd: args.cmd, cwd: args.cwd || '/home/ghost' });
+          const r = await phantomRequest('POST', '/api/agent/run', { cmd: args.cmd, cwd: args.cwd || 'workspace' });
           text = formatResult(r.body);
           break;
         }
@@ -353,14 +406,14 @@ rl.on('line', async (line) => {
         case 'phantom_grep': {
           const r = await phantomRequest('POST', '/api/agent/grep', {
             pattern: args.pattern,
-            dir: args.dir || '/home/ghost',
+            dir: args.dir || 'workspace',
             ext: args.ext || '',
           });
           text = formatResult(r.body);
           break;
         }
         case 'phantom_list_files': {
-          const r = await phantomRequest('POST', '/api/agent/list', { dir: args.dir || '/home/ghost' });
+          const r = await phantomRequest('POST', '/api/agent/list', { dir: args.dir || 'workspace' });
           text = formatResult(r.body);
           break;
         }
