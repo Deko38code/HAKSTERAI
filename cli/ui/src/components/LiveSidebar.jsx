@@ -154,7 +154,6 @@ export default function LiveSidebar({
   tool = '',
   turns = 0,
   elapsedMs = 0,
-  model = '',
   version = '0.1.0',
   mcp = null,
   serverOk = false,
@@ -330,9 +329,6 @@ export default function LiveSidebar({
           <Row width={inner} k="elapsed" v={`${(Number(elapsedMs || 0) / 1000).toFixed(1)}s`} />
         ) : null}
         {liveRows >= 6 ? (
-          <Row width={inner} k="model" v={model} color="yellow" />
-        ) : null}
-        {liveRows >= 7 ? (
         <Row
           width={inner}
           k="version"

@@ -1115,9 +1115,7 @@ export default function App({ version = '0.1.0' }) {
   const ctxK = Math.round(ctxMax / 1000);
   const ctxPart = model ? `ctx ${ctxK}K` : null;
   const headerRightVariants = [
-    ['tui ' + version, view, modelText, ctxPart].filter(Boolean).join(' · '),
-    [view, modelText, ctxPart].filter(Boolean).join(' · '),
-    [view, modelText].filter(Boolean).join(' · '),
+    ['tui ' + version, view, ctxPart].filter(Boolean).join(' · '),
     [view, ctxPart].filter(Boolean).join(' · '),
     view,
   ];
@@ -1382,7 +1380,6 @@ export default function App({ version = '0.1.0' }) {
       hint: '3s refresh',
       cells: [
         { label: 'tokens', value: ctxUsed },
-        { label: 'model', value: modelText, color: 'yellow' },
         { label: 'ad requests', value: ads.adSessionSnapshot().adsServed, color: 'cyan' },
         { label: 'ads held', value: ads.adSessionSnapshot().adsHeld },
       ],
@@ -1395,7 +1392,6 @@ export default function App({ version = '0.1.0' }) {
         { label: 'used', value: ctxUsed },
         { label: 'window', value: `${ctxK}K` },
         { label: 'share', value: ctxUsed > 0 && ctxMax > 0 ? `${Math.round((ctxUsed / ctxMax) * 100)}%` : '—', color: ctxUsed / ctxMax > 0.8 ? 'red' : 'green' },
-        { label: 'model', value: modelText, color: 'yellow' },
       ],
     },
     {
@@ -1421,7 +1417,6 @@ export default function App({ version = '0.1.0' }) {
     tool: activeTool?.name || '',
     turns: userTurns,
     elapsedMs: agent.elapsedMs,
-    model,
     version,
     mcp,
     serverOk: !statusErr && !!status,
@@ -1603,7 +1598,7 @@ export default function App({ version = '0.1.0' }) {
               <GridPanel
                 title="◉ Meters"
                 width={Math.max(1, panelW - 1)}
-                hint={`${smartLabel(meters ? meters.score : 0)} · ${meterPoints}p autolearn · ${catalog.labelFor(catalog.findModel(model) || { id: modelText, vendor: 'local', context: null })}`}
+                hint={`${smartLabel(meters ? meters.score : 0)} · ${meterPoints}p autolearn`}
               >
                 <box style={{ width: Math.max(10, panelW - 5), flexDirection: 'row', flexShrink: 0 }}>
                   <text fg="gray">{'smartness   '}</text>
