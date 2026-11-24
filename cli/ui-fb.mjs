@@ -2225,26 +2225,29 @@ function LiveSidebar({
 }) {
   void _agentStatus;
   void _phase;
+  void turns;
   const inner = Math.max(1, width - 4);
   const servers = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
   const h = Math.max(0, Number(height) || 0);
   const tall = h >= 44;
   const huge = h >= 50;
-  const liveRows = Math.min(3, Math.max(0, h - 3));
+  const liveRows = Math.min(2, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
   const showUsage = left >= 9;
   if (showUsage) left -= 9;
   const showMemory = left >= 26;
   if (showMemory) left -= 8;
-  const wantOutput = huge ? 10 : tall ? 7 : 4;
-  const outputCost = wantOutput + 4;
-  const MCP_MIN = 6;
+  const wantOutput = huge ? 12 : tall ? 9 : 6;
+  const MCP_MIN = 5;
+  const ACT_MIN = 2;
   const activityMax = huge ? showMemory ? 8 : 10 : tall ? 7 : 5;
-  const room = left - outputCost - MCP_MIN - 3;
-  const activityRows = feed && room >= 2 ? Math.min(activityMax, room) : 0;
-  if (activityRows) left -= activityRows + 3;
-  const outputRows = feed ? left - 4 >= wantOutput ? wantOutput : left - 4 >= 2 ? left - 4 : 0 : 0;
+  const outRoom = Math.max(0, left - 4);
+  const outCap = outRoom - MCP_MIN - ACT_MIN >= 2 ? outRoom - MCP_MIN - ACT_MIN : outRoom;
+  const outputRows = feed && outCap >= 2 ? Math.min(wantOutput, outCap) : 0;
   if (outputRows) left -= outputRows + 4;
+  const actCap = left - 3 - MCP_MIN;
+  const activityRows = feed && actCap >= ACT_MIN ? Math.min(activityMax, actCap) : 0;
+  if (activityRows) left -= activityRows + 3;
   const maxServers = Math.max(0, left - 4);
   const live = servers.filter((s) => s.initialized || (s.toolCount || 0) > 0).length;
   const ordered = [...servers].sort((a, b) => {
@@ -2319,8 +2322,7 @@ function LiveSidebar({
   return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25C8 Live", hint: serverOk ? "online" : "offline", children: [
       liveRows >= 1 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "tool", v: tool || "\u2014" }) : null,
-      liveRows >= 2 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "turns", v: turns }) : null,
-      liveRows >= 3 ? /* @__PURE__ */ jsx7(
+      liveRows >= 2 ? /* @__PURE__ */ jsx7(
         Row,
         {
           width: inner,

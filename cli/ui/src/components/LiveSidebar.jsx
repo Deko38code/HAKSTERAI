@@ -175,7 +175,7 @@ export default function LiveSidebar({
   feed = true,
 }) {
   // Kept in the signature for call-site compatibility; nothing below reads them.
-  void _agentStatus; void _phase;
+  void _agentStatus; void _phase; void turns;
   const inner = Math.max(1, width - 4);
   const servers = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
 
@@ -188,17 +188,19 @@ export default function LiveSidebar({
   const h = Math.max(0, Number(height) || 0);
   const tall = h >= 44; // room for five output lines and a longer feed
   const huge = h >= 50;
-  // ◈ Live: border 2 + title 1 + its three info rows (tool · turns · version).
+  // ◈ Live: border 2 + title 1 + its two info rows (tool · version).
   // The status and phase rows are gone (owner, 2026-11-24: "all those lines
   // that are dupes can be more room for our panels"): the spinner row under
   // the composer already names the phase and the run state, the status bar
   // repeats the run state in every view, and the monitor's activity feed
   // carries the phase events — so those two rows cost three lines and said
-  // nothing new. They are now room for the panels below. On a terminal too
-  // short for the three, the panel gives rows up from the bottom instead of
-  // pushing the status bar off the screen (its own budget, so `left` stays
-  // truthful).
-  const liveRows = Math.min(3, Math.max(0, h - 3));
+  // nothing new. The `turns` row then went too (owner, 2026-11-24: "the live
+  // panel can be reduced in size for output panel to be bigger"): ◔ Usage
+  // prints the same turn count one panel down, so that row pays for a taller
+  // ▶ Output instead. On a terminal too short for the two, the panel gives
+  // rows up from the bottom instead of pushing the status bar off the screen
+  // (its own budget, so `left` stays truthful).
+  const liveRows = Math.min(2, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
   const showUsage = left >= 9; // ◔ Usage: 3 + 6 rows
   if (showUsage) left -= 9;
@@ -207,18 +209,29 @@ export default function LiveSidebar({
   // output tail and at least a couple of MCP rows beside it.
   const showMemory = left >= 26;
   if (showMemory) left -= 8;
-  const wantOutput = huge ? 10 : tall ? 7 : 4; // output lines
-  const outputCost = wantOutput + 4; // border 2 + title 1 + call row 1 + lines
-  const MCP_MIN = 6; // 3 + two servers + the "+N" row
+  const wantOutput = huge ? 12 : tall ? 9 : 6; // output lines
+  const MCP_MIN = 5; // border 2 + title 1 + one server row + the "+N" row
+  const ACT_MIN = 2; // a couple of live events
   // Owner, 2026-11-24: the side panels read taller — the feed and the output
   // tail grow with the terminal instead of pinning at four or five lines.
   const activityMax = huge ? (showMemory ? 8 : 10) : tall ? 7 : 5;
-  const room = left - outputCost - MCP_MIN - 3; // rows left for the feed itself
-  const activityRows = feed && room >= 2 ? Math.min(activityMax, room) : 0;
-  if (activityRows) left -= activityRows + 3;
-  // ▶ Output: the call row plus the newest lines, fewer if the height shrank.
-  const outputRows = feed ? (left - 4 >= wantOutput ? wantOutput : left - 4 >= 2 ? left - 4 : 0) : 0;
+  // ▶ Output is now budgeted BEFORE ⚡ Activity (owner, 2026-11-24: "the live
+  // panel can be reduced in size for output panel to be bigger"), so a row
+  // freed anywhere above lands in the output tail instead of the event list.
+  // It still leaves ACT_MIN rows for the feed and one server row for ⬡ MCP
+  // where the terminal can hold them; when it cannot, output takes its want
+  // and the feed takes what is left (a feed that is showing events beats a
+  // server list that is showing none, and neither may leave a blank strip).
+  const outRoom = Math.max(0, left - 4); // border 2 + title 1 + call row 1
+  const outCap = outRoom - MCP_MIN - ACT_MIN >= 2 ? outRoom - MCP_MIN - ACT_MIN : outRoom;
+  const outputRows = feed && outCap >= 2 ? Math.min(wantOutput, outCap) : 0;
   if (outputRows) left -= outputRows + 4;
+  // ⚡ Activity: its max, capped above the server list's minimum so the two
+  // coexist where the terminal can hold them; on a short screen the feed waits
+  // and ⬡ MCP keeps its rows, exactly as before this change.
+  const actCap = left - 3 - MCP_MIN;
+  const activityRows = feed && actCap >= ACT_MIN ? Math.min(activityMax, actCap) : 0;
+  if (activityRows) left -= activityRows + 3;
   // ⬡ MCP: whatever is left. One row is reserved for the "+N" line when the
   // list is longer than the space, so the panel cannot grow by one.
   const maxServers = Math.max(0, left - 4);
@@ -328,17 +341,17 @@ export default function LiveSidebar({
         {liveRows >= 1 ? (
           <Row width={inner} k="tool" v={tool || '—'} />
         ) : null}
-        {liveRows >= 2 ? (
-          <Row width={inner} k="turns" v={turns} />
-        ) : null}
         {/* No status or phase row: the run state is on the spinner row and the
             status bar, and the phase is on the spinner row (and in the
             monitor's feed) — printing them here again was the duplication the
             owner asked to trade for panel room (owner, 2026-11-24).
             No elapsed row either: the run's spinner row under the composer is
             the single home for the timer (owner, 2026-11-24: "the elaspse time
-            twice in bottom spinner and time in right panel"). */}
-        {liveRows >= 3 ? (
+            twice in bottom spinner and time in right panel").
+            No turns row: ◔ Usage keeps the count, and this row is what makes
+            ▶ Output taller (owner, 2026-11-24). The version row stays — it is
+            the one place that carries the ⬆ staged update marker. */}
+        {liveRows >= 2 ? (
         <Row
           width={inner}
           k="version"
