@@ -17,6 +17,10 @@ const HEADLESS_ENV = {
   BROWSER: 'none',
   NO_OPEN_BROWSER: '1',
   DISPLAY: '',
+  // The cine-vault kiro-wrapper defaults its state to /home/cvuser/... which
+  // this box cannot create (2026-11-24: mkdir permission denied, then a
+  // missing identity.env). Give it a directory we own.
+  KIRO_STATE_DIR: process.env.KIRO_STATE_DIR || `${process.env.HOME || '/home/ghost'}/.kiro-sessions/default`,
 };
 
 // Find kiro binary
@@ -43,6 +47,21 @@ function findKiroBin() {
 
 const KIRO_BIN = findKiroBin();
 
+// Auth checks need the real kiro binary. The cine-vault wrapper forwards every
+// argument into `kiro-cli chat`, so `whoami` became a chat prompt, hit the
+// quoted quota error, and the bridge read "error" as "not authenticated"
+// (2026-11-24). Chat still goes through KIRO_BIN so the wrapper's headless
+// rotation stays in play.
+const KIRO_AUTH_BIN = (() => {
+  try {
+    const { execSync } = require('child_process');
+    const plain = execSync('command -v kiro-cli 2>/dev/null', { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
+    return plain || KIRO_BIN;
+  } catch {
+    return KIRO_BIN;
+  }
+})();
+
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }
@@ -50,7 +69,7 @@ function send(msg) {
 function checkAuth() {
   if (!KIRO_BIN) return { ok: false, error: 'kiro-cli binary not found' };
   try {
-    const result = spawnSync(KIRO_BIN, ['whoami'], {
+    const result = spawnSync(KIRO_AUTH_BIN, ['whoami'], {
       env: HEADLESS_ENV,
       timeout: 5000,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -67,7 +86,7 @@ function checkAuth() {
 
 function doLogin() {
   try {
-    const result = spawnSync(KIRO_BIN, ['login', '--use-device-flow'], {
+    const result = spawnSync(KIRO_AUTH_BIN, ['login', '--use-device-flow'], {
       env: HEADLESS_ENV,
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -100,7 +119,11 @@ function callKiro(prompt) {
     }
 
     // Spawn kiro-cli chat with the prompt
-    const args = ['chat', prompt];
+    // The wrapper execs `kiro-cli chat "$@"` itself, so passing our own `chat`
+    // made the real call `chat chat <prompt>` — kiro-cli then rejected the
+    // prompt as an unexpected argument (2026-11-24). Send the prompt alone to
+    // the wrapper; a bare kiro binary still needs the `chat` subcommand.
+    const args = /kiro-wrapper$/.test(KIRO_BIN) ? [prompt] : ['chat', prompt];
     const child = spawn(KIRO_BIN, args, {
       env: HEADLESS_ENV,
       stdio: ['ignore', 'pipe', 'pipe'],
