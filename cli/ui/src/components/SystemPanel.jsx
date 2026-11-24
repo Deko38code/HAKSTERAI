@@ -1,6 +1,6 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
-import { barCells, barColor, smartLabel } from '../../../smartness.mjs';
+import { barCells, barColor, smartLabel, pointsPct, meterArrow, arrowColor } from '../../../smartness.mjs';
 
 /* SystemPanel — the old CLI's SMARTNESS / AUTOLEARN row, plus the two readings
  * it carried elsewhere: the context-window bar (Ink TUI status row) and the
@@ -24,9 +24,17 @@ export default function SystemPanel({ width = 100, meters = null, ctxUsed = 0, c
   const score = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
   const points = Math.max(0, Math.round(Number(meters && meters.points) || 0));
   const delta = Number(meters && meters.delta) || 0;
+  // The autolearn arrow reads the POINT movement, not the score's: the score is
+  // clamped 0–100, so once it sits at 100 a successful tool still earns points
+  // while the score delta reads 0 and the arrow would lie (◆). The percentage
+  // is the same 0–100 scale the points bar draws, so number and bar agree.
+  const pointsDelta = Number(meters && meters.pointsDelta) || 0;
+  const ptsArrow = meterArrow(pointsDelta);
+  const ptsArrowColor = arrowColor(pointsDelta);
+  const ptsPct = pointsPct(points);
   const ctxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
-  const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '◆';
-  const arrowColor = delta > 0 ? 'green' : delta < 0 ? 'red' : 'gray';
+  const arrow = meterArrow(delta);
+  const arrowColorFg = arrowColor(delta);
   // The file-guard count lives in the header (always visible, every view), so
   // it is not repeated here.
 
@@ -45,10 +53,13 @@ export default function SystemPanel({ width = 100, meters = null, ctxUsed = 0, c
 
   // Three widths: full bars, bars-less labels, and a terse line for narrow
   // panels. Pick the richest one that provably fits, so the row never wraps.
-  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + 16 + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
+  // The autolearn segment is measured from the string it renders (points + its
+  // own arrow + its percent + the label) so the fit test can never be stale.
+  const ptsSeg = ` ${points}p${ptsArrow} ${ptsPct}% autolearn   `;
+  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + ptsSeg.length + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
   const hostShort = cpuPct == null && memPct == null ? '' : `  cpu ${cpuPct == null ? '—' : `${cpuPct}%`} ram ${memPct == null ? '—' : `${memPct}%`}`;
-  const compact = `🧠 ${score}% ${arrow} ${smartLabel(score)}  ✦ ${points}p autolearn  ctx ${ctxPct}%${hostShort}`;
-  const terse = `🧠 ${score}% ✦ ${points}p ctx ${ctxPct}%${hostShort}`;
+  const compact = `🧠 ${score}% ${arrow} ${smartLabel(score)}  ✦ ${points}p${ptsArrow} ${ptsPct}% autolearn  ctx ${ctxPct}%${hostShort}`;
+  const terse = `🧠 ${score}% ✦ ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
 
   if (fullLen <= w) {
     return (
@@ -58,13 +69,15 @@ export default function SystemPanel({ width = 100, meters = null, ctxUsed = 0, c
           <span fg={barColor('smart', score)}>{'█'.repeat(sc.filled)}</span>
           <span fg="gray">{'░'.repeat(sc.empty)}</span>
           <span fg="white" attributes={TextAttributes.BOLD}>{` ${score}% `}</span>
-          <span fg={arrowColor}>{arrow}</span>
+          <span fg={arrowColorFg}>{arrow}</span>
           <span fg="gray">{` ${smartLabel(score)}`}</span>
           <span fg="gray">{'   '}</span>
           <span fg={barColor('points', points)} attributes={TextAttributes.BOLD}>{'✦ '}</span>
           <span fg={barColor('points', points)}>{'█'.repeat(ac.filled)}</span>
           <span fg="gray">{'░'.repeat(ac.empty)}</span>
           <span fg="white" attributes={TextAttributes.BOLD}>{` ${points}p`}</span>
+          <span fg={ptsArrowColor}>{ptsArrow}</span>
+          <span fg="white">{` ${ptsPct}%`}</span>
           <span fg="gray">{' autolearn   '}</span>
           <span fg={ctxPct > 85 ? 'red' : ctxPct > 60 ? 'yellow' : 'green'}>{'ctx '}</span>
           <span fg={ctxPct > 85 ? 'red' : ctxPct > 60 ? 'yellow' : 'green'}>{'█'.repeat(cc.filled)}</span>

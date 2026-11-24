@@ -83,6 +83,13 @@ export function createMeter() {
   const meter = {
     score: anchorScore(),
     delta: 0,
+    // The last movement of the point total, BEFORE the score's 0–100 clamp is
+    // applied. `delta` is the score's change and pins at 0 once the score sits
+    // at 100 or 0 — so it cannot tell an up-move from a down-move any more,
+    // even though points keep climbing (owner, 2026-11-24: "make sure the
+    // autolearn points have the up down when points go up or down"). The
+    // autolearn arrow reads this, the smartness arrow keeps reading `delta`.
+    pointsDelta: 0,
     points: 0,
     rounds: 0,
     successes: 0,
@@ -95,6 +102,7 @@ export function createMeter() {
     const before = meter.score;
     meter.score = Math.max(0, Math.min(100, meter.score + d));
     meter.delta = meter.score - before;
+    meter.pointsDelta = d;
     meter.points += d;
     if (meter.score > meter.peak) meter.peak = meter.score;
     return meter.delta;
@@ -107,10 +115,11 @@ export function createMeter() {
   };
   // A named event (loop detected, turn finished, …) worth the same kind of delta.
   meter.bump = (d) => apply(d);
-  meter.resetTask = () => { meter.rounds = 0; meter.delta = 0; };
+  meter.resetTask = () => { meter.rounds = 0; meter.delta = 0; meter.pointsDelta = 0; };
   meter.snapshot = () => ({
     score: meter.score,
     delta: meter.delta,
+    pointsDelta: meter.pointsDelta,
     points: meter.points,
     rounds: meter.rounds,
     successes: meter.successes,
@@ -135,6 +144,27 @@ export function barCells(value, total, len = 16) {
   const ratio = total > 0 ? Math.max(0, Math.min(1, value / total)) : 0;
   const filled = Math.round(ratio * len);
   return { filled, empty: Math.max(0, len - filled) };
+}
+
+// The autolearn percentage, on exactly the scale the points bar draws: the
+// 0–100 display ceiling, never the raw total (so 150p reads 100%). Same value
+// as barCells(points, 100) fills, so the number and the bar can never disagree.
+export function pointsPct(points) {
+  const n = Number(points) || 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+// ▲ up / ▼ down / ◆ unchanged, for either meter's last movement. One helper so
+// the header, the status row and the dashboard can never drift apart.
+export function meterArrow(delta) {
+  const d = Number(delta) || 0;
+  return d > 0 ? '▲' : d < 0 ? '▼' : '◆';
+}
+
+// The colour that pairs with meterArrow.
+export function arrowColor(delta) {
+  const d = Number(delta) || 0;
+  return d > 0 ? 'green' : d < 0 ? 'red' : 'gray';
 }
 
 export function barColor(kind, value) {

@@ -38,7 +38,7 @@ import { peersFromMcp } from './utils/squad.js';
 import { countWebCallsInMessages } from './utils/web-usage.js';
 import cliPrefs from '../../src/prefs.js';
 import { appendInputHistory, loadInputHistory } from '../../src/input-history.js';
-import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel } from '../../smartness.mjs';
+import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel, pointsPct, meterArrow as arrowFor, arrowColor as arrowFg } from '../../smartness.mjs';
 import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
 import { isSupported as kittyGraphicsSupported } from '../../src/kitty-graphics.js';
@@ -1368,8 +1368,15 @@ export default function App({ version = '0.1.0' }) {
   const meterScore = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
   const meterPts = Math.max(0, Math.round(Number(meters && meters.points) || 0));
   const meterDelta = Number(meters && meters.delta) || 0;
-  const meterArrow = meterDelta > 0 ? '\u25b2' : meterDelta < 0 ? '\u25bc' : '\u25c6';
-  const meterArrowFg = meterDelta > 0 ? 'green' : meterDelta < 0 ? 'red' : 'gray';
+  // Autolearn moves on its own arrow: points keep changing after the 0-100
+  // score pins at its ceiling, so `delta` alone showed a flat marker on an
+  // up-move. The percent is the same 0-100 scale the points bar draws.
+  const meterPtsDelta = Number(meters && meters.pointsDelta) || 0;
+  const meterPtsPct = pointsPct(meterPts);
+  const meterArrowCh = arrowFor(meterDelta);
+  const meterArrowFg = arrowFg(meterDelta);
+  const meterPtsArrow = arrowFor(meterPtsDelta);
+  const meterPtsArrowFg = arrowFg(meterPtsDelta);
   const meterCpu = host && host.cpuPct != null ? `${host.cpuPct}%` : '\u2014';
   const meterRam = host && host.memPct != null ? `${host.memPct}%` : '\u2014';
   const meterCtxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
@@ -1385,8 +1392,10 @@ export default function App({ version = '0.1.0' }) {
     mkMeter([
       { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
-      { t: meterArrow, fg: meterArrowFg },
+      { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
+      { t: ` ${meterPtsPct}%`, fg: meterFg.pts },
       { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green' },
       { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
       { t: `  ram ${meterRam}`, fg: meterFg.ram },
@@ -1394,21 +1403,25 @@ export default function App({ version = '0.1.0' }) {
     mkMeter([
       { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
-      { t: meterArrow, fg: meterArrowFg },
+      { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
+      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green' },
       { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
       { t: `  ram ${meterRam}`, fg: meterFg.ram },
     ]),
     mkMeter([
       { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
-      { t: meterArrow, fg: meterArrowFg },
-      { t: ` \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: ` cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: ` ram ${meterRam}`, fg: meterFg.ram },
+      { t: meterArrowCh, fg: meterArrowFg },
+      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
+      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
+      { t: `  ram ${meterRam}`, fg: meterFg.ram },
     ]),
     mkMeter([
       { t: `\u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
       { t: ` cpu ${meterCpu}`, fg: meterFg.cpu },
       { t: ` ram ${meterRam}`, fg: meterFg.ram },
     ]),
@@ -1879,6 +1892,8 @@ export default function App({ version = '0.1.0' }) {
                   <text fg="gray">{'autolearn   '}</text>
                   <Meter value={Math.min(100, meterPoints)} max={100} w={Math.min(40, Math.max(10, panelW - 40))} color={barColor('points', meterPoints)} />
                   <text fg="white">{` ${meterPoints}p`}</text>
+                  <text fg={arrowFg(meters && meters.pointsDelta)}>{arrowFor(meters && meters.pointsDelta)}</text>
+                  <text fg="white">{` ${pointsPct(meterPoints)}%`}</text>
                   <box style={{ marginLeft: 2 }}>
                     <Spark data={pointsHistory} w={Math.min(24, Math.max(8, panelW - 70))} />
                   </box>

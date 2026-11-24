@@ -35,9 +35,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// src/ads/ad-cache.js
+// ../src/ads/ad-cache.js
 var require_ad_cache = __commonJS({
-  "src/ads/ad-cache.js"(exports, module) {
+  "../src/ads/ad-cache.js"(exports, module) {
     "use strict";
     var AD_TTL_MS = 30 * 6e4;
     var held = /* @__PURE__ */ new Map();
@@ -159,9 +159,9 @@ var require_ad_cache = __commonJS({
   }
 });
 
-// src/ads/terminal-safe-text.js
+// ../src/ads/terminal-safe-text.js
 var require_terminal_safe_text = __commonJS({
-  "src/ads/terminal-safe-text.js"(exports, module) {
+  "../src/ads/terminal-safe-text.js"(exports, module) {
     "use strict";
     var CSI = /(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g;
     var OSC = /(?:\x1b\]|\x9d)[\s\S]*?(?:\x07|\x1b\\|\x9c|$)/g;
@@ -202,9 +202,9 @@ var require_terminal_safe_text = __commonJS({
   }
 });
 
-// src/ads/ad-client.js
+// ../src/ads/ad-client.js
 var require_ad_client = __commonJS({
-  "src/ads/ad-client.js"(exports, module) {
+  "../src/ads/ad-client.js"(exports, module) {
     "use strict";
     var { getAd, resetAdCache, recordImpression, renderDelaySinceReceipt, adSessionSnapshot } = require_ad_cache();
     var { sanitizeTerminalStrings } = require_terminal_safe_text();
@@ -309,9 +309,9 @@ var require_ad_client = __commonJS({
   }
 });
 
-// src/ads/inline-ad-layout.js
+// ../src/ads/inline-ad-layout.js
 var require_inline_ad_layout = __commonJS({
-  "src/ads/inline-ad-layout.js"(exports, module) {
+  "../src/ads/inline-ad-layout.js"(exports, module) {
     "use strict";
     var { sanitizeTerminalText } = require_terminal_safe_text();
     var MIN_INLINE_WIDTH_WITH_DESTINATION = 48;
@@ -418,9 +418,9 @@ var require_inline_ad_layout = __commonJS({
   }
 });
 
-// src/kitty-graphics.js
+// ../src/kitty-graphics.js
 var require_kitty_graphics = __commonJS({
-  "src/kitty-graphics.js"(exports, module) {
+  "../src/kitty-graphics.js"(exports, module) {
     "use strict";
     var fs10 = __require("fs");
     var path8 = __require("path");
@@ -511,9 +511,9 @@ var require_kitty_graphics = __commonJS({
   }
 });
 
-// src/live-image.js
+// ../src/live-image.js
 var require_live_image = __commonJS({
-  "src/live-image.js"(exports, module) {
+  "../src/live-image.js"(exports, module) {
     "use strict";
     var fs10 = __require("fs");
     var os6 = __require("os");
@@ -633,9 +633,9 @@ var require_live_image = __commonJS({
   }
 });
 
-// src/prefs.js
+// ../src/prefs.js
 var require_prefs = __commonJS({
-  "src/prefs.js"(exports, module) {
+  "../src/prefs.js"(exports, module) {
     "use strict";
     var fs10 = __require("fs");
     var os6 = __require("os");
@@ -736,9 +736,9 @@ var require_prefs = __commonJS({
   }
 });
 
-// src/models/ladder.js
+// ../src/models/ladder.js
 var require_ladder = __commonJS({
-  "src/models/ladder.js"(exports, module) {
+  "../src/models/ladder.js"(exports, module) {
     "use strict";
     var PRIMARY_MODEL2 = "deepseek-v4.1-flash:cloud";
     var PRIMARY_PROVIDER2 = "ollama";
@@ -815,9 +815,9 @@ var require_ladder = __commonJS({
   }
 });
 
-// src/updater.js
+// ../src/updater.js
 var require_updater = __commonJS({
-  "src/updater.js"(exports, module) {
+  "../src/updater.js"(exports, module) {
     "use strict";
     var fs10 = __require("fs");
     var os6 = __require("os");
@@ -1144,9 +1144,9 @@ var require_updater = __commonJS({
   }
 });
 
-// src/input-history.js
+// ../src/input-history.js
 var require_input_history = __commonJS({
-  "src/input-history.js"(exports, module) {
+  "../src/input-history.js"(exports, module) {
     var fs10 = __require("fs");
     var os6 = __require("os");
     var path8 = __require("path");
@@ -1285,9 +1285,9 @@ var require_input_history = __commonJS({
   }
 });
 
-// src/models/catalog.js
+// ../src/models/catalog.js
 var require_catalog = __commonJS({
-  "src/models/catalog.js"(exports, module) {
+  "../src/models/catalog.js"(exports, module) {
     "use strict";
     var REFERENCE_CATALOG = [
       {
@@ -1461,19 +1461,19 @@ var require_catalog = __commonJS({
   }
 });
 
-// ui/src/index.jsx
+// src/index.jsx
 import React28 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
-// ui/src/App.jsx
+// src/App.jsx
 import React27, { useCallback as useCallback5, useEffect as useEffect16, useRef as useRef11, useState as useState17 } from "react";
 import fs9 from "node:fs";
 import path7 from "node:path";
 import { useKeyboard as useKeyboard7, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes20 } from "@opentui/core";
 
-// ui/src/components/DockAd.jsx
+// src/components/DockAd.jsx
 var import_ad_client = __toESM(require_ad_client());
 var import_inline_ad_layout = __toESM(require_inline_ad_layout());
 import React, { useEffect, useState } from "react";
@@ -1582,12 +1582,12 @@ function DockAd({
   );
 }
 
-// ui/src/components/ApprovalPrompt.jsx
+// src/components/ApprovalPrompt.jsx
 import React2, { useEffect as useEffect2, useState as useState2 } from "react";
 import { useKeyboard as useKeyboard2 } from "@opentui/react";
 import { TextAttributes as TextAttributes2 } from "@opentui/core";
 
-// ui/src/utils/danger-password.js
+// src/utils/danger-password.js
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1606,7 +1606,7 @@ function isSudoCommand(command) {
   return /^\s*sudo\b/i.test(String(command || ""));
 }
 
-// ui/src/components/ApprovalPrompt.jsx
+// src/components/ApprovalPrompt.jsx
 import { Fragment, jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 function ApprovalPrompt({ width = 80, request, onAnswer }) {
   const [password, setPassword] = useState2("");
@@ -1698,7 +1698,7 @@ function ApprovalPrompt({ width = 80, request, onAnswer }) {
   );
 }
 
-// ui/src/components/Composer.jsx
+// src/components/Composer.jsx
 import React3 from "react";
 import { TextAttributes as TextAttributes3 } from "@opentui/core";
 import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
@@ -1754,13 +1754,13 @@ function Composer({
   );
 }
 
-// ui/src/components/GridLayout.jsx
+// src/components/GridLayout.jsx
 import React4 from "react";
 
-// ui/src/hooks/useGridLayout.js
+// src/hooks/useGridLayout.js
 import { useMemo } from "react";
 
-// ui/src/utils/layout-helpers.js
+// src/utils/layout-helpers.js
 var MIN_COLUMN_WIDTH = 10;
 function computeSmartColumns(itemCount, maxColumns) {
   if (itemCount === 0) return 1;
@@ -1773,7 +1773,7 @@ function computeSmartColumns(itemCount, maxColumns) {
   return maxColumns;
 }
 
-// ui/src/hooks/useGridLayout.js
+// src/hooks/useGridLayout.js
 var WIDTH_MD_THRESHOLD = 100;
 var WIDTH_LG_THRESHOLD = 150;
 var WIDTH_XL_THRESHOLD = 200;
@@ -1813,7 +1813,7 @@ function useGridLayout(items, availableWidth) {
   );
 }
 
-// ui/src/components/GridLayout.jsx
+// src/components/GridLayout.jsx
 import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
 function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, marginTop = 0 }) {
   const { columns, columnWidths, columnGroups } = useGridLayout(items, availableWidth);
@@ -1854,7 +1854,7 @@ function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, mar
 }
 var GridLayout_default = GridLayout;
 
-// ui/src/components/GridPanel.jsx
+// src/components/GridPanel.jsx
 import React5 from "react";
 import { TextAttributes as TextAttributes4 } from "@opentui/core";
 import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
@@ -1913,12 +1913,12 @@ function Spark({ data = [], w = 24 }) {
 }
 var GridPanel_default = GridPanel;
 
-// ui/src/components/LiveSidebar.jsx
+// src/components/LiveSidebar.jsx
 import React7, { useEffect as useEffect4, useRef as useRef2, useState as useState4 } from "react";
 import { TextAttributes as TextAttributes5 } from "@opentui/core";
 import { useKeyboard as useKeyboard3 } from "@opentui/react";
 
-// ui/src/utils/panel-scroll.js
+// src/utils/panel-scroll.js
 var maxStartOf = (total, rows) => {
   const n = Math.max(0, Math.trunc(Number(total) || 0));
   const r = Math.max(0, Math.trunc(Number(rows) || 0));
@@ -1975,7 +1975,7 @@ var keyMatches = (key, name, mod = "none") => {
   return !!key.shift === !!want.shift && !!key.meta === !!want.meta && !!key.ctrl === !!want.ctrl;
 };
 
-// ui/src/components/LiveImageViewer.jsx
+// src/components/LiveImageViewer.jsx
 var import_kitty_graphics = __toESM(require_kitty_graphics());
 var import_live_image = __toESM(require_live_image());
 import React6, { useEffect as useEffect3, useRef, useState as useState3 } from "react";
@@ -2119,7 +2119,7 @@ function LiveImageViewer({
   ] });
 }
 
-// ui/src/components/LiveSidebar.jsx
+// src/components/LiveSidebar.jsx
 import { Fragment as Fragment3, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 var isWide = (cp) => cp >= 4352 && cp <= 4447 || cp === 9001 || cp === 9002 || cp >= 9728 && cp <= 10175 || cp >= 11008 && cp <= 11263 || cp >= 11904 && cp <= 42191 || cp >= 44032 && cp <= 55203 || cp >= 63744 && cp <= 64255 || cp >= 65072 && cp <= 65135 || cp >= 65280 && cp <= 65376 || cp >= 65504 && cp <= 65510 || cp >= 126976 && cp <= 129791;
 var cellWidth = (ch) => {
@@ -2466,10 +2466,10 @@ function LiveSidebar({
   ] });
 }
 
-// ui/src/components/LiveOutputPanel.jsx
+// src/components/LiveOutputPanel.jsx
 import React8 from "react";
 
-// ui/src/hooks/usePanelScroll.js
+// src/hooks/usePanelScroll.js
 import { useCallback, useEffect as useEffect5, useRef as useRef3, useState as useState5 } from "react";
 import { useKeyboard as useKeyboard4 } from "@opentui/react";
 function usePanelScroll({
@@ -2532,7 +2532,7 @@ function usePanelScroll({
   };
 }
 
-// ui/src/components/LiveOutputPanel.jsx
+// src/components/LiveOutputPanel.jsx
 import { Fragment as Fragment4, jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 function LiveOutputPanel({
   width = 80,
@@ -2568,7 +2568,7 @@ function LiveOutputPanel({
   ] });
 }
 
-// ui/src/components/UsageView.jsx
+// src/components/UsageView.jsx
 import React9 from "react";
 import { TextAttributes as TextAttributes6 } from "@opentui/core";
 import { Fragment as Fragment5, jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
@@ -2708,7 +2708,7 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
   ] });
 }
 
-// ui/src/hooks/useServerUsage.js
+// src/hooks/useServerUsage.js
 import { useCallback as useCallback2, useEffect as useEffect6, useRef as useRef4, useState as useState6 } from "react";
 import fs3 from "node:fs";
 import os2 from "node:os";
@@ -2767,10 +2767,10 @@ function useServerUsage(refreshSeconds = 15, enabled = true) {
   return { ...state, refresh: load };
 }
 
-// ui/src/App.jsx
+// src/App.jsx
 var import_live_image2 = __toESM(require_live_image());
 
-// ui/src/components/MonitorFeed.jsx
+// src/components/MonitorFeed.jsx
 import React10, { useState as useState7 } from "react";
 import { useKeyboard as useKeyboard5 } from "@opentui/react";
 import { Fragment as Fragment6, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
@@ -2867,7 +2867,7 @@ function MonitorFeed({
   ] });
 }
 
-// ui/src/components/DecodeSplash.jsx
+// src/components/DecodeSplash.jsx
 var import_kitty_graphics2 = __toESM(require_kitty_graphics());
 import React11, { useEffect as useEffect7, useRef as useRef5, useState as useState8 } from "react";
 import fs4 from "node:fs";
@@ -3177,7 +3177,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
   );
 }
 
-// ui/src/components/MenuPalette.jsx
+// src/components/MenuPalette.jsx
 import React12 from "react";
 import { TextAttributes as TextAttributes8 } from "@opentui/core";
 import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
@@ -3202,7 +3202,7 @@ var MENU_ITEMS = [
   { cmd: "/quit", label: "Quit", detail: "leave the dashboard" }
 ];
 
-// ui/src/components/CatalogPopout.jsx
+// src/components/CatalogPopout.jsx
 import React13 from "react";
 import { TextAttributes as TextAttributes9 } from "@opentui/core";
 import { jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
@@ -3273,11 +3273,11 @@ function CatalogPopout({
   ] });
 }
 
-// ui/src/components/SettingsView.jsx
+// src/components/SettingsView.jsx
 import React15 from "react";
 import { TextAttributes as TextAttributes10 } from "@opentui/core";
 
-// ui/src/components/ScrollPanel.jsx
+// src/components/ScrollPanel.jsx
 import React14 from "react";
 import { jsx as jsx14 } from "react/jsx-runtime";
 function ScrollPanel({
@@ -3322,7 +3322,7 @@ function ScrollPanel({
 }
 var ScrollPanel_default = ScrollPanel;
 
-// ui/src/components/SettingsView.jsx
+// src/components/SettingsView.jsx
 var import_prefs = __toESM(require_prefs());
 import { jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
 var clip3 = (s, n) => {
@@ -3377,7 +3377,7 @@ function SettingsView({
   );
 }
 
-// ui/src/components/McpView.jsx
+// src/components/McpView.jsx
 import React16 from "react";
 import { TextAttributes as TextAttributes11 } from "@opentui/core";
 import { Fragment as Fragment8, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
@@ -3457,11 +3457,11 @@ function McpView({
   ] });
 }
 
-// ui/src/components/ScriptsView.jsx
+// src/components/ScriptsView.jsx
 import React17, { useMemo as useMemo2 } from "react";
 import { TextAttributes as TextAttributes12 } from "@opentui/core";
 
-// ui/src/utils/scripts.js
+// src/utils/scripts.js
 import fs5 from "node:fs";
 import path4 from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3574,7 +3574,7 @@ function diffLines(prev, next) {
 }
 var linesOf = (entry) => sourceOf(entry);
 
-// ui/src/components/ScriptsView.jsx
+// src/components/ScriptsView.jsx
 import { jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
 var STATUS_COLOR = {
   idle: "gray",
@@ -3702,11 +3702,11 @@ function ScriptsView({
   ] });
 }
 
-// ui/src/components/SquadView.jsx
+// src/components/SquadView.jsx
 import React18 from "react";
 import { TextAttributes as TextAttributes13 } from "@opentui/core";
 
-// ui/src/utils/squad.js
+// src/utils/squad.js
 var PEER_PATTERN = /agent|squad|subagent|codex|kiro|phantom|hermes|claude-code|hivemind|miniforge|serena|stealth|bounty/i;
 var RANK = { live: 0, lazy: 1, down: 2 };
 function peersFromMcp(mcp) {
@@ -3723,7 +3723,7 @@ function peersFromMcp(mcp) {
   }).sort((a, b) => RANK[a.state] - RANK[b.state] || a.name.localeCompare(b.name));
 }
 
-// ui/src/components/SquadView.jsx
+// src/components/SquadView.jsx
 import { jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
 function SquadView({
   width = 80,
@@ -3787,11 +3787,11 @@ function SquadView({
   ] });
 }
 
-// ui/src/components/ServicesPanel.jsx
+// src/components/ServicesPanel.jsx
 import React19 from "react";
 import { TextAttributes as TextAttributes14 } from "@opentui/core";
 
-// smartness.mjs
+// ../smartness.mjs
 import fs6 from "node:fs";
 import os3 from "node:os";
 import path5 from "node:path";
@@ -3850,6 +3850,13 @@ function createMeter() {
   const meter = {
     score: anchorScore(),
     delta: 0,
+    // The last movement of the point total, BEFORE the score's 0–100 clamp is
+    // applied. `delta` is the score's change and pins at 0 once the score sits
+    // at 100 or 0 — so it cannot tell an up-move from a down-move any more,
+    // even though points keep climbing (owner, 2026-11-24: "make sure the
+    // autolearn points have the up down when points go up or down"). The
+    // autolearn arrow reads this, the smartness arrow keeps reading `delta`.
+    pointsDelta: 0,
     points: 0,
     rounds: 0,
     successes: 0,
@@ -3862,6 +3869,7 @@ function createMeter() {
     const before = meter.score;
     meter.score = Math.max(0, Math.min(100, meter.score + d));
     meter.delta = meter.score - before;
+    meter.pointsDelta = d;
     meter.points += d;
     if (meter.score > meter.peak) meter.peak = meter.score;
     return meter.delta;
@@ -3875,10 +3883,12 @@ function createMeter() {
   meter.resetTask = () => {
     meter.rounds = 0;
     meter.delta = 0;
+    meter.pointsDelta = 0;
   };
   meter.snapshot = () => ({
     score: meter.score,
     delta: meter.delta,
+    pointsDelta: meter.pointsDelta,
     points: meter.points,
     rounds: meter.rounds,
     successes: meter.successes,
@@ -3898,6 +3908,18 @@ function barCells(value, total, len = 16) {
   const ratio = total > 0 ? Math.max(0, Math.min(1, value / total)) : 0;
   const filled = Math.round(ratio * len);
   return { filled, empty: Math.max(0, len - filled) };
+}
+function pointsPct(points) {
+  const n = Number(points) || 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+function meterArrow(delta) {
+  const d = Number(delta) || 0;
+  return d > 0 ? "\u25B2" : d < 0 ? "\u25BC" : "\u25C6";
+}
+function arrowColor(delta) {
+  const d = Number(delta) || 0;
+  return d > 0 ? "green" : d < 0 ? "red" : "gray";
 }
 function barColor(kind, value) {
   if (kind === "points") {
@@ -3981,7 +4003,7 @@ function portLabel(entry, max = 14) {
   return text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}\u2026`;
 }
 
-// ui/src/components/ServicesPanel.jsx
+// src/components/ServicesPanel.jsx
 import { jsx as jsx19, jsxs as jsxs18 } from "react/jsx-runtime";
 var CELL_W = 16;
 function servicesGridRows(width, count, dense = false) {
@@ -4080,11 +4102,11 @@ function ServicesPanel({
   );
 }
 
-// ui/src/components/StatusServicesPanel.jsx
+// src/components/StatusServicesPanel.jsx
 import React21 from "react";
 import { TextAttributes as TextAttributes16 } from "@opentui/core";
 
-// ui/src/components/SystemPanel.jsx
+// src/components/SystemPanel.jsx
 import React20 from "react";
 import { TextAttributes as TextAttributes15 } from "@opentui/core";
 import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
@@ -4097,9 +4119,13 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   const score = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
   const points = Math.max(0, Math.round(Number(meters && meters.points) || 0));
   const delta = Number(meters && meters.delta) || 0;
+  const pointsDelta = Number(meters && meters.pointsDelta) || 0;
+  const ptsArrow = meterArrow(pointsDelta);
+  const ptsArrowColor = arrowColor(pointsDelta);
+  const ptsPct = pointsPct(points);
   const ctxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
-  const arrow = delta > 0 ? "\u25B2" : delta < 0 ? "\u25BC" : "\u25C6";
-  const arrowColor = delta > 0 ? "green" : delta < 0 ? "red" : "gray";
+  const arrow = meterArrow(delta);
+  const arrowColorFg = arrowColor(delta);
   const cpuPct = host && host.cpuPct != null ? host.cpuPct : null;
   const memPct = host && host.memPct != null ? host.memPct : null;
   const swapPct = host && host.swapPct != null ? host.swapPct : null;
@@ -4108,23 +4134,26 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   const sc = barCells(score, 100, 12);
   const ac = barCells(points, 100, 10);
   const cc = barCells(ctxPct, 100, 8);
-  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + 16 + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
+  const ptsSeg = ` ${points}p${ptsArrow} ${ptsPct}% autolearn   `;
+  const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + ptsSeg.length + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
   const hostShort = cpuPct == null && memPct == null ? "" : `  cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`} ram ${memPct == null ? "\u2014" : `${memPct}%`}`;
-  const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p autolearn  ctx ${ctxPct}%${hostShort}`;
-  const terse = `\u{1F9E0} ${score}% \u2726 ${points}p ctx ${ctxPct}%${hostShort}`;
+  const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p${ptsArrow} ${ptsPct}% autolearn  ctx ${ctxPct}%${hostShort}`;
+  const terse = `\u{1F9E0} ${score}% \u2726 ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
   if (fullLen <= w) {
     return /* @__PURE__ */ jsx20("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs19("text", { children: [
       /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), attributes: TextAttributes15.BOLD, children: "\u{1F9E0} " }),
       /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), children: "\u2588".repeat(sc.filled) }),
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: "\u2591".repeat(sc.empty) }),
       /* @__PURE__ */ jsx20("span", { fg: "white", attributes: TextAttributes15.BOLD, children: ` ${score}% ` }),
-      /* @__PURE__ */ jsx20("span", { fg: arrowColor, children: arrow }),
+      /* @__PURE__ */ jsx20("span", { fg: arrowColorFg, children: arrow }),
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: ` ${smartLabel(score)}` }),
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: "   " }),
       /* @__PURE__ */ jsx20("span", { fg: barColor("points", points), attributes: TextAttributes15.BOLD, children: "\u2726 " }),
       /* @__PURE__ */ jsx20("span", { fg: barColor("points", points), children: "\u2588".repeat(ac.filled) }),
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: "\u2591".repeat(ac.empty) }),
       /* @__PURE__ */ jsx20("span", { fg: "white", attributes: TextAttributes15.BOLD, children: ` ${points}p` }),
+      /* @__PURE__ */ jsx20("span", { fg: ptsArrowColor, children: ptsArrow }),
+      /* @__PURE__ */ jsx20("span", { fg: "white", children: ` ${ptsPct}%` }),
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: " autolearn   " }),
       /* @__PURE__ */ jsx20("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "ctx " }),
       /* @__PURE__ */ jsx20("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "\u2588".repeat(cc.filled) }),
@@ -4139,7 +4168,7 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   return /* @__PURE__ */ jsx20("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx20("text", { children: /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), attributes: TextAttributes15.BOLD, children: clip6(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
 }
 
-// ui/src/components/StatusServicesPanel.jsx
+// src/components/StatusServicesPanel.jsx
 import { jsx as jsx21, jsxs as jsxs20 } from "react/jsx-runtime";
 var CELL_W2 = 16;
 function gridShape(width, n) {
@@ -4221,7 +4250,7 @@ function StatusServicesPanel({
   ] });
 }
 
-// ui/src/components/StatusBar.jsx
+// src/components/StatusBar.jsx
 import React22 from "react";
 import { TextAttributes as TextAttributes17 } from "@opentui/core";
 import { jsx as jsx22, jsxs as jsxs21 } from "react/jsx-runtime";
@@ -4277,7 +4306,7 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
   ] });
 }
 
-// ui/src/components/CrushStatus.jsx
+// src/components/CrushStatus.jsx
 import React23, { useEffect as useEffect8, useState as useState9 } from "react";
 import { jsx as jsx23, jsxs as jsxs22 } from "react/jsx-runtime";
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
@@ -4327,7 +4356,7 @@ function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   ] }) });
 }
 
-// ui/src/components/TodoPanel.jsx
+// src/components/TodoPanel.jsx
 import React24 from "react";
 import { TextAttributes as TextAttributes18 } from "@opentui/core";
 import { jsx as jsx24, jsxs as jsxs23 } from "react/jsx-runtime";
@@ -4361,11 +4390,11 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   );
 }
 
-// ui/src/components/Transcript.jsx
+// src/components/Transcript.jsx
 import React26, { useEffect as useEffect10, useRef as useRef6, useState as useState11 } from "react";
 import { useKeyboard as useKeyboard6 } from "@opentui/react";
 
-// ui/src/components/MessageBlock.jsx
+// src/components/MessageBlock.jsx
 import React25, { useEffect as useEffect9, useState as useState10 } from "react";
 import { TextAttributes as TextAttributes19 } from "@opentui/core";
 import { Fragment as Fragment9, jsx as jsx25, jsxs as jsxs24 } from "react/jsx-runtime";
@@ -4538,7 +4567,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   ] });
 }
 
-// ui/src/components/Transcript.jsx
+// src/components/Transcript.jsx
 import { jsx as jsx26, jsxs as jsxs25 } from "react/jsx-runtime";
 var MAX_TURNS = 80;
 var SCROLLBAR_OPTIONS = {
@@ -4662,7 +4691,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
   ) });
 }
 
-// ui/src/hooks/useAgentStream.js
+// src/hooks/useAgentStream.js
 import { useCallback as useCallback3, useEffect as useEffect11, useRef as useRef7, useState as useState12 } from "react";
 var import_ladder = __toESM(require_ladder());
 var DEFAULT_API2 = process.env.HAKSTER_API_URL || "http://localhost:3579";
@@ -5318,7 +5347,7 @@ function useAgentStream({
 }
 var useAgentStream_default = useAgentStream;
 
-// ui/src/hooks/useHostStats.js
+// src/hooks/useHostStats.js
 import { useEffect as useEffect12, useRef as useRef8, useState as useState13 } from "react";
 import os4 from "node:os";
 import fs7 from "node:fs";
@@ -5405,7 +5434,7 @@ function useHostStats(intervalMs = 5e3) {
   return stats;
 }
 
-// ui/src/hooks/useMemoryBank.js
+// src/hooks/useMemoryBank.js
 import { useEffect as useEffect13, useState as useState14 } from "react";
 import fs8 from "node:fs";
 import os5 from "node:os";
@@ -5464,7 +5493,7 @@ function useMemoryBank(intervalMs = 1e4) {
   return state;
 }
 
-// ui/src/hooks/useCliUpdate.js
+// src/hooks/useCliUpdate.js
 var import_updater = __toESM(require_updater());
 var import_prefs2 = __toESM(require_prefs());
 import { useEffect as useEffect14, useRef as useRef9, useState as useState15 } from "react";
@@ -5536,7 +5565,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
   return { ...state, applied };
 }
 
-// ui/src/hooks/useScriptRunner.js
+// src/hooks/useScriptRunner.js
 import { useCallback as useCallback4, useEffect as useEffect15, useRef as useRef10, useState as useState16 } from "react";
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
@@ -5638,7 +5667,7 @@ function useScriptRunner() {
 }
 var useScriptRunner_default = useScriptRunner;
 
-// ui/src/utils/web-usage.js
+// src/utils/web-usage.js
 var WEB_TOOLS = /* @__PURE__ */ new Set([
   // the CLI's own research tools (cli/tools.js)
   "web_search",
@@ -5685,7 +5714,7 @@ function countWebCallsInMessages(messages) {
   return n;
 }
 
-// ui/src/App.jsx
+// src/App.jsx
 var import_prefs3 = __toESM(require_prefs());
 var import_input_history = __toESM(require_input_history());
 var import_ladder2 = __toESM(require_ladder());
@@ -6709,8 +6738,12 @@ function App({ version = "0.1.0" }) {
   const meterScore = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
   const meterPts = Math.max(0, Math.round(Number(meters && meters.points) || 0));
   const meterDelta = Number(meters && meters.delta) || 0;
-  const meterArrow = meterDelta > 0 ? "\u25B2" : meterDelta < 0 ? "\u25BC" : "\u25C6";
-  const meterArrowFg = meterDelta > 0 ? "green" : meterDelta < 0 ? "red" : "gray";
+  const meterPtsDelta = Number(meters && meters.pointsDelta) || 0;
+  const meterPtsPct = pointsPct(meterPts);
+  const meterArrowCh = meterArrow(meterDelta);
+  const meterArrowFg = arrowColor(meterDelta);
+  const meterPtsArrow = meterArrow(meterPtsDelta);
+  const meterPtsArrowFg = arrowColor(meterPtsDelta);
   const meterCpu = host && host.cpuPct != null ? `${host.cpuPct}%` : "\u2014";
   const meterRam = host && host.memPct != null ? `${host.memPct}%` : "\u2014";
   const meterCtxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
@@ -6726,8 +6759,10 @@ function App({ version = "0.1.0" }) {
     mkMeter([
       { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
-      { t: meterArrow, fg: meterArrowFg },
+      { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
+      { t: ` ${meterPtsPct}%`, fg: meterFg.pts },
       { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? "red" : meterCtxPct > 60 ? "yellow" : "green" },
       { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
       { t: `  ram ${meterRam}`, fg: meterFg.ram }
@@ -6735,21 +6770,25 @@ function App({ version = "0.1.0" }) {
     mkMeter([
       { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
-      { t: meterArrow, fg: meterArrowFg },
+      { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
+      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? "red" : meterCtxPct > 60 ? "yellow" : "green" },
       { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
       { t: `  ram ${meterRam}`, fg: meterFg.ram }
     ]),
     mkMeter([
       { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
-      { t: meterArrow, fg: meterArrowFg },
-      { t: ` \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: ` cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: ` ram ${meterRam}`, fg: meterFg.ram }
+      { t: meterArrowCh, fg: meterArrowFg },
+      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
+      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
+      { t: `  ram ${meterRam}`, fg: meterFg.ram }
     ]),
     mkMeter([
       { t: `\u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: meterPtsArrow, fg: meterPtsArrowFg },
       { t: ` cpu ${meterCpu}`, fg: meterFg.cpu },
       { t: ` ram ${meterRam}`, fg: meterFg.ram }
     ])
@@ -7071,6 +7110,8 @@ function App({ version = "0.1.0" }) {
                     /* @__PURE__ */ jsx27("text", { fg: "gray", children: "autolearn   " }),
                     /* @__PURE__ */ jsx27(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
                     /* @__PURE__ */ jsx27("text", { fg: "white", children: ` ${meterPoints}p` }),
+                    /* @__PURE__ */ jsx27("text", { fg: arrowColor(meters && meters.pointsDelta), children: meterArrow(meters && meters.pointsDelta) }),
+                    /* @__PURE__ */ jsx27("text", { fg: "white", children: ` ${pointsPct(meterPoints)}%` }),
                     /* @__PURE__ */ jsx27("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx27(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
                   ] }),
                   /* @__PURE__ */ jsxs26("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
@@ -7264,7 +7305,7 @@ function App({ version = "0.1.0" }) {
   ] });
 }
 
-// ui/src/index.jsx
+// src/index.jsx
 var import_prefs4 = __toESM(require_prefs());
 var root = null;
 var renderer = null;
