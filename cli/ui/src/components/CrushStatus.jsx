@@ -18,7 +18,7 @@ function formatElapsed(ms) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, '0')}s`;
 }
 
-export default function CrushStatus({ width, phase, activity, elapsedMs }) {
+export default function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setFrame((value) => value + 1), 80);
@@ -49,6 +49,11 @@ export default function CrushStatus({ width, phase, activity, elapsedMs }) {
         <span fg={gradColor}>{shimmer}</span>
         {' '}
         <span fg="gray">{formatElapsed(elapsedMs)}</span>
+        {/* The steer queue is part of the run's state, so it is stated on the
+            run's own line — a queued message is never invisible. */}
+        {Number(queued) > 0 ? (
+          <span fg="#d29922">{`  ⏳ ${Number(queued)} queued`}</span>
+        ) : null}
       </text>
     </box>
   );

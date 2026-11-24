@@ -252,6 +252,11 @@ export default function App({ version = '0.1.0' }) {
   const [pointsHistory, setPointsHistory] = useState([]);
   // One image waiting to ride on the next message (`/attach <path>`).
   const [attachment, setAttachment] = useState(null);
+  // Steer queue (owner, 2026-11-24: "i can type while agent is working need
+  // steer que"). A message typed while a run is streaming joins this queue and
+  // is sent as the next turn the moment the current one ends — in order, one at
+  // a time. The running turn is never restarted and nothing typed is dropped.
+  const [steerQueue, setSteerQueue] = useState([]);
   const scrollRef = useRef(null);
   // The dashboard and models views are scroll boxes too: a short terminal must
   // scroll the page, not push the status bar off the bottom (§ owner's
@@ -658,7 +663,8 @@ export default function App({ version = '0.1.0' }) {
         return;
       case '/clear':
         agent.clear();
-        showNotice('transcript cleared');
+        setSteerQueue([]);
+        showNotice('transcript cleared · steer queue emptied');
         return;
       case '/help':
         showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit');
@@ -745,14 +751,43 @@ export default function App({ version = '0.1.0' }) {
         runCommand(v);
         return;
       }
-      if (agent.busy) return;
       const att = attachment;
       setDraft('');
       setAttachment(null);
+      // A running turn does not lock the input. What you type while the agent
+      // works joins the steer queue and is sent as the next turn when this run
+      // ends (see the drain effect below).
+      if (agent.busy) {
+        setSteerQueue((q) => [...q, {
+          id: `steer-${Date.now()}-${q.length}`,
+          text: v,
+          image: att ? att.dataUrl : '',
+          imageName: att ? att.name : '',
+        }]);
+        showNotice(`⏳ steer queued (${steerQueue.length + 1}) — sends when this run ends`);
+        return;
+      }
       agent.send(v, att ? { images: [att.dataUrl], imageName: att.name } : undefined);
     },
-    [agent, attachment, runCommand],
+    [agent, attachment, runCommand, showNotice, steerQueue.length],
   );
+
+  // The steer queue drains itself: one queued message per finished run, in
+  // order. flushLock makes the drain exactly-once — `agent.busy` is React
+  // state, so without it a second render in the same idle window would shift
+  // the queue twice and lose a message. The lock releases as soon as a run is
+  // actually live (`agent.busy`), which is when the next message may be sent.
+  const steerFlushLock = useRef(false);
+  useEffect(() => {
+    if (agent.busy) { steerFlushLock.current = false; return; }
+    if (steerFlushLock.current || steerQueue.length === 0) return;
+    const [next, ...rest] = steerQueue;
+    // send() answers synchronously whether the turn started. If it did not,
+    // the message stays queued — nothing typed is ever dropped.
+    if (agent.send(next.text, next.image ? { images: [next.image], imageName: next.imageName } : undefined) === false) return;
+    steerFlushLock.current = true;
+    setSteerQueue(rest);
+  }, [agent.busy, steerQueue]);
 
   // A pending approval blocks the run, so it takes the keyboard. Both halves are
   // needed: the composer stops accepting input, AND the shortcut layer stands
@@ -770,6 +805,11 @@ export default function App({ version = '0.1.0' }) {
   const mcpOutputText = latestMcpTool?.result == null
     ? 'Waiting for MCP server output…'
     : String(latestMcpTool.result).replace(/\r/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  // Owner, 2026-11-24: "the middle panels need bigger". The MCP output box is
+  // the one middle panel that was pinned at six lines — it now grows with the
+  // terminal so a tool result can actually be read where it lands.
+  const mcpOutLines = (rows || 30) >= 44 ? 10 : (rows || 30) >= 30 ? 8 : MCP_OUTPUT_LINES;
+  const mcpPanelRows = mcpOutLines + 3;
   const mcpPanelWidth = Math.max(1, Math.max(40, Math.min((cols || 100) - 2, 140)) - 10);
   const mcpOutputLines = mcpOutputText.split('\n').flatMap((line) => {
     if (!line) return [' '];
@@ -1148,9 +1188,25 @@ export default function App({ version = '0.1.0' }) {
   const composerRows = menuOpen ? MENU_ROWS : 5;
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
-  const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 3 : 0;
   // approval: border 2 + header 1 + reason 1 + command 1 + answer row 1
   const approvalRows = approving ? 6 : 0;
+  // A short terminal gets a shorter checklist rather than a status bar that has
+  // been pushed off the bottom — the panel scrolls, so nothing is hidden.
+  const todoVisible = (rows || 30) >= 34 ? 6 : 3;
+  // Optional panels are fitted, not assumed. Everything below is mandatory and
+  // is what the column cannot live without: the header and status bar, the
+  // composer, the rail, the meters, the services grid, and one row each for the
+  // result box and the transcript. Anything left over may hold the checklist
+  // (first, it is the agent's own plan) and then the MCP output box — so a
+  // 20-row window with a todo list open shows the list and drops the MCP panel
+  // instead of running off the bottom of the screen.
+  const mandatoryRows = CHROME_ROWS + noticeRows + composerRows + railRows
+    + approvalRows + systemRows + servicesRows + liveOutputChrome + 2;
+  const optionalBudget = (rows || 30) - mandatoryRows;
+  const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
+  const showTodo = wantTodoRows > 0 && optionalBudget >= wantTodoRows;
+  const todoRows = showTodo ? wantTodoRows : 0;
+  const showMcpPanel = !!latestMcpTool && optionalBudget - todoRows >= mcpPanelRows;
   // Everything except the transcript and the live box. Whatever is left is
   // shared between them. Owner, 2026-11-24: the two boxes swapped, and the
   // sizes follow them — the THINKING transcript is now the large area at the
@@ -1160,18 +1216,25 @@ export default function App({ version = '0.1.0' }) {
   // and the MCP panel shrinks them instead of pushing the status bar off.
   const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows
     + approvalRows + systemRows + servicesRows + liveOutputChrome
-    + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
+    + (showMcpPanel ? mcpPanelRows : 0);
   const sharedRows = (rows || 30) - fixedRows;
   // Owner, 2026-11-24: taller panels. The reasoning transcript keeps a real
   // floor that GROWS on a tall screen (10 rows at ≥34, 6 below), and the two
   // boxes can never take each other's last row — the old floors (6 + 3) could
   // together exceed the budget on a short screen carrying todos, an approval
   // card and the MCP panel, which pushed the status bar off the bottom.
-  const transcriptFloor = (rows || 30) >= 34 ? 10 : 6;
   const sharedBudget = Math.max(2, sharedRows);
-  const transcriptTarget = Math.min(transcriptFloor, sharedBudget - 1);
-  const liveOutputLines = Math.min(liveOutputLineCap, sharedBudget - Math.max(1, transcriptTarget));
-  const transcriptRows = sharedBudget - liveOutputLines;
+  // The result strip keeps a readable floor and a share that grows with the
+  // screen, and the transcript always gets the remainder — so the two boxes
+  // sum to exactly the budget on every height. The old min/max pair could hand
+  // the strip a single row when a todo list, an approval card and the MCP panel
+  // were all up; this one cannot starve either box.
+  const liveFloor = sharedBudget >= 24 ? 6 : sharedBudget >= 14 ? 4 : 2;
+  const liveOutputLines = Math.max(
+    1,
+    Math.min(liveOutputLineCap, sharedBudget - 1, Math.max(liveFloor, Math.round(sharedBudget * 0.35))),
+  );
+  const transcriptRows = Math.max(1, sharedBudget - liveOutputLines);
 
   const dashboardItems = [
     {
@@ -1463,13 +1526,13 @@ export default function App({ version = '0.1.0' }) {
       ) : (
         <box style={{ flexDirection: 'row', width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
           <box style={{ width: mainW, flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
-            {agent.todos.length ? (
+            {showTodo ? (
               <box style={{ flexShrink: 0 }}>
                 <TodoPanel
                   todos={agent.todos}
                   width={mainW}
                   hint="the agent's checklist · updates live"
-                  maxVisibleRows={Math.min(agent.todos.length, 6)}
+                  maxVisibleRows={Math.min(agent.todos.length, todoVisible)}
                 />
               </box>
             ) : null}
@@ -1494,14 +1557,14 @@ export default function App({ version = '0.1.0' }) {
               />
             </box>
 
-            {latestMcpTool ? (
+            {showMcpPanel ? (
               <ScrollPanel
                 key={latestMcpTool.id || latestMcpTool.name || 'mcp'}
                 width={mainW}
                 title={`MCP Output · ${String(latestMcpTool.name || '').split('__')[1] || 'server'}`}
                 hint="Ctrl+↑/↓"
                 total={mcpOutputLines.length}
-                rows={MCP_OUTPUT_LINES}
+                rows={mcpOutLines}
                 initial="follow"
                 bindings={{ up: 'ctrl', down: 'ctrl', pageup: 'ctrl', pagedown: 'ctrl', home: 'ctrl', end: 'ctrl' }}
                 empty="Waiting for MCP server output…"
@@ -1513,17 +1576,6 @@ export default function App({ version = '0.1.0' }) {
                   </box>
                 )}
               </ScrollPanel>
-            ) : null}
-
-            {showCrushStatus ? (
-              <box style={{ flexShrink: 0 }}>
-                <CrushStatus
-                  width={mainW}
-                  phase={crushPhase}
-                  activity={activeTool?.name || ''}
-                  elapsedMs={agent.elapsedMs}
-                />
-              </box>
             ) : null}
 
             <box style={{ flexShrink: 0 }}>
@@ -1592,12 +1644,16 @@ export default function App({ version = '0.1.0' }) {
                   onChange={setDraft}
                   onSubmit={submit}
                   focused={focus === 'composer' && !approving}
-                  disabled={agent.busy}
+                  // The input never locks while the agent works (owner,
+                  // 2026-11-24: "i can type while agent is working need steer
+                  // que"). Enter queues the text; the drain effect above sends
+                  // it as the next turn when this run ends.
+                  disabled={false}
                   hint={
                     approving
                       ? 'answer the request above — it is holding the run'
                       : agent.busy
-                        ? 'esc stop · the run is streaming'
+                        ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ''} · it sends when this run ends · esc stop`
                         : attachment
                           ? `📎 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K · enter sends it · /attach clear`
                           : 'enter send · /menu commands · /attach image · pgup scroll · q quit'
@@ -1614,6 +1670,23 @@ export default function App({ version = '0.1.0' }) {
                 />
               )}
             </box>
+
+            {/* The thinking spinner sits UNDER the input bar (owner, 2026-11-24:
+                "the thinking phrase spinner needs to go under the input bar not
+                in the middle of tui"). One row, still budgeted in CHROME_ROWS,
+                and it carries the steer-queue count so a queued message is
+                visible without moving a single panel. */}
+            {showCrushStatus ? (
+              <box style={{ flexShrink: 0 }}>
+                <CrushStatus
+                  width={mainW}
+                  phase={crushPhase}
+                  activity={activeTool?.name || ''}
+                  elapsedMs={agent.elapsedMs}
+                  queued={steerQueue.length}
+                />
+              </box>
+            ) : null}
           </box>
           {sideW ? (
             <box style={{ marginLeft: 1 }}>

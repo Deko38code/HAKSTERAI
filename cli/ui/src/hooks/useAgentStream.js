@@ -367,7 +367,7 @@ export function useAgentStream({
     [api, append, sessionId, setPending, setStatusBoth],
   );
 
-  const send = useCallback(
+  const runTurn = useCallback(
     async (text, opts = {}) => {
       const prompt = String(text == null ? '' : text).trim();
       if (!prompt || statusRef.current === 'connecting' || statusRef.current === 'streaming') {
@@ -816,6 +816,18 @@ export function useAgentStream({
     },
     [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, pushActivity, sessionId, setPending, setStatusBoth, system],
   );
+
+  /* The public entry point, and the reason it is a wrapper: it answers "did
+   * this turn actually start?" synchronously. runTurn() bails silently when a
+   * run is already live, and the TUI's steer queue must keep the message
+   * queued rather than assume it was delivered (owner, 2026-11-24: the steer
+   * queue may never drop what was typed). */
+  const send = useCallback((text, opts = {}) => {
+    const prompt = String(text == null ? '' : text).trim();
+    if (!prompt || statusRef.current === 'connecting' || statusRef.current === 'streaming') return false;
+    runTurn(text, opts);
+    return true;
+  }, [runTurn]);
 
   const clear = useCallback(() => {
     abort();

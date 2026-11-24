@@ -49,73 +49,55 @@ export default function StatusBar({ width, status, model, cols, focus, adsOn, el
       ? formatElapsed(elapsedMs)
       : null;
 
-  const right = [];
-  if (label) {
-    right.push(
-      <text key="status" fg={known ? known.color : 'gray'}>
-        {label}
-      </text>,
-    );
-  }
-  if (elapsed) {
-    right.push(<text key="elapsed" fg="gray">{elapsed}</text>);
-  }
-  if (model) {
-    right.push(<text key="model" fg="yellow">{model}</text>);
-  }
+  // One row, always (the owner's panel rule). The bar used to be two flex rows
+  // of text nodes with no clip: below ~110 columns the right-hand list was
+  // wider than the space left of it, the bar wrapped onto a second line, and
+  // that second line was taken from the spinner under the composer. Segments
+  // are now fitted by character count — the longest set that provably fits —
+  // so the status bar can never reflow.
+  const segs = [];
+  if (label) segs.push({ key: 'status', color: known ? known.color : 'gray', text: label });
+  if (elapsed) segs.push({ key: 'elapsed', color: 'gray', text: elapsed });
+  if (model) segs.push({ key: 'model', color: 'yellow', text: model });
   // The owner's switch, always visible: green means a failed run will move on
   // to the next ladder model, red means it will stay where it failed.
   if (handoff !== undefined && handoff !== null) {
-    right.push(
-      <text key="handoff" fg={handoff ? 'green' : 'red'}>
-        {handoff ? 'handoff auto' : 'handoff off'}
-      </text>,
-    );
+    segs.push({ key: 'handoff', color: handoff ? 'green' : 'red', text: handoff ? 'handoff auto' : 'handoff off' });
   }
   // How much the agent does without asking (/auto). Green = it works and
   // finishes on its own, yellow = it will never stop to ask, gray = it asks.
   if (autoMode) {
-    right.push(
-      <text
-        key="auto"
-        fg={autoMode === 'full-auto' ? 'yellow' : autoMode === 'suggest' ? 'gray' : 'green'}
-      >
-        {autoMode === 'full-auto' ? 'auto full' : autoMode === 'suggest' ? 'auto ask' : 'auto edit'}
-      </text>,
-    );
+    segs.push({
+      key: 'auto',
+      color: autoMode === 'full-auto' ? 'yellow' : autoMode === 'suggest' ? 'gray' : 'green',
+      text: autoMode === 'full-auto' ? 'auto full' : autoMode === 'suggest' ? 'auto ask' : 'auto edit',
+    });
   }
-  if (cols !== undefined && cols !== null) {
-    right.push(<text key="cols" fg="gray">{`${cols}c`}</text>);
-  }
-  right.push(
-    <text key="ads" fg={adsOn ? 'green' : 'red'}>
-      {adsOn ? 'ads on' : 'ads off'}
-    </text>,
-  );
+  if (cols !== undefined && cols !== null) segs.push({ key: 'cols', color: 'gray', text: `${cols}c` });
+  segs.push({ key: 'ads', color: adsOn ? 'green' : 'red', text: adsOn ? 'ads on' : 'ads off' });
 
-  // Separators are interleaved rather than baked into each label so a label
-  // that is absent because its value is missing never leaves a dangling gap.
-  const rightNodes = [];
-  right.forEach((node, i) => {
-    if (i > 0) {
-      rightNodes.push(<text key={`sep-${i}`} fg="gray">{' · '}</text>);
-    }
-    rightNodes.push(node);
-  });
+  const leftText = focus === 'ad' ? '\u27ea ad \u27eb' : '\u27ea composer \u27eb';
+  const hintText = hint ? `  ${hint}` : '';
+  const barW = Math.max(20, Number(width) || 80);
+  // paddingLeft/Right (2) + two spaces that keep the halves apart.
+  const avail = Math.max(8, barW - 2 - leftText.length - hintText.length - 2);
+  const joinedLen = (list) => list.reduce((n, one, i) => n + one.text.length + (i ? 3 : 0), 0);
+  const shown = segs.slice();
+  while (shown.length > 1 && joinedLen(shown) > avail) shown.pop();
+  // A single segment still too wide (a long model id on a narrow screen) is
+  // clipped rather than allowed to wrap the bar.
+  if (shown.length === 1 && shown[0].text.length > avail) {
+    shown[0] = { ...shown[0], text: `${shown[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
+  }
 
   return (
-    <box style={{ width, flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 1, paddingRight: 1 }}>
-      <box style={{ flexDirection: 'row' }}>
-        {focus === 'ad' ? (
-          <text fg="cyan" attributes={TextAttributes.BOLD}>{'⟪ ad ⟫'}</text>
-        ) : (
-          <text fg="gray">{'⟪ composer ⟫'}</text>
-        )}
-        {hint ? <text fg="gray">{`  ${hint}`}</text> : null}
-      </box>
-      <box style={{ flexDirection: 'row' }}>
-        {rightNodes}
-      </box>
+    <box style={{ width: barW, flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 1, paddingRight: 1, overflow: 'hidden', flexShrink: 0 }}>
+      <text fg="gray">{`${leftText}${hintText}`}</text>
+      <text>
+        {shown.map((seg, i) => (
+          <span key={seg.key} fg={seg.color}>{`${i ? ' \u00b7 ' : ''}${seg.text}`}</span>
+        ))}
+      </text>
     </box>
   );
 }

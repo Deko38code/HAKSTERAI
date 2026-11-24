@@ -3793,54 +3793,35 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
   const known = status ? STATUS_STYLES[status] : null;
   const label = known ? known.text : status ? String(status) : "";
   const elapsed = status === "streaming" || status === "thinking" || status === "approval" ? formatElapsed(elapsedMs) : null;
-  const right = [];
-  if (label) {
-    right.push(
-      /* @__PURE__ */ jsx18("text", { fg: known ? known.color : "gray", children: label }, "status")
-    );
-  }
-  if (elapsed) {
-    right.push(/* @__PURE__ */ jsx18("text", { fg: "gray", children: elapsed }, "elapsed"));
-  }
-  if (model) {
-    right.push(/* @__PURE__ */ jsx18("text", { fg: "yellow", children: model }, "model"));
-  }
+  const segs = [];
+  if (label) segs.push({ key: "status", color: known ? known.color : "gray", text: label });
+  if (elapsed) segs.push({ key: "elapsed", color: "gray", text: elapsed });
+  if (model) segs.push({ key: "model", color: "yellow", text: model });
   if (handoff !== void 0 && handoff !== null) {
-    right.push(
-      /* @__PURE__ */ jsx18("text", { fg: handoff ? "green" : "red", children: handoff ? "handoff auto" : "handoff off" }, "handoff")
-    );
+    segs.push({ key: "handoff", color: handoff ? "green" : "red", text: handoff ? "handoff auto" : "handoff off" });
   }
   if (autoMode) {
-    right.push(
-      /* @__PURE__ */ jsx18(
-        "text",
-        {
-          fg: autoMode === "full-auto" ? "yellow" : autoMode === "suggest" ? "gray" : "green",
-          children: autoMode === "full-auto" ? "auto full" : autoMode === "suggest" ? "auto ask" : "auto edit"
-        },
-        "auto"
-      )
-    );
+    segs.push({
+      key: "auto",
+      color: autoMode === "full-auto" ? "yellow" : autoMode === "suggest" ? "gray" : "green",
+      text: autoMode === "full-auto" ? "auto full" : autoMode === "suggest" ? "auto ask" : "auto edit"
+    });
   }
-  if (cols !== void 0 && cols !== null) {
-    right.push(/* @__PURE__ */ jsx18("text", { fg: "gray", children: `${cols}c` }, "cols"));
+  if (cols !== void 0 && cols !== null) segs.push({ key: "cols", color: "gray", text: `${cols}c` });
+  segs.push({ key: "ads", color: adsOn ? "green" : "red", text: adsOn ? "ads on" : "ads off" });
+  const leftText = focus === "ad" ? "\u27EA ad \u27EB" : "\u27EA composer \u27EB";
+  const hintText = hint ? `  ${hint}` : "";
+  const barW = Math.max(20, Number(width) || 80);
+  const avail = Math.max(8, barW - 2 - leftText.length - hintText.length - 2);
+  const joinedLen = (list) => list.reduce((n, one, i) => n + one.text.length + (i ? 3 : 0), 0);
+  const shown = segs.slice();
+  while (shown.length > 1 && joinedLen(shown) > avail) shown.pop();
+  if (shown.length === 1 && shown[0].text.length > avail) {
+    shown[0] = { ...shown[0], text: `${shown[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
   }
-  right.push(
-    /* @__PURE__ */ jsx18("text", { fg: adsOn ? "green" : "red", children: adsOn ? "ads on" : "ads off" }, "ads")
-  );
-  const rightNodes = [];
-  right.forEach((node, i) => {
-    if (i > 0) {
-      rightNodes.push(/* @__PURE__ */ jsx18("text", { fg: "gray", children: " \xB7 " }, `sep-${i}`));
-    }
-    rightNodes.push(node);
-  });
-  return /* @__PURE__ */ jsxs17("box", { style: { width, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsxs17("box", { style: { flexDirection: "row" }, children: [
-      focus === "ad" ? /* @__PURE__ */ jsx18("text", { fg: "cyan", attributes: TextAttributes13.BOLD, children: "\u27EA ad \u27EB" }) : /* @__PURE__ */ jsx18("text", { fg: "gray", children: "\u27EA composer \u27EB" }),
-      hint ? /* @__PURE__ */ jsx18("text", { fg: "gray", children: `  ${hint}` }) : null
-    ] }),
-    /* @__PURE__ */ jsx18("box", { style: { flexDirection: "row" }, children: rightNodes })
+  return /* @__PURE__ */ jsxs17("box", { style: { width: barW, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1, overflow: "hidden", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx18("text", { fg: "gray", children: `${leftText}${hintText}` }),
+    /* @__PURE__ */ jsx18("text", { children: shown.map((seg, i) => /* @__PURE__ */ jsx18("span", { fg: seg.color, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) })
   ] });
 }
 
@@ -3918,7 +3899,7 @@ function formatElapsed2(ms) {
   const seconds = Math.max(0, Math.floor(Number(ms || 0) / 1e3));
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
 }
-function CrushStatus({ width, phase, activity, elapsedMs }) {
+function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   const [frame, setFrame] = useState9(0);
   useEffect8(() => {
     const timer = setInterval(() => setFrame((value) => value + 1), 80);
@@ -3944,7 +3925,8 @@ function CrushStatus({ width, phase, activity, elapsedMs }) {
     " ",
     /* @__PURE__ */ jsx20("span", { fg: gradColor, children: shimmer }),
     " ",
-    /* @__PURE__ */ jsx20("span", { fg: "gray", children: formatElapsed2(elapsedMs) })
+    /* @__PURE__ */ jsx20("span", { fg: "gray", children: formatElapsed2(elapsedMs) }),
+    Number(queued) > 0 ? /* @__PURE__ */ jsx20("span", { fg: "#d29922", children: `  \u23F3 ${Number(queued)} queued` }) : null
   ] }) });
 }
 
@@ -4497,7 +4479,7 @@ function useAgentStream({
     },
     [api, append, sessionId, setPending, setStatusBoth]
   );
-  const send = useCallback3(
+  const runTurn = useCallback3(
     async (text, opts = {}) => {
       const prompt = String(text == null ? "" : text).trim();
       if (!prompt || statusRef.current === "connecting" || statusRef.current === "streaming") {
@@ -4854,6 +4836,12 @@ function useAgentStream({
     },
     [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, pushActivity, sessionId, setPending, setStatusBoth, system]
   );
+  const send = useCallback3((text, opts = {}) => {
+    const prompt = String(text == null ? "" : text).trim();
+    if (!prompt || statusRef.current === "connecting" || statusRef.current === "streaming") return false;
+    runTurn(text, opts);
+    return true;
+  }, [runTurn]);
   const clear = useCallback3(() => {
     abort();
     setPending(null);
@@ -5321,6 +5309,7 @@ function App({ version = "0.1.0" }) {
   const [guard, setGuard] = useState17(null);
   const [pointsHistory, setPointsHistory] = useState17([]);
   const [attachment, setAttachment] = useState17(null);
+  const [steerQueue, setSteerQueue] = useState17([]);
   const scrollRef = useRef10(null);
   const dashRef = useRef10(null);
   const usageRef = useRef10(null);
@@ -5618,7 +5607,8 @@ function App({ version = "0.1.0" }) {
         return;
       case "/clear":
         agent.clear();
-        showNotice("transcript cleared");
+        setSteerQueue([]);
+        showNotice("transcript cleared \xB7 steer queue emptied");
         return;
       case "/help":
         showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /status /update /settings /clear /quit");
@@ -5695,20 +5685,43 @@ function App({ version = "0.1.0" }) {
         runCommand(v);
         return;
       }
-      if (agent.busy) return;
       const att = attachment;
       setDraft("");
       setAttachment(null);
+      if (agent.busy) {
+        setSteerQueue((q) => [...q, {
+          id: `steer-${Date.now()}-${q.length}`,
+          text: v,
+          image: att ? att.dataUrl : "",
+          imageName: att ? att.name : ""
+        }]);
+        showNotice(`\u23F3 steer queued (${steerQueue.length + 1}) \u2014 sends when this run ends`);
+        return;
+      }
       agent.send(v, att ? { images: [att.dataUrl], imageName: att.name } : void 0);
     },
-    [agent, attachment, runCommand]
+    [agent, attachment, runCommand, showNotice, steerQueue.length]
   );
+  const steerFlushLock = useRef10(false);
+  useEffect16(() => {
+    if (agent.busy) {
+      steerFlushLock.current = false;
+      return;
+    }
+    if (steerFlushLock.current || steerQueue.length === 0) return;
+    const [next, ...rest] = steerQueue;
+    if (agent.send(next.text, next.image ? { images: [next.image], imageName: next.imageName } : void 0) === false) return;
+    steerFlushLock.current = true;
+    setSteerQueue(rest);
+  }, [agent.busy, steerQueue]);
   const approving = !!agent.pendingConfirm;
   const showCrushStatus = view === "chat" && agent.busy;
   const activeAssistant = [...agent.messages].reverse().find((message) => message.role === "assistant");
   const activeTool = activeAssistant?.tools?.slice().reverse().find((tool) => tool.result === null);
   const latestMcpTool = agent.messages.filter((message) => message.role === "assistant").flatMap((message) => message.tools || []).filter((tool) => tool.mcp || String(tool.name || "").startsWith("mcp__")).slice(-1)[0] || null;
   const mcpOutputText = latestMcpTool?.result == null ? "Waiting for MCP server output\u2026" : String(latestMcpTool.result).replace(/\r/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  const mcpOutLines = (rows || 30) >= 44 ? 10 : (rows || 30) >= 30 ? 8 : MCP_OUTPUT_LINES;
+  const mcpPanelRows = mcpOutLines + 3;
   const mcpPanelWidth = Math.max(1, Math.max(40, Math.min((cols || 100) - 2, 140)) - 10);
   const mcpOutputLines = mcpOutputText.split("\n").flatMap((line) => {
     if (!line) return [" "];
@@ -6025,15 +6038,23 @@ function App({ version = "0.1.0" }) {
   const composerRows = menuOpen ? MENU_ROWS : 5;
   const noticeRows = notice ? 1 : 0;
   const railRows = dockExpanded ? 7 : 1;
-  const todoRows = agent.todos.length ? Math.min(agent.todos.length, 6) + 3 : 0;
   const approvalRows = approving ? 6 : 0;
-  const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows + approvalRows + systemRows + servicesRows + liveOutputChrome + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
+  const todoVisible = (rows || 30) >= 34 ? 6 : 3;
+  const mandatoryRows = CHROME_ROWS + noticeRows + composerRows + railRows + approvalRows + systemRows + servicesRows + liveOutputChrome + 2;
+  const optionalBudget = (rows || 30) - mandatoryRows;
+  const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
+  const showTodo = wantTodoRows > 0 && optionalBudget >= wantTodoRows;
+  const todoRows = showTodo ? wantTodoRows : 0;
+  const showMcpPanel = !!latestMcpTool && optionalBudget - todoRows >= mcpPanelRows;
+  const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows + approvalRows + systemRows + servicesRows + liveOutputChrome + (showMcpPanel ? mcpPanelRows : 0);
   const sharedRows = (rows || 30) - fixedRows;
-  const transcriptFloor = (rows || 30) >= 34 ? 10 : 6;
   const sharedBudget = Math.max(2, sharedRows);
-  const transcriptTarget = Math.min(transcriptFloor, sharedBudget - 1);
-  const liveOutputLines = Math.min(liveOutputLineCap, sharedBudget - Math.max(1, transcriptTarget));
-  const transcriptRows = sharedBudget - liveOutputLines;
+  const liveFloor = sharedBudget >= 24 ? 6 : sharedBudget >= 14 ? 4 : 2;
+  const liveOutputLines = Math.max(
+    1,
+    Math.min(liveOutputLineCap, sharedBudget - 1, Math.max(liveFloor, Math.round(sharedBudget * 0.35)))
+  );
+  const transcriptRows = Math.max(1, sharedBudget - liveOutputLines);
   const dashboardItems = [
     {
       key: "system",
@@ -6292,13 +6313,13 @@ function App({ version = "0.1.0" }) {
       ] })
     ) : /* @__PURE__ */ jsxs23("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
       /* @__PURE__ */ jsxs23("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
-        agent.todos.length ? /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx24(
+        showTodo ? /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx24(
           TodoPanel,
           {
             todos: agent.todos,
             width: mainW,
             hint: "the agent's checklist \xB7 updates live",
-            maxVisibleRows: Math.min(agent.todos.length, 6)
+            maxVisibleRows: Math.min(agent.todos.length, todoVisible)
           }
         ) }) : null,
         /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx24(
@@ -6315,14 +6336,14 @@ function App({ version = "0.1.0" }) {
             bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
           }
         ) }),
-        latestMcpTool ? /* @__PURE__ */ jsx24(
+        showMcpPanel ? /* @__PURE__ */ jsx24(
           ScrollPanel_default,
           {
             width: mainW,
             title: `MCP Output \xB7 ${String(latestMcpTool.name || "").split("__")[1] || "server"}`,
             hint: "Ctrl+\u2191/\u2193",
             total: mcpOutputLines.length,
-            rows: MCP_OUTPUT_LINES,
+            rows: mcpOutLines,
             initial: "follow",
             bindings: { up: "ctrl", down: "ctrl", pageup: "ctrl", pagedown: "ctrl", home: "ctrl", end: "ctrl" },
             empty: "Waiting for MCP server output\u2026",
@@ -6331,15 +6352,6 @@ function App({ version = "0.1.0" }) {
           },
           latestMcpTool.id || latestMcpTool.name || "mcp"
         ) : null,
-        showCrushStatus ? /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx24(
-          CrushStatus,
-          {
-            width: mainW,
-            phase: crushPhase,
-            activity: activeTool?.name || "",
-            elapsedMs: agent.elapsedMs
-          }
-        ) }) : null,
         /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx24(
           DockAd,
           {
@@ -6391,8 +6403,8 @@ function App({ version = "0.1.0" }) {
             onChange: setDraft,
             onSubmit: submit,
             focused: focus === "composer" && !approving,
-            disabled: agent.busy,
-            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? "esc stop \xB7 the run is streaming" : attachment ? `\u{1F4CE} ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 /menu commands \xB7 /attach image \xB7 pgup scroll \xB7 q quit",
+            disabled: false,
+            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u{1F4CE} ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 /menu commands \xB7 /attach image \xB7 pgup scroll \xB7 q quit",
             adSlot: /* @__PURE__ */ jsx24(
               DockAd,
               {
@@ -6404,7 +6416,17 @@ function App({ version = "0.1.0" }) {
               }
             )
           }
-        ) })
+        ) }),
+        showCrushStatus ? /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx24(
+          CrushStatus,
+          {
+            width: mainW,
+            phase: crushPhase,
+            activity: activeTool?.name || "",
+            elapsedMs: agent.elapsedMs,
+            queued: steerQueue.length
+          }
+        ) }) : null
       ] }),
       sideW ? /* @__PURE__ */ jsx24("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx24(LiveSidebar, { ...sidebarProps }) }) : null
     ] }),
