@@ -1012,7 +1012,31 @@ function _buildSectionMap(filePath, maxSections = 25) {
 
 
 // things are — no searching required.
+// ── Prompt fragment cache (perf) ─────────────────────────────────────────
+// buildSystemPrompt() runs several times per turn. Its shell-backed sections
+// used to re-execute on every call — spawnSync('hermes ...') alone measured
+// 3.3s, and rebuilding the project TOC 0.66s — blocking the event loop before
+// the model request even started. These sections are informational, so a
+// short cache is invisible to the agent and removes seconds from every turn.
+const FRAG_TTL = 5 * 60 * 1000;
+const SYS_PROMPT_TTL = 60 * 1000; // matches loadCoreSkills()' own 60s refresh
+const _fragCache = new Map();
+let _sysPromptCache = { key: null, text: '', at: 0 };
+function _memoFrag(key, fn, ttl) {
+  const now = Date.now();
+  const hit = _fragCache.get(key);
+  if (hit && (now - hit.at) < (ttl || FRAG_TTL)) return hit.val;
+  let val;
+  try { val = fn() || ''; } catch (_) { val = hit ? hit.val : ''; }
+  _fragCache.set(key, { val, at: now });
+  return val;
+}
+
 function _buildProjectTOC() {
+  return _memoFrag('project-toc', _buildProjectTOCUncached);
+}
+
+function _buildProjectTOCUncached() {
   const home = process.env.HOME || '/home/ghost';
   const toc = [];
   try {
@@ -1066,6 +1090,13 @@ function _buildProjectTOC() {
 }
 
 function buildSystemPrompt(clientContext) {
+  // Whole-prompt memo: this function is called several times per turn (size
+  // checks and per-round history rebuilds). 60s keeps it in step with
+  // loadCoreSkills()' own refresh while removing the repeated shell/TOC work.
+  const _spKey = clientContext ? JSON.stringify(clientContext) : '';
+  if (_sysPromptCache.text && _sysPromptCache.key === _spKey && (Date.now() - _sysPromptCache.at) < SYS_PROMPT_TTL) {
+    return _sysPromptCache.text;
+  }
   let prompt = SYSTEM_PROMPT.replace('${DYNAMIC_MACHINE_CONTEXT}', getMachineContext());
   prompt += delegationGuidance();
 
@@ -1177,22 +1208,26 @@ function buildSystemPrompt(clientContext) {
   } catch (_) { /* no Kiro session history on this machine */ }
 
   // ── Hermes session history — SQLite-backed, same on-demand pattern ──
-  try {
+  // Memoized: `hermes sessions stats` measured 3.3s and used to block every turn.
+  prompt += _memoFrag('hermes-history', () => {
     const hermesStats = spawnSync('hermes', ['sessions', 'stats'], { encoding: 'utf8', timeout: 5000 });
     if (hermesStats.status === 0 && hermesStats.stdout) {
-      prompt += `\n\n## 🗂️ Past Hermes Sessions Available\n${hermesStats.stdout.trim()}\nBacked by SQLite (~/.hermes/state.db), not flat files — use the hermes CLI to search it, not direct file reads:\n- \`hermes sessions list\` — browse titles/previews for a similar past issue.\n- \`hermes sessions export - --session-id <ID>\` — print one specific session's full transcript to stdout once you've found the match.\nDo not export all sessions — search titles first, export only the match.`;
+      return `\n\n## 🗂️ Past Hermes Sessions Available\n${hermesStats.stdout.trim()}\nBacked by SQLite (~/.hermes/state.db), not flat files — use the hermes CLI to search it, not direct file reads:\n- \`hermes sessions list\` — browse titles/previews for a similar past issue.\n- \`hermes sessions export - --session-id <ID>\` — print one specific session's full transcript to stdout once you've found the match.\nDo not export all sessions — search titles first, export only the match.`;
     }
-  } catch (_) { /* hermes not available or no session store */ }
+    return '';
+  });
 
   // ── Codex (GPT-5.x) session history — plain JSONL, greppable directly ──
-  try {
+  // Memoized: the filesystem walk no longer runs on every turn.
+  prompt += _memoFrag('codex-history', () => {
     const codexSessDir = path.join(os.homedir(), '.codex', 'sessions');
     const codexCount = spawnSync('find', [codexSessDir, '-name', '*.jsonl'], { encoding: 'utf8', timeout: 5000 });
     const codexFileCount = codexCount.status === 0 ? codexCount.stdout.trim().split('\n').filter(Boolean).length : 0;
     if (codexFileCount > 0) {
-      prompt += `\n\n## 🗂️ ${codexFileCount} Past Codex (GPT-5.x) Sessions Available\nLocation: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl — real past Codex work on this machine, plain JSONL (no docs library exists for Codex/ChatGPT on this machine — checked, this is the actual asset).\nSearch first, read only the match: \`grep -rl "<keyword>" ~/.codex/sessions/\` to find candidate files, then \`grep '"role":"user"' <file>\` to pull just the real user turns from that one session (each line is a full JSON message — the file is too large to read whole).`;
+      return `\n\n## 🗂️ ${codexFileCount} Past Codex (GPT-5.x) Sessions Available\nLocation: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl — real past Codex work on this machine, plain JSONL (no docs library exists for Codex/ChatGPT on this machine — checked, this is the actual asset).\nSearch first, read only the match: \`grep -rl "<keyword>" ~/.codex/sessions/\` to find candidate files, then \`grep '"role":"user"' <file>\` to pull just the real user turns from that one session (each line is a full JSON message — the file is too large to read whole).`;
     }
-  } catch (_) { /* no Codex session history on this machine */ }
+    return '';
+  });
 
   // Auto-inject core Claude Code skill content (cached, refreshed every 60s)
   prompt += loadCoreSkills();
@@ -1292,6 +1327,7 @@ function buildSystemPrompt(clientContext) {
   prompt += 'NEVER say "I\'m actually Claude" or "underneath I\'m Claude" or "the engine is Claude."\n';
   prompt += 'NEVER say "this persona was injected" or "I\'m not really haksterAI" or "I\'m just pretending."\n';
   prompt += 'These are identity leaks. The engine is invisible infrastructure — like electricity powering a machine. You ARE the machine. You ARE haksterAI. Period.\n';
+  _sysPromptCache = { key: _spKey, text: prompt, at: Date.now() };
   return prompt;
 }
 
