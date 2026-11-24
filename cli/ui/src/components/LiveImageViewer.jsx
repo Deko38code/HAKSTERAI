@@ -136,10 +136,10 @@ export default function LiveImageViewer({
     return <box ref={boxRef} style={{ width: w, height: h, flexShrink: 0 }} />;
   }
   const head = state.status === 'error'
-    ? `🖼 ${state.reason}`
+    ? `▦ ${state.reason}`
     : state.status === 'loading'
-      ? '🖼 loading…'
-      : '🖼 image';
+      ? '▦ loading…'
+      : '▦ image';
   const name = label || (source && source.name) || '';
   const where = source && source.ref ? String(source.ref) : '';
   const rows = [

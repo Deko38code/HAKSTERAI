@@ -4,12 +4,12 @@ const FRAMES = ['❄', '✦', '✧', '✶', '✧', '✦'];
 const SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
 const GRADIENT = [51, 87, 117, 153, 117, 87];
 const PHASES = {
-  THINK: { color: '#58a6ff', emoji: '🧠', phrases: ['Thinking through the problem…', 'Reasoning carefully…', 'Analyzing the request…', 'Connecting concepts…'] },
-  PLAN: { color: '#c084fc', emoji: '📋', phrases: ['Formulating a plan…', 'Mapping out steps…', 'Structuring the approach…'] },
+  THINK: { color: '#58a6ff', emoji: '◈', phrases: ['Thinking through the problem…', 'Reasoning carefully…', 'Analyzing the request…', 'Connecting concepts…'] },
+  PLAN: { color: '#c084fc', emoji: '≡', phrases: ['Formulating a plan…', 'Mapping out steps…', 'Structuring the approach…'] },
   ACT: { color: '#3fb950', emoji: '⚡', phrases: ['Executing command…', 'Running tool…', 'Taking action…'] },
-  OBSERVE: { color: '#39c5cf', emoji: '👁', phrases: ['Observing output…', 'Reading results…', 'Checking response…'] },
-  REFLECT: { color: '#d29922', emoji: '🪞', phrases: ['Assessing the outcome…', 'Learning from this step…'] },
-  CONSOLIDATE: { color: '#ffd700', emoji: '📦', phrases: ['Consolidating findings…', 'Compiling the answer…', 'Putting it all together…'] },
+  OBSERVE: { color: '#39c5cf', emoji: '◉', phrases: ['Observing output…', 'Reading results…', 'Checking response…'] },
+  REFLECT: { color: '#d29922', emoji: '⊙', phrases: ['Assessing the outcome…', 'Learning from this step…'] },
+  CONSOLIDATE: { color: '#ffd700', emoji: '▣', phrases: ['Consolidating findings…', 'Compiling the answer…', 'Putting it all together…'] },
   DEFAULT: { color: '#58a6ff', emoji: '◇', phrases: ['Working on it…', 'Processing…', 'Hold tight…'] },
 };
 
@@ -52,7 +52,7 @@ export default function CrushStatus({ width, phase, activity, elapsedMs, queued 
         {/* The steer queue is part of the run's state, so it is stated on the
             run's own line — a queued message is never invisible. */}
         {Number(queued) > 0 ? (
-          <span fg="#d29922">{`  ⏳ ${Number(queued)} queued`}</span>
+          <span fg="#d29922">{`  ◌ ${Number(queued)} queued`}</span>
         ) : null}
       </text>
     </box>

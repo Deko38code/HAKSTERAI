@@ -71,7 +71,7 @@ export default function McpView({
   return (
     <box style={{ width: w, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'blue', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
       <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
-        <text fg="blue" attributes={TextAttributes.BOLD}>{'⬡ MCP servers'}</text>
+        <text fg="blue" attributes={TextAttributes.BOLD}>{'◎ MCP servers'}</text>
         <text fg="gray">
           {clip(`${live}/${servers.length} live · ${tools} tools${servers.length > listRows ? ` · ${start}↑ ${Math.max(0, servers.length - start - shown.length)}↓` : ''}`, inner - 14)}
         </text>

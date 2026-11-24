@@ -78,7 +78,7 @@ export const EVENT_GLYPH = {
   start: '⚙',
   ok: '✓',
   err: '✗',
-  mcp: '⬡',
+  mcp: '◎',
   done: '●',
   handoff: '⇄',
   confirm: '⚠',
@@ -215,7 +215,7 @@ export default function LiveSidebar({
   const liveRows = showUsage ? 1 : Math.min(2, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
   if (showUsage) left -= 10; // ◔ Usage: 3 + 7 rows
-  // 🧠 Memory: 3 + 5 rows. It is the newest panel and the least time-critical,
+  // ◈ Memory: 3 + 5 rows. It is the newest panel and the least time-critical,
   // so it only appears where the taller layout leaves room for the feed, the
   // output tail and at least a couple of MCP rows beside it.
   const showMemory = left >= 26;
@@ -229,7 +229,7 @@ export default function LiveSidebar({
   // ▶ Output is now budgeted BEFORE ⚡ Activity (owner, 2026-11-24: "the live
   // panel can be reduced in size for output panel to be bigger"), so a row
   // freed anywhere above lands in the output tail instead of the event list.
-  // It still leaves ACT_MIN rows for the feed and one server row for ⬡ MCP
+  // It still leaves ACT_MIN rows for the feed and one server row for ◎ MCP
   // where the terminal can hold them; when it cannot, output takes its want
   // and the feed takes what is left (a feed that is showing events beats a
   // server list that is showing none, and neither may leave a blank strip).
@@ -239,11 +239,11 @@ export default function LiveSidebar({
   if (outputRows) left -= outputRows + 4;
   // ⚡ Activity: its max, capped above the server list's minimum so the two
   // coexist where the terminal can hold them; on a short screen the feed waits
-  // and ⬡ MCP keeps its rows, exactly as before this change.
+  // and ◎ MCP keeps its rows, exactly as before this change.
   const actCap = left - 3 - MCP_MIN;
   const activityRows = feed && actCap >= ACT_MIN ? Math.min(activityMax, actCap) : 0;
   if (activityRows) left -= activityRows + 3;
-  // ⬡ MCP: whatever is left. One row is reserved for the "+N" line when the
+  // ◎ MCP: whatever is left. One row is reserved for the "+N" line when the
   // list is longer than the space, so the panel cannot grow by one.
   const maxServers = Math.max(0, left - 4);
 
@@ -287,7 +287,7 @@ export default function LiveSidebar({
     : '';
   const liveHint = [serverOk ? '' : 'offline', liveRows < 2 ? updateMark : ''].filter(Boolean).join(' ');
 
-  // ⬡ MCP window: the allocator's rows, one of which becomes the "more" row
+  // ◎ MCP window: the allocator's rows, one of which becomes the "more" row
   // whenever the list is longer than the space.
   const mcpCapacity = maxServers + 1; // list rows + the "more" row the allocator reserved
   const mcpOverflow = ordered.length > mcpCapacity;
@@ -419,12 +419,12 @@ export default function LiveSidebar({
           />
         </Panel>
       ) : null}
-      {/* 🧠 Memory — the banks the server's autolearn writes and the next run
+      {/* ◈ Memory — the banks the server's autolearn writes and the next run
           recalls (pullMemoryBanks reads the same files), counted here so the
           session can see what it is starting from. Counts, slugs and tag
           clusters only; no observation text ever leaves the bank file. */}
       {showMemory ? (
-        <Panel width={width} title="🧠 Memory" hint={memory ? `${memory.total} entries` : '…'}>
+        <Panel width={width} title="◈ Memory" hint={memory ? `${memory.total} entries` : '…'}>
           {!memory ? (
             <box style={{ width: inner }}>
               <text fg="gray">{clip('—', inner)}</text>
@@ -548,7 +548,7 @@ export default function LiveSidebar({
         </Panel>
       ) : null}
       {maxServers > 0 ? (
-        <Panel width={width} title="⬡ MCP servers" hint={servers.length ? `${live}/${servers.length}` : '…'}>
+        <Panel width={width} title="◎ MCP servers" hint={servers.length ? `${live}/${servers.length}` : '…'}>
           {shownServers.map((s, i) => {
             const up = !!s.initialized || (s.toolCount || 0) > 0;
             const lazy = !!s.lazy && !up;

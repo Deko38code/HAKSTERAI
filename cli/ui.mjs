@@ -1034,7 +1034,7 @@ function ModelDialog({
     ] }),
     needsAPIKey ? /* @__PURE__ */ jsxs4(Fragment, { children: [
       /* @__PURE__ */ jsx4(Box4, { marginTop: 1, children: /* @__PURE__ */ jsxs4(Text4, { color: "yellow", bold: true, children: [
-        "\u{1F511} ",
+        "\u2318 ",
         selected?.providerName,
         " API key"
       ] }) }),
@@ -1084,7 +1084,7 @@ function ModelDialog({
               r.option.name.padEnd(26).slice(0, 26)
             ] }),
             r.option.model === currentModel ? /* @__PURE__ */ jsx4(Text4, { color: "cyan", bold: true, children: " \u2713" }) : null,
-            r.option.needsKey ? /* @__PURE__ */ jsx4(Text4, { color: "yellow", dim: true, children: " \u{1F511}" }) : null
+            r.option.needsKey ? /* @__PURE__ */ jsx4(Text4, { color: "yellow", dim: true, children: " \u2318" }) : null
           ] }, r.key)
         ) }),
         showScrollbar && /* @__PURE__ */ jsx4(Box4, { flexDirection: "column", marginLeft: 1, children: Array.from({ length: VISIBLE_ROWS }).map((_, i) => /* @__PURE__ */ jsx4(Text4, { color: i >= thumbStart && i < thumbStart + thumbSize ? "cyan" : "gray", dim: !(i >= thumbStart && i < thumbStart + thumbSize), children: i >= thumbStart && i < thumbStart + thumbSize ? "\u2588" : "\u2502" }, i)) })
@@ -1233,7 +1233,7 @@ var RISK_CONFIG = {
   low: { color: "green", icon: "\u2713", label: "LOW" },
   medium: { color: "yellow", icon: "\u26A0", label: "MEDIUM" },
   high: { color: "red", icon: "\u26A0", label: "HIGH" },
-  critical: { color: "red", icon: "\u{1F511}", label: "SUDO" }
+  critical: { color: "red", icon: "\u2318", label: "SUDO" }
 };
 function ApprovalPrompt({
   command = "",
@@ -1297,7 +1297,7 @@ function ApprovalPrompt({
       /* @__PURE__ */ jsx6(Text6, { color: "gray", dim: true, children: "[ Esc = deny ]" })
     ] }),
     /* @__PURE__ */ jsx6(Box6, { marginTop: 0, children: /* @__PURE__ */ jsxs6(Text6, { color: "white", children: [
-      sudo ? "\u{1F511} SUDO " : "\u26A0 ",
+      sudo ? "\u2318 SUDO " : "\u26A0 ",
       displayReason
     ] }) }),
     command && /* @__PURE__ */ jsx6(Box6, { marginTop: 0, children: /* @__PURE__ */ jsxs6(Text6, { color: "gray", children: [
@@ -1464,7 +1464,7 @@ function PlanDisplay({ plan = null, cols = 80 }) {
       borderColor: "blue",
       paddingX: 1,
       children: [
-        /* @__PURE__ */ jsx8(Text8, { color: "blue", bold: true, underline: true, children: "\u{1F4CB} Plan" }),
+        /* @__PURE__ */ jsx8(Text8, { color: "blue", bold: true, underline: true, children: "\u2261 Plan" }),
         goal && /* @__PURE__ */ jsxs8(Text8, { color: "white", children: [
           "Goal: ",
           /* @__PURE__ */ jsx8(Text8, { color: "cyan", children: goal })
@@ -1534,7 +1534,7 @@ function QueueBox({ items = [], cols = 80 }) {
   return /* @__PURE__ */ jsxs10(Box10, { flexDirection: "column", borderStyle: "single", borderColor: "cyan", paddingX: 1, width: cols, children: [
     /* @__PURE__ */ jsxs10(Box10, { justifyContent: "space-between", children: [
       /* @__PURE__ */ jsxs10(Text10, { color: "cyan", bold: true, children: [
-        "\u23F3 Queued messages (",
+        "\u25CC Queued messages (",
         list.length,
         ")"
       ] }),
@@ -1648,12 +1648,12 @@ function ThinkingBox({ thinking = "", phase = "", cols = 80, theme }) {
   }, [active]);
   const normalizedPhase = thinking && ["IDLE", "DONE"].includes(rawPhase) ? "THINK" : rawPhase;
   const phases = {
-    THINK: { color: "#58a6ff", emoji: "🧠", phrases: ["Thinking through the problem…", "Reasoning carefully…", "Analyzing the request…", "Connecting concepts…"] },
-    PLAN: { color: "#c084fc", emoji: "📋", phrases: ["Formulating a plan…", "Mapping out steps…", "Structuring the approach…"] },
+    THINK: { color: "#58a6ff", emoji: "◈", phrases: ["Thinking through the problem…", "Reasoning carefully…", "Analyzing the request…", "Connecting concepts…"] },
+    PLAN: { color: "#c084fc", emoji: "≡", phrases: ["Formulating a plan…", "Mapping out steps…", "Structuring the approach…"] },
     ACT: { color: "#3fb950", emoji: "⚡", phrases: ["Executing command…", "Running tool…", "Taking action…"] },
-    OBSERVE: { color: "#39c5cf", emoji: "👁", phrases: ["Observing output…", "Reading results…", "Checking response…"] },
-    REFLECT: { color: "#d29922", emoji: "🪞", phrases: ["Assessing the outcome…", "Learning from this step…"] },
-    CONSOLIDATE: { color: "#ffd700", emoji: "📦", phrases: ["Consolidating findings…", "Compiling the answer…", "Putting it all together…"] },
+    OBSERVE: { color: "#39c5cf", emoji: "◉", phrases: ["Observing output…", "Reading results…", "Checking response…"] },
+    REFLECT: { color: "#d29922", emoji: "⊙", phrases: ["Assessing the outcome…", "Learning from this step…"] },
+    CONSOLIDATE: { color: "#ffd700", emoji: "▣", phrases: ["Consolidating findings…", "Compiling the answer…", "Putting it all together…"] },
     DEFAULT: { color: "#58a6ff", emoji: "◇", phrases: ["Working on it…", "Processing…", "Hold tight…"] },
   };
   const info = phases[normalizedPhase] || phases.DEFAULT;
@@ -1706,9 +1706,9 @@ function SystemPanel({ meters, services, scanOk, cols = 80 }) {
   // node the row can only be one line: it truncates, it never wraps.
   return /* @__PURE__ */ jsxs13(Box12, { flexDirection: "column", width: cols, paddingX: 1, flexShrink: 0, children: [
     narrow
-      ? /* @__PURE__ */ jsx12(Text13, { key: "narrow", wrap: "truncate", children: `🧠 ${score}% ${arrow} ${smartLabel(score)}   ✦ ${points}p autolearn` })
+      ? /* @__PURE__ */ jsx12(Text13, { key: "narrow", wrap: "truncate", children: `◈ ${score}% ${arrow} ${smartLabel(score)}   ✦ ${points}p autolearn` })
       : /* @__PURE__ */ jsxs13(Text13, { key: "bars", wrap: "truncate", children: [
-      /* @__PURE__ */ jsx12(Text13, { key: "b1", color: barColor("smart", score), bold: true, children: "🧠 " }),
+      /* @__PURE__ */ jsx12(Text13, { key: "b1", color: barColor("smart", score), bold: true, children: "◈ " }),
       /* @__PURE__ */ jsx12(Text13, { key: "b2", color: barColor("smart", score), children: "█".repeat(sc.filled) }),
       /* @__PURE__ */ jsx12(Text13, { key: "b3", color: "gray", dim: true, children: "░".repeat(sc.empty) }),
       /* @__PURE__ */ jsx12(Text13, { key: "b4", bold: true, children: ` ${score}% ` }),
@@ -1759,7 +1759,7 @@ function InputBox({
   // overflow by the ellipsis, adding an empty row that blows the box budget.
   // One computed string always fits innerW = cols - 4 (border + paddingX).
   const hintFull = "\u21B5 send  \u21E7\u21B5 newline  \u2303U clear  \u2303W del-word  /commands  ?help";
-  const hintRight = disabled ? "\u23F8 busy" : "\u25CF ready";
+  const hintRight = disabled ? "\u2016 busy" : "\u25CF ready";
   const hintRoom = Math.max(4, cols - 4 - hintRight.length - 2);
   const hintLeft = hintFull.length <= hintRoom ? hintFull.padEnd(hintRoom) : hintFull.slice(0, Math.max(0, hintRoom - 1)) + "\u2026";
   const hintLine = hintLeft + " " + hintRight;
@@ -1779,7 +1779,7 @@ function InputBox({
         /* @__PURE__ */ jsx13(ThinkingBox, { thinking, phase, cols, theme }),
         queueCount > 0 && /* @__PURE__ */ jsxs14(Box13, { justifyContent: "space-between", children: [
           /* @__PURE__ */ jsxs14(Text14, { color: "cyan", bold: true, children: [
-            "\u{1F4E8} ",
+            "\u2709 ",
             queueCount,
             " message",
             queueCount > 1 ? "s" : "",
@@ -1815,7 +1815,7 @@ function MessageGrid({ messages = [], cols = 80, theme }) {
     const isAssistant = msg.role === "assistant" || msg.role === "model";
     const isTool = msg.role === "tool" || msg.role === "system";
     const isThinking = msg.role === "thinking";
-    const roleLabel = isUser ? "\u{1F464} YOU" : isAssistant ? "\u{1F916} AI" : isTool ? "\u{1F527} TOOL" : isThinking ? "\u{1F9E0} THINK" : "\u25C6";
+    const roleLabel = isUser ? "\u25AA YOU" : isAssistant ? "\u25C6 AI" : isTool ? "\u2699 TOOL" : isThinking ? "\u25C8 THINK" : "\u25C6";
     const roleColor = isUser ? theme?.primary || "green" : isAssistant ? theme?.secondary || "cyan" : isThinking ? "yellow" : "gray";
     const cardBorder = isUser ? theme?.primary || "green" : isThinking ? "yellow" : theme?.secondary || "cyan";
     let content = msg.content || msg.text || "";
@@ -2250,19 +2250,19 @@ function App() {
         isSudo,
         onApprove: (pw) => {
           agent_default.respondApproval(toolCallId, true, false, false, pw || "");
-          setOutput((p) => [...p, { type: "system", text: `\u2705 Approved${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
+          setOutput((p) => [...p, { type: "system", text: `\u2713 Approved${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
         },
         onApproveSession: (pw) => {
           agent_default.respondApproval(toolCallId, true, false, true, pw || "");
-          setOutput((p) => [...p, { type: "system", text: `\u2705 Approved for session${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
+          setOutput((p) => [...p, { type: "system", text: `\u2713 Approved for session${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
         },
         onAllowlist: (pw) => {
           agent_default.respondApproval(toolCallId, true, true, false, pw || "");
-          setOutput((p) => [...p, { type: "system", text: `\u2705 Approved & allowlisted${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
+          setOutput((p) => [...p, { type: "system", text: `\u2713 Approved & allowlisted${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
         },
         onDeny: (pw) => {
           agent_default.respondApproval(toolCallId, false, false, false, pw || "");
-          setOutput((p) => [...p, { type: "system", text: `\u{1F6AB} Denied${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
+          setOutput((p) => [...p, { type: "system", text: `\u2717 Denied${isSudo ? " sudo" : ""}: ${command}` }].slice(-MAX_OUTPUT));
         }
       });
     });

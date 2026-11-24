@@ -256,7 +256,7 @@ export default function MessageBlock({ message, width, compact = false, live = f
         <text fg={border} attributes={TextAttributes.BOLD}>{roleStyle.label}</text>
       )}
       {message.images ? (
-        <text fg="gray">{`📎 ${message.imageName || `${message.images} image`}`}</text>
+        <text fg="gray">{`⊸ ${message.imageName || `${message.images} image`}`}</text>
       ) : null}
       {rounds.length ? (
         rounds.map((round, i) => {

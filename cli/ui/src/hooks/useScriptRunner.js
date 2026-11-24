@@ -79,7 +79,7 @@ export function useScriptRunner() {
     timerRef.current = setTimeout(() => {
       if (seq.current !== id) return;
       try { child.kill('SIGTERM'); } catch { /* already gone */ }
-      push(`⏱ stopped after ${Math.round(TIMEOUT_MS / 1000)}s (the runner's cap)`);
+      push(`◔ stopped after ${Math.round(TIMEOUT_MS / 1000)}s (the runner's cap)`);
     }, TIMEOUT_MS);
 
     child.on('error', (e) => {

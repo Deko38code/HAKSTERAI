@@ -58,14 +58,14 @@ export default function SystemPanel({ width = 100, meters = null, ctxUsed = 0, c
   const ptsSeg = ` ${points}p${ptsArrow} ${ptsPct}% autolearn   `;
   const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + ptsSeg.length + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
   const hostShort = cpuPct == null && memPct == null ? '' : `  cpu ${cpuPct == null ? '—' : `${cpuPct}%`} ram ${memPct == null ? '—' : `${memPct}%`}`;
-  const compact = `🧠 ${score}% ${arrow} ${smartLabel(score)}  ✦ ${points}p${ptsArrow} ${ptsPct}% autolearn  ctx ${ctxPct}%${hostShort}`;
-  const terse = `🧠 ${score}% ✦ ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
+  const compact = `◈ ${score}% ${arrow} ${smartLabel(score)}  ✦ ${points}p${ptsArrow} ${ptsPct}% autolearn  ctx ${ctxPct}%${hostShort}`;
+  const terse = `◈ ${score}% ✦ ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
 
   if (fullLen <= w) {
     return (
       <box style={{ width: w, flexDirection: 'column', flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
         <text>
-          <span fg={barColor('smart', score)} attributes={TextAttributes.BOLD}>{'🧠 '}</span>
+          <span fg={barColor('smart', score)} attributes={TextAttributes.BOLD}>{'◈ '}</span>
           <span fg={barColor('smart', score)}>{'█'.repeat(sc.filled)}</span>
           <span fg="gray">{'░'.repeat(sc.empty)}</span>
           <span fg="white" attributes={TextAttributes.BOLD}>{` ${score}% `}</span>

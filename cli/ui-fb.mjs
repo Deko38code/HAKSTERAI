@@ -2104,7 +2104,7 @@ function LiveImageViewer({
   if (ready) {
     return /* @__PURE__ */ jsx6("box", { ref: boxRef, style: { width: w, height: h, flexShrink: 0 } });
   }
-  const head = state.status === "error" ? `\u{1F5BC} ${state.reason}` : state.status === "loading" ? "\u{1F5BC} loading\u2026" : "\u{1F5BC} image";
+  const head = state.status === "error" ? `\u25A6 ${state.reason}` : state.status === "loading" ? "\u25A6 loading\u2026" : "\u25A6 image";
   const name = label || source && source.name || "";
   const where = source && source.ref ? String(source.ref) : "";
   const rows = [
@@ -2165,7 +2165,7 @@ var EVENT_GLYPH = {
   start: "\u2699",
   ok: "\u2713",
   err: "\u2717",
-  mcp: "\u2B21",
+  mcp: "\u25CE",
   done: "\u25CF",
   handoff: "\u21C4",
   confirm: "\u26A0",
@@ -2371,7 +2371,7 @@ function LiveSidebar({
         }
       )
     ] }) : null,
-    showMemory ? /* @__PURE__ */ jsx7(Panel, { width, title: "\u{1F9E0} Memory", hint: memory ? `${memory.total} entries` : "\u2026", children: !memory ? /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip("\u2014", inner) }) }) : memory.banks.length === 0 ? /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip("empty", inner) }) }) : /* @__PURE__ */ jsxs7(Fragment3, { children: [
+    showMemory ? /* @__PURE__ */ jsx7(Panel, { width, title: "\u25C8 Memory", hint: memory ? `${memory.total} entries` : "\u2026", children: !memory ? /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip("\u2014", inner) }) }) : memory.banks.length === 0 ? /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip("empty", inner) }) }) : /* @__PURE__ */ jsxs7(Fragment3, { children: [
       (memory.banks.length > 4 ? memory.banks.slice(0, 4) : memory.banks).map((b) => /* @__PURE__ */ jsx7(
         Row,
         {
@@ -2438,7 +2438,7 @@ function LiveSidebar({
         })
       )
     ] }) : null,
-    maxServers > 0 ? /* @__PURE__ */ jsxs7(Panel, { width, title: "\u2B21 MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
+    maxServers > 0 ? /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25CE MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
       shownServers.map((s, i) => {
         const up = !!s.initialized || (s.toolCount || 0) > 0;
         const lazy = !!s.lazy && !up;
@@ -3421,7 +3421,7 @@ function McpView({
   const toolLines = active ? wrap(Array.isArray(active.tools) && active.tools.length ? active.tools : ["(no tools listed)"], inner - 2) : [];
   return /* @__PURE__ */ jsxs15("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "blue", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx16("text", { fg: "blue", attributes: TextAttributes11.BOLD, children: "\u2B21 MCP servers" }),
+      /* @__PURE__ */ jsx16("text", { fg: "blue", attributes: TextAttributes11.BOLD, children: "\u25CE MCP servers" }),
       /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4(`${live}/${servers.length} live \xB7 ${tools} tools${servers.length > listRows ? ` \xB7 ${start2}\u2191 ${Math.max(0, servers.length - start2 - shown.length)}\u2193` : ""}`, inner - 14) })
     ] }),
     /* @__PURE__ */ jsx16("box", { style: { width: inner, flexDirection: "column" }, children: shown.length === 0 ? /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4("no servers reported \u2014 is the server reachable?", inner) }) : shown.map((s, i) => {
@@ -3747,7 +3747,7 @@ function SquadView({
       ScrollPanel_default,
       {
         width: w,
-        title: `\u26E8 Squad \xB7 ${up}/${peers.length} live${lazy ? ` \xB7 ${lazy} lazy` : ""}`,
+        title: `\u235F Squad \xB7 ${up}/${peers.length} live${lazy ? ` \xB7 ${lazy} lazy` : ""}`,
         hint: "\u2191\u2193 select \xB7 enter delegate \xB7 esc back",
         total: peers.length,
         rows: listRows,
@@ -4137,11 +4137,11 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   const ptsSeg = ` ${points}p${ptsArrow} ${ptsPct}% autolearn   `;
   const fullLen = 3 + 12 + 13 + 3 + 2 + 10 + ptsSeg.length + 3 + 4 + 8 + 7 + (hostTxt ? hostTxt.length + 3 : 0);
   const hostShort = cpuPct == null && memPct == null ? "" : `  cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`} ram ${memPct == null ? "\u2014" : `${memPct}%`}`;
-  const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p${ptsArrow} ${ptsPct}% autolearn  ctx ${ctxPct}%${hostShort}`;
-  const terse = `\u{1F9E0} ${score}% \u2726 ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
+  const compact = `\u25C8 ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p${ptsArrow} ${ptsPct}% autolearn  ctx ${ctxPct}%${hostShort}`;
+  const terse = `\u25C8 ${score}% \u2726 ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
   if (fullLen <= w) {
     return /* @__PURE__ */ jsx20("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs19("text", { children: [
-      /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), attributes: TextAttributes15.BOLD, children: "\u{1F9E0} " }),
+      /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), attributes: TextAttributes15.BOLD, children: "\u25C8 " }),
       /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), children: "\u2588".repeat(sc.filled) }),
       /* @__PURE__ */ jsx20("span", { fg: "gray", children: "\u2591".repeat(sc.empty) }),
       /* @__PURE__ */ jsx20("span", { fg: "white", attributes: TextAttributes15.BOLD, children: ` ${score}% ` }),
@@ -4313,12 +4313,12 @@ var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
 var GRADIENT = [51, 87, 117, 153, 117, 87];
 var PHASES = {
-  THINK: { color: "#58a6ff", emoji: "\u{1F9E0}", phrases: ["Thinking through the problem\u2026", "Reasoning carefully\u2026", "Analyzing the request\u2026", "Connecting concepts\u2026"] },
-  PLAN: { color: "#c084fc", emoji: "\u{1F4CB}", phrases: ["Formulating a plan\u2026", "Mapping out steps\u2026", "Structuring the approach\u2026"] },
+  THINK: { color: "#58a6ff", emoji: "\u25C8", phrases: ["Thinking through the problem\u2026", "Reasoning carefully\u2026", "Analyzing the request\u2026", "Connecting concepts\u2026"] },
+  PLAN: { color: "#c084fc", emoji: "\u2261", phrases: ["Formulating a plan\u2026", "Mapping out steps\u2026", "Structuring the approach\u2026"] },
   ACT: { color: "#3fb950", emoji: "\u26A1", phrases: ["Executing command\u2026", "Running tool\u2026", "Taking action\u2026"] },
-  OBSERVE: { color: "#39c5cf", emoji: "\u{1F441}", phrases: ["Observing output\u2026", "Reading results\u2026", "Checking response\u2026"] },
-  REFLECT: { color: "#d29922", emoji: "\u{1FA9E}", phrases: ["Assessing the outcome\u2026", "Learning from this step\u2026"] },
-  CONSOLIDATE: { color: "#ffd700", emoji: "\u{1F4E6}", phrases: ["Consolidating findings\u2026", "Compiling the answer\u2026", "Putting it all together\u2026"] },
+  OBSERVE: { color: "#39c5cf", emoji: "\u25C9", phrases: ["Observing output\u2026", "Reading results\u2026", "Checking response\u2026"] },
+  REFLECT: { color: "#d29922", emoji: "\u2299", phrases: ["Assessing the outcome\u2026", "Learning from this step\u2026"] },
+  CONSOLIDATE: { color: "#ffd700", emoji: "\u25A3", phrases: ["Consolidating findings\u2026", "Compiling the answer\u2026", "Putting it all together\u2026"] },
   DEFAULT: { color: "#58a6ff", emoji: "\u25C7", phrases: ["Working on it\u2026", "Processing\u2026", "Hold tight\u2026"] }
 };
 function formatElapsed2(ms) {
@@ -4352,7 +4352,7 @@ function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
     /* @__PURE__ */ jsx23("span", { fg: gradColor, children: shimmer }),
     " ",
     /* @__PURE__ */ jsx23("span", { fg: "gray", children: formatElapsed2(elapsedMs) }),
-    Number(queued) > 0 ? /* @__PURE__ */ jsx23("span", { fg: "#d29922", children: `  \u23F3 ${Number(queued)} queued` }) : null
+    Number(queued) > 0 ? /* @__PURE__ */ jsx23("span", { fg: "#d29922", children: `  \u25CC ${Number(queued)} queued` }) : null
   ] }) });
 }
 
@@ -4520,7 +4520,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   );
   return /* @__PURE__ */ jsxs24("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
     compact ? null : /* @__PURE__ */ jsx25("text", { fg: border, attributes: TextAttributes19.BOLD, children: roleStyle.label }),
-    message.images ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: `\u{1F4CE} ${message.imageName || `${message.images} image`}` }) : null,
+    message.images ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: `\u22B8 ${message.imageName || `${message.images} image`}` }) : null,
     rounds.length ? rounds.map((round, i) => {
       const tail = live && i === rounds.length - 1;
       const roundTools = Array.isArray(round.tools) ? round.tools : [];
@@ -5635,7 +5635,7 @@ function useScriptRunner() {
         child.kill("SIGTERM");
       } catch {
       }
-      push(`\u23F1 stopped after ${Math.round(TIMEOUT_MS / 1e3)}s (the runner's cap)`);
+      push(`\u25D4 stopped after ${Math.round(TIMEOUT_MS / 1e3)}s (the runner's cap)`);
     }, TIMEOUT_MS);
     child.on("error", (e) => {
       if (seq2.current !== id) return;
@@ -6095,7 +6095,7 @@ function App({ version = "0.1.0" }) {
         try {
           const next = readImageAttachment(arg);
           setAttachment(next);
-          showNotice(`\u{1F4CE} ${next.name} \xB7 ${Math.round(next.bytes / 1024)}K \u2014 enter sends it with your message`);
+          showNotice(`\u22B8 ${next.name} \xB7 ${Math.round(next.bytes / 1024)}K \u2014 enter sends it with your message`);
         } catch (e) {
           showNotice(`attach failed: ${e && e.message || "could not read the file"}`);
         }
@@ -6332,7 +6332,7 @@ function App({ version = "0.1.0" }) {
         };
         if (att) {
           setSteerQueue((q) => [...q, queued]);
-          showNotice(`\u23F3 steer queued (${steerQueue.length + 1}) \u2014 an attachment sends when this run ends`);
+          showNotice(`\u25CC steer queued (${steerQueue.length + 1}) \u2014 an attachment sends when this run ends`);
           return;
         }
         Promise.resolve(agent.steer(v)).then((delivered) => {
@@ -6341,7 +6341,7 @@ function App({ version = "0.1.0" }) {
             return;
           }
           setSteerQueue((q) => [...q, queued]);
-          showNotice(`\u23F3 steer queued (${steerQueue.length + 1}) \u2014 sends when this run ends`);
+          showNotice(`\u25CC steer queued (${steerQueue.length + 1}) \u2014 sends when this run ends`);
         });
         return;
       }
@@ -6556,7 +6556,7 @@ function App({ version = "0.1.0" }) {
       }
       if (key.name === "r") {
         mcpRefreshRef.current && mcpRefreshRef.current();
-        showNotice("\u2B21 MCP \u2014 re-reading /api/agent/mcp-status");
+        showNotice("\u25CE MCP \u2014 re-reading /api/agent/mcp-status");
         return;
       }
       return;
@@ -6594,7 +6594,7 @@ function App({ version = "0.1.0" }) {
             setDraft(`Delegate this to the ${peer.name} sub-agent${tool ? ` (mcp__${peer.name}__${tool})` : ""}: `);
             setView("chat");
             setFocus("composer");
-            showNotice(`\u26E8 ${peer.name} \u2014 delegation placed on the composer`);
+            showNotice(`\u235F ${peer.name} \u2014 delegation placed on the composer`);
           }
         }
         return;
@@ -6666,7 +6666,7 @@ function App({ version = "0.1.0" }) {
       const want = !expandThinking;
       setExpandThinking(want);
       writePrefs({ thinkingExpanded: want });
-      showNotice(want ? '\u{1F9E0} reasoning expanded \u2014 Ctrl+T folds it to "Thought for \u2026"' : "\u{1F9E0} reasoning folded \u2014 Ctrl+T expands it");
+      showNotice(want ? '\u25C8 reasoning expanded \u2014 Ctrl+T folds it to "Thought for \u2026"' : "\u25C8 reasoning folded \u2014 Ctrl+T expands it");
       return;
     }
     if (key.ctrl || key.meta) return;
@@ -6757,7 +6757,7 @@ function App({ version = "0.1.0" }) {
   const mkMeter = (parts) => ({ text: parts.map((x) => x.t).join(""), parts });
   const headerMeterVariants = [
     mkMeter([
-      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
+      { t: "\u25C8 ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -6768,7 +6768,7 @@ function App({ version = "0.1.0" }) {
       { t: `  ram ${meterRam}`, fg: meterFg.ram }
     ]),
     mkMeter([
-      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
+      { t: "\u25C8 ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -6778,7 +6778,7 @@ function App({ version = "0.1.0" }) {
       { t: `  ram ${meterRam}`, fg: meterFg.ram }
     ]),
     mkMeter([
-      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
+      { t: "\u25C8 ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -7261,7 +7261,7 @@ function App({ version = "0.1.0" }) {
             onSubmit: submit,
             focused: focus === "composer" && !approving,
             disabled: false,
-            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u{1F4CE} ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 \u2191 history \xB7 /menu commands \xB7 /attach \xB7 pgup scroll \xB7 q quit",
+            hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u22B8 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 \u2191 history \xB7 /menu commands \xB7 /attach \xB7 pgup scroll \xB7 q quit",
             adSlot: /* @__PURE__ */ jsx27(
               DockAd,
               {

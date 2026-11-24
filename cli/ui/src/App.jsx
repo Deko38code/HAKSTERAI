@@ -457,7 +457,7 @@ export default function App({ version = '0.1.0' }) {
     : null;
   // This machine's own vitals — cpu, ram, swap, disk, load — sampled in-process.
   const host = useHostStats(5000);
-  // 🧠 Memory: the same banks autolearn writes and the next run recalls,
+  // ◈ Memory: the same banks autolearn writes and the next run recalls,
   // counted from disk every 10 s (see useMemoryBank — counts only, no text).
   const memory = useMemoryBank(10000);
   // ⬆ Update: the Claude Code model — check in the background while this
@@ -614,7 +614,7 @@ export default function App({ version = '0.1.0' }) {
         try {
           const next = readImageAttachment(arg);
           setAttachment(next);
-          showNotice(`📎 ${next.name} · ${Math.round(next.bytes / 1024)}K — enter sends it with your message`);
+          showNotice(`⊸ ${next.name} · ${Math.round(next.bytes / 1024)}K — enter sends it with your message`);
         } catch (e) {
           showNotice(`attach failed: ${(e && e.message) || 'could not read the file'}`);
         }
@@ -906,7 +906,7 @@ export default function App({ version = '0.1.0' }) {
         };
         if (att) {
           setSteerQueue((q) => [...q, queued]);
-          showNotice(`⏳ steer queued (${steerQueue.length + 1}) — an attachment sends when this run ends`);
+          showNotice(`◌ steer queued (${steerQueue.length + 1}) — an attachment sends when this run ends`);
           return;
         }
         Promise.resolve(agent.steer(v)).then((delivered) => {
@@ -915,7 +915,7 @@ export default function App({ version = '0.1.0' }) {
             return;
           }
           setSteerQueue((q) => [...q, queued]);
-          showNotice(`⏳ steer queued (${steerQueue.length + 1}) — sends when this run ends`);
+          showNotice(`◌ steer queued (${steerQueue.length + 1}) — sends when this run ends`);
         });
         return;
       }
@@ -1141,7 +1141,7 @@ export default function App({ version = '0.1.0' }) {
       if (key.name === 'down') { setMcpIdx((i) => (i + 1) % n); return; }
       if (key.name === 'r') {
         mcpRefreshRef.current && mcpRefreshRef.current();
-        showNotice('⬡ MCP — re-reading /api/agent/mcp-status');
+        showNotice('◎ MCP — re-reading /api/agent/mcp-status');
         return;
       }
       return;
@@ -1173,7 +1173,7 @@ export default function App({ version = '0.1.0' }) {
             setDraft(`Delegate this to the ${peer.name} sub-agent${tool ? ` (mcp__${peer.name}__${tool})` : ''}: `);
             setView('chat');
             setFocus('composer');
-            showNotice(`⛨ ${peer.name} — delegation placed on the composer`);
+            showNotice(`⍟ ${peer.name} — delegation placed on the composer`);
           }
         }
         return;
@@ -1268,8 +1268,8 @@ export default function App({ version = '0.1.0' }) {
       setExpandThinking(want);
       writePrefs({ thinkingExpanded: want });
       showNotice(want
-        ? '🧠 reasoning expanded — Ctrl+T folds it to "Thought for …"'
-        : '🧠 reasoning folded — Ctrl+T expands it');
+        ? '◈ reasoning expanded — Ctrl+T folds it to "Thought for …"'
+        : '◈ reasoning folded — Ctrl+T expands it');
       return;
     }
 
@@ -1390,7 +1390,7 @@ export default function App({ version = '0.1.0' }) {
   const mkMeter = (parts) => ({ text: parts.map((x) => x.t).join(''), parts });
   const headerMeterVariants = [
     mkMeter([
-      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
+      { t: '\u25C8 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -1401,7 +1401,7 @@ export default function App({ version = '0.1.0' }) {
       { t: `  ram ${meterRam}`, fg: meterFg.ram },
     ]),
     mkMeter([
-      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
+      { t: '\u25C8 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -1411,7 +1411,7 @@ export default function App({ version = '0.1.0' }) {
       { t: `  ram ${meterRam}`, fg: meterFg.ram },
     ]),
     mkMeter([
-      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
+      { t: '\u25C8 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
       { t: meterArrowCh, fg: meterArrowFg },
       { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
@@ -2093,7 +2093,7 @@ export default function App({ version = '0.1.0' }) {
                       : agent.busy
                         ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ''} · it sends when this run ends · esc stop`
                         : attachment
-                          ? `📎 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K · enter sends it · /attach clear`
+                          ? `⊸ ${attachment.name} ${Math.round(attachment.bytes / 1024)}K · enter sends it · /attach clear`
                           : 'enter send · ↑ history · /menu commands · /attach · pgup scroll · q quit'
                   }
                   adSlot={

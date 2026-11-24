@@ -41,7 +41,7 @@ export default function SquadView({
     <box style={{ width: w, height: h, flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
       <ScrollPanel
         width={w}
-        title={`⛨ Squad · ${up}/${peers.length} live${lazy ? ` · ${lazy} lazy` : ''}`}
+        title={`⍟ Squad · ${up}/${peers.length} live${lazy ? ` · ${lazy} lazy` : ''}`}
         hint="↑↓ select · enter delegate · esc back"
         total={peers.length}
         rows={listRows}
