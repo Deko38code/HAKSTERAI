@@ -46,7 +46,7 @@ shot('CHAT (status line must appear once)');
 flushSync(() => setup.mockInput.pressKey('p', { ctrl: true })); await setup.flush(); await settle(150);
 await type('setting'); await settle(120);
 shot('CATALOG filter=setting');
-flushSync(() => setup.mockInput.pressKey('escape')); await setup.flush();
+flushSync(() => setup.mockInput.pressEscape()); await setup.flush();
 for (let i = 0; i < 12; i += 1) flushSync(() => setup.mockInput.pressBackspace());
 await setup.flush();
 
