@@ -12,7 +12,7 @@ import { TextAttributes } from '@opentui/core';
 export const MENU_ITEMS = [
   { cmd: '/model', label: 'Models', detail: 'switch the model for this session' },
   { cmd: '/auto', label: 'Autonomy', detail: 'ask · edit · full — how far it runs alone' },
-  { cmd: '/mcp', label: 'MCP servers', detail: 'live servers and their tool counts' },
+  { cmd: '/mcp', label: 'MCP servers', detail: 'server manager · status, tools, pids' },
   { cmd: '/handoff', label: 'Auto handoff', detail: 'on/off · DeepSeek → Codex → others' },
   { cmd: '/ports', label: 'Ports', detail: 'services and every listening port' },
   { cmd: '/attach', label: 'Attach image', detail: '/attach <path> · sends with your message' },
@@ -23,7 +23,7 @@ export const MENU_ITEMS = [
   { cmd: '/status', label: 'Status', detail: 'server, phase, tokens' },
   { cmd: '/usage', label: 'Usage', detail: 'per-user · daily & weekly graphs · r refresh · [ ] rate' },
   { cmd: '/update', label: 'Update', detail: 'check · downloads in-session · applies on restart' },
-  { cmd: '/settings', label: 'Settings', detail: "the CLI's own preferences · read one / set one" },
+  { cmd: '/settings', label: 'Settings', detail: 'every CLI setting · change it in place' },
   { cmd: '/graphics', label: 'Kitty graphics', detail: 'real logo image in kitty/Ghostty/WezTerm · report or on/off' },
   { cmd: '/clear', label: 'Clear transcript', detail: 'start the conversation over' },
   { cmd: '/help', label: 'Help', detail: 'keys and commands' },

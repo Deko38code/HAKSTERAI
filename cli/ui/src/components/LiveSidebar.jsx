@@ -337,7 +337,11 @@ export default function LiveSidebar({
 
   return (
     <box style={{ width, flexDirection: 'column', flexShrink: 0 }}>
-      <Panel width={width} title="◈ Live" hint={serverOk ? 'online' : 'offline'}>
+      {/* No `online` hint: the status box above the column already states the
+          server state, so printing it again here is the dupe the owner flagged
+          (2026-11-24: "you have dupes 13/13 files online"). A DOWN server stays
+          visible here as `offline`, because that is the case worth flagging. */}
+      <Panel width={width} title="◈ Live" hint={serverOk ? '' : 'offline'}>
         {liveRows >= 1 ? (
           <Row width={inner} k="tool" v={tool || '—'} />
         ) : null}

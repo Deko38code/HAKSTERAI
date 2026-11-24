@@ -17,6 +17,8 @@ import MonitorFeed from './components/MonitorFeed.jsx';
 import DecodeSplash from './components/DecodeSplash.jsx';
 import { MENU_ITEMS } from './components/MenuPalette.jsx';
 import CatalogPopout from './components/CatalogPopout.jsx';
+import SettingsView, { showValue } from './components/SettingsView.jsx';
+import McpView from './components/McpView.jsx';
 import ScrollPanel from './components/ScrollPanel.jsx';
 import ScriptsView from './components/ScriptsView.jsx';
 import SquadView from './components/SquadView.jsx';
@@ -252,6 +254,15 @@ export default function App({ version = '0.1.0' }) {
   const [squadIdx, setSquadIdx] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuQuery, setMenuQuery] = useState('');
+  // The two full pages the /menu catalog opens: all of the CLI's own settings
+  // (Claude CLI's `/config`) and the MCP server manager (`/mcp`). Owner,
+  // 2026-11-24: "fix our popout /menu for all our cli settings mcps etc".
+  const [settingsIdx, setSettingsIdx] = useState(0);
+  const [mcpIdx, setMcpIdx] = useState(0);
+  // A settings change is written to cli-prefs.json; this tick forces the page
+  // and the catalog to re-read it, so a flipped switch shows its new value
+  // immediately instead of on the next launch.
+  const [prefsTick, setPrefsTick] = useState(0);
   const [notice, setNotice] = useState(null);
   // Services on ports — the old CLI's ONLINE PORTS panel, scanned read-only
   // and refreshed every 30 s. It starts empty rather than guessing.
@@ -320,7 +331,9 @@ export default function App({ version = '0.1.0' }) {
   }, [load]);
 
   // MCP inventory: the same /api/agent/mcp-status the browser HakTerm lists.
-  // Read-only, every 30s; a failed read keeps the last good panel.
+  // Read-only, every 30s; a failed read keeps the last good panel. The tick is
+  // kept on a ref so the MCP page's `r` can ask for a fresh read immediately.
+  const mcpRefreshRef = useRef(null);
   useEffect(() => {
     let alive = true;
     const tick = async () => {
@@ -334,9 +347,10 @@ export default function App({ version = '0.1.0' }) {
         if (alive && j && Array.isArray(j.servers)) setMcp(j);
       } catch { /* keep the previous reading */ }
     };
+    mcpRefreshRef.current = tick;
     tick();
     const t = setInterval(tick, 30000);
-    return () => { alive = false; clearInterval(t); };
+    return () => { alive = false; mcpRefreshRef.current = null; clearInterval(t); };
   }, []);
 
   // Services/ports: one bounded `ss -tlnp` on boot and every 30 s. Read-only.
@@ -515,6 +529,56 @@ export default function App({ version = '0.1.0' }) {
     );
   }, [update, showNotice]);
 
+  // ── Settings: one list for the settings page and the /menu SETTINGS section.
+  // Read from the same cli-prefs.json the rest of the CLI uses; `prefsTick`
+  // re-reads it after every change so the displayed value is never stale.
+  const settingsRows = React.useMemo(() => {
+    void prefsTick;
+    let rows = [];
+    try { rows = cliPrefs.list(); } catch { rows = []; }
+    // The live values the running view already honours win over the file read,
+    // so a toggle shows its new state in the same frame it is flipped.
+    return rows.map((r) => {
+      if (r.key === 'ads') return { ...r, value: adsOn };
+      if (r.key === 'autoHandoff') return { ...r, value: handoffOn };
+      if (r.key === 'usageRefresh') return { ...r, value: usageRefresh };
+      if (r.key === 'graphics') return { ...r, value: prefsRef.current.graphics !== false };
+      return r;
+    });
+  }, [prefsTick, adsOn, handoffOn, usageRefresh]);
+
+  // Write one setting and apply it to the running view where the view can honour
+  // it now; the rest say "next launch" in the notice. Never touches another
+  // project and never a secret (§16, §23) — every key here is the CLI's own.
+  const applySetting = useCallback((key, value) => {
+    writePrefs({ [key]: value });
+    prefsRef.current = { ...prefsRef.current, [key]: value };
+    if (key === 'ads') setAdsOn(!!value);
+    else if (key === 'autoHandoff') setHandoffOn(!!value);
+    else if (key === 'model') { setModel(String(value) || ''); setProvider(PRIMARY_PROVIDER); }
+    else if (key === 'provider') setProvider(String(value) || PRIMARY_PROVIDER);
+    else if (key === 'usageRefresh') setUsageRefresh(Number(value) || 0);
+    setPrefsTick((t) => t + 1);
+    const shown = typeof value === 'boolean' ? (value ? 'on' : 'off') : value === '' ? '(default)' : value;
+    showNotice(`⚙ ${key} → ${shown}${key === 'opaqueBackdrop' || key === 'intro' ? ' — applies on the next launch' : ''}`);
+  }, [showNotice]);
+
+  // Enter on a settings row. A switch flips; a number steps through sensible
+  // values; `model` opens the picker; any other text explains how to set it.
+  const changeSetting = useCallback((key) => {
+    const row = settingsRows.find((r) => r.key === key);
+    if (!row) return;
+    if (typeof row.value === 'boolean') { applySetting(key, !row.value); return; }
+    if (typeof row.value === 'number') {
+      const steps = [0, 5, 15, 30, 60, 120];
+      const next = steps.find((s) => s > Number(row.value));
+      applySetting(key, next == null ? steps[0] : next);
+      return;
+    }
+    if (key === 'model') { setView('models'); return; }
+    showNotice(`⚙ ${key} is text — set it with /settings ${key} <value>`);
+  }, [settingsRows, applySetting, showNotice]);
+
   // Slash commands from the composer — the terminal counterpart of HakTerm's
   // palette actions. Unknown commands say so instead of being sent to the
   // model, so a typo never becomes a prompt.
@@ -560,14 +624,13 @@ export default function App({ version = '0.1.0' }) {
       case '/mcp': {
         const list = mcp && Array.isArray(mcp.servers) ? mcp.servers : [];
         if (!list.length) { showNotice('MCP — no server list yet (server unreachable?)'); return; }
-        const live = list.filter((x) => x.initialized || (x.toolCount || 0) > 0).length;
-        const tools = list.reduce((n, x) => n + (Number(x.toolCount) || 0), 0);
-        const names = list
-          .filter((x) => x.initialized || (x.toolCount || 0) > 0)
-          .slice(0, 5)
-          .map((x) => `${x.name}(${x.toolCount || 0})`)
-          .join(' · ');
-        showNotice(`MCP ${live}/${list.length} live · ${tools} tools · ${names}${list.length > 5 ? ' …' : ''}`);
+        if (arg) {
+          const at = list.findIndex((x) => String(x.name) === String(arg));
+          setMcpIdx(at > 0 ? at : 0);
+        } else {
+          setMcpIdx(0);
+        }
+        setView('mcp');
         return;
       }
       case '/handoff': {
@@ -636,11 +699,11 @@ export default function App({ version = '0.1.0' }) {
         // running view can honour change now; the rest say "next launch".
         const [key, ...rest] = arg.split(/\s+/).filter(Boolean);
         if (!key) {
-          // One line that fits beside the sidebar: how many keys, which ones
-          // the owner has changed, and how to read or set one. Reading a key
-          // (`/settings ads`) prints its value on its own.
-          const changed = cliPrefs.list().filter((r) => String(r.value) !== String(r.default)).map((r) => r.key);
-          showNotice(`⚙ ${cliPrefs.KEYS.length} keys · ${changed.length ? `changed: ${changed.join(', ')}` : 'all default'} · /settings <key> [on|off]`);
+          // Bare `/settings` opens the full settings page — one row per key,
+          // changed values marked, enter changes and r resets. `/settings <key>`
+          // still reads one value in a line, for scripts and quick checks.
+          setSettingsIdx(0);
+          setView('settings');
           return;
         }
         if (!cliPrefs.isKnown(key)) {
@@ -747,9 +810,15 @@ export default function App({ version = '0.1.0' }) {
     const servers = (mcp && Array.isArray(mcp.servers)) ? mcp.servers : [];
     pushSection('MCP', servers.map((s) => ({
       kind: 'mcp',
-      label: s.name,
-      detail: `${s.toolCount == null ? '?' : s.toolCount} tools${s.initialized === false ? ' · down' : ''}`,
-      action: { cmd: '/mcp' },
+      label: `${s.initialized === false && !(Number(s.toolCount) || 0) ? '○' : '●'} ${s.name}`,
+      detail: `mcp · ${s.toolCount == null ? '?' : s.toolCount} tools${s.lazy ? ' · lazy' : ''}${s.initialized === false ? ' · down' : ''}`,
+      action: { mcp: s.name },
+    })));
+    pushSection('SETTINGS', settingsRows.map((r) => ({
+      kind: 'setting',
+      label: `${r.key} ${showValue(r.value)}`,
+      detail: `setting · ${String(r.value) !== String(r.default) ? 'changed · ' : 'default · '}enter changes`,
+      action: { setting: r.key },
     })));
     pushSection('COMMANDS', MENU_ITEMS.map((i) => ({
       kind: 'cmd',
@@ -771,8 +840,15 @@ export default function App({ version = '0.1.0' }) {
       showNotice(`model → ${row.action.model || row.label} · provider ${row.action.provider || PRIMARY_PROVIDER}`);
       return;
     }
+    if (row.action.setting) { changeSetting(row.action.setting); return; }
+    if (row.action.mcp) {
+      const at = (mcp && Array.isArray(mcp.servers) ? mcp.servers : []).findIndex((s) => s.name === row.action.mcp);
+      setMcpIdx(at > 0 ? at : 0);
+      setView('mcp');
+      return;
+    }
     if (row.action.cmd) runCommand(row.action.cmd);
-  }, [runCommand, showNotice]);
+  }, [runCommand, showNotice, changeSetting, mcp]);
 
   const submit = useCallback(
     (text) => {
@@ -922,6 +998,10 @@ export default function App({ version = '0.1.0' }) {
       if (key.name === 'backspace') { setMenuQuery((q) => q.slice(0, -1)); setMenuIndex(0); return; }
       if (key.name === 'return') {
         const row = catalogRows[catalogSelectable[Math.min(menuIndex, catalogSelectable.length - 1)]];
+        // A settings row toggles in place and the catalog stays open, so several
+        // switches can be flipped without reopening the menu; anything else
+        // closes the popout and does its thing.
+        if (row && row.action && row.action.setting) { applyCatalogRow(row); return; }
         setMenuOpen(false);
         setMenuQuery('');
         applyCatalogRow(row);
@@ -986,6 +1066,40 @@ export default function App({ version = '0.1.0' }) {
         }
         if (key.name === 'home') { page.scrollTo(0); return; }
         if (key.name === 'end') { page.scrollBy(1000, 'viewport'); return; }
+      }
+      return;
+    }
+
+    // The settings page owns its keys: ↑↓ select, enter changes, r resets the
+    // row to its default, esc returns to the chat.
+    if (view === 'settings') {
+      const n = settingsRows.length || 1;
+      if (key.name === 'escape') { setView('chat'); return; }
+      if (key.name === 'up') { setSettingsIdx((i) => (i - 1 + n) % n); return; }
+      if (key.name === 'down') { setSettingsIdx((i) => (i + 1) % n); return; }
+      if (key.name === 'return') {
+        const row = settingsRows[Math.min(settingsIdx, settingsRows.length - 1)];
+        if (row) changeSetting(row.key);
+        return;
+      }
+      if (key.name === 'r') {
+        const row = settingsRows[Math.min(settingsIdx, settingsRows.length - 1)];
+        if (row) applySetting(row.key, row.default);
+        return;
+      }
+      return;
+    }
+
+    // The MCP page: ↑↓ walk the servers, r re-reads the list now, esc back.
+    if (view === 'mcp') {
+      const n = (mcp && Array.isArray(mcp.servers) ? mcp.servers.length : 0) || 1;
+      if (key.name === 'escape') { setView('chat'); return; }
+      if (key.name === 'up') { setMcpIdx((i) => (i - 1 + n) % n); return; }
+      if (key.name === 'down') { setMcpIdx((i) => (i + 1) % n); return; }
+      if (key.name === 'r') {
+        mcpRefreshRef.current && mcpRefreshRef.current();
+        showNotice('⬡ MCP — re-reading /api/agent/mcp-status');
+        return;
       }
       return;
     }
@@ -1176,20 +1290,31 @@ export default function App({ version = '0.1.0' }) {
   // variant chosen so the pair fits the panel. Files survive longer than the
   // right-hand detail because the owner asked for the guard count always on.
   const headerState = statusErr ? 'OFFLINE' : status ? 'ONLINE' : 'connecting…';
+  // The chat column's status box already prints brand · state · file guard ·
+  // TUI version on its own top line (owner, 2026-11-24: "services panel on top
+  // with haksterai online 13/13 files tui 0.3.6"). Printing the same words one
+  // row higher is the dupe the owner flagged ("you have dupes 13/13 files
+  // online"), so in the chat view this header row carries only the meters and
+  // the right-hand detail. Every other view has no status box and keeps the
+  // full line — the state and the guard count stay visible everywhere.
+  const statusBoxShown = view === 'chat';
   const ctxK = Math.round(ctxMax / 1000);
   const ctxPart = model ? `ctx ${ctxK}K` : null;
-  const headerRightVariants = [
-    ['tui ' + version, view, ctxPart].filter(Boolean).join(' · '),
-    [view, ctxPart].filter(Boolean).join(' · '),
-    view,
-  ];
+  const headerRightVariants = statusBoxShown
+    ? // `tui <version>` lives on the status box's top line here, not twice.
+      [[view, ctxPart].filter(Boolean).join(' · '), view]
+    : [
+      ['tui ' + version, view, ctxPart].filter(Boolean).join(' · '),
+      [view, ctxPart].filter(Boolean).join(' · '),
+      view,
+    ];
   const headerInner = panelW - 2;
   const guardTxt = guard ? `${guard.present}/${guard.total} files` : '';
   const headerLeftLen = (withFiles) =>
     `● ◆ haksterAi · ${headerState}`.length + (withFiles && guardTxt ? `   ${guardTxt}`.length : 0);
-  const showGuard = !!guardTxt && headerLeftLen(true) + 8 <= headerInner;
+  const showGuard = !statusBoxShown && !!guardTxt && headerLeftLen(true) + 8 <= headerInner;
   const headerFiles = showGuard ? guardTxt : '';
-  const headerLeftText = headerLeftLen(showGuard);
+  const headerLeftText = statusBoxShown ? 0 : headerLeftLen(showGuard);
 
   // Meters on the very top line (owner, 2026-11-24: "move the autolearn cpu ram
   // meters up top also"). The readings that had their own line inside the status
@@ -1548,15 +1673,21 @@ export default function App({ version = '0.1.0' }) {
           terminal shortens the line instead of wrapping it onto the panels. */}
       <box style={{ width: panelW, flexDirection: 'row', justifyContent: 'space-between', flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
         <box style={{ flexDirection: 'row' }}>
-          <text fg={status ? (statusErr ? 'red' : 'green') : 'yellow'} attributes={TextAttributes.BOLD}>{statusErr ? '○ ' : status ? '● ' : '◌ '}</text>
-          <text fg="cyan" attributes={TextAttributes.BOLD}>{'◆ haksterAi'}</text>
-          <text fg={statusErr ? 'red' : status ? 'green' : 'yellow'}>{` · ${headerState}`}</text>
-          {headerFiles ? (
-            <text fg={guard.missing && guard.missing.length ? 'red' : 'gray'}>{`   ${headerFiles}`}</text>
-          ) : null}
+          {/* Brand · state · files are drawn by the chat view's status box, so
+              they are not repeated here. Other views keep them. */}
+          {statusBoxShown ? null : (
+            <>
+              <text fg={status ? (statusErr ? 'red' : 'green') : 'yellow'} attributes={TextAttributes.BOLD}>{statusErr ? '○ ' : status ? '● ' : '◌ '}</text>
+              <text fg="cyan" attributes={TextAttributes.BOLD}>{'◆ haksterAi'}</text>
+              <text fg={statusErr ? 'red' : status ? 'green' : 'yellow'}>{` · ${headerState}`}</text>
+              {headerFiles ? (
+                <text fg={guard.missing && guard.missing.length ? 'red' : 'gray'}>{`   ${headerFiles}`}</text>
+              ) : null}
+            </>
+          )}
           {headerMeter ? (
             <text>
-              <span fg="gray">{'   '}</span>
+              {statusBoxShown ? null : <span fg="gray">{'   '}</span>}
               {headerMeter.parts.map((part, i) => (
                 <span key={i} fg={part.fg} attributes={part.bold ? TextAttributes.BOLD : 0}>{part.t}</span>
               ))}
@@ -1599,6 +1730,25 @@ export default function App({ version = '0.1.0' }) {
             );
           }}
         </ScrollPanel>
+      ) : view === 'settings' ? (
+        /* The full settings page: every key in cli-prefs.json, its live value
+           and what it does. Same row budget as the models picker so the status
+           bar never moves. */
+        <SettingsView
+          width={panelW}
+          rows={modelRows}
+          list={settingsRows}
+          selected={settingsIdx}
+        />
+      ) : view === 'mcp' ? (
+        /* The MCP server manager: each server's real state from
+           /api/agent/mcp-status, with the selected server's tool names. */
+        <McpView
+          width={panelW}
+          height={Math.max(7, (rows || 30) - 2)}
+          servers={(mcp && Array.isArray(mcp.servers)) ? mcp.servers : []}
+          selected={mcpIdx}
+        />
       ) : view === 'scripts' ? (
         <ScriptsView
           width={panelW}

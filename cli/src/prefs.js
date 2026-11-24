@@ -32,6 +32,21 @@ const DEFAULTS = {
   usageRefresh: 15, // the usage page's poll, seconds (0 = paused)
 };
 
+/* What each key means, shown in the settings panel and the /menu catalog. This
+ * is display metadata only — it never changes a default or a stored value. */
+const META = {
+  model: { label: 'Model', detail: 'blank = the pinned Phantom Flash config' },
+  provider: { label: 'Provider', detail: 'blank = the pinned provider (ollama)' },
+  autoHandoff: { label: 'Auto handoff', detail: 'a failed run moves down the model ladder' },
+  ads: { label: 'Ad rail', detail: 'the sponsor line under the chat column' },
+  monitorFollow: { label: 'Monitor follow', detail: 'the live monitor follows the newest line' },
+  updateCheck: { label: 'Update check', detail: 'background CLI update check on start' },
+  opaqueBackdrop: { label: 'Opaque backdrop', detail: 'solid background over the terminal wallpaper' },
+  intro: { label: 'Intro splash', detail: 'the five-line decode screen on start' },
+  graphics: { label: 'Kitty graphics', detail: 'real logo image in kitty / Ghostty / WezTerm' },
+  usageRefresh: { label: 'Usage refresh', detail: 'seconds between usage polls (0 = paused)' },
+};
+
 const KEYS = Object.keys(DEFAULTS);
 
 function readJson(file) {
@@ -98,4 +113,4 @@ function list() {
   return KEYS.map((key) => ({ key, value: current[key], default: DEFAULTS[key] }));
 }
 
-module.exports = { DEFAULTS, KEYS, PREFS_FILE, load, save, coerce, isKnown, list };
+module.exports = { DEFAULTS, KEYS, META, PREFS_FILE, load, save, coerce, isKnown, list };
