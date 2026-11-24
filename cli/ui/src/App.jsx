@@ -1388,8 +1388,43 @@ export default function App({ version = '0.1.0' }) {
     cpu: heatFg(host && host.cpuPct),
     ram: heatFg(host && host.memPct),
   };
+  // ⬆ Update on the top line (owner, 2026-11-24: "in our tui cli up top with cpu
+  // etc add when our cli has updates will say updates will install on restart").
+  // A staged package is already downloaded and hash-verified, so the only step
+  // left is a restart — that is all this says. A source checkout is never
+  // written into (§8), so it says pull rather than promising an install.
+  // Nothing renders for current / checking / error: a badge that cries wolf is
+  // worse than none, and the check re-runs on its own interval.
+  const updatePending = !!(update && !update.applied
+    && (update.status === 'staged' || update.status === 'blocked'));
+  const updateBlocked = updatePending && update.status === 'blocked';
+  const updateVer = updatePending && update.version ? ` v${update.version}` : '';
+  const updateBadgeVariants = !updatePending
+    ? [null]
+    : (updateBlocked
+      ? [
+          `\u2B06 update${updateVer} \u00b7 pull to update`,
+          '\u2B06 update \u00b7 pull to update',
+          '\u2B06 pull to update',
+        ]
+      : [
+          `\u2B06 update${updateVer} \u00b7 installs on restart`,
+          '\u2B06 update \u00b7 installs on restart',
+          '\u2B06 installs on restart',
+        ])
+      .filter((text, i, all) => all.indexOf(text) === i)
+      .map((text) => ({ text, fg: updateBlocked ? 'yellow' : 'green' }));
+
   const mkMeter = (parts) => ({ text: parts.map((x) => x.t).join(''), parts });
-  const headerMeterVariants = [
+  // Append the badge to an already-built meter form (or stand it alone).
+  const withBadge = (meter, badge) => {
+    if (!badge) return meter;
+    const parts = meter.parts.length
+      ? [...meter.parts, { t: `  ${badge.text}`, fg: badge.fg, bold: true }]
+      : [{ t: badge.text, fg: badge.fg, bold: true }];
+    return { text: parts.map((x) => x.t).join(''), parts };
+  };
+  const baseMeterVariants = [
     mkMeter([
       { t: '\u25C8 ', fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: 'white', bold: true },
@@ -1427,6 +1462,16 @@ export default function App({ version = '0.1.0' }) {
       { t: ` ram ${meterRam}`, fg: meterFg.ram },
     ]),
   ];
+  // Richest meter × longest badge first; a badge-only form closes the list so a
+  // pending update outlives the cpu/ram readings on a narrow terminal instead of
+  // being the first thing dropped when the row gets tight.
+  const headerMeterVariants = [];
+  for (const base of baseMeterVariants) {
+    for (const badge of updateBadgeVariants) headerMeterVariants.push(withBadge(base, badge));
+  }
+  if (updatePending) {
+    for (const badge of updateBadgeVariants) headerMeterVariants.push(withBadge(mkMeter([]), badge));
+  }
   // Meters outrank the right-hand detail here (the owner just asked for them up
   // top, while the model is repeated on the bottom status bar and the TUI
   // version in the status box): walk the meter forms richest-first and take the

@@ -204,6 +204,26 @@ async function checkForUpdate(opts = {}) {
     return { status: 'current', version: staged.version, checkedAt: new Date().toISOString(), running };
   }
 
+  // Same version with a different bundle is a newer build of it (§28.2 keys the
+  // release on the version AND the hash); anything OLDER than what is installed
+  // is not an update at all. Without this, running an unreleased local build
+  // would "stage" the published package as a downgrade on every check.
+  const cmp = cmpVersion(staged.version, running.version);
+  const isNewer = cmp > 0 || (cmp === 0 && staged.bundleSha !== running.bundleSha);
+  if (!isNewer) {
+    const prev = readJson(PENDING_FILE, null);
+    if (!(prev && prev.appliedAt)) {
+      writeJson(PENDING_FILE, {
+        version: staged.version,
+        bundleSha: staged.bundleSha,
+        checkedAt: new Date().toISOString(),
+        state: 'current',
+        runningVersion: running.version,
+      });
+    }
+    return { status: 'current', version: running.version, checkedAt: new Date().toISOString(), running };
+  }
+
   const blocked = isSourceCheckout(opts.cliDir) ? 'source-checkout' : null;
   const pending = {
     version: staged.version,
@@ -237,7 +257,17 @@ function pendingInfo(explicitDir) {
   const pending = readJson(PENDING_FILE, null);
   if (!pending || !pending.version) return null;
   const ok = !!pending.bundleSha && sha256File(path.join(STAGED_DIR, 'cli', 'ui-fb.mjs')) === pending.bundleSha;
-  return { ...pending, verified: ok, isCurrent: sameBuild(pending, runningInfo(explicitDir)) };
+  const running = runningInfo(explicitDir);
+  // A stage from an OLDER version is not an update: it is the leftover record of
+  // a check taken before this install was upgraded. Reporting it as staged would
+  // announce a downgrade and offer to install one on the next start.
+  return {
+    ...pending,
+    verified: ok,
+    isCurrent: sameBuild(pending, running),
+    superseded: cmpVersion(pending.version, running.version) < 0,
+    runningVersion: running.version,
+  };
 }
 
 /**
@@ -277,6 +307,10 @@ function applyPending(explicitDir) {
   const target = cliDirOf(explicitDir);
   if (pending.appliedAt) return { applied: false, reason: 'already applied', version: pending.version };
   if (!pending.verified) return { applied: false, reason: 'staged package failed verification', version: pending.version };
+  if (pending.superseded) {
+    writeJson(PENDING_FILE, { ...pending, state: 'superseded', supersededAt: new Date().toISOString() });
+    return { applied: false, reason: `superseded by the running v${runningInfo(target).version}`, version: pending.version };
+  }
   if (isSourceCheckout(target)) return { applied: false, reason: 'source-checkout', version: pending.version };
   const running = runningInfo(target);
   if (sameBuild(pending, running)) {
@@ -343,6 +377,7 @@ async function promptStagedUpdate(opts = {}) {
   if (sameBuild(pending, running)) {
     return { action: 'current', pending, running };
   }
+  if (pending.superseded) return { action: 'none', pending, running };
   if (isSourceCheckout(opts.cliDir)) return { action: 'blocked', pending, running };
 
   const stdin = process.stdin;

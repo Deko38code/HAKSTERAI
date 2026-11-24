@@ -29,8 +29,14 @@ function readStartup() {
       return { applied, status: { status: 'applied', version: applied.version, from: applied.from, checkedAt: applied.appliedAt } };
     }
     if (pending && pending.version) {
-      if (pending.isCurrent) {
-        return { applied: null, status: { status: 'current', version: pending.version, checkedAt: pending.stagedAt } };
+      // A leftover record from a version already behind this install is not a
+      // pending update: it would announce a downgrade in the header and offer to
+      // install one on the next start.
+      if (pending.isCurrent || pending.superseded) {
+        return {
+          applied: null,
+          status: { status: 'current', version: pending.runningVersion || pending.version, checkedAt: pending.stagedAt },
+        };
       }
       return {
         applied: null,

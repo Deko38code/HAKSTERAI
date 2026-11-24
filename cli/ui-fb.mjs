@@ -981,6 +981,21 @@ var require_updater = __commonJS({
         }
         return { status: "current", version: staged.version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
       }
+      const cmp = cmpVersion(staged.version, running.version);
+      const isNewer = cmp > 0 || cmp === 0 && staged.bundleSha !== running.bundleSha;
+      if (!isNewer) {
+        const prev = readJson(PENDING_FILE, null);
+        if (!(prev && prev.appliedAt)) {
+          writeJson(PENDING_FILE, {
+            version: staged.version,
+            bundleSha: staged.bundleSha,
+            checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            state: "current",
+            runningVersion: running.version
+          });
+        }
+        return { status: "current", version: running.version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      }
       const blocked = isSourceCheckout(opts.cliDir) ? "source-checkout" : null;
       const pending = {
         version: staged.version,
@@ -1005,7 +1020,14 @@ var require_updater = __commonJS({
       const pending = readJson(PENDING_FILE, null);
       if (!pending || !pending.version) return null;
       const ok = !!pending.bundleSha && sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
-      return { ...pending, verified: ok, isCurrent: sameBuild(pending, runningInfo(explicitDir)) };
+      const running = runningInfo(explicitDir);
+      return {
+        ...pending,
+        verified: ok,
+        isCurrent: sameBuild(pending, running),
+        superseded: cmpVersion(pending.version, running.version) < 0,
+        runningVersion: running.version
+      };
     }
     var APPLIED_NOTICE_MS = 24 * 60 * 60 * 1e3;
     function appliedNotice2(explicitDir, maxAgeMs) {
@@ -1028,6 +1050,10 @@ var require_updater = __commonJS({
       const target = cliDirOf(explicitDir);
       if (pending.appliedAt) return { applied: false, reason: "already applied", version: pending.version };
       if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
+      if (pending.superseded) {
+        writeJson(PENDING_FILE, { ...pending, state: "superseded", supersededAt: (/* @__PURE__ */ new Date()).toISOString() });
+        return { applied: false, reason: `superseded by the running v${runningInfo(target).version}`, version: pending.version };
+      }
       if (isSourceCheckout(target)) return { applied: false, reason: "source-checkout", version: pending.version };
       const running = runningInfo(target);
       if (sameBuild(pending, running)) {
@@ -1072,6 +1098,7 @@ var require_updater = __commonJS({
       if (sameBuild(pending, running)) {
         return { action: "current", pending, running };
       }
+      if (pending.superseded) return { action: "none", pending, running };
       if (isSourceCheckout(opts.cliDir)) return { action: "blocked", pending, running };
       const stdin = process.stdin;
       const stdout = process.stdout;
@@ -5513,8 +5540,11 @@ function readStartup() {
       return { applied, status: { status: "applied", version: applied.version, from: applied.from, checkedAt: applied.appliedAt } };
     }
     if (pending && pending.version) {
-      if (pending.isCurrent) {
-        return { applied: null, status: { status: "current", version: pending.version, checkedAt: pending.stagedAt } };
+      if (pending.isCurrent || pending.superseded) {
+        return {
+          applied: null,
+          status: { status: "current", version: pending.runningVersion || pending.version, checkedAt: pending.stagedAt }
+        };
       }
       return {
         applied: null,
@@ -6762,8 +6792,25 @@ function App({ version = "0.1.0" }) {
     cpu: heatFg(host && host.cpuPct),
     ram: heatFg(host && host.memPct)
   };
+  const updatePending = !!(update && !update.applied && (update.status === "staged" || update.status === "blocked"));
+  const updateBlocked = updatePending && update.status === "blocked";
+  const updateVer = updatePending && update.version ? ` v${update.version}` : "";
+  const updateBadgeVariants = !updatePending ? [null] : (updateBlocked ? [
+    `\u2B06 update${updateVer} \xB7 pull to update`,
+    "\u2B06 update \xB7 pull to update",
+    "\u2B06 pull to update"
+  ] : [
+    `\u2B06 update${updateVer} \xB7 installs on restart`,
+    "\u2B06 update \xB7 installs on restart",
+    "\u2B06 installs on restart"
+  ]).filter((text, i, all) => all.indexOf(text) === i).map((text) => ({ text, fg: updateBlocked ? "yellow" : "green" }));
   const mkMeter = (parts) => ({ text: parts.map((x) => x.t).join(""), parts });
-  const headerMeterVariants = [
+  const withBadge = (meter, badge) => {
+    if (!badge) return meter;
+    const parts = meter.parts.length ? [...meter.parts, { t: `  ${badge.text}`, fg: badge.fg, bold: true }] : [{ t: badge.text, fg: badge.fg, bold: true }];
+    return { text: parts.map((x) => x.t).join(""), parts };
+  };
+  const baseMeterVariants = [
     mkMeter([
       { t: "\u25C8 ", fg: meterFg.smart, bold: true },
       { t: `${meterScore}% `, fg: "white", bold: true },
@@ -6801,6 +6848,13 @@ function App({ version = "0.1.0" }) {
       { t: ` ram ${meterRam}`, fg: meterFg.ram }
     ])
   ];
+  const headerMeterVariants = [];
+  for (const base of baseMeterVariants) {
+    for (const badge of updateBadgeVariants) headerMeterVariants.push(withBadge(base, badge));
+  }
+  if (updatePending) {
+    for (const badge of updateBadgeVariants) headerMeterVariants.push(withBadge(mkMeter([]), badge));
+  }
   let headerRight = "";
   let headerMeter = null;
   if (view === "chat") {
