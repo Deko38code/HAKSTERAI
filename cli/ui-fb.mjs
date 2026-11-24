@@ -4598,6 +4598,7 @@ function useAgentStream({
   const attemptCtxRef = useRef7({ produced: false, sawError: null, status: null });
   const startedAtRef = useRef7(null);
   const statusRef = useRef7("idle");
+  const activeRunIdRef = useRef7(null);
   const setStatusBoth = useCallback3((next) => {
     statusRef.current = next;
     setStatus(next);
@@ -4891,6 +4892,14 @@ function useAgentStream({
             });
             break;
           }
+          case "steer": {
+            const text2 = String(evt.content || "").trim();
+            if (text2) {
+              append({ id: nextId("user"), role: "user", text: text2 });
+              pushActivity("sys", "\u21B3 live steer applied");
+            }
+            break;
+          }
           case "loop_detected":
             try {
               meterRef.current.bump(-10);
@@ -4962,6 +4971,8 @@ function useAgentStream({
         requestsRef.current += 1;
         setRequests(requestsRef.current);
         pushActivity("sys", `\u2192 ${target.label || target.provider || "auto"}`);
+        const runId = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        activeRunIdRef.current = runId;
         const controller = new AbortController();
         abortRef.current = controller;
         const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -4984,6 +4995,7 @@ function useAgentStream({
                 }
               ],
               stream: true,
+              runId,
               // Tier 3 sends neither, so the server's own waterfall decides —
               // that is what "others last" means here.
               ...target.provider ? { provider: target.provider } : {},
@@ -5081,6 +5093,7 @@ function useAgentStream({
         setStatusBoth("connecting");
       }
       abortRef.current = null;
+      activeRunIdRef.current = null;
       setPending(null);
       setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
     },
@@ -5092,6 +5105,23 @@ function useAgentStream({
     runTurn(text, opts);
     return true;
   }, [runTurn]);
+  const steer = useCallback3(async (text) => {
+    const prompt = String(text == null ? "" : text).trim();
+    const runId = activeRunIdRef.current;
+    if (!prompt || !runId) return false;
+    try {
+      const res = await fetch(`${api}/api/agent/steer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} },
+        body: JSON.stringify({ runId, text: prompt })
+      });
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => ({}));
+      return data && data.ok === true;
+    } catch {
+      return false;
+    }
+  }, [api]);
   const clear = useCallback3(() => {
     abort();
     setPending(null);
@@ -5120,6 +5150,7 @@ function useAgentStream({
     pendingConfirm,
     answerConfirm,
     send,
+    steer,
     abort,
     clear
   };
@@ -5979,13 +6010,25 @@ function App({ version = "0.1.0" }) {
       setDraft("");
       setAttachment(null);
       if (agent.busy) {
-        setSteerQueue((q) => [...q, {
-          id: `steer-${Date.now()}-${q.length}`,
+        const queued = {
+          id: `steer-${Date.now()}-${steerQueue.length}`,
           text: v,
           image: att ? att.dataUrl : "",
           imageName: att ? att.name : ""
-        }]);
-        showNotice(`\u23F3 steer queued (${steerQueue.length + 1}) \u2014 sends when this run ends`);
+        };
+        if (att) {
+          setSteerQueue((q) => [...q, queued]);
+          showNotice(`\u23F3 steer queued (${steerQueue.length + 1}) \u2014 an attachment sends when this run ends`);
+          return;
+        }
+        Promise.resolve(agent.steer(v)).then((delivered) => {
+          if (delivered) {
+            showNotice("\u21B3 steer sent \u2014 the running agent reads it before this run ends");
+            return;
+          }
+          setSteerQueue((q) => [...q, queued]);
+          showNotice(`\u23F3 steer queued (${steerQueue.length + 1}) \u2014 sends when this run ends`);
+        });
         return;
       }
       agent.send(v, att ? { images: [att.dataUrl], imageName: att.name } : void 0);

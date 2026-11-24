@@ -804,13 +804,31 @@ export default function App({ version = '0.1.0' }) {
       // works joins the steer queue and is sent as the next turn when this run
       // ends (see the drain effect below).
       if (agent.busy) {
-        setSteerQueue((q) => [...q, {
-          id: `steer-${Date.now()}-${q.length}`,
+        // An attachment can only travel on a real turn, so it queues outright.
+        // Text goes to the LIVE run first: the server reads it before the run
+        // ends, so a correction lands inside the answer instead of after it
+        // (owner, 2026-11-24). Only a refusal (run already closed, or a server
+        // without the steer endpoint) falls back to the queue — nothing typed
+        // is ever dropped.
+        const queued = {
+          id: `steer-${Date.now()}-${steerQueue.length}`,
           text: v,
           image: att ? att.dataUrl : '',
           imageName: att ? att.name : '',
-        }]);
-        showNotice(`⏳ steer queued (${steerQueue.length + 1}) — sends when this run ends`);
+        };
+        if (att) {
+          setSteerQueue((q) => [...q, queued]);
+          showNotice(`⏳ steer queued (${steerQueue.length + 1}) — an attachment sends when this run ends`);
+          return;
+        }
+        Promise.resolve(agent.steer(v)).then((delivered) => {
+          if (delivered) {
+            showNotice('↳ steer sent — the running agent reads it before this run ends');
+            return;
+          }
+          setSteerQueue((q) => [...q, queued]);
+          showNotice(`⏳ steer queued (${steerQueue.length + 1}) — sends when this run ends`);
+        });
         return;
       }
       agent.send(v, att ? { images: [att.dataUrl], imageName: att.name } : undefined);

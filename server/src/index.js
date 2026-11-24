@@ -4685,6 +4685,27 @@ app.post('/api/agent/allowlist', requireOwner, (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Live steering inbox: a run can be steered WHILE it streams. The TUI
+//    mints a runId per turn, posts to /api/agent/steer, and the run's own turn
+//    loop drains it before the next model call — so an update typed mid-run is
+//    read inside that run instead of waiting to become the next queued turn.
+//    Entries are per-run and removed when the run's response closes, so a late
+//    steer answers 409 and the client falls back to queueing it (nothing typed
+//    is ever dropped).
+const agentSteerRuns = new Map();
+
+app.post('/api/agent/steer', requireSignedIn, (req, res) => {
+  const runId = String((req.body && req.body.runId) || '').slice(0, 80);
+  const text = String((req.body && req.body.text) || '').trim();
+  if (!runId || !text) return res.status(400).json({ ok: false, error: 'runId and text required' });
+  const inbox = agentSteerRuns.get(runId);
+  if (!inbox) return res.status(409).json({ ok: false, error: 'no active run', reason: 'no-active-run' });
+  inbox.items.push(text.slice(0, 8000));
+  inbox.at = Date.now();
+  console.log(`[agent] live steer queued for run ${runId.slice(0, 8)} (${inbox.items.length} waiting)`);
+  res.json({ ok: true, queued: inbox.items.length });
+});
+
 app.post('/api/agent/confirm', requireOwner, (req, res) => {
   const { sessionId, toolCallId, approved, command, permanent } = req.body || {};
   const sid = sessionId || 'default';
@@ -4753,6 +4774,21 @@ app.delete('/api/agent/allowlist/:id', requireOwner, (req, res) => {
 
 app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, res) => {
   const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false, maxTurns: requestedMaxTurns } = req.body;
+  // Live steering: register this run's inbox so POST /api/agent/steer can land
+  // a message inside the run. It is removed the moment the response closes, so
+  // a steer that arrives after the run has ended is refused (409) rather than
+  // silently swallowed.
+  const runId = String((req.body && req.body.runId) || '').slice(0, 80);
+  if (runId) {
+    agentSteerRuns.set(runId, { items: [], at: Date.now() });
+    if (agentSteerRuns.size > 200) {
+      const oldest = [...agentSteerRuns.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest && oldest[0] !== runId) agentSteerRuns.delete(oldest[0]);
+    }
+    res.on('close', () => {
+      if (agentSteerRuns.has(runId)) agentSteerRuns.delete(runId);
+    });
+  }
   const savedAgent = getHaksterModelConfig();
   const requestedProvider = req.body.provider || savedAgent.provider || null;
   const requestedModel = req.body.model || savedAgent.model || null;
@@ -5797,6 +5833,26 @@ ${dirListing}
         res.write(`data: ${JSON.stringify({ type: 'aborted' })}\n\n`);
         res.end();
         return;
+      }
+
+      // ── Live steering: read anything the operator typed while this run was
+      //    streaming, BEFORE the next model call. The update joins the
+      //    conversation as a system message, so the agent acts on it inside
+      //    this run instead of after it.
+      if (runId) {
+        const _inbox = agentSteerRuns.get(runId);
+        if (_inbox && _inbox.items.length) {
+          const _steerText = _inbox.items.splice(0, 8).map((t) => String(t).trim()).filter(Boolean).join('\n\n').slice(0, 16000);
+          if (_steerText) {
+            _inbox.at = Date.now();
+            agentMessages.push({
+              role: 'system',
+              content: `LIVE USER STEERING — incorporate this update immediately, before this run ends. Change the current approach as requested while preserving completed work:\n\n${_steerText}`,
+            });
+            res.write(`data: ${JSON.stringify({ type: 'steer', content: _steerText })}\n\n`);
+            console.log(`[agent] live steer applied on turn ${turn}: ${_steerText.slice(0, 60).replace(/\s+/g, ' ')}`);
+          }
+        }
       }
 
       // ── Kiro round budget: convergence nudges at 67% / 80% of maxTurns ──

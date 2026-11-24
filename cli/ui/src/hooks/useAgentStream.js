@@ -182,6 +182,9 @@ export function useAgentStream({
   const startedAtRef = useRef(null);
   // Mirrors `status` for the stream loop, which outlives any single render.
   const statusRef = useRef('idle');
+  // The id of the turn currently on the wire. POST /api/agent/steer names it,
+  // so a message typed mid-run lands in THAT run instead of a new one.
+  const activeRunIdRef = useRef(null);
 
   const setStatusBoth = useCallback((next) => {
     statusRef.current = next;
@@ -570,6 +573,19 @@ export function useAgentStream({
             break;
           }
 
+          case 'steer': {
+            // The server read this mid-run and put it in front of the model on
+            // the next round. Shown as the operator's own line, because that is
+            // whose words they are — and because a steer that never appeared
+            // would look like it was dropped.
+            const text = String(evt.content || '').trim();
+            if (text) {
+              append({ id: nextId('user'), role: 'user', text });
+              pushActivity('sys', '↳ live steer applied');
+            }
+            break;
+          }
+
           case 'loop_detected':
             // A loop break is a real penalty in the old CLI (-10) — the same
             // cost here, so the bar tells the truth about a bad run.
@@ -659,6 +675,11 @@ export function useAgentStream({
         requestsRef.current += 1;
         setRequests(requestsRef.current);
         pushActivity('sys', `→ ${target.label || target.provider || 'auto'}`);
+        // One id per request: the server registers a steer inbox under it and
+        // removes it when the stream closes, so a late steer is refused rather
+        // than delivered into a run that already answered.
+        const runId = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        activeRunIdRef.current = runId;
         const controller = new AbortController();
         abortRef.current = controller;
         const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -683,6 +704,7 @@ export function useAgentStream({
                 },
               ],
               stream: true,
+              runId,
               // Tier 3 sends neither, so the server's own waterfall decides —
               // that is what "others last" means here.
               ...(target.provider ? { provider: target.provider } : {}),
@@ -809,6 +831,7 @@ export function useAgentStream({
       }
 
       abortRef.current = null;
+      activeRunIdRef.current = null;
       // Once the stream is over there is nothing left to answer: a pending
       // approval whose socket has closed can no longer be reported anywhere.
       setPending(null);
@@ -828,6 +851,28 @@ export function useAgentStream({
     runTurn(text, opts);
     return true;
   }, [runTurn]);
+
+  /* Hand a message to the run that is streaming right now. Resolves true only
+   * when the server accepted it for THIS run — a run that has already closed
+   * answers 409, and an older server a 404. Either way the caller queues the
+   * message instead of dropping it. */
+  const steer = useCallback(async (text) => {
+    const prompt = String(text == null ? '' : text).trim();
+    const runId = activeRunIdRef.current;
+    if (!prompt || !runId) return false;
+    try {
+      const res = await fetch(`${api}/api/agent/steer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) },
+        body: JSON.stringify({ runId, text: prompt }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => ({}));
+      return data && data.ok === true;
+    } catch {
+      return false;
+    }
+  }, [api]);
 
   const clear = useCallback(() => {
     abort();
@@ -863,6 +908,7 @@ export function useAgentStream({
     pendingConfirm,
     answerConfirm,
     send,
+    steer,
     abort,
     clear,
   };
