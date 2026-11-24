@@ -36,6 +36,77 @@ const TONE_COLOR = { error: 'red', warn: 'yellow', notice: 'cyan' };
  *  a turn is too dense to show the whole reasoning block. */
 const lastLine = (s) => String(s || '').replace(/\r/g, '').split('\n').filter((l) => l.trim()).pop() || '';
 
+/* Reasoning is drawn the way OMP draws its thinking blocks (oh-my-pi
+ * packages/tui/src/chat/assistant-message.ts): while it streams you read the
+ * TAIL inside a fixed body, and once it stops it folds to one line — "Thought
+ * for 12s" — which Ctrl+T reopens (owner, 2026-11-24: "i want the win"). The
+ * fixed body is the point: a long thought used to push the whole transcript up
+ * a row at a time while it was written. */
+const LIVE_THINK_LINES = 4;
+const LIVE_TEXT_LINES = 8;
+
+/** A tail window over a streamed field: the last `n` non-blank lines, plus how
+ *  many were dropped, so the cut is stated rather than silent. */
+function tailWindow(value, n) {
+  const lines = String(value == null ? '' : value).replace(/\r/g, '').split('\n').filter((l) => l.trim());
+  return { lines: lines.slice(-n), hidden: Math.max(0, lines.length - n) };
+}
+
+/** "12s" — seconds, never a fake tenth. Sub-second thoughts read "1s". */
+const thoughtFor = (ms) => `Thought for ${Math.max(1, Math.round((Number(ms) || 0) / 1000))}s`;
+
+/** One reasoning block. Live while it is being written (spinner, elapsed, tail
+ *  of the text); finished it is one line unless `expand` is on. */
+function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand }) {
+  const frame = useSpinnerFrame(live);
+  const started = Number(startedAt) || 0;
+  const ended = Number(endedAt) || 0;
+  if (live) {
+    const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
+    return (
+      <box style={{ flexDirection: 'column', width, flexShrink: 0 }}>
+        <text>
+          <span fg="yellow">{`${SPINNER_FRAMES[frame]} `}</span>
+          <span fg="gray">{`thinking…${started ? ` ${fmtDur(Date.now() - started)}` : ''}`}</span>
+        </text>
+        {/* Not clipped: reasoning is prose and must keep its words; the count is
+            what stays bounded while it streams. */}
+        {window.lines.map((line, i) => (
+          <text key={`th-${i}`} fg="gray">{line.trim()}</text>
+        ))}
+      </box>
+    );
+  }
+  if (!expand) {
+    const label = started && ended ? thoughtFor(ended - started) : lastLine(text);
+    return <text fg="gray">{clip(`⋯ ${label}`, Math.max(4, width))}</text>;
+  }
+  return (
+    <box style={{ flexDirection: 'column', width, flexShrink: 0 }}>
+      {String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim()).map((line, i) => (
+        <text key={`td-${i}`} fg="gray">{line.trim()}</text>
+      ))}
+    </box>
+  );
+}
+
+/** One prose block. Live it shows its tail inside the same bounded body; once
+ *  the run ends the whole answer is drawn, exactly as it was written. */
+function ProseBlock({ text, live, width, compact }) {
+  if (!live) return <text fg="white">{String(text)}</text>;
+  const window = tailWindow(text, compact ? 3 : LIVE_TEXT_LINES);
+  return (
+    <box style={{ flexDirection: 'column', width, flexShrink: 0 }}>
+      {window.hidden ? (
+        <text fg="gray">{`⋯ ${window.hidden} earlier line${window.hidden === 1 ? '' : 's'} (writing)`}</text>
+      ) : null}
+      {window.lines.map((line, i) => (
+        <text key={`pr-${i}`} fg="white">{line.trim()}</text>
+      ))}
+    </box>
+  );
+}
+
 /** A tool call is still running until its result arrives. In a compact turn
  *  the result is one clipped line instead of the full output.
  *
@@ -137,7 +208,7 @@ function ToolRow({ tool, width, compact = false }) {
   );
 }
 
-export default function MessageBlock({ message, width, compact = false }) {
+export default function MessageBlock({ message, width, compact = false, live = false, expandThinking = false }) {
   if (!message) return null;
 
   const roleStyle = ROLE_STYLE[message.role] || ROLE_STYLE.system;
@@ -178,34 +249,50 @@ export default function MessageBlock({ message, width, compact = false }) {
         <text fg="gray">{`📎 ${message.imageName || `${message.images} image`}`}</text>
       ) : null}
       {rounds.length ? (
-        rounds.map((round, i) => (
-          <box key={`round-${i}`} style={{ flexDirection: 'column', width: inner, flexShrink: 0 }}>
-            {round.thinking && String(round.thinking).trim() ? (
-              // A reasoning model doing tool rounds may spend most of a turn
-              // thinking; dropping the line entirely in a dense turn is why
-              // the transcript read as tool rows only. Compact keeps the newest
-              // line of the round's reasoning.
-              compact
-                ? <text fg="gray">{clip(`⋯ ${lastLine(round.thinking)}`, Math.max(4, inner))}</text>
-                : <text fg="gray">{String(round.thinking)}</text>
-            ) : null}
-            {round.text && String(round.text).trim() ? (
-              <text fg="white">{String(round.text)}</text>
-            ) : null}
-            {(Array.isArray(round.tools) ? round.tools : []).map((tool, j) => (
-              <ToolRow key={`tool-${i}-${j}`} tool={tool} width={inner} compact={compact} />
-            ))}
-          </box>
-        ))
+        rounds.map((round, i) => {
+          // Only the last round of the streaming turn is live: the blocks above
+          // it are finished text and must not clamp or animate.
+          const tail = live && i === rounds.length - 1;
+          const roundTools = Array.isArray(round.tools) ? round.tools : [];
+          const proseLive = tail && roundTools.length === 0;
+          const thinkLive = proseLive && String(round.thinking || '').trim() !== '' && String(round.text || '').trim() === '';
+          return (
+            <box key={`round-${i}`} style={{ flexDirection: 'column', width: inner, flexShrink: 0 }}>
+              {round.thinking && String(round.thinking).trim() ? (
+                <ThinkingBlock
+                  text={round.thinking}
+                  startedAt={round.thinkingT0}
+                  endedAt={round.thinkingT1}
+                  live={thinkLive}
+                  width={inner}
+                  compact={compact}
+                  expand={expandThinking}
+                />
+              ) : null}
+              {round.text && String(round.text).trim() ? (
+                <ProseBlock text={round.text} live={proseLive} width={inner} compact={compact} />
+              ) : null}
+              {roundTools.map((tool, j) => (
+                <ToolRow key={`tool-${i}-${j}`} tool={tool} width={inner} compact={compact} />
+              ))}
+            </box>
+          );
+        })
       ) : (
         <>
           {message.thinking ? (
-            compact
-              ? <text fg="gray">{clip(`⋯ ${lastLine(message.thinking)}`, Math.max(4, inner))}</text>
-              : <text fg="gray">{String(message.thinking)}</text>
+            <ThinkingBlock
+              text={message.thinking}
+              startedAt={message.thinkingT0}
+              endedAt={message.thinkingT1}
+              live={live && !tools.length}
+              width={inner}
+              compact={compact}
+              expand={expandThinking}
+            />
           ) : null}
           {message.text ? (
-            <text fg="white">{String(message.text)}</text>
+            <ProseBlock text={message.text} live={live && !tools.length} width={inner} compact={compact} />
           ) : !message.thinking && tools.length === 0 ? (
             <text fg="gray">thinking…</text>
           ) : null}

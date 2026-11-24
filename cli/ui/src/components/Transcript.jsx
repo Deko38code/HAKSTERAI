@@ -53,7 +53,7 @@ function turnWeight(message) {
   return n;
 }
 
-export default function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false }) {
+export default function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef(null);
@@ -172,9 +172,17 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
           <text fg="gray">{`… ${hidden} earlier turn${hidden === 1 ? '' : 's'} (PgUp)`}</text>
         ) : null}
         <box style={{ flexDirection: 'column', width: contentW }}>
-          {capped.map((message) => (
+          {capped.map((message, i) => (
             <box key={message.id} style={{ marginBottom: compact ? 0 : 1, flexShrink: 0 }}>
-              <MessageBlock message={message} width={contentW} compact={compact} />
+              <MessageBlock
+                message={message}
+                width={contentW}
+                compact={compact}
+                // Only the newest turn can be streaming; every turn above it is
+                // finished and draws its full answer.
+                live={live && i === capped.length - 1 && message.role === 'assistant'}
+                expandThinking={expandThinking}
+              />
             </box>
           ))}
         </box>

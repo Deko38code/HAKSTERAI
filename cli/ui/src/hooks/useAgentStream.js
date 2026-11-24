@@ -433,14 +433,28 @@ export function useAgentStream({
             patch(assistantId, (m) => withRound(
               { ...m, text: m.text + (evt.content || '') },
               (r) => r.tools.length > 0,
-              (r) => { r.text += evt.content || ''; },
+              // Prose starting ends the reasoning clock: the transcript folds a
+              // finished thought to "Thought for 12s" (see MessageBlock).
+              (r) => {
+                if (r.thinkingT0 && !r.thinkingT1) r.thinkingT1 = Date.now();
+                r.text += evt.content || '';
+              },
             ));
             break;
 
-          case 'thinking_start':
+          case 'thinking_start': {
             setStatusBoth('thinking');
-            patch(assistantId, (m) => ({ ...m, thinking: '' }));
+            const thinkAt = Date.now();
+            // A reasoning block that opens after prose or tool rows is its own
+            // round: the transcript draws blocks in the order they were written,
+            // so reasoning is never parked above an answer it came after.
+            patch(assistantId, (m) => withRound(
+              { ...m, thinking: '' },
+              (r) => r.tools.length > 0 || String(r.text || '').trim() !== '',
+              (r) => { r.thinkingT0 = thinkAt; r.thinkingT1 = undefined; },
+            ));
             break;
+          }
 
           case 'thinking':
             setStatusBoth('thinking');
@@ -448,13 +462,24 @@ export function useAgentStream({
             patch(assistantId, (m) => withRound(
               { ...m, thinking: m.thinking + (evt.content || '') },
               (r) => r.tools.length > 0,
-              (r) => { r.thinking += evt.content || ''; },
+              (r) => {
+                if (!r.thinkingT0) r.thinkingT0 = Date.now();
+                r.thinking += evt.content || '';
+              },
             ));
             break;
 
           case 'thinking_end':
             // The reasoning is kept on the message so the operator can still
-            // read it after the answer lands; only the spinner stops.
+            // read it after the answer lands; only the spinner stops. The end
+            // stamp is what lets the block fold to "Thought for 12s" instead of
+            // holding dozens of rows open for the rest of the session.
+            patch(assistantId, (m) => {
+              const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => ({ ...r })) : [];
+              const cur = rounds[rounds.length - 1];
+              if (cur && cur.thinkingT0 && !cur.thinkingT1) cur.thinkingT1 = Date.now();
+              return { ...m, rounds };
+            });
             break;
 
           case 'phase':
@@ -491,7 +516,10 @@ export function useAgentStream({
               return withRound(
                 { ...m, tools: [...m.tools, call] },
                 () => false, // a call joins the round the prose before it opened
-                (r) => { r.tools.push(call); },
+                (r) => {
+                  if (r.thinkingT0 && !r.thinkingT1) r.thinkingT1 = Date.now();
+                  r.tools.push(call);
+                },
               );
             });
             break;

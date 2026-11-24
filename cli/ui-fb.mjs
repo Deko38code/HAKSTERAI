@@ -3998,6 +3998,41 @@ var ROLE_STYLE = {
 };
 var TONE_COLOR = { error: "red", warn: "yellow", notice: "cyan" };
 var lastLine = (s) => String(s || "").replace(/\r/g, "").split("\n").filter((l) => l.trim()).pop() || "";
+var LIVE_THINK_LINES = 4;
+var LIVE_TEXT_LINES = 8;
+function tailWindow(value, n) {
+  const lines = String(value == null ? "" : value).replace(/\r/g, "").split("\n").filter((l) => l.trim());
+  return { lines: lines.slice(-n), hidden: Math.max(0, lines.length - n) };
+}
+var thoughtFor = (ms) => `Thought for ${Math.max(1, Math.round((Number(ms) || 0) / 1e3))}s`;
+function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand }) {
+  const frame = useSpinnerFrame(live);
+  const started = Number(startedAt) || 0;
+  const ended = Number(endedAt) || 0;
+  if (live) {
+    const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
+    return /* @__PURE__ */ jsxs21("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
+      /* @__PURE__ */ jsxs21("text", { children: [
+        /* @__PURE__ */ jsx22("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
+        /* @__PURE__ */ jsx22("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur(Date.now() - started)}` : ""}` })
+      ] }),
+      window.lines.map((line, i) => /* @__PURE__ */ jsx22("text", { fg: "gray", children: line.trim() }, `th-${i}`))
+    ] });
+  }
+  if (!expand) {
+    const label = started && ended ? thoughtFor(ended - started) : lastLine(text);
+    return /* @__PURE__ */ jsx22("text", { fg: "gray", children: clip(`\u22EF ${label}`, Math.max(4, width)) });
+  }
+  return /* @__PURE__ */ jsx22("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: String(text || "").replace(/\r/g, "").split("\n").filter((l) => l.trim()).map((line, i) => /* @__PURE__ */ jsx22("text", { fg: "gray", children: line.trim() }, `td-${i}`)) });
+}
+function ProseBlock({ text, live, width, compact }) {
+  if (!live) return /* @__PURE__ */ jsx22("text", { fg: "white", children: String(text) });
+  const window = tailWindow(text, compact ? 3 : LIVE_TEXT_LINES);
+  return /* @__PURE__ */ jsxs21("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
+    window.hidden ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: `\u22EF ${window.hidden} earlier line${window.hidden === 1 ? "" : "s"} (writing)` }) : null,
+    window.lines.map((line, i) => /* @__PURE__ */ jsx22("text", { fg: "white", children: line.trim() }, `pr-${i}`))
+  ] });
+}
 var SPINNER_FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
 var ARGS_BUDGET = 64;
 var ARG_VALUE_MAX = 40;
@@ -4058,7 +4093,7 @@ function ToolRow({ tool, width, compact = false }) {
     hidden > 0 ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 \u25B6 Result` }) : null
   ] });
 }
-function MessageBlock({ message, width, compact = false }) {
+function MessageBlock({ message, width, compact = false, live = false, expandThinking = false }) {
   if (!message) return null;
   const roleStyle = ROLE_STYLE[message.role] || ROLE_STYLE.system;
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
@@ -4073,19 +4108,41 @@ function MessageBlock({ message, width, compact = false }) {
   return /* @__PURE__ */ jsxs21("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
     compact ? null : /* @__PURE__ */ jsx22("text", { fg: border, attributes: TextAttributes16.BOLD, children: roleStyle.label }),
     message.images ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: `\u{1F4CE} ${message.imageName || `${message.images} image`}` }) : null,
-    rounds.length ? rounds.map((round, i) => /* @__PURE__ */ jsxs21("box", { style: { flexDirection: "column", width: inner, flexShrink: 0 }, children: [
-      round.thinking && String(round.thinking).trim() ? (
-        // A reasoning model doing tool rounds may spend most of a turn
-        // thinking; dropping the line entirely in a dense turn is why
-        // the transcript read as tool rows only. Compact keeps the newest
-        // line of the round's reasoning.
-        compact ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: clip(`\u22EF ${lastLine(round.thinking)}`, Math.max(4, inner)) }) : /* @__PURE__ */ jsx22("text", { fg: "gray", children: String(round.thinking) })
+    rounds.length ? rounds.map((round, i) => {
+      const tail = live && i === rounds.length - 1;
+      const roundTools = Array.isArray(round.tools) ? round.tools : [];
+      const proseLive = tail && roundTools.length === 0;
+      const thinkLive = proseLive && String(round.thinking || "").trim() !== "" && String(round.text || "").trim() === "";
+      return /* @__PURE__ */ jsxs21("box", { style: { flexDirection: "column", width: inner, flexShrink: 0 }, children: [
+        round.thinking && String(round.thinking).trim() ? /* @__PURE__ */ jsx22(
+          ThinkingBlock,
+          {
+            text: round.thinking,
+            startedAt: round.thinkingT0,
+            endedAt: round.thinkingT1,
+            live: thinkLive,
+            width: inner,
+            compact,
+            expand: expandThinking
+          }
+        ) : null,
+        round.text && String(round.text).trim() ? /* @__PURE__ */ jsx22(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
+        roundTools.map((tool, j) => /* @__PURE__ */ jsx22(ToolRow, { tool, width: inner, compact }, `tool-${i}-${j}`))
+      ] }, `round-${i}`);
+    }) : /* @__PURE__ */ jsxs21(Fragment8, { children: [
+      message.thinking ? /* @__PURE__ */ jsx22(
+        ThinkingBlock,
+        {
+          text: message.thinking,
+          startedAt: message.thinkingT0,
+          endedAt: message.thinkingT1,
+          live: live && !tools.length,
+          width: inner,
+          compact,
+          expand: expandThinking
+        }
       ) : null,
-      round.text && String(round.text).trim() ? /* @__PURE__ */ jsx22("text", { fg: "white", children: String(round.text) }) : null,
-      (Array.isArray(round.tools) ? round.tools : []).map((tool, j) => /* @__PURE__ */ jsx22(ToolRow, { tool, width: inner, compact }, `tool-${i}-${j}`))
-    ] }, `round-${i}`)) : /* @__PURE__ */ jsxs21(Fragment8, { children: [
-      message.thinking ? compact ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: clip(`\u22EF ${lastLine(message.thinking)}`, Math.max(4, inner)) }) : /* @__PURE__ */ jsx22("text", { fg: "gray", children: String(message.thinking) }) : null,
-      message.text ? /* @__PURE__ */ jsx22("text", { fg: "white", children: String(message.text) }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: "thinking\u2026" }) : null,
+      message.text ? /* @__PURE__ */ jsx22(ProseBlock, { text: message.text, live: live && !tools.length, width: inner, compact }) : !message.thinking && tools.length === 0 ? /* @__PURE__ */ jsx22("text", { fg: "gray", children: "thinking\u2026" }) : null,
       tools.map((tool, i) => /* @__PURE__ */ jsx22(ToolRow, { tool, width: inner, compact }, `tool-${i}`))
     ] })
   ] });
@@ -4117,7 +4174,7 @@ function turnWeight(message) {
   }
   return n;
 }
-function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false }) {
+function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef6(null);
@@ -4198,7 +4255,16 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
       scrollbarOptions: SCROLLBAR_OPTIONS,
       children: [
         hidden > 0 ? /* @__PURE__ */ jsx23("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
-        /* @__PURE__ */ jsx23("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message) => /* @__PURE__ */ jsx23("box", { style: { marginBottom: compact ? 0 : 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx23(MessageBlock, { message, width: contentW, compact }) }, message.id)) })
+        /* @__PURE__ */ jsx23("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message, i) => /* @__PURE__ */ jsx23("box", { style: { marginBottom: compact ? 0 : 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx23(
+          MessageBlock,
+          {
+            message,
+            width: contentW,
+            compact,
+            live: live && i === capped.length - 1 && message.role === "assistant",
+            expandThinking
+          }
+        ) }, message.id)) })
       ]
     }
   ) });
@@ -4480,15 +4546,27 @@ function useAgentStream({
             patch(assistantId, (m) => withRound(
               { ...m, text: m.text + (evt.content || "") },
               (r) => r.tools.length > 0,
+              // Prose starting ends the reasoning clock: the transcript folds a
+              // finished thought to "Thought for 12s" (see MessageBlock).
               (r) => {
+                if (r.thinkingT0 && !r.thinkingT1) r.thinkingT1 = Date.now();
                 r.text += evt.content || "";
               }
             ));
             break;
-          case "thinking_start":
+          case "thinking_start": {
             setStatusBoth("thinking");
-            patch(assistantId, (m) => ({ ...m, thinking: "" }));
+            const thinkAt = Date.now();
+            patch(assistantId, (m) => withRound(
+              { ...m, thinking: "" },
+              (r) => r.tools.length > 0 || String(r.text || "").trim() !== "",
+              (r) => {
+                r.thinkingT0 = thinkAt;
+                r.thinkingT1 = void 0;
+              }
+            ));
             break;
+          }
           case "thinking":
             setStatusBoth("thinking");
             attemptCtxRef.current.produced = true;
@@ -4496,11 +4574,18 @@ function useAgentStream({
               { ...m, thinking: m.thinking + (evt.content || "") },
               (r) => r.tools.length > 0,
               (r) => {
+                if (!r.thinkingT0) r.thinkingT0 = Date.now();
                 r.thinking += evt.content || "";
               }
             ));
             break;
           case "thinking_end":
+            patch(assistantId, (m) => {
+              const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => ({ ...r })) : [];
+              const cur = rounds[rounds.length - 1];
+              if (cur && cur.thinkingT0 && !cur.thinkingT1) cur.thinkingT1 = Date.now();
+              return { ...m, rounds };
+            });
             break;
           case "phase":
             if (evt.phase) {
@@ -4533,6 +4618,7 @@ function useAgentStream({
                 () => false,
                 // a call joins the round the prose before it opened
                 (r) => {
+                  if (r.thinkingT0 && !r.thinkingT1) r.thinkingT1 = Date.now();
                   r.tools.push(call);
                 }
               );
@@ -5215,6 +5301,7 @@ function App({ version = "0.1.0" }) {
     const saved = String(prefsRef.current.autoMode || "");
     return AUTO_MODES.has(saved) ? saved : "auto-edit";
   });
+  const [expandThinking, setExpandThinking] = useState17(() => prefsRef.current.thinkingExpanded === true);
   const [usageRefresh, setUsageRefresh] = useState17(() => {
     const n = Number(prefsRef.current.usageRefresh);
     return Number.isFinite(n) && n >= 0 ? n : 15;
@@ -5833,6 +5920,13 @@ function App({ version = "0.1.0" }) {
       setDockExpanded((v) => !v);
       return;
     }
+    if (key.ctrl && key.name === "t") {
+      const want = !expandThinking;
+      setExpandThinking(want);
+      writePrefs({ thinkingExpanded: want });
+      showNotice(want ? '\u{1F9E0} reasoning expanded \u2014 Ctrl+T folds it to "Thought for \u2026"' : "\u{1F9E0} reasoning folded \u2014 Ctrl+T expands it");
+      return;
+    }
     if (key.ctrl || key.meta) return;
     switch (key.name) {
       case "a": {
@@ -6211,7 +6305,8 @@ function App({ version = "0.1.0" }) {
             height: transcriptRows,
             scrollRef,
             live: agent.status !== "idle",
-            emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; esc stops a run."
+            expandThinking,
+            emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
           }
         ) }),
         latestMcpTool ? /* @__PURE__ */ jsx24(

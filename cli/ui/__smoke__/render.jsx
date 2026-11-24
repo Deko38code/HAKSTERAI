@@ -392,6 +392,14 @@ export async function run({ adsPort }) {
   await settle(900);
   await small.flush();
   const bigFrame = small.captureCharFrame();
+  // Reasoning fold (the OMP block behaviour, owner 2026-11-24: "i want the
+  // win"): a finished thought is one "Thought for Ns" line; Ctrl+T reopens it.
+  flushSync(() => small.mockInput.pressKey('t', { ctrl: true }));
+  await small.flush();
+  await settle(120);
+  const expandedFrame = small.captureCharFrame();
+  flushSync(() => small.mockInput.pressKey('t', { ctrl: true }));
+  await small.flush();
   smallRoot.unmount();
   small.renderer.destroy();
   bigMode = false;
@@ -413,7 +421,8 @@ export async function run({ adsPort }) {
     // ── plain chat turn ──
     ['submitted prompt appears in the transcript', /fix the bug/.test(chatFrame)],
     ['streamed answer appears', /Patched the handler and added a test\./.test(chatFrame)],
-    ['reasoning is shown separately', /look at the handler first/.test(chatFrame)],
+    ['finished reasoning folds to one line', /⋯ Thought for \d+s/.test(chatFrame)],
+    ['ctrl+t reopens a folded thought', /Checking the bundle sizes first/.test(expandedFrame)],
     ['todo panel reflects the checklist tool', /1\/2 completed/.test(chatFrame)],
     // Anchored to the keystroke: the dashboard panel titles must appear in the
     // frame captured right after the `d` keypress.
@@ -438,8 +447,8 @@ export async function run({ adsPort }) {
     // What the agent said, not just what the shell printed.
     ['the agent\'s spoken line stays on screen', /The bundle is too big/.test(bigFrame)],
     ['its closing answer stays on screen', /Answer: the build passes after the split/.test(bigFrame)],
-    // A compact turn keeps one reasoning line instead of hiding it.
-    ['reasoning is not dropped when the turn is dense', /Checking the bundle sizes first/.test(bigFrame)],
+    // A dense turn still states its reasoning — as the fold line, not silently.
+    ['a dense turn still states its reasoning', /⋯ Thought for \d+s/.test(bigFrame)],
     // The dump is capped and says where the rest is. The panel the pointer
     // names is ▶ Result (LiveOutputPanel); this string was left saying "Output"
     // after the pane was renamed and had been failing ever since.

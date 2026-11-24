@@ -212,6 +212,10 @@ export default function App({ version = '0.1.0' }) {
     const saved = String(prefsRef.current.autoMode || '');
     return AUTO_MODES.has(saved) ? saved : 'auto-edit';
   });
+  // Reasoning fold (owner, 2026-11-24: "i want the win", after OMP's thinking
+  // blocks). A finished thought draws as one "Thought for 12s" line; Ctrl+T
+  // reopens every thought in the transcript. Remembered between sessions.
+  const [expandThinking, setExpandThinking] = useState(() => prefsRef.current.thinkingExpanded === true);
   // The usage page's own poll rate (owner, 2026-11-23: "live graphs refresh
   // rate"). Seconds; 0 pauses. It is a CLI preference, saved on this machine.
   const [usageRefresh, setUsageRefresh] = useState(() => {
@@ -972,6 +976,17 @@ export default function App({ version = '0.1.0' }) {
       setDockExpanded((v) => !v);
       return;
     }
+    if (key.ctrl && key.name === 't') {
+      // Reasoning fold, the OMP block behaviour: finished thoughts are one line
+      // by default; this opens or folds them all.
+      const want = !expandThinking;
+      setExpandThinking(want);
+      writePrefs({ thinkingExpanded: want });
+      showNotice(want
+        ? '🧠 reasoning expanded — Ctrl+T folds it to "Thought for …"'
+        : '🧠 reasoning folded — Ctrl+T expands it');
+      return;
+    }
 
     // Only plain letters reach the shortcuts: a Ctrl/Alt chord must never
     // toggle a view. (Ctrl+D, sent by a pipe at EOF, used to flip to the
@@ -1449,7 +1464,8 @@ export default function App({ version = '0.1.0' }) {
                 height={transcriptRows}
                 scrollRef={scrollRef}
                 live={agent.status !== 'idle'}
-                emptyHint="Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; esc stops a run."
+                expandThinking={expandThinking}
+                emptyHint="Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
               />
             </box>
 
