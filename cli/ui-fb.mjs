@@ -6028,8 +6028,8 @@ function App({ version = "0.1.0" }) {
   const approvalRows = approving ? 6 : 0;
   const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows + approvalRows + systemRows + servicesRows + liveOutputChrome + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
   const sharedRows = (rows || 30) - fixedRows;
-  const liveOutputLines = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
-  const transcriptRows = Math.max(4, sharedRows - liveOutputLines);
+  const transcriptRows = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
+  const liveOutputLines = Math.max(6, sharedRows - transcriptRows);
   const dashboardItems = [
     {
       key: "system",
@@ -6297,16 +6297,18 @@ function App({ version = "0.1.0" }) {
             maxVisibleRows: Math.min(agent.todos.length, 6)
           }
         ) }) : null,
-        /* @__PURE__ */ jsx24("box", { style: { flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsx24(
-          Transcript,
+        /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx24(
+          LiveOutputPanel,
           {
-            messages: agent.messages,
             width: mainW,
-            height: transcriptRows,
-            scrollRef,
-            live: agent.status !== "idle",
-            expandThinking,
-            emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
+            rows: liveOutputLines,
+            lines: liveLines,
+            image: liveImage,
+            graphics: prefsRef.current.graphics !== false,
+            call: liveToolTxt,
+            busy: agent.busy,
+            phase: livePhase,
+            bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
           }
         ) }),
         latestMcpTool ? /* @__PURE__ */ jsx24(
@@ -6355,20 +6357,18 @@ function App({ version = "0.1.0" }) {
         notice ? /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx24("text", { fg: "cyan", children: clipLine2(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
         /* @__PURE__ */ jsx24(SystemPanel, { width: mainW, meters, ctxUsed, ctxMax, host }),
         /* @__PURE__ */ jsx24(ServicesPanel, { width: mainW, services, scan, dense, maxCells: servicesCapacity }),
-        /* @__PURE__ */ jsx24(
-          LiveOutputPanel,
+        /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx24(
+          Transcript,
           {
+            messages: agent.messages,
             width: mainW,
-            rows: liveOutputLines,
-            lines: liveLines,
-            image: liveImage,
-            graphics: prefsRef.current.graphics !== false,
-            call: liveToolTxt,
-            busy: agent.busy,
-            phase: livePhase,
-            bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
+            height: transcriptRows,
+            scrollRef,
+            live: agent.status !== "idle",
+            expandThinking,
+            emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
           }
-        ),
+        ) }),
         /* @__PURE__ */ jsx24("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx24(
           CatalogPopout,
           {
