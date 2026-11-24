@@ -21,6 +21,7 @@ import ScrollPanel from './components/ScrollPanel.jsx';
 import ScriptsView from './components/ScriptsView.jsx';
 import SquadView from './components/SquadView.jsx';
 import ServicesPanel, { servicesGridRows } from './components/ServicesPanel.jsx';
+import StatusServicesPanel, { statusServicesRows } from './components/StatusServicesPanel.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import SystemPanel from './components/SystemPanel.jsx';
 import CrushStatus from './components/CrushStatus.jsx';
@@ -1144,8 +1145,9 @@ export default function App({ version = '0.1.0' }) {
   // boxes. The dashboard/monitor still list every other port as cells.
   const servicesRaw = Math.max(1, services.length);
   const servicesRawAll = services.length + (otherPorts.length ? 1 : 0);
-  const servicesCapacity = servicesCapacityFor(mainW);
-  const servicesRows = servicesRowsFor(mainW, servicesCapacity, servicesRaw);
+  // Chat column: the meters row and the services grid are ONE box now (owner,
+  // 2026-11-24: "combined the 2 panels into 1"), so its height replaces both.
+  const statusRows = statusServicesRows(mainW, servicesRaw, true);
   const dashServicesWidth = Math.max(1, panelW - 1);
   const dashServicesCapacity = servicesCapacityFor(dashServicesWidth, dashDense);
   const monitorServicesCapacity = servicesCapacityFor(panelW);
@@ -1194,7 +1196,7 @@ export default function App({ version = '0.1.0' }) {
   // Everything the chat column draws before the composer and the two middle
   // boxes. Used to cap the /menu popout so it can never grow past the screen.
   const chromeNoComposer = CHROME_ROWS + errRows + noticeRows + railRows
-    + approvalRows + systemRows + servicesRows + liveOutputChrome;
+    + approvalRows + statusRows + liveOutputChrome;
   // The /menu popout takes the composer's slot: bordered, title + filter + list
   // + footer. It is capped by what the terminal can spare AFTER the chrome and
   // two rows for the middle boxes, so a short window shrinks the popout instead
@@ -1212,7 +1214,7 @@ export default function App({ version = '0.1.0' }) {
   // 20-row window with a todo list open shows the list and drops the MCP panel
   // instead of running off the bottom of the screen.
   const mandatoryRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows
-    + approvalRows + systemRows + servicesRows + liveOutputChrome + 2;
+    + approvalRows + statusRows + liveOutputChrome + 2;
   const optionalBudget = (rows || 30) - mandatoryRows;
   const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
   const showTodo = wantTodoRows > 0 && optionalBudget >= wantTodoRows;
@@ -1226,7 +1228,7 @@ export default function App({ version = '0.1.0' }) {
   // leftover (large) rows; a screen carrying a big todo list, an approval card
   // and the MCP panel shrinks them instead of pushing the status bar off.
   const fixedRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + todoRows
-    + approvalRows + systemRows + servicesRows + liveOutputChrome
+    + approvalRows + statusRows + liveOutputChrome
     + (showMcpPanel ? mcpPanelRows : 0);
   const sharedRows = (rows || 30) - fixedRows;
   // Owner, 2026-11-24: taller panels. The reasoning transcript keeps a real
@@ -1537,6 +1539,24 @@ export default function App({ version = '0.1.0' }) {
       ) : (
         <box style={{ flexDirection: 'row', width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }}>
           <box style={{ width: mainW, flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+            {/* One status box pinned at the top of the column (owner,
+                2026-11-24: "combined the 2 panels into 1 ... services panel
+                on top with haksterai online 13/13 files tui 0.3.6 ... 2 row
+                panel for services"). Brand · state · file guard · version on
+                the top line, the meters under it, the ports grid in two rows. */}
+            <StatusServicesPanel
+              width={mainW}
+              services={services}
+              version={version}
+              guard={guard}
+              online={!!status}
+              offline={!!statusErr}
+              meters={meters}
+              ctxUsed={ctxUsed}
+              ctxMax={ctxMax}
+              host={host}
+              dense
+            />
             {showTodo ? (
               <box style={{ flexShrink: 0 }}>
                 <TodoPanel
@@ -1616,10 +1636,6 @@ export default function App({ version = '0.1.0' }) {
                 <text fg="cyan">{clipLine(`◆ ${notice}`, Math.max(8, mainW - 2))}</text>
               </box>
             ) : null}
-
-            {/* Old CLI's two meters + the context bar, then their ports grid. */}
-            <SystemPanel width={mainW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
-            <ServicesPanel width={mainW} services={services} scan={scan} dense={dense} maxCells={servicesCapacity} />
 
             {/* The THINKING transcript is now the LARGE area, sitting lowest
                 directly over the input bar (owner, 2026-11-24: swapped with
