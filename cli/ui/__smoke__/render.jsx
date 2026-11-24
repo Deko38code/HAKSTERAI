@@ -64,6 +64,33 @@ const BIG_TURN = {
   ],
 };
 
+/* A sub-agent call the way "testing agents" looks: an MCP tool call whose result
+ * is the peer's output, then a done. The MCP Output box must show it while the
+ * call is in flight and clear itself once the turn is idle (owner, 2026-11-24:
+ * "clear after sub agents output stops then clear panel for your workspace"). */
+const MCP_TURN = {
+  holds: false,
+  pre: [
+    { type: 'phase', phase: 'ACT', turn: 1 },
+    { type: 'thinking_start' },
+    { type: 'thinking', content: 'Handing this to the codex sub-agent.' },
+    { type: 'thinking_end' },
+    {
+      type: 'tool_call_start',
+      tool_call_id: 'm1',
+      tool_name: 'mcp__codex__codex_readonly',
+      tool_args: { prompt: 'list the repo root' },
+    },
+    {
+      type: 'tool_call_result',
+      tool_call_id: 'm1',
+      tool_name: 'mcp__codex__codex_readonly',
+      tool_result: 'CODEX-MARKER output from the peer',
+    },
+    { type: 'done', model: 'glm-5.2:cloud', provider: 'ollama', inputTokens: 10, outputTokens: 5 },
+  ],
+};
+
 const TAB = '\t';
 const ENTER = '\r';
 const ESC = '\u001b';
@@ -153,6 +180,7 @@ export async function run({ adsPort }) {
   const confirmCalls = [];
   const runBatch = [];
   let bigMode = false;
+  let mcpMode = false;
   let runIndex = 0;
   let heldController = null;
   let heldRun = null;
@@ -210,6 +238,15 @@ export async function run({ adsPort }) {
     }
 
     if (u.includes('/api/agent/run')) {
+      if (mcpMode) {
+        const stream = new ReadableStream({
+          start(controller) {
+            for (const f of MCP_TURN.pre) controller.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`));
+            controller.close();
+          },
+        });
+        return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }
       if (bigMode) {
         const stream = new ReadableStream({
           start(controller) {
@@ -375,6 +412,36 @@ export async function run({ adsPort }) {
   setup.renderer.destroy();
   await settle(50);
 
+  // ── 7. The sub-agent (MCP) panel clears when its output stops ───────────
+  // Owner, 2026-11-24: "our panel when testing agents … need to clear after sub
+  // agents output stops then clear panel for your workspace". Shorten the settle
+  // window for the probe; the shipped default is 8 s.
+  process.env.HAKSTER_MCP_SETTLE_MS = '400';
+  mcpMode = true;
+  const mcpSetup = await createTestRenderer({ width: 120, height: 44 });
+  const mcpRoot = createRoot(mcpSetup.renderer);
+  flushSync(() => mcpRoot.render(React.createElement(App, { version: 'smoke' })));
+  await mcpSetup.flush();
+  await settle(400);
+  flushSync(() => {
+    for (const ch of 'run codex') mcpSetup.mockInput.pressKey(ch);
+  });
+  await mcpSetup.flush();
+  flushSync(() => mcpSetup.mockInput.pressEnter());
+  // Right after the call lands, the panel is up with the peer's output.
+  await settle(250);
+  await mcpSetup.flush();
+  const mcpLiveFrame = mcpSetup.captureCharFrame();
+  // Then the turn goes idle and the panel clears on its own.
+  await settle(1400);
+  await mcpSetup.flush();
+  const mcpClearFrame = mcpSetup.captureCharFrame();
+  mcpRoot.unmount();
+  mcpSetup.renderer.destroy();
+  mcpMode = false;
+  delete process.env.HAKSTER_MCP_SETTLE_MS;
+  await settle(50);
+
   // ── 6. A small screen with a huge shell result ─────────────────────────
   // The owner's report: "its not showing agents output what he says something
   // only shell call tools i see". 120x30 is a realistic split-terminal size,
@@ -520,6 +587,10 @@ export async function run({ adsPort }) {
     ['the correct password approves', confirmCountAfterPassword === 3, `got ${confirmCountAfterPassword}`],
     ['password approval is approved:true and session-scoped', cPassword.approved === true && cPassword.permanent === false],
     ['the password run resumes', /sudo apt-get install -y nmap is finished\./.test(passwordResolved)],
+    // ── the sub-agent panel ──
+    ['the sub-agent panel shows while the call runs', /MCP Output/.test(mcpLiveFrame) && /CODEX-MARKER/.test(mcpLiveFrame)],
+    ['the sub-agent panel clears once its output stops', !/MCP Output/.test(mcpClearFrame)],
+    ['the workspace keeps the sub-agent output after the panel clears', /CODEX-MARKER/.test(mcpClearFrame)],
   ];
 
 

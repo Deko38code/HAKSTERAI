@@ -5694,6 +5694,7 @@ var import_ad_client2 = __toESM(require_ad_client());
 import { Fragment as Fragment10, jsx as jsx27, jsxs as jsxs26 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 6;
+var MCP_PANEL_SETTLE_MS = 8e3;
 var PAGE_SCROLLBAR = {
   width: 1,
   showArrows: true,
@@ -6345,6 +6346,17 @@ function App({ version = "0.1.0" }) {
     for (let i = 0; i < line.length; i += mcpPanelWidth) rows2.push(line.slice(i, i + mcpPanelWidth));
     return rows2;
   });
+  const [mcpPanelCleared, setMcpPanelCleared] = useState17(false);
+  const mcpToolCallKey = latestMcpTool ? `${latestMcpTool.id || latestMcpTool.name || "mcp"}:${latestMcpTool.result == null ? "live" : "done"}` : "";
+  useEffect16(() => {
+    if (!latestMcpTool || latestMcpTool.result == null || agent.busy) {
+      setMcpPanelCleared(false);
+      return void 0;
+    }
+    const settleMs = Number(process.env.HAKSTER_MCP_SETTLE_MS) || MCP_PANEL_SETTLE_MS;
+    const timer = setTimeout(() => setMcpPanelCleared(true), settleMs);
+    return () => clearTimeout(timer);
+  }, [mcpToolCallKey, agent.busy]);
   const crushPhase = activeAssistant?.phase || (agent.status === "thinking" ? "THINK" : agent.status === "connecting" ? "PLAN" : "ACT");
   const answerApproval = useCallback5(
     (approved, opts) => {
@@ -6797,7 +6809,7 @@ function App({ version = "0.1.0" }) {
   const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
   const showTodo = wantTodoRows > 0 && optionalBudget >= wantTodoRows;
   const todoRows = showTodo ? wantTodoRows : 0;
-  const showMcpPanel = !!latestMcpTool && optionalBudget - todoRows >= mcpPanelRows;
+  const showMcpPanel = !!latestMcpTool && !mcpPanelCleared && optionalBudget - todoRows >= mcpPanelRows;
   const fixedRows = CHROME_ROWS + errRows + noticeRows + composerRows + railRows + todoRows + approvalRows + statusRows + (showLiveBox ? liveOutputChrome : 0) + (showMcpPanel ? mcpPanelRows : 0);
   const sharedRows = (rows || 30) - fixedRows;
   const sharedBudget = Math.max(2, sharedRows);

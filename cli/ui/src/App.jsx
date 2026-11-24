@@ -46,6 +46,11 @@ import ads from '../../src/ads/ad-client.js';
 
 const API = process.env.HAKSTER_API_URL || 'http://localhost:3579';
 const MCP_OUTPUT_LINES = 6;
+// How long a finished sub-agent's output stays in the MCP Output box before the
+// box clears itself (owner, 2026-11-24: "clear after sub agents output stops then
+// clear panel for your workspace"). Long enough to read the last lines, short
+// enough that the workspace gets its rows back without a keypress.
+const MCP_PANEL_SETTLE_MS = 8000;
 // The dashboard and models pages are native OpenTUI scroll boxes: the same ▲ /
 // █ / ▼ bar the transcript uses, clickable with the mouse, auto-hidden when the
 // page fits (owner's 2026-11-23 all-panels rule).
@@ -964,6 +969,30 @@ export default function App({ version = '0.1.0' }) {
     for (let i = 0; i < line.length; i += mcpPanelWidth) rows.push(line.slice(i, i + mcpPanelWidth));
     return rows;
   });
+  // Owner, 2026-11-24: "our panel when testing agents … when they're done the panel
+  // clears … need to clear after sub agents output stops then clear panel for your
+  // workspace". The MCP Output box exists to show a sub-agent call WHILE it runs; it
+  // used to pin the last result forever and eat the reasoning workspace's rows. It now
+  // clears itself a settle-window after the call returns AND the turn goes idle, and
+  // comes straight back the moment another MCP call starts. Nothing is lost from the
+  // transcript: the tool row and the run's own output stay there.
+  const [mcpPanelCleared, setMcpPanelCleared] = useState(false);
+  const mcpToolCallKey = latestMcpTool
+    ? `${latestMcpTool.id || latestMcpTool.name || 'mcp'}:${latestMcpTool.result == null ? 'live' : 'done'}`
+    : '';
+  useEffect(() => {
+    if (!latestMcpTool || latestMcpTool.result == null || agent.busy) {
+      // In flight, or the turn is still working: the panel stays up.
+      setMcpPanelCleared(false);
+      return undefined;
+    }
+    // Read at effect time (not module load) so a render probe can shorten the
+    // window without touching the shipped default.
+    const settleMs = Number(process.env.HAKSTER_MCP_SETTLE_MS) || MCP_PANEL_SETTLE_MS;
+    const timer = setTimeout(() => setMcpPanelCleared(true), settleMs);
+    return () => clearTimeout(timer);
+  }, [mcpToolCallKey, agent.busy]);
+
   const crushPhase = activeAssistant?.phase
     || (agent.status === 'thinking' ? 'THINK' : agent.status === 'connecting' ? 'PLAN' : 'ACT');
 
@@ -1522,7 +1551,7 @@ export default function App({ version = '0.1.0' }) {
   const wantTodoRows = agent.todos.length ? Math.min(agent.todos.length, todoVisible) + 3 : 0;
   const showTodo = wantTodoRows > 0 && optionalBudget >= wantTodoRows;
   const todoRows = showTodo ? wantTodoRows : 0;
-  const showMcpPanel = !!latestMcpTool && optionalBudget - todoRows >= mcpPanelRows;
+  const showMcpPanel = !!latestMcpTool && !mcpPanelCleared && optionalBudget - todoRows >= mcpPanelRows;
   // Everything except the transcript and the live box. Whatever is left is
   // shared between them. Owner, 2026-11-24: the two boxes swapped, and the
   // sizes follow them — the THINKING transcript is now the large area at the
