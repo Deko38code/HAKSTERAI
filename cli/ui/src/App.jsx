@@ -1145,18 +1145,18 @@ export default function App({ version = '0.1.0' }) {
   // approval: border 2 + header 1 + reason 1 + command 1 + answer row 1
   const approvalRows = approving ? 6 : 0;
   // Everything except the transcript and the live box. Whatever is left is
-  // shared between them. Owner, 2026-11-24: the two boxes swapped — the RESULT
-  // box is now the large area at the top of the column and the THINKING
-  // transcript is the compact strip directly over the composer. So the live
-  // box takes the leftover (large) rows and the transcript keeps a small,
-  // readable cap; a screen carrying a big todo list, an approval card and the
-  // MCP panel shrinks them instead of pushing the status bar off the bottom.
+  // shared between them. Owner, 2026-11-24: the two boxes swapped, and the
+  // sizes follow them — the THINKING transcript is now the large area at the
+  // bottom of the column and the RESULT box is the compact strip at the top.
+  // So the live box keeps a small, readable cap and the transcript takes the
+  // leftover (large) rows; a screen carrying a big todo list, an approval card
+  // and the MCP panel shrinks them instead of pushing the status bar off.
   const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows
     + approvalRows + systemRows + servicesRows + liveOutputChrome
     + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
   const sharedRows = (rows || 30) - fixedRows;
-  const transcriptRows = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
-  const liveOutputLines = Math.max(6, sharedRows - transcriptRows);
+  const liveOutputLines = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
+  const transcriptRows = Math.max(6, sharedRows - liveOutputLines);
 
   const dashboardItems = [
     {
@@ -1459,12 +1459,12 @@ export default function App({ version = '0.1.0' }) {
               </box>
             ) : null}
 
-            {/* ▶ Result — the large area at the top of the column (owner,
+            {/* ▶ Result — the compact strip at the top of the column (owner,
                 2026-11-24: the thinking and result boxes swapped, so the
-                result now sits up here and the reasoning strip goes below).
-                It follows the newest line while the run streams; shift+↑/↓
-                pages it when the sidebar is hidden (the sidebar owns those
-                keys when wide). */}
+                result sits up here as a short strip and the reasoning
+                transcript takes the large area below). It follows the newest
+                line while the run streams; shift+↑/↓ pages it when the
+                sidebar is hidden (the sidebar owns those keys when wide). */}
             <box style={{ flexShrink: 0, overflow: 'hidden' }}>
               <LiveOutputPanel
                 width={mainW}
@@ -1543,10 +1543,11 @@ export default function App({ version = '0.1.0' }) {
             <SystemPanel width={mainW} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
             <ServicesPanel width={mainW} services={services} scan={scan} dense={dense} maxCells={servicesCapacity} />
 
-            {/* The THINKING transcript sits LOWEST, directly over the input
-                bar (owner, 2026-11-24: swapped with the result box, so the
-                reasoning now lives right above the composer). It stays
-                compact; PgUp/PgDn page it and Ctrl+T opens the full reasoning. */}
+            {/* The THINKING transcript is now the LARGE area, sitting lowest
+                directly over the input bar (owner, 2026-11-24: swapped with
+                the result box and given the big rows, so the reasoning fills
+                the column bottom while the result stays a strip on top).
+                PgUp/PgDn page it and Ctrl+T opens the full reasoning. */}
             <box style={{ flexShrink: 0, overflow: 'hidden' }}>
               <Transcript
                 messages={agent.messages}

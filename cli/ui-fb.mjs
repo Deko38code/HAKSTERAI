@@ -6028,8 +6028,8 @@ function App({ version = "0.1.0" }) {
   const approvalRows = approving ? 6 : 0;
   const fixedRows = CHROME_ROWS + noticeRows + composerRows + railRows + todoRows + approvalRows + systemRows + servicesRows + liveOutputChrome + (latestMcpTool ? MCP_OUTPUT_PANEL_ROWS : 0);
   const sharedRows = (rows || 30) - fixedRows;
-  const transcriptRows = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
-  const liveOutputLines = Math.max(6, sharedRows - transcriptRows);
+  const liveOutputLines = Math.max(3, Math.min(liveOutputLineCap, sharedRows - 6));
+  const transcriptRows = Math.max(6, sharedRows - liveOutputLines);
   const dashboardItems = [
     {
       key: "system",
