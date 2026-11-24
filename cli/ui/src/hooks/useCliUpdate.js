@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { checkForUpdate, pendingInfo } from '../../../src/updater.js';
+import { useEffect, useRef, useState } from 'react';
+import { appliedNotice, checkForUpdate, pendingInfo } from '../../../src/updater.js';
 import prefs from '../../../src/prefs.js';
 
 /* useCliUpdate — the Claude Code update model in the TUI: the running session
@@ -8,27 +8,53 @@ import prefs from '../../../src/prefs.js';
  * from here and nothing is written into a source checkout.
  *
  * State: { status: 'idle'|'checking'|'current'|'staged'|'blocked'|'error'|'unknown',
- *          version, reason, checkedAt }
- * A package staged by an earlier session is reported immediately, before the
- * first network check, so a restart that was pending shows up at once.
+ *          version, reason, checkedAt, applied }
+ *
+ * Owner, 2026-11-24: "need our updates to show when updates have been installed
+ * upon starting cli". `applied` is that confirmation — `{ version, from,
+ * appliedAt }` when the CLI on disk was installed by an earlier start (see
+ * appliedNotice in src/updater.js). It is read once, at mount, and never
+ * overwritten by the background check, so the start screen can say "updated
+ * from vX" for the whole session.
+ *
+ * A stage that is byte-identical to the running build is NOT an update — it is
+ * this CLI. Reporting it as 'staged' every launch was the old lie; it is
+ * 'current' now (updater.pendingInfo().isCurrent).
  */
-export default function useCliUpdate(intervalMs = 30 * 60 * 1000) {
-  const [state, setState] = useState(() => {
-    try {
-      const pending = pendingInfo();
-      if (pending && pending.version) {
-        return {
+function readStartup() {
+  try {
+    const applied = appliedNotice();
+    const pending = pendingInfo();
+    if (applied) {
+      return { applied, status: { status: 'applied', version: applied.version, from: applied.from, checkedAt: applied.appliedAt } };
+    }
+    if (pending && pending.version) {
+      if (pending.isCurrent) {
+        return { applied: null, status: { status: 'current', version: pending.version, checkedAt: pending.stagedAt } };
+      }
+      return {
+        applied: null,
+        status: {
           status: pending.blocked ? 'blocked' : 'staged',
           version: pending.version,
           blocked: pending.blocked || undefined,
           checkedAt: pending.stagedAt,
-        };
-      }
-    } catch {
-      /* no updater state: idle */
+        },
+      };
     }
-    return { status: 'idle' };
-  });
+  } catch {
+    /* no updater state: idle */
+  }
+  return { applied: null, status: { status: 'idle' } };
+}
+
+export default function useCliUpdate(intervalMs = 30 * 60 * 1000) {
+  // Read the install/update facts exactly once — they describe this launch.
+  const startup = useRef(null);
+  if (startup.current === null) startup.current = readStartup();
+  const applied = startup.current.applied;
+
+  const [state, setState] = useState(startup.current.status);
 
   useEffect(() => {
     let alive = true;
@@ -36,16 +62,23 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000) {
       // /settings updateCheck off stops the background check; a package already
       // staged stays visible and still applies on the next launch.
       if (prefs.load().updateCheck === false) return;
-      setState((prev) => (prev.status === 'staged' || prev.status === 'blocked' ? prev : { ...prev, status: 'checking' }));
+      setState((prev) =>
+        prev.status === 'staged' || prev.status === 'blocked' || prev.status === 'applied' ? prev : { ...prev, status: 'checking' },
+      );
       try {
         const res = await checkForUpdate();
         if (!alive) return;
-        setState({
-          status: res.status,
-          version: res.version,
-          blocked: res.blocked || (res.status === 'blocked' ? 'source-checkout' : undefined),
-          reason: res.reason,
-          checkedAt: res.checkedAt,
+        setState((prev) => {
+          // The install confirmation outranks the network answer: this session
+          // is running the version an earlier start installed.
+          if (applied) return prev;
+          return {
+            status: res.status,
+            version: res.version,
+            blocked: res.blocked || (res.status === 'blocked' ? 'source-checkout' : undefined),
+            reason: res.reason,
+            checkedAt: res.checkedAt,
+          };
         });
       } catch (e) {
         if (alive) setState({ status: 'error', reason: String((e && e.message) || e) });
@@ -62,7 +95,7 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000) {
       alive = false;
       clearInterval(id);
     };
-  }, [intervalMs]);
+  }, [intervalMs, applied]);
 
-  return state;
+  return { ...state, applied };
 }

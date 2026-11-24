@@ -220,12 +220,50 @@ async function checkForUpdate(opts = {}) {
   return { status: blocked ? 'blocked' : 'staged', reason: blocked || undefined, ...pending, checkedAt: pending.stagedAt, running };
 }
 
-/** What a previous session left ready, without touching anything. */
-function pendingInfo() {
+/** A pending record describes the build this CLI is already running. */
+function sameBuild(pending, running) {
+  if (!pending || !running) return false;
+  if (String(pending.version || '') !== String(running.version || '')) return false;
+  return !pending.bundleSha || pending.bundleSha === running.bundleSha;
+}
+
+/** What a previous session left ready, without touching anything.
+ *
+ *  `isCurrent` is the honest answer to "is this the build I'm on?" — a stage
+ *  whose version AND bundle hash match the running install is not an update
+ *  waiting to apply, it is this CLI. The startup screens use it so they never
+ *  announce a restart that would change nothing. */
+function pendingInfo(explicitDir) {
   const pending = readJson(PENDING_FILE, null);
   if (!pending || !pending.version) return null;
   const ok = !!pending.bundleSha && sha256File(path.join(STAGED_DIR, 'cli', 'ui-fb.mjs')) === pending.bundleSha;
-  return { ...pending, verified: ok };
+  return { ...pending, verified: ok, isCurrent: sameBuild(pending, runningInfo(explicitDir)) };
+}
+
+/**
+ * The "an update was installed on an earlier start" record, if there is one.
+ *
+ * Owner, 2026-11-24: "need our updates to show when updates have been installed
+ * upon starting cli". applyPending() writes appliedAt/appliedOver into
+ * pending.json; the TUI reads it here and says so on the start screen. It only
+ * reports while the installed version is still the one running (a later release
+ * supersedes it) and within the freshness window, so a months-old install is
+ * not announced as news.
+ */
+const APPLIED_NOTICE_MS = 24 * 60 * 60 * 1000; // show it for the first day after install
+function appliedNotice(explicitDir, maxAgeMs) {
+  const pending = readJson(PENDING_FILE, null);
+  if (!pending || !pending.appliedAt || !pending.appliedOver) return null;
+  const at = Date.parse(pending.appliedAt);
+  if (!Number.isFinite(at)) return null;
+  if (Date.now() - at > (Number(maxAgeMs) || APPLIED_NOTICE_MS)) return null;
+  if (!sameBuild(pending, runningInfo(explicitDir))) return null; // superseded by a newer release
+  return {
+    version: String(pending.version || ''),
+    from: String(pending.appliedOver || ''),
+    appliedAt: pending.appliedAt,
+    backupDir: pending.backupDir || '',
+  };
 }
 
 /**
@@ -241,8 +279,11 @@ function applyPending(explicitDir) {
   if (!pending.verified) return { applied: false, reason: 'staged package failed verification', version: pending.version };
   if (isSourceCheckout(target)) return { applied: false, reason: 'source-checkout', version: pending.version };
   const running = runningInfo(target);
-  if (pending.version === running.version && pending.bundleSha === running.bundleSha) {
-    writeJson(PENDING_FILE, { ...pending, appliedAt: new Date().toISOString(), state: 'current' });
+  if (sameBuild(pending, running)) {
+    // The stage is this very build — nothing was installed, so it must not
+    // leave an appliedAt behind (that record is the "update was installed"
+    // notice, and a false one would be a lie on the next start screen).
+    writeJson(PENDING_FILE, { ...pending, matchedAt: new Date().toISOString(), state: 'current' });
     return { applied: false, reason: 'current', version: pending.version };
   }
   const installedDeps = readJson(path.join(target, 'package.json'), {}).dependencies || {};
@@ -299,7 +340,7 @@ async function promptStagedUpdate(opts = {}) {
   if (!pending || !pending.version) return { action: 'none' };
   if (pending.appliedAt) return { action: 'none', pending };
   const running = runningInfo(opts.cliDir);
-  if (pending.version === running.version && pending.bundleSha === running.bundleSha) {
+  if (sameBuild(pending, running)) {
     return { action: 'current', pending, running };
   }
   if (isSourceCheckout(opts.cliDir)) return { action: 'blocked', pending, running };
@@ -364,6 +405,7 @@ function readChoice(timeoutMs) {
 module.exports = {
   checkForUpdate,
   applyPending,
+  appliedNotice,
   pendingInfo,
   promptStagedUpdate,
   runningInfo,

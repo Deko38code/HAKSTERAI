@@ -466,11 +466,33 @@ export default function App({ version = '0.1.0' }) {
     setTimeout(() => setNotice((cur) => (cur === text ? null : cur)), 6000);
   }, []);
 
+  // ⬆ Install confirmation (owner, 2026-11-24: "need our updates to show when
+  // updates have been installed upon starting cli"). When an earlier start
+  // swapped in a newer package, say so once per launch — the stderr line from
+  // tui-entry is lost the moment the TUI takes the alternate screen, so this is
+  // the one place the operator actually sees it.
+  const installedAnnounced = useRef(false);
+  useEffect(() => {
+    if (installedAnnounced.current) return;
+    if (!update || !update.applied || !update.applied.version) return;
+    installedAnnounced.current = true;
+    // Same version, newer build is possible (the package hash decides when the
+    // version is equal), so say that instead of "was v0.3.6 (was v0.3.6)".
+    const from =
+      update.applied.from && update.applied.from !== update.applied.version
+        ? ` (was v${update.applied.from})`
+        : ' (newer build, same version)';
+    showNotice(`✓ CLI updated to v${update.applied.version}${from} — installed on this start`);
+  }, [update, showNotice]);
+
   // ⬆ Update announcement: say it once per staged version. The swap happens at
   // the next launch (src/updater.js applies a verified stage before the bundle
   // loads); a source checkout is only ever told, never written into (§8).
   const updateAnnounced = useRef('');
   useEffect(() => {
+    // A build that is already installed is not a pending update — the install
+    // notice above covers it, and announcing "staged" would contradict it.
+    if (update && update.applied) return;
     if (!update || !update.version) return;
     if (update.status !== 'staged' && update.status !== 'blocked') return;
     const key = `${update.status}:${update.version}`;
@@ -652,7 +674,9 @@ export default function App({ version = '0.1.0' }) {
         showNotice(
           !update || update.status === 'idle' || update.status === 'checking'
             ? '⬆ update — checking the server for a newer CLI…'
-            : update.status === 'current'
+            : update.status === 'applied' || (update.applied && update.applied.version)
+              ? `⬆ update — running v${version}, installed on this start${update.applied && update.applied.from ? ` (was v${update.applied.from})` : ''}`
+              : update.status === 'current'
               ? `⬆ update — up to date (v${update.version || version})`
               : update.status === 'staged'
                 ? `⬆ update — v${update.version} staged; applies when the CLI restarts`
@@ -1417,12 +1441,23 @@ export default function App({ version = '0.1.0' }) {
   // Every line is live state — version, update state, model, server — so the
   // splash never tells the owner anything the session doesn't know.
   if (!introDone) {
+    // Line 2 answers the owner's question directly (2026-11-24): was an update
+    // installed? Then say it — green, with the version it replaced.
     const updateLine =
-      update && update.status === 'blocked'
-        ? `update v${update.version} held · source checkout`
-        : update && update.status === 'staged'
-          ? `update v${update.version} staged · applies on restart`
-          : 'updates check live · apply on restart';
+      update && update.applied && update.applied.version
+        ? {
+            text:
+              update.applied.from && update.applied.from !== update.applied.version
+                ? `✓ updated from v${update.applied.from}`
+                : '✓ updated to the newest build',
+            color: '#00ff41',
+            bold: true,
+          }
+        : update && update.status === 'blocked'
+          ? { text: `update v${update.version} held · source checkout`, color: 'gray' }
+          : update && update.status === 'staged'
+            ? { text: `update v${update.version} staged · applies on restart`, color: 'yellow' }
+            : { text: 'up to date · updates check live', color: 'gray' };
     return (
       <DecodeSplash
         width={cols || 100}
@@ -1434,7 +1469,7 @@ export default function App({ version = '0.1.0' }) {
         lines={[
           // Lime green on the hacker-desk hero, per the owner's 2026-11-23 note.
           { text: '◆ haksterAi', color: '#00ff41', bold: true },
-          { text: `CLI v${version} · ${updateLine}`, color: 'gray' },
+          { text: `CLI v${version} · ${updateLine.text}`, color: updateLine.color || 'gray', bold: !!updateLine.bold },
           { text: `model ${modelText}`, color: '#a3e635' },
           {
             text: statusErr ? `server offline — ${statusErr}` : status ? 'server online' : 'connecting…',

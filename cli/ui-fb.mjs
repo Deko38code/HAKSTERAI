@@ -35,9 +35,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// src/ads/ad-cache.js
+// ../src/ads/ad-cache.js
 var require_ad_cache = __commonJS({
-  "src/ads/ad-cache.js"(exports, module) {
+  "../src/ads/ad-cache.js"(exports, module) {
     "use strict";
     var AD_TTL_MS = 30 * 6e4;
     var held = /* @__PURE__ */ new Map();
@@ -159,9 +159,9 @@ var require_ad_cache = __commonJS({
   }
 });
 
-// src/ads/terminal-safe-text.js
+// ../src/ads/terminal-safe-text.js
 var require_terminal_safe_text = __commonJS({
-  "src/ads/terminal-safe-text.js"(exports, module) {
+  "../src/ads/terminal-safe-text.js"(exports, module) {
     "use strict";
     var CSI = /(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g;
     var OSC = /(?:\x1b\]|\x9d)[\s\S]*?(?:\x07|\x1b\\|\x9c|$)/g;
@@ -202,9 +202,9 @@ var require_terminal_safe_text = __commonJS({
   }
 });
 
-// src/ads/ad-client.js
+// ../src/ads/ad-client.js
 var require_ad_client = __commonJS({
-  "src/ads/ad-client.js"(exports, module) {
+  "../src/ads/ad-client.js"(exports, module) {
     "use strict";
     var { getAd, resetAdCache, recordImpression, renderDelaySinceReceipt, adSessionSnapshot } = require_ad_cache();
     var { sanitizeTerminalStrings } = require_terminal_safe_text();
@@ -309,9 +309,9 @@ var require_ad_client = __commonJS({
   }
 });
 
-// src/ads/inline-ad-layout.js
+// ../src/ads/inline-ad-layout.js
 var require_inline_ad_layout = __commonJS({
-  "src/ads/inline-ad-layout.js"(exports, module) {
+  "../src/ads/inline-ad-layout.js"(exports, module) {
     "use strict";
     var { sanitizeTerminalText } = require_terminal_safe_text();
     var MIN_INLINE_WIDTH_WITH_DESTINATION = 48;
@@ -418,9 +418,9 @@ var require_inline_ad_layout = __commonJS({
   }
 });
 
-// src/kitty-graphics.js
+// ../src/kitty-graphics.js
 var require_kitty_graphics = __commonJS({
-  "src/kitty-graphics.js"(exports, module) {
+  "../src/kitty-graphics.js"(exports, module) {
     "use strict";
     var fs10 = __require("fs");
     var path8 = __require("path");
@@ -511,9 +511,9 @@ var require_kitty_graphics = __commonJS({
   }
 });
 
-// src/live-image.js
+// ../src/live-image.js
 var require_live_image = __commonJS({
-  "src/live-image.js"(exports, module) {
+  "../src/live-image.js"(exports, module) {
     "use strict";
     var fs10 = __require("fs");
     var os6 = __require("os");
@@ -633,9 +633,9 @@ var require_live_image = __commonJS({
   }
 });
 
-// src/models/ladder.js
+// ../src/models/ladder.js
 var require_ladder = __commonJS({
-  "src/models/ladder.js"(exports, module) {
+  "../src/models/ladder.js"(exports, module) {
     "use strict";
     var PRIMARY_MODEL2 = "deepseek-v4.1-flash:cloud";
     var PRIMARY_PROVIDER2 = "ollama";
@@ -712,9 +712,9 @@ var require_ladder = __commonJS({
   }
 });
 
-// src/updater.js
+// ../src/updater.js
 var require_updater = __commonJS({
-  "src/updater.js"(exports, module) {
+  "../src/updater.js"(exports, module) {
     "use strict";
     var fs10 = __require("fs");
     var os6 = __require("os");
@@ -885,11 +885,31 @@ var require_updater = __commonJS({
       writeJson(PENDING_FILE, pending);
       return { status: blocked ? "blocked" : "staged", reason: blocked || void 0, ...pending, checkedAt: pending.stagedAt, running };
     }
-    function pendingInfo2() {
+    function sameBuild(pending, running) {
+      if (!pending || !running) return false;
+      if (String(pending.version || "") !== String(running.version || "")) return false;
+      return !pending.bundleSha || pending.bundleSha === running.bundleSha;
+    }
+    function pendingInfo2(explicitDir) {
       const pending = readJson(PENDING_FILE, null);
       if (!pending || !pending.version) return null;
       const ok = !!pending.bundleSha && sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
-      return { ...pending, verified: ok };
+      return { ...pending, verified: ok, isCurrent: sameBuild(pending, runningInfo(explicitDir)) };
+    }
+    var APPLIED_NOTICE_MS = 24 * 60 * 60 * 1e3;
+    function appliedNotice2(explicitDir, maxAgeMs) {
+      const pending = readJson(PENDING_FILE, null);
+      if (!pending || !pending.appliedAt || !pending.appliedOver) return null;
+      const at = Date.parse(pending.appliedAt);
+      if (!Number.isFinite(at)) return null;
+      if (Date.now() - at > (Number(maxAgeMs) || APPLIED_NOTICE_MS)) return null;
+      if (!sameBuild(pending, runningInfo(explicitDir))) return null;
+      return {
+        version: String(pending.version || ""),
+        from: String(pending.appliedOver || ""),
+        appliedAt: pending.appliedAt,
+        backupDir: pending.backupDir || ""
+      };
     }
     function applyPending(explicitDir) {
       const pending = pendingInfo2();
@@ -899,8 +919,8 @@ var require_updater = __commonJS({
       if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
       if (isSourceCheckout(target)) return { applied: false, reason: "source-checkout", version: pending.version };
       const running = runningInfo(target);
-      if (pending.version === running.version && pending.bundleSha === running.bundleSha) {
-        writeJson(PENDING_FILE, { ...pending, appliedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current" });
+      if (sameBuild(pending, running)) {
+        writeJson(PENDING_FILE, { ...pending, matchedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current" });
         return { applied: false, reason: "current", version: pending.version };
       }
       const installedDeps = readJson(path8.join(target, "package.json"), {}).dependencies || {};
@@ -938,7 +958,7 @@ var require_updater = __commonJS({
       if (!pending || !pending.version) return { action: "none" };
       if (pending.appliedAt) return { action: "none", pending };
       const running = runningInfo(opts.cliDir);
-      if (pending.version === running.version && pending.bundleSha === running.bundleSha) {
+      if (sameBuild(pending, running)) {
         return { action: "current", pending, running };
       }
       if (isSourceCheckout(opts.cliDir)) return { action: "blocked", pending, running };
@@ -1009,6 +1029,7 @@ var require_updater = __commonJS({
     module.exports = {
       checkForUpdate: checkForUpdate2,
       applyPending,
+      appliedNotice: appliedNotice2,
       pendingInfo: pendingInfo2,
       promptStagedUpdate,
       runningInfo,
@@ -1020,9 +1041,9 @@ var require_updater = __commonJS({
   }
 });
 
-// src/prefs.js
+// ../src/prefs.js
 var require_prefs = __commonJS({
-  "src/prefs.js"(exports, module) {
+  "../src/prefs.js"(exports, module) {
     "use strict";
     var fs10 = __require("fs");
     var os6 = __require("os");
@@ -1111,9 +1132,9 @@ var require_prefs = __commonJS({
   }
 });
 
-// src/models/catalog.js
+// ../src/models/catalog.js
 var require_catalog = __commonJS({
-  "src/models/catalog.js"(exports, module) {
+  "../src/models/catalog.js"(exports, module) {
     "use strict";
     var REFERENCE_CATALOG = [
       {
@@ -1287,19 +1308,19 @@ var require_catalog = __commonJS({
   }
 });
 
-// ui/src/index.jsx
+// src/index.jsx
 import React26 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
-// ui/src/App.jsx
-import React25, { useCallback as useCallback5, useEffect as useEffect16, useRef as useRef10, useState as useState17 } from "react";
+// src/App.jsx
+import React25, { useCallback as useCallback5, useEffect as useEffect16, useRef as useRef11, useState as useState17 } from "react";
 import fs9 from "node:fs";
 import path7 from "node:path";
 import { useKeyboard as useKeyboard7, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes18 } from "@opentui/core";
 
-// ui/src/components/DockAd.jsx
+// src/components/DockAd.jsx
 var import_ad_client = __toESM(require_ad_client());
 var import_inline_ad_layout = __toESM(require_inline_ad_layout());
 import React, { useEffect, useState } from "react";
@@ -1408,12 +1429,12 @@ function DockAd({
   );
 }
 
-// ui/src/components/ApprovalPrompt.jsx
+// src/components/ApprovalPrompt.jsx
 import React2, { useEffect as useEffect2, useState as useState2 } from "react";
 import { useKeyboard as useKeyboard2 } from "@opentui/react";
 import { TextAttributes as TextAttributes2 } from "@opentui/core";
 
-// ui/src/utils/danger-password.js
+// src/utils/danger-password.js
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1432,7 +1453,7 @@ function isSudoCommand(command) {
   return /^\s*sudo\b/i.test(String(command || ""));
 }
 
-// ui/src/components/ApprovalPrompt.jsx
+// src/components/ApprovalPrompt.jsx
 import { Fragment, jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 function ApprovalPrompt({ width = 80, request, onAnswer }) {
   const [password, setPassword] = useState2("");
@@ -1524,7 +1545,7 @@ function ApprovalPrompt({ width = 80, request, onAnswer }) {
   );
 }
 
-// ui/src/components/Composer.jsx
+// src/components/Composer.jsx
 import React3 from "react";
 import { TextAttributes as TextAttributes3 } from "@opentui/core";
 import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
@@ -1580,13 +1601,13 @@ function Composer({
   );
 }
 
-// ui/src/components/GridLayout.jsx
+// src/components/GridLayout.jsx
 import React4 from "react";
 
-// ui/src/hooks/useGridLayout.js
+// src/hooks/useGridLayout.js
 import { useMemo } from "react";
 
-// ui/src/utils/layout-helpers.js
+// src/utils/layout-helpers.js
 var MIN_COLUMN_WIDTH = 10;
 function computeSmartColumns(itemCount, maxColumns) {
   if (itemCount === 0) return 1;
@@ -1599,7 +1620,7 @@ function computeSmartColumns(itemCount, maxColumns) {
   return maxColumns;
 }
 
-// ui/src/hooks/useGridLayout.js
+// src/hooks/useGridLayout.js
 var WIDTH_MD_THRESHOLD = 100;
 var WIDTH_LG_THRESHOLD = 150;
 var WIDTH_XL_THRESHOLD = 200;
@@ -1639,7 +1660,7 @@ function useGridLayout(items, availableWidth) {
   );
 }
 
-// ui/src/components/GridLayout.jsx
+// src/components/GridLayout.jsx
 import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
 function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, marginTop = 0 }) {
   const { columns, columnWidths, columnGroups } = useGridLayout(items, availableWidth);
@@ -1680,7 +1701,7 @@ function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, mar
 }
 var GridLayout_default = GridLayout;
 
-// ui/src/components/GridPanel.jsx
+// src/components/GridPanel.jsx
 import React5 from "react";
 import { TextAttributes as TextAttributes4 } from "@opentui/core";
 import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
@@ -1739,12 +1760,12 @@ function Spark({ data = [], w = 24 }) {
 }
 var GridPanel_default = GridPanel;
 
-// ui/src/components/LiveSidebar.jsx
+// src/components/LiveSidebar.jsx
 import React7, { useEffect as useEffect4, useRef as useRef2, useState as useState4 } from "react";
 import { TextAttributes as TextAttributes5 } from "@opentui/core";
 import { useKeyboard as useKeyboard3 } from "@opentui/react";
 
-// ui/src/utils/panel-scroll.js
+// src/utils/panel-scroll.js
 var maxStartOf = (total, rows) => {
   const n = Math.max(0, Math.trunc(Number(total) || 0));
   const r = Math.max(0, Math.trunc(Number(rows) || 0));
@@ -1801,7 +1822,7 @@ var keyMatches = (key, name, mod = "none") => {
   return !!key.shift === !!want.shift && !!key.meta === !!want.meta && !!key.ctrl === !!want.ctrl;
 };
 
-// ui/src/components/LiveImageViewer.jsx
+// src/components/LiveImageViewer.jsx
 var import_kitty_graphics = __toESM(require_kitty_graphics());
 var import_live_image = __toESM(require_live_image());
 import React6, { useEffect as useEffect3, useRef, useState as useState3 } from "react";
@@ -1945,7 +1966,7 @@ function LiveImageViewer({
   ] });
 }
 
-// ui/src/components/LiveSidebar.jsx
+// src/components/LiveSidebar.jsx
 import { Fragment as Fragment3, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 var isWide = (cp) => cp >= 4352 && cp <= 4447 || cp === 9001 || cp === 9002 || cp >= 9728 && cp <= 10175 || cp >= 11008 && cp <= 11263 || cp >= 11904 && cp <= 42191 || cp >= 44032 && cp <= 55203 || cp >= 63744 && cp <= 64255 || cp >= 65072 && cp <= 65135 || cp >= 65280 && cp <= 65376 || cp >= 65504 && cp <= 65510 || cp >= 126976 && cp <= 129791;
 var cellWidth = (ch) => {
@@ -2287,10 +2308,10 @@ function LiveSidebar({
   ] });
 }
 
-// ui/src/components/LiveOutputPanel.jsx
+// src/components/LiveOutputPanel.jsx
 import React8 from "react";
 
-// ui/src/hooks/usePanelScroll.js
+// src/hooks/usePanelScroll.js
 import { useCallback, useEffect as useEffect5, useRef as useRef3, useState as useState5 } from "react";
 import { useKeyboard as useKeyboard4 } from "@opentui/react";
 function usePanelScroll({
@@ -2353,7 +2374,7 @@ function usePanelScroll({
   };
 }
 
-// ui/src/components/LiveOutputPanel.jsx
+// src/components/LiveOutputPanel.jsx
 import { Fragment as Fragment4, jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 function LiveOutputPanel({
   width = 80,
@@ -2390,7 +2411,7 @@ function LiveOutputPanel({
   ] });
 }
 
-// ui/src/components/UsageView.jsx
+// src/components/UsageView.jsx
 import React9 from "react";
 import { TextAttributes as TextAttributes6 } from "@opentui/core";
 import { Fragment as Fragment5, jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
@@ -2530,7 +2551,7 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
   ] });
 }
 
-// ui/src/hooks/useServerUsage.js
+// src/hooks/useServerUsage.js
 import { useCallback as useCallback2, useEffect as useEffect6, useRef as useRef4, useState as useState6 } from "react";
 import fs3 from "node:fs";
 import os2 from "node:os";
@@ -2589,10 +2610,10 @@ function useServerUsage(refreshSeconds = 15, enabled = true) {
   return { ...state, refresh: load };
 }
 
-// ui/src/App.jsx
+// src/App.jsx
 var import_live_image2 = __toESM(require_live_image());
 
-// ui/src/components/MonitorFeed.jsx
+// src/components/MonitorFeed.jsx
 import React10, { useState as useState7 } from "react";
 import { useKeyboard as useKeyboard5 } from "@opentui/react";
 import { Fragment as Fragment6, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
@@ -2689,7 +2710,7 @@ function MonitorFeed({
   ] });
 }
 
-// ui/src/components/DecodeSplash.jsx
+// src/components/DecodeSplash.jsx
 var import_kitty_graphics2 = __toESM(require_kitty_graphics());
 import React11, { useEffect as useEffect7, useRef as useRef5, useState as useState8 } from "react";
 import fs4 from "node:fs";
@@ -2999,7 +3020,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
   );
 }
 
-// ui/src/components/MenuPalette.jsx
+// src/components/MenuPalette.jsx
 import React12 from "react";
 import { TextAttributes as TextAttributes8 } from "@opentui/core";
 import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
@@ -3024,7 +3045,7 @@ var MENU_ITEMS = [
   { cmd: "/quit", label: "Quit", detail: "leave the dashboard" }
 ];
 
-// ui/src/components/CatalogPopout.jsx
+// src/components/CatalogPopout.jsx
 import React13 from "react";
 import { TextAttributes as TextAttributes9 } from "@opentui/core";
 import { jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
@@ -3095,7 +3116,7 @@ function CatalogPopout({
   ] });
 }
 
-// ui/src/components/ScrollPanel.jsx
+// src/components/ScrollPanel.jsx
 import React14 from "react";
 import { jsx as jsx14 } from "react/jsx-runtime";
 function ScrollPanel({
@@ -3140,11 +3161,11 @@ function ScrollPanel({
 }
 var ScrollPanel_default = ScrollPanel;
 
-// ui/src/components/ScriptsView.jsx
+// src/components/ScriptsView.jsx
 import React15, { useMemo as useMemo2 } from "react";
 import { TextAttributes as TextAttributes10 } from "@opentui/core";
 
-// ui/src/utils/scripts.js
+// src/utils/scripts.js
 import fs5 from "node:fs";
 import path4 from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3257,7 +3278,7 @@ function diffLines(prev, next) {
 }
 var linesOf = (entry) => sourceOf(entry);
 
-// ui/src/components/ScriptsView.jsx
+// src/components/ScriptsView.jsx
 import { jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
 var STATUS_COLOR = {
   idle: "gray",
@@ -3385,11 +3406,11 @@ function ScriptsView({
   ] });
 }
 
-// ui/src/components/SquadView.jsx
+// src/components/SquadView.jsx
 import React16 from "react";
 import { TextAttributes as TextAttributes11 } from "@opentui/core";
 
-// ui/src/utils/squad.js
+// src/utils/squad.js
 var PEER_PATTERN = /agent|squad|subagent|codex|kiro|phantom|hermes|claude-code|hivemind|miniforge|serena|stealth|bounty/i;
 var RANK = { live: 0, lazy: 1, down: 2 };
 function peersFromMcp(mcp) {
@@ -3406,7 +3427,7 @@ function peersFromMcp(mcp) {
   }).sort((a, b) => RANK[a.state] - RANK[b.state] || a.name.localeCompare(b.name));
 }
 
-// ui/src/components/SquadView.jsx
+// src/components/SquadView.jsx
 import { jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
 function SquadView({
   width = 80,
@@ -3470,11 +3491,11 @@ function SquadView({
   ] });
 }
 
-// ui/src/components/ServicesPanel.jsx
+// src/components/ServicesPanel.jsx
 import React17 from "react";
 import { TextAttributes as TextAttributes12 } from "@opentui/core";
 
-// smartness.mjs
+// ../smartness.mjs
 import fs6 from "node:fs";
 import os3 from "node:os";
 import path5 from "node:path";
@@ -3664,7 +3685,7 @@ function portLabel(entry, max = 14) {
   return text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}\u2026`;
 }
 
-// ui/src/components/ServicesPanel.jsx
+// src/components/ServicesPanel.jsx
 import { jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
 var CELL_W = 16;
 function servicesGridRows(width, count, dense = false) {
@@ -3763,11 +3784,11 @@ function ServicesPanel({
   );
 }
 
-// ui/src/components/StatusServicesPanel.jsx
+// src/components/StatusServicesPanel.jsx
 import React19 from "react";
 import { TextAttributes as TextAttributes14 } from "@opentui/core";
 
-// ui/src/components/SystemPanel.jsx
+// src/components/SystemPanel.jsx
 import React18 from "react";
 import { TextAttributes as TextAttributes13 } from "@opentui/core";
 import { jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
@@ -3822,7 +3843,7 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   return /* @__PURE__ */ jsx18("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx18("text", { children: /* @__PURE__ */ jsx18("span", { fg: barColor("smart", score), attributes: TextAttributes13.BOLD, children: clip4(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
 }
 
-// ui/src/components/StatusServicesPanel.jsx
+// src/components/StatusServicesPanel.jsx
 import { jsx as jsx19, jsxs as jsxs18 } from "react/jsx-runtime";
 var CELL_W2 = 16;
 function gridShape(width, n) {
@@ -3904,7 +3925,7 @@ function StatusServicesPanel({
   ] });
 }
 
-// ui/src/components/StatusBar.jsx
+// src/components/StatusBar.jsx
 import React20 from "react";
 import { TextAttributes as TextAttributes15 } from "@opentui/core";
 import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
@@ -3960,7 +3981,7 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
   ] });
 }
 
-// ui/src/components/CrushStatus.jsx
+// src/components/CrushStatus.jsx
 import React21, { useEffect as useEffect8, useState as useState9 } from "react";
 import { jsx as jsx21, jsxs as jsxs20 } from "react/jsx-runtime";
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
@@ -4010,7 +4031,7 @@ function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   ] }) });
 }
 
-// ui/src/components/TodoPanel.jsx
+// src/components/TodoPanel.jsx
 import React22 from "react";
 import { TextAttributes as TextAttributes16 } from "@opentui/core";
 import { jsx as jsx22, jsxs as jsxs21 } from "react/jsx-runtime";
@@ -4044,11 +4065,11 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   );
 }
 
-// ui/src/components/Transcript.jsx
+// src/components/Transcript.jsx
 import React24, { useEffect as useEffect10, useRef as useRef6, useState as useState11 } from "react";
 import { useKeyboard as useKeyboard6 } from "@opentui/react";
 
-// ui/src/components/MessageBlock.jsx
+// src/components/MessageBlock.jsx
 import React23, { useEffect as useEffect9, useState as useState10 } from "react";
 import { TextAttributes as TextAttributes17 } from "@opentui/core";
 import { Fragment as Fragment8, jsx as jsx23, jsxs as jsxs22 } from "react/jsx-runtime";
@@ -4210,7 +4231,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   ] });
 }
 
-// ui/src/components/Transcript.jsx
+// src/components/Transcript.jsx
 import { jsx as jsx24, jsxs as jsxs23 } from "react/jsx-runtime";
 var MAX_TURNS = 80;
 var SCROLLBAR_OPTIONS = {
@@ -4332,7 +4353,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
   ) });
 }
 
-// ui/src/hooks/useAgentStream.js
+// src/hooks/useAgentStream.js
 import { useCallback as useCallback3, useEffect as useEffect11, useRef as useRef7, useState as useState12 } from "react";
 var import_ladder = __toESM(require_ladder());
 var DEFAULT_API2 = process.env.HAKSTER_API_URL || "http://localhost:3579";
@@ -4956,7 +4977,7 @@ function useAgentStream({
 }
 var useAgentStream_default = useAgentStream;
 
-// ui/src/hooks/useHostStats.js
+// src/hooks/useHostStats.js
 import { useEffect as useEffect12, useRef as useRef8, useState as useState13 } from "react";
 import os4 from "node:os";
 import fs7 from "node:fs";
@@ -5043,7 +5064,7 @@ function useHostStats(intervalMs = 5e3) {
   return stats;
 }
 
-// ui/src/hooks/useMemoryBank.js
+// src/hooks/useMemoryBank.js
 import { useEffect as useEffect13, useState as useState14 } from "react";
 import fs8 from "node:fs";
 import os5 from "node:os";
@@ -5102,40 +5123,59 @@ function useMemoryBank(intervalMs = 1e4) {
   return state;
 }
 
-// ui/src/hooks/useCliUpdate.js
+// src/hooks/useCliUpdate.js
 var import_updater = __toESM(require_updater());
 var import_prefs = __toESM(require_prefs());
-import { useEffect as useEffect14, useState as useState15 } from "react";
-function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
-  const [state, setState] = useState15(() => {
-    try {
-      const pending = (0, import_updater.pendingInfo)();
-      if (pending && pending.version) {
-        return {
+import { useEffect as useEffect14, useRef as useRef9, useState as useState15 } from "react";
+function readStartup() {
+  try {
+    const applied = (0, import_updater.appliedNotice)();
+    const pending = (0, import_updater.pendingInfo)();
+    if (applied) {
+      return { applied, status: { status: "applied", version: applied.version, from: applied.from, checkedAt: applied.appliedAt } };
+    }
+    if (pending && pending.version) {
+      if (pending.isCurrent) {
+        return { applied: null, status: { status: "current", version: pending.version, checkedAt: pending.stagedAt } };
+      }
+      return {
+        applied: null,
+        status: {
           status: pending.blocked ? "blocked" : "staged",
           version: pending.version,
           blocked: pending.blocked || void 0,
           checkedAt: pending.stagedAt
-        };
-      }
-    } catch {
+        }
+      };
     }
-    return { status: "idle" };
-  });
+  } catch {
+  }
+  return { applied: null, status: { status: "idle" } };
+}
+function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
+  const startup = useRef9(null);
+  if (startup.current === null) startup.current = readStartup();
+  const applied = startup.current.applied;
+  const [state, setState] = useState15(startup.current.status);
   useEffect14(() => {
     let alive = true;
     const tick = async () => {
       if (import_prefs.default.load().updateCheck === false) return;
-      setState((prev) => prev.status === "staged" || prev.status === "blocked" ? prev : { ...prev, status: "checking" });
+      setState(
+        (prev) => prev.status === "staged" || prev.status === "blocked" || prev.status === "applied" ? prev : { ...prev, status: "checking" }
+      );
       try {
         const res = await (0, import_updater.checkForUpdate)();
         if (!alive) return;
-        setState({
-          status: res.status,
-          version: res.version,
-          blocked: res.blocked || (res.status === "blocked" ? "source-checkout" : void 0),
-          reason: res.reason,
-          checkedAt: res.checkedAt
+        setState((prev) => {
+          if (applied) return prev;
+          return {
+            status: res.status,
+            version: res.version,
+            blocked: res.blocked || (res.status === "blocked" ? "source-checkout" : void 0),
+            reason: res.reason,
+            checkedAt: res.checkedAt
+          };
         });
       } catch (e) {
         if (alive) setState({ status: "error", reason: String(e && e.message || e) });
@@ -5151,12 +5191,12 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
       alive = false;
       clearInterval(id);
     };
-  }, [intervalMs]);
-  return state;
+  }, [intervalMs, applied]);
+  return { ...state, applied };
 }
 
-// ui/src/hooks/useScriptRunner.js
-import { useCallback as useCallback4, useEffect as useEffect15, useRef as useRef9, useState as useState16 } from "react";
+// src/hooks/useScriptRunner.js
+import { useCallback as useCallback4, useEffect as useEffect15, useRef as useRef10, useState as useState16 } from "react";
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
 var TIMEOUT_MS = 12e4;
@@ -5169,9 +5209,9 @@ function useScriptRunner() {
     }
   });
   const [run, setRun] = useState16({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
-  const procRef = useRef9(null);
-  const timerRef = useRef9(null);
-  const seq2 = useRef9(0);
+  const procRef = useRef10(null);
+  const timerRef = useRef10(null);
+  const seq2 = useRef10(0);
   const stop = useCallback4(() => {
     const p = procRef.current;
     if (p) {
@@ -5257,7 +5297,7 @@ function useScriptRunner() {
 }
 var useScriptRunner_default = useScriptRunner;
 
-// ui/src/App.jsx
+// src/App.jsx
 var import_prefs2 = __toESM(require_prefs());
 var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
@@ -5361,7 +5401,7 @@ function App({ version = "0.1.0" }) {
   const [model, setModel] = useState17(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
   const [provider, setProvider] = useState17(process.env.HAKSTER_PROVIDER || "");
   const [modelIdx, setModelIdx] = useState17(0);
-  const prefsRef = useRef10(null);
+  const prefsRef = useRef11(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
   const [handoffOn, setHandoffOn] = useState17(() => prefsRef.current.autoHandoff !== false);
   const [autoMode, setAutoMode] = useState17(() => {
@@ -5389,9 +5429,9 @@ function App({ version = "0.1.0" }) {
   const [pointsHistory, setPointsHistory] = useState17([]);
   const [attachment, setAttachment] = useState17(null);
   const [steerQueue, setSteerQueue] = useState17([]);
-  const scrollRef = useRef10(null);
-  const dashRef = useRef10(null);
-  const usageRef = useRef10(null);
+  const scrollRef = useRef11(null);
+  const dashRef = useRef11(null);
+  const usageRef = useRef11(null);
   const agent = useAgentStream_default({
     api: API,
     model,
@@ -5536,8 +5576,17 @@ function App({ version = "0.1.0" }) {
     setNotice(text);
     setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
   }, []);
-  const updateAnnounced = useRef10("");
+  const installedAnnounced = useRef11(false);
   useEffect16(() => {
+    if (installedAnnounced.current) return;
+    if (!update || !update.applied || !update.applied.version) return;
+    installedAnnounced.current = true;
+    const from = update.applied.from && update.applied.from !== update.applied.version ? ` (was v${update.applied.from})` : " (newer build, same version)";
+    showNotice(`\u2713 CLI updated to v${update.applied.version}${from} \u2014 installed on this start`);
+  }, [update, showNotice]);
+  const updateAnnounced = useRef11("");
+  useEffect16(() => {
+    if (update && update.applied) return;
     if (!update || !update.version) return;
     if (update.status !== "staged" && update.status !== "blocked") return;
     const key = `${update.status}:${update.version}`;
@@ -5681,7 +5730,7 @@ function App({ version = "0.1.0" }) {
       }
       case "/update":
         showNotice(
-          !update || update.status === "idle" || update.status === "checking" ? "\u2B06 update \u2014 checking the server for a newer CLI\u2026" : update.status === "current" ? `\u2B06 update \u2014 up to date (v${update.version || version})` : update.status === "staged" ? `\u2B06 update \u2014 v${update.version} staged; applies when the CLI restarts` : update.status === "blocked" ? `\u2B06 update \u2014 v${update.version} staged; source checkout, not applied (pull/install when ready)` : `\u2B06 update \u2014 check failed: ${update.reason || "unknown"}`
+          !update || update.status === "idle" || update.status === "checking" ? "\u2B06 update \u2014 checking the server for a newer CLI\u2026" : update.status === "applied" || update.applied && update.applied.version ? `\u2B06 update \u2014 running v${version}, installed on this start${update.applied && update.applied.from ? ` (was v${update.applied.from})` : ""}` : update.status === "current" ? `\u2B06 update \u2014 up to date (v${update.version || version})` : update.status === "staged" ? `\u2B06 update \u2014 v${update.version} staged; applies when the CLI restarts` : update.status === "blocked" ? `\u2B06 update \u2014 v${update.version} staged; source checkout, not applied (pull/install when ready)` : `\u2B06 update \u2014 check failed: ${update.reason || "unknown"}`
         );
         return;
       case "/clear":
@@ -5701,7 +5750,7 @@ function App({ version = "0.1.0" }) {
         showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
     }
   }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn, autoMode, update, version]);
-  const crushModelList = useRef10(null);
+  const crushModelList = useRef11(null);
   if (!crushModelList.current) crushModelList.current = readCrushModels();
   const catalogRows = (() => {
     const q = menuQuery.trim().toLowerCase();
@@ -5781,7 +5830,7 @@ function App({ version = "0.1.0" }) {
     },
     [agent, attachment, runCommand, showNotice, steerQueue.length]
   );
-  const steerFlushLock = useRef10(false);
+  const steerFlushLock = useRef11(false);
   useEffect16(() => {
     if (agent.busy) {
       steerFlushLock.current = false;
@@ -6281,7 +6330,11 @@ function App({ version = "0.1.0" }) {
     update
   };
   if (!introDone) {
-    const updateLine = update && update.status === "blocked" ? `update v${update.version} held \xB7 source checkout` : update && update.status === "staged" ? `update v${update.version} staged \xB7 applies on restart` : "updates check live \xB7 apply on restart";
+    const updateLine = update && update.applied && update.applied.version ? {
+      text: update.applied.from && update.applied.from !== update.applied.version ? `\u2713 updated from v${update.applied.from}` : "\u2713 updated to the newest build",
+      color: "#00ff41",
+      bold: true
+    } : update && update.status === "blocked" ? { text: `update v${update.version} held \xB7 source checkout`, color: "gray" } : update && update.status === "staged" ? { text: `update v${update.version} staged \xB7 applies on restart`, color: "yellow" } : { text: "up to date \xB7 updates check live", color: "gray" };
     return /* @__PURE__ */ jsx25(
       DecodeSplash,
       {
@@ -6292,7 +6345,7 @@ function App({ version = "0.1.0" }) {
         lines: [
           // Lime green on the hacker-desk hero, per the owner's 2026-11-23 note.
           { text: "\u25C6 haksterAi", color: "#00ff41", bold: true },
-          { text: `CLI v${version} \xB7 ${updateLine}`, color: "gray" },
+          { text: `CLI v${version} \xB7 ${updateLine.text}`, color: updateLine.color || "gray", bold: !!updateLine.bold },
           { text: `model ${modelText}`, color: "#a3e635" },
           {
             text: statusErr ? `server offline \u2014 ${statusErr}` : status ? "server online" : "connecting\u2026",
@@ -6610,7 +6663,7 @@ function App({ version = "0.1.0" }) {
   ] });
 }
 
-// ui/src/index.jsx
+// src/index.jsx
 var import_prefs3 = __toESM(require_prefs());
 var root = null;
 var renderer = null;
