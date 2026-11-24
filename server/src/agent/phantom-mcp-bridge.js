@@ -216,10 +216,12 @@ const TOOLS = [
   },
   {
     name: 'phantom_status',
-    description: 'Get Phantom IDE server status: uptime, CPU/RAM, AI providers, sessions, peer sync.',
+    description: 'Get a compact Phantom IDE status summary: uptime, CPU/RAM/temp, battery, agents, provider health, session counts, peer sync. Pass detail:"full" for the complete status object (giant session list collapsed).',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        detail: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) or full status object.' },
+      },
       additionalProperties: false,
     },
   },
@@ -243,6 +245,64 @@ function formatResult(r) {
     return JSON.stringify(r, null, 2);
   }
   return String(r);
+}
+
+// ── STATUS SUMMARY: /api/status/full dumps ~1.9 MB (20k session rows).
+// Collapse to the fields an agent can actually use, with counts for lists.
+function summarizeStatus(body) {
+  if (!body || typeof body !== 'object') return formatResult(body);
+  const p = body.phantom || {};
+  const s = body.system || {};
+  const out = [];
+  const dur = (sec) => {
+    sec = Number(sec) || 0;
+    const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+    return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+  };
+  out.push(`Phantom IDE: ${p.status || 'unknown'} on ${s.hostname || '?'} (${s.platform || '?'})`);
+  out.push(`  port ${p.port} · pid ${p.pid} · uptime ${dur(p.uptime_sec)}${p.dev_mode ? ' · dev_mode' : ''}`);
+  out.push(`  cpu ${s.cpu_pct}% · mem ${s.mem_used_pct}%`);
+  const bat = body.battery;
+  if (bat && bat.available) out.push(`  battery ${bat.percent}% ${bat.status || ''}`.trim());
+  const ct = body.thermals && body.thermals.coretemp && body.thermals.coretemp.temps;
+  if (ct) {
+    const vals = Object.values(ct).filter((v) => typeof v === 'number');
+    if (vals.length) out.push(`  temp max ${Math.max(...vals)}°C (${vals.length} sensors)`);
+  }
+  if (body.peer_sync) out.push(`  peer_sync ${body.peer_sync.enabled ? 'on' : 'off'}${body.peer_sync.url ? ' · ' + body.peer_sync.url : ''}`);
+  if (body.cpu_guard) out.push(`  cpu_guard ${body.cpu_guard.running ? 'running' : 'stopped'}`);
+
+  const agents = Array.isArray(body.active_agents) ? body.active_agents : [];
+  const activeAgents = agents.filter((a) => a && a.is_active);
+  out.push(`Agents: ${activeAgents.length}/${agents.length} active${activeAgents.length ? ' — ' + activeAgents.map((a) => a.name).join(', ') : ''}`);
+
+  const provs = Array.isArray(body.provider_health) ? body.provider_health : [];
+  const keyed = provs.filter((x) => x && x.has_key);
+  const cooling = provs.filter((x) => x && x.cooling);
+  out.push(`Providers: ${keyed.length}/${provs.length} keyed${cooling.length ? ` · cooling: ${cooling.map((x) => x.name).join(', ')}` : ' · none cooling'}`);
+
+  const sess = body.active_sessions || {};
+  const rows = Array.isArray(sess.users) ? sess.users : [];
+  const uniq = new Set(rows.map((u) => u && u.email).filter(Boolean));
+  out.push(`Sessions: count ${sess.count != null ? sess.count : rows.length} · unique accounts ${uniq.size}`);
+
+  const pf = Array.isArray(body.protected_files) ? body.protected_files : [];
+  if (pf.length) out.push(`Protected files: ${pf.join(', ')}`);
+  const rt = Array.isArray(body.recent_tasks) ? body.recent_tasks : [];
+  out.push(`Recent tasks: ${rt.length}`);
+  return out.join('\n');
+}
+
+// Full detail without the unbounded session list (keeps the payload usable).
+function boundedStatus(body) {
+  if (!body || typeof body !== 'object') return String(body);
+  const copy = Object.assign({}, body);
+  const sess = Object.assign({}, copy.active_sessions || {});
+  const rows = Array.isArray(sess.users) ? sess.users : [];
+  const uniq = new Set(rows.map((u) => u && u.email).filter(Boolean));
+  sess.users = { rows: rows.length, unique: uniq.size, sample: rows.slice(0, 5) };
+  copy.active_sessions = sess;
+  return JSON.stringify(copy, null, 2);
 }
 // ── FABRICATION GUARD: validate tool args before execution ──
 const fs = require('fs');
@@ -419,7 +479,7 @@ rl.on('line', async (line) => {
         }
         case 'phantom_status': {
           const r = await phantomRequest('GET', '/api/status/full');
-          text = formatResult(r.body);
+          text = (args.detail === 'full') ? boundedStatus(r.body) : summarizeStatus(r.body);
           break;
         }
         default:
