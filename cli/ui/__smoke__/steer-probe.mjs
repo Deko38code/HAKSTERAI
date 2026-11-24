@@ -137,6 +137,7 @@ console.log('---');
 console.log(JSON.stringify({
   ROWS,
   frameRows,
+  noOverflow: lastNonEmpty <= ROWS - 1,
   inputRow,
   spinnerRow,
   spinnerUnderInput: spinnerRow > inputRow,
