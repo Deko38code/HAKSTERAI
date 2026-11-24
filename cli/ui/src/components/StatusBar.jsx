@@ -43,9 +43,11 @@ export default function StatusBar({ width, status, model, cols, focus, adsOn, el
   const label = known ? known.text : status ? String(status) : '';
 
   // The timer only runs while the agent is actually doing something; a frozen
-  // "0.0s" next to "ready" would read as a stalled request.
+  // "0.0s" next to "ready" would read as a stalled request. 'connecting' counts
+  // — the turn is on the wire from the moment it is sent (owner, 2026-11-24).
   const elapsed =
-    status === 'streaming' || status === 'thinking' || status === 'approval'
+    status === 'connecting' || status === 'streaming' ||
+    status === 'thinking' || status === 'approval'
       ? formatElapsed(elapsedMs)
       : null;
 

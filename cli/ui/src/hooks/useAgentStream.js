@@ -197,9 +197,18 @@ export function useAgentStream({
   useEffect(() => {
     // 'approval' still counts as a live run: the server is holding the stream
     // open against a five-minute timer, so the clock has to keep running.
+    // 'connecting' is the run too (owner, 2026-11-24: "need live counter starts
+    // when message is sent and agents recieves it"): startedAtRef is stamped the
+    // moment the turn goes on the wire, and the clock must already be moving
+    // while the request is in flight instead of sitting at 0s until the first
+    // thinking/streaming event lands.
     const ticking =
-      status === 'thinking' || status === 'streaming' || status === 'approval';
+      status === 'connecting' || status === 'thinking' ||
+      status === 'streaming' || status === 'approval';
     if (!ticking) return undefined;
+    // Recompute on entry so a status change shows the true elapsed time now,
+    // not after the first 250 ms tick.
+    if (startedAtRef.current) setElapsedMs(Date.now() - startedAtRef.current);
     const id = setInterval(() => {
       if (startedAtRef.current) setElapsedMs(Date.now() - startedAtRef.current);
     }, 250);
