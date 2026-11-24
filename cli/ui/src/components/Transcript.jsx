@@ -39,7 +39,21 @@ const SCROLLBAR_OPTIONS = {
   },
 };
 
-export default function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
+/** Every row drawn by one turn: prose, reasoning, and each tool's args and
+ *  result — including rounds, which is where an agent's tool history lives. */
+function turnWeight(message) {
+  const textLen = (v) => String(v == null ? '' : v).length;
+  const toolLen = (t) => textLen(t && t.result) + 4;
+  let n = textLen(message.text) + textLen(message.thinking);
+  for (const t of (Array.isArray(message.tools) ? message.tools : [])) n += toolLen(t);
+  for (const r of (Array.isArray(message.rounds) ? message.rounds : [])) {
+    n += textLen(r && r.text) + textLen(r && r.thinking);
+    for (const t of (Array.isArray(r && r.tools) ? r.tools : [])) n += toolLen(t);
+  }
+  return n;
+}
+
+export default function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef(null);
@@ -47,18 +61,13 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
   // streams a row pushes the content down before the sticky logic can notice,
   // so "is it at the bottom?" is false exactly when we need it to be true.
   const [follow, setFollow] = useState(true);
-  const tail = list.length ? list[list.length - 1] : null;
-  // Everything that changes the length of the drawn turn. Content changes move
-  // the tail; nothing else in the window needs a scroll.
-  const tailSig = tail
-    ? [
-      String(tail.text || '').length,
-      String(tail.thinking || '').length,
-      Array.isArray(tail.tools) ? tail.tools.length : 0,
-      Array.isArray(tail.tools) ? tail.tools.reduce((n, t) => n + String(t.result == null ? '' : t.result).length, 0) : 0,
-      Array.isArray(tail.rounds) ? tail.rounds.map((r) => `${String(r.text || '').length}.${String(r.thinking || '').length}.${(r.tools || []).length}`).join('|') : '',
-    ].join(':')
-    : '';
+  const capped = list.slice(-MAX_TURNS);
+  const hidden = list.length - capped.length;
+  // Signature of everything on screen, not just the newest turn: a tool result
+  // can land in an earlier round, a compaction can rewrite rows above the tail,
+  // and the window has to keep up with either. Built over the capped list so it
+  // stays cheap on a long session.
+  const listSig = `${capped.reduce((n, m) => n + turnWeight(m) + 7, 0)}:${capped.length}:${hidden}`;
 
   const setBox = (node) => {
     boxRef.current = node;
@@ -71,23 +80,36 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
   // window on the last row. Without this the transcript drew the TOP of an
   // overflowing turn — the operator saw the start of the reasoning and missed
   // the sentence the agent had just written under it.
+  //
+  // Three passes, because a delta burst outruns layout: the scroll box measures
+  // its content on the next two layout passes, so an immediate set plus 0 ms and
+  // 25 ms re-sets catches the row a tool result just added. While a run is live
+  // and the operator has not paged up, a 100 ms pin keeps the window glued to
+  // the tail between content changes — a streaming answer must never scroll
+  // itself off the bottom of the screen.
+  const pinToTail = () => {
+    const box = boxRef.current;
+    if (!box) return;
+    const view = box.viewport && box.viewport.height ? box.viewport.height : 0;
+    if (!view) return;
+    const max = Math.max(0, (box.scrollHeight || 0) - view);
+    if (max <= 0) return;
+    if (box.scrollTop < max) box.scrollTo(max);
+  };
+
   useEffect(() => {
     if (!follow) return undefined;
-    const box = boxRef.current;
-    if (!box) return undefined;
-    const toTail = () => {
-      const view = box.viewport && box.viewport.height ? box.viewport.height : 0;
-      if (!view) return;
-      const max = Math.max(0, (box.scrollHeight || 0) - view);
-      if (max > 0 && box.scrollTop < max) box.scrollTop = max;
-    };
-    toTail();
-    // The scroll box measures its content on the next layout pass, so one
-    // immediate set is not always enough on the row a tool result lands.
-    const t1 = setTimeout(toTail, 0);
-    const t2 = setTimeout(toTail, 25);
+    pinToTail();
+    const t1 = setTimeout(pinToTail, 0);
+    const t2 = setTimeout(pinToTail, 25);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [list.length, budget, tailSig, follow]);
+  }, [listSig, budget, follow]);
+
+  useEffect(() => {
+    if (!follow || !live) return undefined;
+    const id = setInterval(pinToTail, 100);
+    return () => clearInterval(id);
+  }, [follow, live]);
 
   // PgUp/PgDn (and Home/End) page this window. Moving up parks the window
   // where the operator put it; returning to the bottom re-arms the follow.
@@ -122,8 +144,6 @@ export default function Transcript({ messages = [], width, height, emptyHint, sc
     );
   }
 
-  const capped = list.slice(-MAX_TURNS);
-  const hidden = list.length - capped.length;
   // Leave one column for the scroll bar so a long line never collides with it.
   const contentW = Math.max(8, (Number(width) || 80) - 1);
   // Auto-compact: a short window or a narrow column gets the dense turn shape

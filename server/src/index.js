@@ -5059,6 +5059,10 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         '-p',
         '--output-format', 'stream-json',
         '--verbose',
+        // Token-by-token text and reasoning, not one lump per completed
+        // message: without this the TUI showed tool rows only while the model
+        // was writing, and a long answer looked like nothing at all.
+        '--include-partial-messages',
         '--dangerously-skip-permissions',
         '--add-dir', workDir,
       ];
@@ -5106,6 +5110,40 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         let stderrBuf = '';
         let settled = false;
 
+        // Prose and reasoning are written as they are generated; the completed
+        // `assistant` message that follows repeats them, so per-message flags
+        // keep one sentence from landing twice. Reasoning is emitted as the
+        // TUI's own thinking events, which is the grey block above the answer —
+        // before this, a claude-cli turn rendered as tool cards with no words.
+        let streamedText = false;      // the run produced streamed prose
+        let textThisMsg = false;       // prose already streamed for this message
+        let thinkingThisMsg = false;   // reasoning already streamed for it
+        let thinkingOpen = false;
+        const openThinking = () => {
+          if (thinkingOpen) return;
+          thinkingOpen = true;
+          res.write(`data: ${JSON.stringify({ type: 'thinking_start' })}\n\n`);
+        };
+        const closeThinking = () => {
+          if (!thinkingOpen) return;
+          thinkingOpen = false;
+          res.write(`data: ${JSON.stringify({ type: 'thinking_end' })}\n\n`);
+        };
+        const writeThinking = (text) => {
+          if (!text) return;
+          thinkingThisMsg = true;
+          openThinking();
+          res.write(`data: ${JSON.stringify({ type: 'thinking', content: text })}\n\n`);
+        };
+        const writeDelta = (text) => {
+          if (!text) return;
+          closeThinking();
+          streamedText = true;
+          textThisMsg = true;
+          finalText += text;
+          res.write(`data: ${JSON.stringify({ type: 'delta', content: text })}\n\n`);
+        };
+
         child.stdout.on('data', (chunk) => {
           stdoutBuf += chunk.toString();
           const lines = stdoutBuf.split('\n');
@@ -5114,26 +5152,49 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
             if (!line.trim()) continue;
             let evt;
             try { evt = JSON.parse(line); } catch { continue; }
-            if (evt.type === 'assistant' && evt.message?.content) {
+            if (evt.type === 'stream_event') {
+              const inner = evt.event || {};
+              if (inner.type === 'content_block_delta') {
+                const d = inner.delta || {};
+                if (d.type === 'text_delta' && typeof d.text === 'string') writeDelta(d.text);
+                else if (d.type === 'thinking_delta' && typeof d.thinking === 'string') writeThinking(d.thinking);
+              }
+            } else if (evt.type === 'assistant' && evt.message?.content) {
+              const hadText = textThisMsg;
+              const hadThinking = thinkingThisMsg;
+              textThisMsg = false;
+              thinkingThisMsg = false;
               if (evt.message.model) realModel = evt.message.model;
               for (const block of evt.message.content) {
                 if (block.type === 'text' && block.text) {
-                  finalText += block.text;
-                  res.write(`data: ${JSON.stringify({ type: 'delta', content: block.text })}\n\n`);
+                  if (!hadText) writeDelta(block.text);
+                } else if (block.type === 'thinking' && (block.thinking || block.text)) {
+                  if (!hadThinking) writeThinking(block.thinking || block.text);
                 } else if (block.type === 'tool_use') {
+                  closeThinking();
                   toolCount++;
-                  res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_name: block.name, tool_args: block.input })}\n\n`);
+                  // The id pairs this call with its result, so the card settles
+                  // in place instead of by "last unanswered" guesswork.
+                  res.write(`data: ${JSON.stringify({ type: 'tool_call_start', tool_call_id: block.id, tool_name: block.name, tool_args: block.input })}\n\n`);
                 }
               }
+              closeThinking();
             } else if (evt.type === 'user' && evt.message?.content) {
               for (const block of evt.message.content) {
                 if (block.type === 'tool_result') {
                   const resultText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
-                  res.write(`data: ${JSON.stringify({ type: 'tool_result', result: (resultText || '').slice(0, 4000) })}\n\n`);
+                  res.write(`data: ${JSON.stringify({ type: 'tool_result', tool_call_id: block.tool_use_id, result: (resultText || '').slice(0, 4000) })}\n\n`);
                 }
               }
             } else if (evt.type === 'result') {
-              if (evt.result) finalText = evt.result;
+              // Fallback for a CLI build that sends no partial text at all:
+              // the turn's answer still reaches the transcript once.
+              if (!streamedText && typeof evt.result === 'string' && evt.result.trim()) {
+                finalText = evt.result;
+                res.write(`data: ${JSON.stringify({ type: 'delta', content: evt.result })}\n\n`);
+              } else if (evt.result) {
+                finalText = evt.result;
+              }
               if (evt.total_cost_usd) costUsd = evt.total_cost_usd;
               if (evt.usage) usage = evt.usage;
               if (evt.is_error) {

@@ -4086,43 +4086,55 @@ var SCROLLBAR_OPTIONS = {
     foregroundColor: "#22d3ee"
   }
 };
-function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
+function turnWeight(message) {
+  const textLen = (v) => String(v == null ? "" : v).length;
+  const toolLen = (t) => textLen(t && t.result) + 4;
+  let n = textLen(message.text) + textLen(message.thinking);
+  for (const t of Array.isArray(message.tools) ? message.tools : []) n += toolLen(t);
+  for (const r of Array.isArray(message.rounds) ? message.rounds : []) {
+    n += textLen(r && r.text) + textLen(r && r.thinking);
+    for (const t of Array.isArray(r && r.tools) ? r.tools : []) n += toolLen(t);
+  }
+  return n;
+}
+function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef4(null);
   const [follow, setFollow] = useState11(true);
-  const tail = list.length ? list[list.length - 1] : null;
-  const tailSig = tail ? [
-    String(tail.text || "").length,
-    String(tail.thinking || "").length,
-    Array.isArray(tail.tools) ? tail.tools.length : 0,
-    Array.isArray(tail.tools) ? tail.tools.reduce((n, t) => n + String(t.result == null ? "" : t.result).length, 0) : 0,
-    Array.isArray(tail.rounds) ? tail.rounds.map((r) => `${String(r.text || "").length}.${String(r.thinking || "").length}.${(r.tools || []).length}`).join("|") : ""
-  ].join(":") : "";
+  const capped = list.slice(-MAX_TURNS);
+  const hidden = list.length - capped.length;
+  const listSig = `${capped.reduce((n, m) => n + turnWeight(m) + 7, 0)}:${capped.length}:${hidden}`;
   const setBox = (node) => {
     boxRef.current = node;
     if (!scrollRef) return;
     if (typeof scrollRef === "function") scrollRef(node);
     else scrollRef.current = node;
   };
+  const pinToTail = () => {
+    const box = boxRef.current;
+    if (!box) return;
+    const view = box.viewport && box.viewport.height ? box.viewport.height : 0;
+    if (!view) return;
+    const max = Math.max(0, (box.scrollHeight || 0) - view);
+    if (max <= 0) return;
+    if (box.scrollTop < max) box.scrollTo(max);
+  };
   useEffect8(() => {
     if (!follow) return void 0;
-    const box = boxRef.current;
-    if (!box) return void 0;
-    const toTail = () => {
-      const view = box.viewport && box.viewport.height ? box.viewport.height : 0;
-      if (!view) return;
-      const max = Math.max(0, (box.scrollHeight || 0) - view);
-      if (max > 0 && box.scrollTop < max) box.scrollTop = max;
-    };
-    toTail();
-    const t1 = setTimeout(toTail, 0);
-    const t2 = setTimeout(toTail, 25);
+    pinToTail();
+    const t1 = setTimeout(pinToTail, 0);
+    const t2 = setTimeout(pinToTail, 25);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [list.length, budget, tailSig, follow]);
+  }, [listSig, budget, follow]);
+  useEffect8(() => {
+    if (!follow || !live) return void 0;
+    const id = setInterval(pinToTail, 100);
+    return () => clearInterval(id);
+  }, [follow, live]);
   useKeyboard6((key) => {
     const box = boxRef.current;
     if (!box) return;
@@ -4148,8 +4160,6 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef }) {
   if (list.length === 0) {
     return /* @__PURE__ */ jsx23("box", { style: { width, flexDirection: "column" }, children: /* @__PURE__ */ jsx23("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) });
   }
-  const capped = list.slice(-MAX_TURNS);
-  const hidden = list.length - capped.length;
   const contentW = Math.max(8, (Number(width) || 80) - 1);
   const compact = budget < 12 || contentW < 40;
   return /* @__PURE__ */ jsx23("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsxs22(
@@ -5176,7 +5186,7 @@ function App({ version = "0.1.0" }) {
   const [dockExpanded, setDockExpanded] = useState17(false);
   const [draft, setDraft] = useState17("");
   const [model, setModel] = useState17(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
-  const [provider, setProvider] = useState17(process.env.HAKSTER_PROVIDER || import_ladder2.PRIMARY_PROVIDER);
+  const [provider, setProvider] = useState17(process.env.HAKSTER_PROVIDER || "");
   const [modelIdx, setModelIdx] = useState17(0);
   const prefsRef = useRef8(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
@@ -5293,7 +5303,8 @@ function App({ version = "0.1.0" }) {
   }, [meterPoints]);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
   const pickerModels = [
-    { key: "__claude", vendor: "Claude", value: `Claude \xB7 ${import_ladder2.PRIMARY_MODEL}`, model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER },
+    { key: "__claude", vendor: "Claude", value: `Claude Code \xB7 ${import_ladder2.PRIMARY_MODEL}`, model: import_ladder2.PRIMARY_MODEL, provider: "claude-cli" },
+    { key: "__deepseek", vendor: "DeepSeek", value: `DeepSeek relay \xB7 ${import_ladder2.PRIMARY_MODEL}`, model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER },
     { key: "__codex", vendor: "Codex", value: "Codex (Pro) \xB7 provider default", model: "", provider: "codex-cli" },
     ...models.map((m) => ({ key: `c:${m.id}`, vendor: m.vendor, value: m.id, model: m.id, provider: import_ladder2.PRIMARY_PROVIDER }))
   ];
@@ -6178,6 +6189,7 @@ function App({ version = "0.1.0" }) {
             width: mainW,
             height: transcriptRows,
             scrollRef,
+            live: agent.status !== "idle",
             emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; esc stops a run."
           }
         ) }),

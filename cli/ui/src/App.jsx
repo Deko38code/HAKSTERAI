@@ -190,7 +190,13 @@ export default function App({ version = '0.1.0' }) {
   // Start on the owner's cheap DeepSeek config; a GLM env tag is the old
   // default and falls through (§22 — the pinned Phantom Flash config).
   const [model, setModel] = useState(() => (process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || PRIMARY_MODEL));
-  const [provider, setProvider] = useState(process.env.HAKSTER_PROVIDER || PRIMARY_PROVIDER);
+  // No provider pin by default: the ladder's tier 1 picks the engine (the
+  // Claude Code CLI on the pinned DeepSeek route). Pinning PRIMARY_PROVIDER
+  // here overrode tier 1 on every turn, which sent the agent down the direct
+  // relay loop instead — the run that showed shell calls only and stopped on
+  // the server's loop guard. An explicit HAKSTER_PROVIDER, /provider or a
+  // model picked in /model still wins.
+  const [provider, setProvider] = useState(process.env.HAKSTER_PROVIDER || '');
   const [modelIdx, setModelIdx] = useState(0);
   // Auto handoff: DeepSeek Flash → Codex → server waterfall. On unless the
   // owner turned it off; the choice is remembered between sessions.
@@ -349,7 +355,8 @@ export default function App({ version = '0.1.0' }) {
   // same provider, stated literally (§22). Tier 2 is Codex on the Pro plan.
   // Everything below is the reference catalogue, unchanged.
   const pickerModels = [
-    { key: '__claude', vendor: 'Claude', value: `Claude · ${PRIMARY_MODEL}`, model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER },
+    { key: '__claude', vendor: 'Claude', value: `Claude Code · ${PRIMARY_MODEL}`, model: PRIMARY_MODEL, provider: 'claude-cli' },
+    { key: '__deepseek', vendor: 'DeepSeek', value: `DeepSeek relay · ${PRIMARY_MODEL}`, model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER },
     { key: '__codex', vendor: 'Codex', value: 'Codex (Pro) · provider default', model: '', provider: 'codex-cli' },
     ...models.map((m) => ({ key: `c:${m.id}`, vendor: m.vendor, value: m.id, model: m.id, provider: PRIMARY_PROVIDER })),
   ];
@@ -1417,6 +1424,7 @@ export default function App({ version = '0.1.0' }) {
                 width={mainW}
                 height={transcriptRows}
                 scrollRef={scrollRef}
+                live={agent.status !== 'idle'}
                 emptyHint="Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; esc stops a run."
               />
             </box>
