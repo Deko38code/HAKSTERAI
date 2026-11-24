@@ -35,6 +35,7 @@ import useMemoryBank from './hooks/useMemoryBank.js';
 import useCliUpdate from './hooks/useCliUpdate.js';
 import useScriptRunner from './hooks/useScriptRunner.js';
 import { peersFromMcp } from './utils/squad.js';
+import { countWebCallsInMessages } from './utils/web-usage.js';
 import cliPrefs from '../../src/prefs.js';
 import { appendInputHistory, loadInputHistory } from '../../src/input-history.js';
 import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel } from '../../smartness.mjs';
@@ -466,8 +467,14 @@ export default function App({ version = '0.1.0' }) {
   // figure here is estimated; each is a count of something that happened.
   const userTurns = agent.messages.filter((m) => m.role === 'user').length;
   const toolCalls = agent.messages.reduce((n, m) => n + (Array.isArray(m.tools) ? m.tools.length : 0), 0);
+  // Web calls are a subset of `tools`: the search/fetch/scrape calls this
+  // session actually made (owner, 2026-11-24: "add web tool usage in the usage
+  // panel … just for our count"). Counted from the same streamed call events,
+  // so it moves live with the run — a count of calls, never an estimate.
+  const webCalls = countWebCallsInMessages(agent.messages);
   const usage = {
     tools: toolCalls,
+    web: webCalls,
     ok: Number(meters && meters.successes) || 0,
     fail: Number(meters && meters.failures) || 0,
     requests: Number(agent.requests) || 0,

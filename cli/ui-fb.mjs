@@ -2245,8 +2245,8 @@ function LiveSidebar({
   const huge = h >= 50;
   const liveRows = Math.min(2, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
-  const showUsage = left >= 9;
-  if (showUsage) left -= 9;
+  const showUsage = left >= 10;
+  if (showUsage) left -= 10;
   const showMemory = left >= 26;
   if (showMemory) left -= 8;
   const wantOutput = huge ? 12 : tall ? 9 : 6;
@@ -2346,6 +2346,7 @@ function LiveSidebar({
     ] }),
     showUsage ? /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25D4 Usage", hint: busy ? "live" : "session", children: [
       /* @__PURE__ */ jsx7(Row, { width: inner, k: "tools", v: compact ? String(Number(usage && usage.tools) || 0) : `${Number(usage && usage.tools) || 0} calls`, color: "cyan" }),
+      /* @__PURE__ */ jsx7(Row, { width: inner, k: "web", v: compact ? String(Number(usage && usage.web) || 0) : `${Number(usage && usage.web) || 0} calls`, color: "blue" }),
       /* @__PURE__ */ jsx7(
         Row,
         {
@@ -5634,6 +5635,53 @@ function useScriptRunner() {
 }
 var useScriptRunner_default = useScriptRunner;
 
+// src/utils/web-usage.js
+var WEB_TOOLS = /* @__PURE__ */ new Set([
+  // the CLI's own research tools (cli/tools.js)
+  "web_search",
+  "websearch",
+  "web_fetch",
+  "webfetch",
+  // Firecrawl family (cli/tools.js proxies these through /api/agent/firecrawl)
+  "firecrawl",
+  "firecrawl_scrape",
+  "firecrawl_search",
+  "firecrawl_crawl",
+  "firecrawl_map",
+  "firecrawl_extract",
+  // Hakster scraper service
+  "hakster_scrape",
+  "hakster_scrape_status"
+]);
+function bareToolName(name) {
+  const raw = String(name == null ? "" : name).trim().toLowerCase();
+  if (!raw) return "";
+  const parts = raw.split("__");
+  return parts[parts.length - 1] || raw;
+}
+function isWebTool(name) {
+  const bare = bareToolName(name);
+  if (!bare) return false;
+  if (WEB_TOOLS.has(bare)) return true;
+  return /^(?:firecrawl|web)_(?:search|fetch|scrape|crawl|map|extract)$/.test(bare) || /^(?:scrape|crawl)_/.test(bare);
+}
+function countWebCalls(tools) {
+  if (!Array.isArray(tools)) return 0;
+  let n = 0;
+  for (const call of tools) {
+    if (call && isWebTool(call.name)) n += 1;
+  }
+  return n;
+}
+function countWebCallsInMessages(messages) {
+  if (!Array.isArray(messages)) return 0;
+  let n = 0;
+  for (const m of messages) {
+    if (m && Array.isArray(m.tools)) n += countWebCalls(m.tools);
+  }
+  return n;
+}
+
 // src/App.jsx
 var import_prefs3 = __toESM(require_prefs());
 var import_input_history = __toESM(require_input_history());
@@ -5901,8 +5949,10 @@ function App({ version = "0.1.0" }) {
   const runner = useScriptRunner_default();
   const userTurns = agent.messages.filter((m) => m.role === "user").length;
   const toolCalls = agent.messages.reduce((n, m) => n + (Array.isArray(m.tools) ? m.tools.length : 0), 0);
+  const webCalls = countWebCallsInMessages(agent.messages);
   const usage = {
     tools: toolCalls,
+    web: webCalls,
     ok: Number(meters && meters.successes) || 0,
     fail: Number(meters && meters.failures) || 0,
     requests: Number(agent.requests) || 0,

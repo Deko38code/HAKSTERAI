@@ -202,8 +202,8 @@ export default function LiveSidebar({
   // (its own budget, so `left` stays truthful).
   const liveRows = Math.min(2, Math.max(0, h - 3));
   let left = h - (3 + liveRows);
-  const showUsage = left >= 9; // ◔ Usage: 3 + 6 rows
-  if (showUsage) left -= 9;
+  const showUsage = left >= 10; // ◔ Usage: 3 + 7 rows
+  if (showUsage) left -= 10;
   // 🧠 Memory: 3 + 5 rows. It is the newest panel and the least time-critical,
   // so it only appears where the taller layout leaves room for the feed, the
   // output tail and at least a couple of MCP rows beside it.
@@ -369,12 +369,17 @@ export default function LiveSidebar({
         ) : null}
       </Panel>
       {/* ◔ Usage — the session counted from the same stream events the run
-          renders: tool calls actually made, how many the meter scored as wins
-          and losses, requests sent to /api/agent/run (handoffs included),
-          operator turns, the turn-reported token totals, and context share. */}
+          renders: tool calls actually made (and the web subset of them), how
+          many the meter scored as wins and losses, requests sent to
+          /api/agent/run (handoffs included), operator turns, the turn-reported
+          token totals, and context share. */}
       {showUsage ? (
         <Panel width={width} title="◔ Usage" hint={busy ? 'live' : 'session'}>
           <Row width={inner} k="tools" v={compact ? String(Number(usage && usage.tools) || 0) : `${Number(usage && usage.tools) || 0} calls`} color="cyan" />
+          {/* The web subset of those calls — searches, fetches, scrapes and
+              crawls only (utils/web-usage.js decides the names). Session count
+              for the operator's own visibility, never a billing figure. */}
+          <Row width={inner} k="web" v={compact ? String(Number(usage && usage.web) || 0) : `${Number(usage && usage.web) || 0} calls`} color="blue" />
           <Row
             width={inner}
             k="wins"
