@@ -1104,7 +1104,84 @@ export default function App({ version = '0.1.0' }) {
   const showGuard = !!guardTxt && headerLeftLen(true) + 8 <= headerInner;
   const headerFiles = showGuard ? guardTxt : '';
   const headerLeftText = headerLeftLen(showGuard);
-  const headerRight = headerRightVariants.find((t) => headerLeftText + t.length + 2 <= headerInner) || '';
+
+  // Meters on the very top line (owner, 2026-11-24: "move the autolearn cpu ram
+  // meters up top also"). The readings that had their own line inside the status
+  // box move onto the header row itself, so the top box is exactly the status
+  // line + the two service rows. Only the chat view does this — dashboard and
+  // monitor already draw their own meters panels. If the line is too narrow for
+  // any meter form, the box keeps its meters line: nothing disappears.
+  const meterScore = Math.max(0, Math.min(100, Math.round(Number(meters && meters.score) || 0)));
+  const meterPts = Math.max(0, Math.round(Number(meters && meters.points) || 0));
+  const meterDelta = Number(meters && meters.delta) || 0;
+  const meterArrow = meterDelta > 0 ? '\u25b2' : meterDelta < 0 ? '\u25bc' : '\u25c6';
+  const meterArrowFg = meterDelta > 0 ? 'green' : meterDelta < 0 ? 'red' : 'gray';
+  const meterCpu = host && host.cpuPct != null ? `${host.cpuPct}%` : '\u2014';
+  const meterRam = host && host.memPct != null ? `${host.memPct}%` : '\u2014';
+  const meterCtxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
+  const heatFg = (v) => (v == null ? 'gray' : v > 85 ? 'red' : v > 60 ? 'yellow' : 'green');
+  const meterFg = {
+    smart: barColor('smart', meterScore),
+    pts: barColor('points', meterPts),
+    cpu: heatFg(host && host.cpuPct),
+    ram: heatFg(host && host.memPct),
+  };
+  const mkMeter = (parts) => ({ text: parts.map((x) => x.t).join(''), parts });
+  const headerMeterVariants = [
+    mkMeter([
+      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
+      { t: `${meterScore}% `, fg: 'white', bold: true },
+      { t: meterArrow, fg: meterArrowFg },
+      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green' },
+      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
+      { t: `  ram ${meterRam}`, fg: meterFg.ram },
+    ]),
+    mkMeter([
+      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
+      { t: `${meterScore}% `, fg: 'white', bold: true },
+      { t: meterArrow, fg: meterArrowFg },
+      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
+      { t: `  ram ${meterRam}`, fg: meterFg.ram },
+    ]),
+    mkMeter([
+      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
+      { t: `${meterScore}% `, fg: 'white', bold: true },
+      { t: meterArrow, fg: meterArrowFg },
+      { t: ` \u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: ` cpu ${meterCpu}`, fg: meterFg.cpu },
+      { t: ` ram ${meterRam}`, fg: meterFg.ram },
+    ]),
+    mkMeter([
+      { t: `\u2726 ${meterPts}p`, fg: meterFg.pts },
+      { t: ` cpu ${meterCpu}`, fg: meterFg.cpu },
+      { t: ` ram ${meterRam}`, fg: meterFg.ram },
+    ]),
+  ];
+  // Meters outrank the right-hand detail here (the owner just asked for them up
+  // top, while the model is repeated on the bottom status bar and the TUI
+  // version in the status box): walk the meter forms richest-first and take the
+  // richest right-hand text that still fits beside it. The +2 slack absorbs the
+  // brain emoji measuring two cells wide; only when no right-hand text fits
+  // beside the terse form does the status box keep its own meters line.
+  let headerRight = '';
+  let headerMeter = null;
+  if (view === 'chat') {
+    for (const meter of headerMeterVariants) {
+      const rightText = headerRightVariants.find((t) => (
+        headerLeftText + 3 + meter.text.length + 2 + (t ? t.length + 2 : 0) + 2 <= headerInner
+      ));
+      if (rightText !== undefined) {
+        headerRight = rightText;
+        headerMeter = meter;
+        break;
+      }
+    }
+  }
+  if (!headerMeter) {
+    headerRight = headerRightVariants.find((t) => headerLeftText + t.length + 2 <= headerInner) || '';
+  }
 
   // HakTerm-style live column: only when there is room for it beside a readable
   // transcript (>=96 cols). Narrower terminals keep the panels full width.
@@ -1147,7 +1224,7 @@ export default function App({ version = '0.1.0' }) {
   const servicesRawAll = services.length + (otherPorts.length ? 1 : 0);
   // Chat column: the meters row and the services grid are ONE box now (owner,
   // 2026-11-24: "combined the 2 panels into 1"), so its height replaces both.
-  const statusRows = statusServicesRows(mainW, servicesRaw, true);
+  const statusRows = statusServicesRows(mainW, servicesRaw, true, !headerMeter);
   const dashServicesWidth = Math.max(1, panelW - 1);
   const dashServicesCapacity = servicesCapacityFor(dashServicesWidth, dashDense);
   const monitorServicesCapacity = servicesCapacityFor(panelW);
@@ -1383,6 +1460,14 @@ export default function App({ version = '0.1.0' }) {
           {headerFiles ? (
             <text fg={guard.missing && guard.missing.length ? 'red' : 'gray'}>{`   ${headerFiles}`}</text>
           ) : null}
+          {headerMeter ? (
+            <text>
+              <span fg="gray">{'   '}</span>
+              {headerMeter.parts.map((part, i) => (
+                <span key={i} fg={part.fg} attributes={part.bold ? TextAttributes.BOLD : 0}>{part.t}</span>
+              ))}
+            </text>
+          ) : null}
         </box>
         {headerRight ? <text fg="gray">{headerRight}</text> : null}
       </box>
@@ -1546,6 +1631,7 @@ export default function App({ version = '0.1.0' }) {
                 the top line, the meters under it, the ports grid in two rows. */}
             <StatusServicesPanel
               width={mainW}
+              showMeters={!headerMeter}
               services={services}
               version={version}
               guard={guard}

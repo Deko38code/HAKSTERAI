@@ -31,12 +31,12 @@ function gridShape(width, n) {
 
 /** Rows this panel occupies at `width` for `count` service cells, for the row
  *  budget: border 2 + status line 1 + meters line 1 + the two cell rows. */
-export function statusServicesRows(width, count, dense = true) {
+export function statusServicesRows(width, count, dense = true, showMeters = true) {
   const n = Math.max(1, Number(count) || 1);
   const { perRow, capacity } = gridShape(width, n);
   const shown = Math.min(n, capacity);
   const rows = Math.max(1, Math.min(2, Math.ceil(shown / perRow)));
-  return 3 + 1 + rows * (dense ? 1 : 2);
+  return 3 + (showMeters ? 1 : 0) + rows * (dense ? 1 : 2);
 }
 
 export default function StatusServicesPanel({
@@ -51,6 +51,7 @@ export default function StatusServicesPanel({
   ctxMax = 1,
   host = null,
   dense = true,
+  showMeters = true,
 }) {
   const w = Math.max(24, Number(width) || 80);
   const inner = Math.max(1, w - 4);
@@ -111,8 +112,11 @@ export default function StatusServicesPanel({
         </text>
         {rightText ? <text fg={allUp ? 'green' : up > 0 ? 'yellow' : 'red'}>{rightText}</text> : null}
       </box>
-      {/* Row 2 — the meters line, unchanged from the old SystemPanel. */}
-      <SystemPanel width={inner} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} />
+      {/* Row 2 — the meters line, unchanged from the old SystemPanel. The chat
+          header takes this row over when it has the width for it (owner,
+          2026-11-24: "move the autolearn cpu ram meters up top also"), so the
+          box is exactly the status line + the two service rows there. */}
+      {showMeters ? <SystemPanel width={inner} meters={meters} ctxUsed={ctxUsed} ctxMax={ctxMax} host={host} /> : null}
       {/* Rows 3-4 — the ports grid, always exactly two rows of one-line cells. */}
       {rows.map((row, i) => (
         <box key={`r${i}`} style={{ width: inner, flexDirection: 'row' }}>
