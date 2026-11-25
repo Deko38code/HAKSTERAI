@@ -1,25 +1,33 @@
 #!/bin/sh
-# failover-sync.sh — keep the Lenovo standby's database close to the Dell's.
+# failover-sync.sh — keep the Lenovo standby current, without ever taking it down.
 #
-# Owner, 2026-11-25: "if dell server drops for period of time lenovo kicks in".
-# A standby is only useful if its account data is current, so this copies the
-# Dell's live SQLite snapshot to the Lenovo standby on a timer.
+# Owner, 2026-11-25: "if dell server drops for period of time lenovo kicks in" /
+# "how can we make it to where no user gets errors we need both online at all
+# times".
+#
+# The standby runs TWO slots on two ports. Only the slot the router calls active
+# serves traffic. Each run puts the fresh database and code into the IDLE slot,
+# boots it, waits until it answers, moves the router to it, and only then stops
+# the old slot — so at no instant is there no standby serving, and an update
+# costs a visitor nothing.
 #
 # Safety rules this script enforces (CLAUDE.md §2, §4):
 #   · It never touches the Dell's running server or its database in place — the
 #     snapshot comes from SQLite's own backup API, which is safe on a live DB.
-#   · It refuses to sync if the standby has answered traffic during a failover
-#     (`failovers` rose since the last run): those writes exist only on the
-#     Lenovo and a copy now would destroy them. The owner decides that case.
-#   · The standby instance is stopped for the copy and started again after it,
-#     because a running SQLite process keeps the old inode open.
-#   · Nothing is deleted: the previous standby DB is kept as hakster.db.prev.
+#   · It refuses to sync while the standby is the one serving (`primary_alive`
+#     false): those writes exist only on the Lenovo. The owner decides that case.
+#   · It refuses to sync if a failover happened since the last run (`failovers`
+#     rose): the standby may hold writes the Dell does not.
+#   · Nothing is deleted: the previous database is kept as hakster.db.prev.
 #
 # Env (all optional):
 #   STANDBY_SSH      default mint
-#   STANDBY_DIR      default ~/haksterAi-failover-<newest>   (resolved on the peer)
-#   STANDBY_PORT     default 3581
-#   ROUTER_STATUS    default http://127.0.0.1:3579/router/status
+#   STANDBY_URL      default http://10.0.0.210:3581   (the door the Dell dials)
+#   SLOT_A_DIR       default haksterAi-standby-a      (relative to the standby's home)
+#   SLOT_A_PORT      default 3591
+#   SLOT_B_DIR       default haksterAi-standby-b
+#   SLOT_B_PORT      default 3592
+#   ROUTER_STATUS    default http://127.0.0.1:3579/router/status   (the Dell's own router)
 #   STATE_FILE       default /tmp/hakster-failover-sync.state
 set -eu
 
@@ -29,7 +37,11 @@ export PATH
 
 STANDBY_SSH="${STANDBY_SSH:-mint}"
 STANDBY_URL="${STANDBY_URL:-http://10.0.0.210:3581}"
-STANDBY_PORT="${STANDBY_PORT:-3581}"
+STANDBY_HOST=$(printf '%s' "$STANDBY_URL" | sed 's#^[a-zA-Z]*://##; s#[:/].*##')
+SLOT_A_DIR="${SLOT_A_DIR:-haksterAi-standby-a}"
+SLOT_A_PORT="${SLOT_A_PORT:-3591}"
+SLOT_B_DIR="${SLOT_B_DIR:-haksterAi-standby-b}"
+SLOT_B_PORT="${SLOT_B_PORT:-3592}"
 ROUTER_STATUS="${ROUTER_STATUS:-http://127.0.0.1:3579/router/status}"
 STATE_FILE="${STATE_FILE:-/tmp/hakster-failover-sync.state}"
 LOCAL_DB="${LOCAL_DB:-/home/ghost/haksterAi/data/hakster.db}"
@@ -43,6 +55,8 @@ trap cleanup EXIT INT TERM
 # One sync at a time: a slow copy must never overlap the next timer tick.
 mkdir "$LOCK_DIR" 2>/dev/null || { say "held: another sync is still running"; exit 0; }
 mkdir -p "$TMP"
+
+ctl() { ssh -n -o BatchMode=yes "$STANDBY_SSH" "sh ~/hakster-standby-ctl.sh $*"; }
 
 # ── 1. refuse while a failover has happened since the last sync ────────────
 STATUS=$(curl -s -m 5 "$ROUTER_STATUS" 2>/dev/null || true)
@@ -76,13 +90,44 @@ src.backup(dst); dst.close(); src.close()
 WANT=$(sha256sum "$TMP/hakster.db" | cut -d' ' -f1)
 say "snapshot made ($(du -h "$TMP/hakster.db" | cut -f1) sha256 ${WANT%%????????????????????????????????????????})"
 
-# ── 2b. keep the standby's *code* identical, not just its data ─────────────
+# ── 3. which slot is live, and which one is idle ───────────────────────────
+ACTIVE_PORT=$(ctl active 2>/dev/null || true)
+if [ -z "$ACTIVE_PORT" ]; then
+  # No router answer: fall back to whichever slot is actually listening.
+  for p in "$SLOT_A_PORT" "$SLOT_B_PORT"; do
+    if [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://$STANDBY_HOST:$p/api/version" 2>/dev/null || true)" = "200" ]; then
+      ACTIVE_PORT="$p"; break
+    fi
+  done
+fi
+
+if [ "$ACTIVE_PORT" = "$SLOT_A_PORT" ]; then
+  TARGET_DIR="$SLOT_B_DIR"; TARGET_PORT="$SLOT_B_PORT"; OLD_PORT="$SLOT_A_PORT"
+elif [ "$ACTIVE_PORT" = "$SLOT_B_PORT" ]; then
+  TARGET_DIR="$SLOT_A_DIR"; TARGET_PORT="$SLOT_A_PORT"; OLD_PORT="$SLOT_B_PORT"
+else
+  TARGET_DIR="$SLOT_A_DIR"; TARGET_PORT="$SLOT_A_PORT"; OLD_PORT=""
+fi
+say "active slot: ${ACTIVE_PORT:-none} -> installing into $TARGET_DIR ($TARGET_PORT)"
+
+# ── 4. keep the standby's *code* identical, not just its data ──────────────
 # The router serves half the static traffic from the standby, and ad landing
 # pages are static. A stale build there would show an old site to real ad
-# clicks, so the deployable tree is synced with every data sync.
-REMOTE_DIR=$(ssh -o BatchMode=yes "$STANDBY_SSH" \
-  'ls -1d ~/haksterAi-failover-* 2>/dev/null | sort | tail -n 1')
-[ -n "$REMOTE_DIR" ] || { say "failed: no standby directory on $STANDBY_SSH"; exit 1; }
+# clicks, so the deployable tree is synced with every data sync — into the IDLE
+# slot, so the live one keeps the code it booted with.
+scp -q -o BatchMode=yes scripts/failover-slot.sh "$STANDBY_SSH:~/hakster-standby-ctl.sh" \
+  && ssh -n -o BatchMode=yes "$STANDBY_SSH" 'chmod 700 ~/hakster-standby-ctl.sh' \
+  || { say "failed: could not install the slot helper"; exit 1; }
+
+# The standby's own router is kept current the same way. Copying it does not
+# change the running process: a router code change still needs its own restart,
+# which is a deliberate decision, never a side effect of a data sync.
+scp -q -o BatchMode=yes scripts/failover-router.cjs "$STANDBY_SSH:~/hakster-standby-router.cjs" \
+  || { say "warning: could not update the standby's router file"; }
+
+ssh -n -o BatchMode=yes "$STANDBY_SSH" "mkdir -p ~/$TARGET_DIR/data" \
+  || { say "failed: could not create $TARGET_DIR"; exit 1; }
+
 if [ "${SKIP_CODE:-0}" != "1" ]; then
   rsync -a --safe-links \
     --exclude='node_modules' --exclude='.git' --exclude='*.bak*' --exclude='*.db' --exclude='*.db-*' \
@@ -91,53 +136,59 @@ if [ "${SKIP_CODE:-0}" != "1" ]; then
     -e "ssh -o BatchMode=yes" \
     /home/ghost/haksterAi/cli /home/ghost/haksterAi/server /home/ghost/haksterAi/dist \
     /home/ghost/haksterAi/scripts /home/ghost/haksterAi/public /home/ghost/haksterAi/package.json \
-    "$STANDBY_SSH:$REMOTE_DIR/" \
-    && say "code synced to the standby (dist, server, cli, scripts)" \
-    || { say "warning: code sync did not complete - standby keeps its previous build"; }
+    "$STANDBY_SSH:$TARGET_DIR/" \
+    && say "code synced into $TARGET_DIR (dist, server, cli, scripts)" \
+    || { say "warning: code sync did not complete - the slot keeps its previous build"; }
 else
   say "code sync skipped (SKIP_CODE=1)"
 fi
 
-# ── 3. copy first, so the standby is stopped for ~2 s instead of ~20 ───────
-# A timer that fires every few minutes must not mean a standing 20 s hole in
-# the shared static capacity: the transfer happens while the standby serves,
-# and only the swap needs it stopped.
-say "standby: $STANDBY_SSH:$REMOTE_DIR (port $STANDBY_PORT)"
+# ── 5. install the database into the IDLE slot (nobody is serving from it) ─
+scp -q -o BatchMode=yes "$TMP/hakster.db" "$STANDBY_SSH:$TARGET_DIR/data/hakster.db.new" \
+  || { say "failed: copy did not arrive"; exit 1; }
+ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+  "sh ~/hakster-standby-ctl.sh install ~/$TARGET_DIR $WANT" \
+  | sed 's/^/  /' || { say "failed: install refused (checksum?)"; exit 1; }
 
-HAVE=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
-  "sha256sum '$REMOTE_DIR/data/hakster.db' 2>/dev/null | cut -d' ' -f1" || true)
-if [ "$HAVE" = "$WANT" ]; then
-  say "unchanged: the standby already holds this exact database"
-  exit 0
+# ── 6. boot the idle slot and wait until it really answers ─────────────────
+if [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://$STANDBY_HOST:$TARGET_PORT/api/version" 2>/dev/null || true)" != "200" ]; then
+  ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+    "sh ~/hakster-standby-ctl.sh start ~/$TARGET_DIR $TARGET_PORT" | sed 's/^/  /' \
+    || { say "failed: slot would not start"; exit 1; }
 fi
 
-scp -q -o BatchMode=yes "$TMP/hakster.db" "$STANDBY_SSH:$REMOTE_DIR/data/hakster.db.new" || {
-  say "failed: copy did not arrive"; exit 1; }
+i=0; up=""
+while [ $i -lt 40 ]; do
+  if [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://$STANDBY_HOST:$TARGET_PORT/api/version" 2>/dev/null || true)" = "200" ]; then
+    up="yes"; break
+  fi
+  i=$((i + 1)); sleep 1
+done
+if [ -z "$up" ]; then
+  say "failed: $TARGET_DIR did not answer on $TARGET_PORT within 40 s - the old slot keeps the traffic"
+  exit 1
+fi
+say "idle slot is answering on $TARGET_PORT - switching the router to it"
 
-# ── 4. short stop, verify, swap, start ─────────────────────────────────────
-ssh -n -o BatchMode=yes "$STANDBY_SSH" "
-  cd '$REMOTE_DIR/data' || exit 1
-  got=\$(sha256sum hakster.db.new | cut -d' ' -f1)
-  [ \"\$got\" = '$WANT' ] || { echo 'checksum mismatch - keeping the old copy'; rm -f hakster.db.new; exit 1; }
-  pid=\$(ss -ltnp 2>/dev/null | grep ':$STANDBY_PORT ' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n 1)
-  if [ -n \"\$pid\" ]; then kill \"\$pid\"; fi
-  n=0
-  while [ \$n -lt 16 ] && ss -ltn 2>/dev/null | grep -q ':$STANDBY_PORT '; do
-    sleep 0.25; n=\$((n + 1))
-  done
-  [ -f hakster.db ] && cp -p hakster.db hakster.db.prev
-  mv hakster.db.new hakster.db
-  chmod 600 hakster.db
-  echo \"installed \$got\"
-  cd '$REMOTE_DIR/server' || exit 1
-  setsid env PORT=$STANDBY_PORT node src/index.js </dev/null >> ../failover.log 2>&1 &
-" || { say "failed: standby swap did not complete"; exit 1; }
+# ── 7. move traffic, then stop the old slot ────────────────────────────────
+ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+  "sh ~/hakster-standby-ctl.sh switch $TARGET_PORT" | sed 's/^/  /' \
+  || { say "failed: the router did not accept the switch - the old slot keeps the traffic"; exit 1; }
 
-# ── 5. confirm the standby is answering again ─────────────────────────────
+if [ -n "$OLD_PORT" ] && [ "$OLD_PORT" != "$TARGET_PORT" ]; then
+  # Let in-flight requests finish on the old slot before it goes away.
+  sleep 2
+  ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+    "sh ~/hakster-standby-ctl.sh stop $OLD_PORT" | sed 's/^/  /' || true
+fi
+
+# ── 8. confirm what the Dell actually sees through the door ────────────────
+code=""
 i=0
-while [ $i -lt 12 ]; do
+while [ $i -lt 10 ]; do
   code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$STANDBY_URL/api/version" 2>/dev/null || true)
   [ "$code" = "200" ] && break
-  i=$((i + 1)); sleep 2
+  i=$((i + 1)); sleep 1
 done
-say "done: standby answered ${code:-nothing} after the swap"
+say "done: standby door answered ${code:-nothing} on $STANDBY_URL (active slot $TARGET_PORT)"
+[ "$code" = "200" ]
