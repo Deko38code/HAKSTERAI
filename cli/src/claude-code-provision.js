@@ -155,7 +155,7 @@ function provisionClaudeCode(opts = {}) {
   }
 
   log.log(`▸ Claude Code isn't installed here — setting it up once in ${prefix}`);
-  log.log('▸ This download is about 500 MB (a minute or two). It stays separate from any');
+  log.log('▸ This download is about 400 MB (a minute or two). It stays separate from any');
   log.log('  Claude Code you install yourself, and it still signs in through HaksterAI.');
 
   const args = [
