@@ -15,6 +15,58 @@ const { WebSocketServer } = require('ws');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { diffLines } = require('diff');
+// ── Runtime health: is this server actually fast under hard use? ───────────
+// Owner, 2026-11-25: "make sure our server can handle users multiple running
+// at once if needed" / "need it to know to be fast for hard use our server".
+// One Node process serves every user concurrently by never blocking its event
+// loop, so the honest measure of "fast under hard use" is how long that loop
+// is delayed. perf_hooks is native and near-free; the numbers are reported on
+// /api/health instead of an opinion (§10: real state, never invented).
+const { monitorEventLoopDelay } = require('node:perf_hooks');
+let _loopDelay = null;
+try {
+  _loopDelay = monitorEventLoopDelay({ resolution: 10 });
+  _loopDelay.enable();
+  // A rolling minute, so the reading describes now — not a spike from boot.
+  const _loopReset = setInterval(() => { try { _loopDelay.reset(); } catch { /* disabled */ } }, 60000);
+  if (_loopReset.unref) _loopReset.unref();
+} catch { _loopDelay = null; }
+
+// Live agent runs: one entry per /api/agent/run in flight, removed when its
+// response closes. Counts only — no account identifier ever leaves the server.
+const activeAgentRuns = new Map(); // key -> { userId, startedAt }
+function runtimeHealth() {
+  let loop = null;
+  if (_loopDelay && _loopDelay.count) {
+    const ms = (ns) => Math.round((ns / 1e6) * 10) / 10;
+    loop = {
+      windowS: 60,
+      // Delay is bucketed by the histogram's own resolution, so a reading at or
+      // just above it is "the loop was idle", not a 10 ms stall.
+      resolutionMs: 10,
+      samples: _loopDelay.count,
+      p50Ms: ms(_loopDelay.percentile(50)),
+      p95Ms: ms(_loopDelay.percentile(95)),
+      p99Ms: ms(_loopDelay.percentile(99)),
+      maxMs: ms(_loopDelay.max),
+    };
+  }
+  const users = new Set();
+  for (const run of activeAgentRuns.values()) if (run.userId) users.add(run.userId);
+  return {
+    node: process.version,
+    uptimeS: Math.round(process.uptime()),
+    rssMb: Math.round(process.memoryUsage().rss / 1048576),
+    eventLoop: loop,
+    // A run is streaming, never blocked: p99 loop delay under 100 ms is what
+    // "fast under hard use" looks like on this host. Reported as a fact about
+    // the last minute, not a claim about the future.
+    fastP99ThresholdMs: 100,
+    activeRuns: activeAgentRuns.size,
+    activeUsers: users.size,
+  };
+}
+
 const { getDb } = require('./db');
 const siteAnalytics = require('./siteAnalytics');
 const cloudflareAnalytics = require('./cloudflareAnalytics');
@@ -3125,6 +3177,9 @@ app.get('/api/health', (_req, res) => {
     version: '1.0.0',
     checks,
     providers: Object.keys(PROVIDERS),
+    // Concurrent users are served by this one process; these counts plus the
+    // event-loop delay are how we tell "fast under hard use" from a guess.
+    runtime: runtimeHealth(),
   });
 });
 
@@ -5083,6 +5138,11 @@ app.post('/anthropic/v1/messages/count_tokens', async (req, res) => {
 
 app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, res) => {
   const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false, maxTurns: requestedMaxTurns } = req.body;
+  // Live-run registry (counts only, for /api/health): a run is in flight from
+  // here until its response closes, whichever way it ends.
+  const activeKey = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  activeAgentRuns.set(activeKey, { userId: req.user && req.user.id, startedAt: Date.now() });
+  res.on('close', () => { activeAgentRuns.delete(activeKey); });
   // Live steering: register this run's inbox so POST /api/agent/steer can land
   // a message inside the run. It is removed the moment the response closes, so
   // a steer that arrives after the run has ended is refused (409) rather than
