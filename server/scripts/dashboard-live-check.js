@@ -31,7 +31,7 @@ for (const line of fs.readFileSync(path.join(ROOT, 'server/.env'), 'utf8').split
               VALUES (?, ?, 'customer.subscription.updated', 'acknowledged-failure', NULL, NULL, NULL, 'fixture: unknown price, acknowledged', unixepoch() - 600)`)
     .run('evt_FIXTURE_failure:acknowledged-failure', fx[1]);
 
-  const browser = await puppeteer.launch({ headless: 'new', executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const browser = await puppeteer.launch({ headless: 'new', executablePath: require('../src/browser-path').resolveBrowserPath() || undefined, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 1200 });
   let apiHits = 0;

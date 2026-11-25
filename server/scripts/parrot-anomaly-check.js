@@ -17,7 +17,7 @@ const Database = require(path.join(ROOT, 'server/node_modules/better-sqlite3'));
   if (!owner) { console.log('FAIL: no owner row'); process.exit(1); }
   const clicksBefore = db.prepare("SELECT COUNT(*) c FROM user_activity WHERE action = 'admin_click'").get().c;
 
-  const browser = await puppeteer.launch({ headless: 'new', executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const browser = await puppeteer.launch({ headless: 'new', executablePath: require('../src/browser-path').resolveBrowserPath() || undefined, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 1400 });
   await page.setRequestInterception(true);

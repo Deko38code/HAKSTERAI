@@ -25,7 +25,7 @@ const AGENT = process.argv.includes('--codex') ? 'codex' : 'deepseek';
   db.close();
   if (!owner) { console.log('FAIL: no owner row'); process.exit(1); }
 
-  const browser = await puppeteer.launch({ headless: 'new', executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const browser = await puppeteer.launch({ headless: 'new', executablePath: require('../src/browser-path').resolveBrowserPath() || undefined, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 1200 });
   let agentHits = 0;

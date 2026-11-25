@@ -225,9 +225,10 @@ async function getBrowser() {
   // by the cache-dir bug above always throwing before this line was reached).
   if (!_browser || !_browser.connected) {
     const puppeteer = require('puppeteer');
+    // Resolved per box, not from one env value: see server/src/browser-path.js.
     _browser = await puppeteer.launch({
       headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      executablePath: require('../browser-path').resolveBrowserPath() || undefined,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--headless=new'],
     });
   }
