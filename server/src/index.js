@@ -13387,7 +13387,13 @@ if (fs.existsSync(distPath)) {
     }
   });
   app.get('/install.sh', (req, res) => {
-    const origin = (req.protocol || 'https') + '://' + (req.get('host') || 'haksterai.com');
+    // Behind the Cloudflare tunnel req.protocol is http and no trust-proxy is set,
+    // so a public install would be told http:// and point the CLI at a redirect.
+    const host = req.get('host') || 'haksterai.com';
+    const fwd = String(req.get('x-forwarded-proto') || '').split(',')[0].trim().toLowerCase();
+    const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
+    const scheme = fwd === 'https' || fwd === 'http' ? fwd : (isLocal ? (req.protocol || 'http') : 'https');
+    const origin = scheme + '://' + host;
     res.type('text/plain; charset=utf-8');
     res.set('cache-control', 'no-store');
     res.send(CLI_INSTALL_SH.replace(/__ORIGIN__/g, origin));
