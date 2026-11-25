@@ -269,6 +269,38 @@ function statusBody() {
   };
 }
 
+/* Bind with a short retry loop instead of dying on EADDRINUSE.
+ *
+ * The connector dials 3579 and cannot be repointed, so replacing the router
+ * means the port changes hands. If the new process dies when the old one still
+ * holds it, the swap costs a hole of whatever it takes to start Node (~150-
+ * 200 ms) — and a request landing in that hole is a user error. Waiting here
+ * shrinks the hole to one retry interval (~25 ms) and lets the new router be
+ * started BEFORE the old one stops, which is what makes the cutover safe.
+ *
+ * Bounded: if the port never frees the router exits with a clear line rather
+ * than pretending to serve.
+ */
+const BIND_RETRY_MS = Number(process.env.ROUTER_BIND_RETRY_MS || 25);
+const BIND_TRIES = Number(process.env.ROUTER_BIND_TRIES || 600); // ~15 s
+
+function listenRetrying(srv, opts, label) {
+  let tries = 0;
+  srv.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE' && tries < BIND_TRIES) {
+      tries += 1;
+      if (tries === 1 || tries % 40 === 0) {
+        log(`${label} waiting for ${opts.host}:${opts.port} (in use, try ${tries})`);
+      }
+      setTimeout(() => { try { srv.listen(opts); } catch { /* retried below */ } }, BIND_RETRY_MS);
+      return;
+    }
+    log(`${label} could not listen on ${opts.host}:${opts.port}: ${err && err.code ? err.code : err}`);
+    process.exit(1);
+  });
+  srv.listen(opts);
+}
+
 function isLoopback(addr) {
   const a = String(addr || '');
   return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
@@ -397,9 +429,10 @@ if (SHARED_LISTEN) {
     socket.on('error', kill);
     socket.on('close', () => { try { upstream.destroy(); } catch { /* already gone */ } });
   });
-  sharedServer.listen(SHARED_LISTEN.port, SHARED_LISTEN.host, () => {
+  sharedServer.on('listening', () => {
     log(`shared door (peer) listening on ${SHARED_LISTEN.host}:${SHARED_LISTEN.port}`);
   });
+  listenRetrying(sharedServer, { port: SHARED_LISTEN.port, host: SHARED_LISTEN.host }, 'shared door');
 }
 
 // Health loop. Also used to recover: a node that answers again is UP again.
@@ -411,9 +444,10 @@ const healthTimer = setInterval(() => {
 }, HEALTH_MS);
 healthTimer.unref();
 
-server.listen(LISTEN.port, LISTEN.host, () => {
+server.on('listening', () => {
   log(`router listening on ${LISTEN.host}:${LISTEN.port} -> primary ${base(PRIMARY)}, peers ${PEERS.map(base).join(' ')} (active ${state.active}, static: ${STATIC_MODE})`);
 });
+listenRetrying(server, { port: LISTEN.port, host: LISTEN.host }, 'router');
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
