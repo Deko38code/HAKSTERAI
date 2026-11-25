@@ -13277,7 +13277,8 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
       var d = out.body || {};
       if (out.status === 401) {
         ready = false;
-        showSignin('Your sign-in expired before the answer was sent — sign in below, then press ' + (approve ? 'Allow' : 'Deny') + ' again.');
+        showSignin('Your sign-in expired before the answer was sent — sign in below and this page picks the answer back up. If it does not, press ' + (approve ? 'Allow' : 'Deny') + ' again.');
+        schedule();
         return;
       }
       if (out.status === 404) {
