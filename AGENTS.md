@@ -436,7 +436,7 @@ the server for a static deploy.
 ## Junkalot rulebook index — mapped
 
 Junkalot's index of the MASTERGUARD rules is `/home/ghost694/junkalot/RULEBOOK-INDEX.md` (on Parrot's
-master copy): every section of `/home/ghost/CLAUDE.md` (§1–§37) with what it means on that project and where
+master copy): every section of `/home/ghost/CLAUDE.md` (§1–§38) with what it means on that project and where
 this file mirrors it. It is a read-only pointer — HaksterAI never writes a rule, a rate, a key or usage into
 that project (§16) — and it is not a second rulebook: CLAUDE.md wins on any difference.
 
@@ -510,3 +510,45 @@ read-only via `scripts/client-activity.mjs` over `data/admin-sessions.jsonl`, na
 (`1junkalot@gmail.com`, `susanschlamp53@gmail.com`); the owner's account never counts. A held restart is
 reported as held, never as done, and nothing overrides her session on a timer. No rate, bill, model or
 computation moves (§19, §24, §26, §22 remain locked).
+
+---
+
+## Section 38 Added — Fix And Patch, Never Reconfigure Himself (2026-11-25)
+
+_Added: 2026-11-25, owner-directed ("add a guard where hakster can break himself only fix patch but never do
+what he just did break his own config"; "make sure his steer is working and he recieves his messages while
+working to do it all in one shot"; "make sure his response time is fast like 10sec or less not 20 sec"; "his
+cli updates arent installing when cli starts and dosnt say installed restart cli to see changes should be on
+top of tui to the right of cpu ram usage"; "make sure his model has our config from this cli for speed";
+"make it exacly like this cli and my model are set to"). Backup before the edit:
+`AGENTS.md.bak-20261125T063452Z (39,484 B, size-verified)`. Nothing above this line was rewritten, reordered
+or removed — one pointer parenthetical was advanced from §1–§37 to §1–§38, exactly as the §35–§37 entries did._
+
+`/home/ghost/CLAUDE.md` is now **§1–§38**. §38 is **"Hakster Fixes And Patches — He Never Rewrites His Own
+Config, And He Hears You While He Works"**. Four things it makes binding here:
+
+1. **Self-config guard.** `cli/src/self-config-guard.js` refuses — never rewrites — any tool write to
+   `cli/src/models/ladder.js`, `cli/src/prefs.js`, `~/.hakster/config.json` or a model/provider variable in
+   an env file, on both tool surfaces (`cli/tools.js`, `server/src/providers.js` `executeAgentTool`). Ordinary
+   fixes and patches are untouched; the owner's `HAKSTER_ALLOW_SELF_CONFIG=1` opens it for one action.
+   Pinned by `cli/ui/__tests__/self-config-lock.test.mjs`.
+2. **Live steer.** A message typed while he works is read inside the run — drained before the next model
+   call, taken at a mid-stream boundary, or (on the `claude-cli` lane, which has no stdin turn loop) the turn
+   is stopped, the update is announced on the wire, and the run restarts on the same conversation with what
+   was already completed spelled out. Bounded at 4 restarts; an update that cannot reach the model is handed
+   back and queued, never dropped.
+3. **The 10-second bar.** An interactive turn answers in ~10 s or less: the `claude-cli` lane starts the MCP
+   core plus any server the operator's own message names (measured 11.1–11.6 s with all, 5.1–6.4 s with the
+   core), a full-auto run keeps the whole toolkit, and a change that moves latency is measured before and
+   after. A build on disk newer than the running session shows `⬆ vX installed · restart CLI to see changes`
+   at the right of the cpu/ram meters, once in the transcript too.
+4. **His model is this session's config, value for value.** `claudeCliEnv()` mirrors the owner's own Claude
+   Code session — relay `http://127.0.0.1:11434`, `deepseek-v4.1-flash:cloud` behind every Claude-style
+   alias, 1,048,576 context and compact window, attribution header, auto-mode server, survey/reminder/
+   error-reporting switches and PATH — and a test pins it so a later edit cannot drift one value. `--model`
+   is passed only for a wire id, so an alias can send the relay nothing it does not serve. Nothing in §38
+   moves a model, route, provider order, rate, plan or allowance (§19.3, §22.4, §26).
+
+Behavioural canary: `cd cli && npm run selfcheck` (add `--live` for one real tool round) — it fails when a
+tool round stops completing, which is the exact failure that broke tool calling on 2026-11-25. §38 is
+HaksterAI-only; nothing in it writes into Junkalot, PhantomIDE or any other project (§16).
