@@ -222,13 +222,20 @@ export default function App({ version = '0.1.0' }) {
   // default and falls through (§22 — the pinned HAKSTERAI-FLASH config;
   // the wire model and relay are unchanged, only the display name moved).
   const [model, setModel] = useState(() => (process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || PRIMARY_MODEL));
-  // No provider pin by default: the ladder's tier 1 picks the engine (the
-  // Claude Code CLI on the pinned DeepSeek route). Pinning PRIMARY_PROVIDER
-  // here overrode tier 1 on every turn, which sent the agent down the direct
-  // relay loop instead — the run that showed shell calls only and stopped on
-  // the server's loop guard. An explicit HAKSTER_PROVIDER, /provider or a
+  // Speed, without moving the config (owner, 2026-11-25: "takes almost 17-20
+  // sec ... can you fix make faster without breaking our config"). The pinned
+  // HAKSTERAI-FLASH model answers in ~0.9 s straight from the 127.0.0.1:11434
+  // relay; driving the same turn through the claude-cli harness costs 11-13 s
+  // per turn, because that lane spawns the whole Claude Code CLI for every
+  // request (measured 2026-11-25 on this box: relay 0.75-0.9 s, claude-cli
+  // 11.1-12.7 s, raw `claude -p` floor 5.8 s). So the default lane is the
+  // pinned provider itself. Nothing locked moves (§22/§35): the wire model,
+  // the relay, the provider and the ladder in src/models/ladder.js are
+  // untouched — this only says which lane answers first, and auto-handoff
+  // still falls back to claude-cli -> Codex -> the server waterfall when this
+  // lane fails. An explicit HAKSTER_PROVIDER, a saved /provider pick or a
   // model picked in /model still wins.
-  const [provider, setProvider] = useState(process.env.HAKSTER_PROVIDER || '');
+  const [provider, setProvider] = useState(() => process.env.HAKSTER_PROVIDER || readPrefs().provider || PRIMARY_PROVIDER);
   const [modelIdx, setModelIdx] = useState(0);
   // Auto handoff: HAKSTERAI-FLASH → Codex → server waterfall. On unless the
   // owner turned it off; the choice is remembered between sessions.

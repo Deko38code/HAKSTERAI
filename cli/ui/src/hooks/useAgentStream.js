@@ -499,10 +499,25 @@ export function useAgentStream({
       // (src/models/ladder.js). One attempt at a time; an attempt that failed
       // before producing anything hands the same prompt to the next entry when
       // the owner's auto-handoff switch is on.
-      const attempts = attemptsFor(model, provider);
+      let attempts = attemptsFor(model, provider);
       if (attempts.length && provider && attempts[0].provider !== provider) {
-        // An explicit HAKSTER_PROVIDER / caller provider wins for tier 1.
-        attempts[0] = { ...attempts[0], provider };
+        // An explicit HAKSTER_PROVIDER / caller provider answers first. The lane
+        // is MOVED to the front rather than swapping tier 1's provider in place,
+        // so the rest of the ladder (claude-cli, Codex, the server waterfall)
+        // stays behind it as the fallback chain.
+        const chosen = attempts.find((a) => a.provider === provider) || { ...attempts[0], provider };
+        attempts = [
+          chosen,
+          ...attempts.filter((a) => (a.provider || '') !== (chosen.provider || '') || (a.model || '') !== (chosen.model || '')),
+        ];
+      }
+      // A handoff must never spend a turn re-running an identical request, so
+      // any remaining duplicate lane is dropped.
+      for (let i = attempts.length - 1; i > 0; i -= 1) {
+        const dup = attempts.slice(0, i).some(
+          (a) => (a.provider || '') === (attempts[i].provider || '') && (a.model || '') === (attempts[i].model || ''),
+        );
+        if (dup) attempts.splice(i, 1);
       }
       // Statuses that another model cannot fix: a signed-out session, an
       // entitlement problem, a malformed turn, or a body the server refused.
