@@ -58,16 +58,17 @@ function findBun(env = process.env) {
   if (onPath) return onPath;
 
   const root = runtimeRoot(env);
+  // The bun package ships the real executable here on every platform (it is
+  // named bun.exe even on Linux); on Windows this is preferred over npm's .cmd
+  // shim, which needs a shell to start.
+  for (const name of names('bun')) {
+    const bundled = path.join(root, 'bun', 'node_modules', 'bun', 'bin', name);
+    if (isExecutableFile(bundled)) return bundled;
+  }
   // install.sh / install.ps1: npm install --prefix <root>/bun bun@<version>
   for (const name of names('bun')) {
     const installed = path.join(root, 'bun', 'node_modules', '.bin', name);
     if (isExecutableFile(installed)) return installed;
-  }
-  // The bun package ships a real executable here on every platform; on Windows
-  // this is preferred over npm's .cmd shim, which needs a shell to start.
-  for (const name of names('bun')) {
-    const bundled = path.join(root, 'bun', 'node_modules', 'bun', 'bin', name);
-    if (isExecutableFile(bundled)) return bundled;
   }
   // A bootstrapped Node tree can also carry one; checked newest-first.
   let dirs = [];
