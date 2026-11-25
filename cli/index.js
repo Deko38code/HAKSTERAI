@@ -3086,31 +3086,55 @@ program
   });
 
 // ── quake — the CLI in a Guake drop-down ─────────────────────────────────
-// The desktop already runs Guake; this opens the dashboard TUI in a tab of
-// that drop-down instead of asking the operator to keep a window around.
+// The drop-down IS the shipped look (owner, 2026-11-25: "make sure our cli
+// when paid users download it it comes with quake terminal no matter what";
+// "the startup like my cli does the matrix and my backsolash i have all
+// included"). The package carries assets/guake-hakster.conf — his neon
+// palette, DejaVu Sans Mono 11, full drop-down geometry, the transparency —
+// plus assets/haksterai-backdrop.png, so a paid customer's drop-down looks
+// like this one. The profile is applied once per CLI version through Guake's
+// own --restore-preferences, after backing up whatever was there (§2.9), and
+// Guake is only installed when the operator says yes (never silent sudo).
 // Each call adds a tab named "hakster" — Guake's CLI cannot list tabs, so an
 // existing one cannot be found and re-focused.
 program
   .command('quake')
-  .description('Open the dashboard TUI in a Guake drop-down tab (quake terminal)')
+  .description('Open the dashboard TUI in a Guake drop-down tab, themed like ours')
   .option('--show', 'Show the drop-down window')
   .option('--hide', 'Hide the drop-down window')
   .option('--toggle', 'Toggle the drop-down window')
-  .action((opts) => {
+  .option('--setup', 'Apply the shipped Guake look and exit')
+  .option('--repair', 'Re-apply the shipped Guake look even if it was applied before')
+  .option('--no-setup', 'Launch without touching Guake preferences')
+  .option('--yes', 'Install Guake without asking (only when it is missing)')
+  .action(async (opts) => {
     const { spawnSync } = require('child_process');
-    const have = spawnSync('bash', ['-lc', 'command -v guake'], { encoding: 'utf8' });
-    if (!have.stdout.trim()) {
-      console.log(`${C.red}✗ Guake is not installed.${C.reset} ${C.dim}Install: sudo apt install guake${C.reset}`);
+    const quake = require('./src/quake');
+    const version = require('./package.json').version;
+    const say = (line) => console.log(line);
+    const ready = await quake.ensureGuake({ yes: Boolean(opts.yes), log: say });
+    if (!ready.ok) {
+      if (ready.reason === 'declined') process.exit(0);
       process.exit(1);
     }
-    const run = (args) => spawnSync('guake', args, { stdio: 'inherit' }).status || 0;
+    if (ready.installed) say(`${C.green}✓ Guake installed${C.reset}`);
+    const wantsProfile = opts.setup === undefined ? true : Boolean(opts.setup);
+    if (wantsProfile && (opts.repair || !quake.isSetup(version))) {
+      const applied = quake.applyProfile({ version });
+      if (applied.ok) {
+        say(`${C.green}✓ Guake look applied${C.reset}${C.dim}${applied.backup ? ` (previous profile saved: ${applied.backup})` : ''}${C.reset}`);
+      } else if (applied.reason !== 'guake-missing') {
+        // A profile that would not import is reported, never retried in a loop.
+        say(`${C.yellow}◆ Guake look not applied (${applied.reason})${C.reset}`);
+      }
+    }
+    if (opts.setup) process.exit(0);
+    const guakeBin = quake.findGuake() || 'guake';
+    const run = (argv) => spawnSync(guakeBin, argv, { stdio: 'inherit' }).status || 0;
     if (opts.hide) process.exit(run(['--hide']));
     if (opts.toggle) process.exit(run(['--toggle-visibility']));
     if (opts.show) process.exit(run(['--show']));
-    const q = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
-    const entry = path.join(__dirname, 'index.js');
-    const cmd = `cd ${q(process.cwd())} && HAKSTER_NO_SPLASH=1 ${q(process.execPath)} ${q(entry)} tui`;
-    process.exit(run(['--show', '--new-tab', process.cwd(), '--rename-tab', 'hakster', '-e', cmd]));
+    process.exit(run(quake.launchArgs({ cwd: process.cwd() })));
   });
 
 // ── sessions — grid box view of server sessions ──────────────────────────
