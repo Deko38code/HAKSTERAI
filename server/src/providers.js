@@ -2769,7 +2769,10 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
   // visible to the agent and it appears to "forget" everything across sessions.
   try {
     const { getMemoryContext } = require('./memory');
-    const memCtx = getMemoryContext(null, { maxMemories: lowToken ? 5 : 20, maxChars: lowToken ? 1000 : 4000 });
+    // bump:false — this is a prompt build, not a recall. Writing here reshuffled
+    // the very ranking read back on the next turn and changed the prompt bytes
+    // (see memory.js), which cost a full re-prefill of the cached system prompt.
+    const memCtx = getMemoryContext(null, { maxMemories: lowToken ? 5 : 20, maxChars: lowToken ? 1000 : 4000, bump: false });
     if (memCtx) {
       prompt += `\n\n${memCtx}`;
     }

@@ -128,7 +128,7 @@ function deleteMemory(keyOrId) {
  * Get a formatted context block of relevant memories for injection into the agent system prompt.
  * Searches by the user's message content and returns a concise summary.
  */
-function getMemoryContext(userMessage, { maxMemories = 15, maxChars = 3000 } = {}) {
+function getMemoryContext(userMessage, { maxMemories = 15, maxChars = 3000, bump = true } = {}) {
   const db = getDb();
 
   // Always include high-confidence, recently accessed memories (core context)
@@ -165,19 +165,30 @@ function getMemoryContext(userMessage, { maxMemories = 15, maxChars = 3000 } = {
     }
   }
 
-  // Bump access count for all retrieved memories
+  // Bump access count for retrieved memories — optional, because this call is
+  // also the one that builds the agent's system prompt. Writing on read there
+  // corrupted the ranking it reads back: every recalled memory got the same
+  // `updated_at = now`, so the next build ordered a different set (and every
+  // age rendered as "just now"). A prompt build passes bump:false, so the
+  // selection stays identical between turns and the model's cached prompt
+  // prefix is not discarded (measured 2026-11-26).
   const now = Math.floor(Date.now() / 1000);
-  const bumpStmt = db.prepare('UPDATE memories SET access_count = access_count + 1, updated_at = ? WHERE id = ?');
-  for (const m of merged) {
-    bumpStmt.run(now, m.id);
+  if (bump) {
+    const bumpStmt = db.prepare('UPDATE memories SET access_count = access_count + 1, updated_at = ? WHERE id = ?');
+    for (const m of merged) {
+      bumpStmt.run(now, m.id);
+    }
   }
 
   if (merged.length === 0) return '';
 
-  // Format as compact context block
-  const lines = merged.map(m => {
-    const age = now - m.updated_at;
-    const ageStr = age < 60 ? 'just now' : age < 3600 ? `${Math.floor(age / 60)}m ago` : age < 86400 ? `${Math.floor(age / 3600)}h ago` : `${Math.floor(age / 86400)}d ago`;
+  // Format as compact context block. Sorted deterministically and aged in whole
+  // days: a relative "5m ago" changed the prompt bytes on every rebuild, which
+  // is exactly what kept invalidating the cached prefix.
+  const byKey = (a, b) => (String(a.category).localeCompare(String(b.category)) || String(a.key).localeCompare(String(b.key)));
+  const lines = merged.slice().sort(byKey).map(m => {
+    const days = Math.floor(Math.max(0, now - (m.updated_at || 0)) / 86400);
+    const ageStr = days < 1 ? 'today' : `${days}d ago`;
     return `[${m.category}] ${m.key}: ${m.value} (${ageStr})`;
   });
 

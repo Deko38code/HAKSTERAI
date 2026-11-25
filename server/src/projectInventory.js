@@ -221,7 +221,16 @@ function getProjectInventory(options = {}) {
 function formatProjectInventory(options = {}) {
   const inventory = getProjectInventory(options);
   const maxProjects = options.maxProjects || 10;
-  const lines = [`Project inventory generated ${inventory.generatedAt}`];
+  // Date only, never the wall-clock ISO stamp. This block ships inside the
+  // agent's system prompt on every turn, and a per-rebuild timestamp changed
+  // those bytes whenever the 60 s inventory cache refreshed — which threw away
+  // the model's cached prompt prefix and paid a full re-prefill of the whole
+  // ~24K-token prompt (measured 2026-11-26: 5.96 s cold vs 1.87 s warm for the
+  // same prompt). The day is still truthful and stays identical for a session,
+  // so the cached prefix survives every rebuild. Nothing else changes: the
+  // inventory's own generatedAt still carries the exact time for tool output.
+  const inventoryDay = String(inventory.generatedAt || '').slice(0, 10);
+  const lines = [inventoryDay ? `Project inventory generated ${inventoryDay}` : 'Project inventory'];
   for (const p of inventory.projects.slice(0, maxProjects)) {
     const scripts = Object.keys(p.scripts || {}).slice(0, 8).join(', ') || 'none';
     const keyFiles = p.keyFiles.slice(0, 10).join(', ') || 'none';
