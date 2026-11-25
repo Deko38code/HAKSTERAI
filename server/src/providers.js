@@ -8,6 +8,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../.env'), override: true });
 const crypto = require('crypto');
 const firecrawlApi = require('./firecrawl-api');
+const { agentRunGate } = require('./agent/run-gate');
 
 // Approval mode — bypass confirmation prompts in FULL_AUTO / AUTO_EDIT
 const { FULL_AUTO, shouldConfirm: shouldConfirmApproval } = require('./agent/approval');
@@ -314,6 +315,16 @@ function markProviderAuthDead(name, ms = 30 * 60 * 1000) {
   if (isProviderAuthDead(name)) return;
   _authDead.set(name, { until: Date.now() + ms, fp: _keyFingerprint(name) });
   console.warn(`[providers] ${name} rejected its key (401/403) — skipping that lane for ${Math.round(ms / 60000)} min; provider config unchanged`);
+}
+// §46.3 — a lane is disabled only on a real rejection from the provider itself.
+// A CLI lane (claude-cli, codex-cli) has no key in this process: it authenticates
+// through its own binary's login. A 401 from one therefore means our own code
+// handed a shell-out provider to an HTTP client — our wiring bug, not a bad
+// credential — so the lane is left enabled and the cause is reported instead of
+// being benched for 30 minutes (the "all the fallbacks are down" failure).
+function isCliLane(name) {
+  const t = PROVIDERS[name] && PROVIDERS[name].type;
+  return t === 'claude-cli' || t === 'codex-cli';
 }
 function isAuthError(err) {
   return /\b(401|403)\b|unauthoriz|invalid.?api.?key|authentication/i.test(String((err && err.message) || err || ''));
@@ -1040,7 +1051,7 @@ function buildCliTranscript(messages) {
     .join('\n\n');
 }
 
-function claudeCliComplete({ model, messages, system }) {
+function claudeCliCompleteUnslotted({ model, messages, system }) {
   const { spawn } = require('child_process');
   return new Promise((resolve, reject) => {
     const sysPrompt = system || SYSTEM_PROMPT;
@@ -1093,6 +1104,35 @@ function claudeCliComplete({ model, messages, system }) {
   });
 }
 
+// ── Admission to the claude-cli lane ───────────────────────────────────────
+// Every turn on this lane spawns `claude -p` plus its core MCP servers, which
+// measured ~635 MB on this Dell (2026-11-26). The waterfall can fall through to
+// this lane from any chat endpoint, so admission lives here — at the one place
+// the process is actually started — instead of at each caller. A burst of users
+// then queues for a slot rather than pushing the box into swap. Global cap
+// only: the per-account cap is enforced at /api/agent/run, the one surface
+// where a single account can start turns. No model, route, provider or cost
+// changes (CLAUDE.md §19.3, §22.4, §26).
+async function claudeCliComplete(opts) {
+  const release = await agentRunGate.acquire({});
+  try {
+    return await claudeCliCompleteUnslotted(opts);
+  } finally {
+    try { release(); } catch { /* the gate keeps its own count */ }
+  }
+}
+
+async function* claudeCliStream(opts) {
+  const release = await agentRunGate.acquire({});
+  try {
+    yield* claudeCliStreamUnslotted(opts);
+  } finally {
+    // Runs even when the consumer stops iterating early (a broken `for await`
+    // calls the generator's return()), so a cancelled turn cannot leak a slot.
+    try { release(); } catch { /* the gate keeps its own count */ }
+  }
+}
+
 // ── Streaming variant of the claude-cli lane ────────────────────────
 // claudeCliComplete resolves only when the child exits, so the streaming path
 // used to sit on dead air for the whole turn and then hand over the entire
@@ -1102,7 +1142,7 @@ function claudeCliComplete({ model, messages, system }) {
 // tokens — only delivery changes (§38, §39.4: no model, route or cost moves).
 // Throws (never yields a partial answer twice) so the caller can fall back to
 // the blocking call when an older CLI lacks stream-json.
-async function* claudeCliStream({ model, messages, system }) {
+async function* claudeCliStreamUnslotted({ model, messages, system }) {
   const { spawn } = require('child_process');
   const os = require('os');
   const readline = require('readline');
@@ -1195,6 +1235,19 @@ function codexCliAvailable() {
   return _codexCliBinCache;
 }
 
+// A model id this lane actually serves. Anything else — the locked Ollama wire
+// model (§22), an Anthropic alias, another provider's name — must not be
+// forwarded: `codex -m <foreign>` fails with model_not_found, a bare `codex exec`
+// answers fine (§46.2). Ollama cloud tags always carry a `:cloud`-style suffix,
+// which is never a Codex id, so a colon rules a name out outright.
+const CODEX_NATIVE_MODEL_RE = /^(?:gpt-|codex-|o[1-9](?:$|[-.]))/i;
+function isCodexNativeModel(model) {
+  const m = String(model || '').trim();
+  if (!m || m === 'codex-cli') return false;
+  if (m.includes(':')) return false;
+  return CODEX_NATIVE_MODEL_RE.test(m);
+}
+
 function codexCliComplete({ model, messages, system }) {
   const { spawn } = require('child_process');
   const os = require('os');
@@ -1214,7 +1267,14 @@ function codexCliComplete({ model, messages, system }) {
     // read-only sandbox: this provider answers text, it must never write files or
     // run commands on the box. A throwaway cwd keeps it out of the project tree.
     const args = ['exec', '--skip-git-repo-check', '-C', os.tmpdir(), '-s', 'read-only', '--json'];
-    if (model && model !== 'codex-cli') args.push('-m', model);
+    // §46.2 — a lane is sent only the model it serves. This line used to forward
+    // whatever reached it, including the locked Ollama wire model
+    // (`deepseek-v4.1-flash:cloud`), and `codex -m` answers model_not_found for a
+    // name it does not serve — reproduced 2026-11-26: "The 'deepseek-v4.1-flash:cloud'
+    // model is not supported when using Codex with a ChatGPT account", while a bare
+    // `codex exec` answered normally (5,252 tokens). A foreign name now resolves to
+    // an empty `-m`, so codex uses its own default; only a Codex-native id is passed.
+    if (isCodexNativeModel(model)) args.push('-m', model);
     args.push('-');
 
     const child = spawn('codex', args, { env: codexCliEnv() });
@@ -4490,7 +4550,13 @@ async function chatTimed(opts) {
     // Revoked or invalid key on the chosen lane: skip that lane and answer from
     // the next healthy one in the same call, so a dead key never reaches a user.
     if (opts && opts.provider && isAuthError(err)) {
-      markProviderAuthDead(opts.provider);
+      if (isCliLane(opts.provider)) {
+        // §46.3: a CLI lane owns its own login; an auth error from one is our
+        // wiring bug, not a dead credential. Report it, leave the lane enabled.
+        console.warn(`[providers] ${opts.provider} returned an auth error, but it is a CLI lane with no key of its own — leaving it enabled (§46.3)`);
+      } else {
+        markProviderAuthDead(opts.provider);
+      }
       const next = _nextWaterfallProvider(opts.provider) || getWaterfallProvider();
       if (next && next.provider !== opts.provider) {
         try {
@@ -4517,7 +4583,13 @@ async function* chatStreamTimed(opts) {
     // Same rule as chatTimed, but only before the first byte has gone out —
     // once a stream is flowing it cannot be restarted without duplicating text.
     if (!yieldedAny && opts && opts.provider && isAuthError(err)) {
-      markProviderAuthDead(opts.provider);
+      if (isCliLane(opts.provider)) {
+        // §46.3: a CLI lane owns its own login; an auth error from one is our
+        // wiring bug, not a dead credential. Report it, leave the lane enabled.
+        console.warn(`[providers] ${opts.provider} returned an auth error, but it is a CLI lane with no key of its own — leaving it enabled (§46.3)`);
+      } else {
+        markProviderAuthDead(opts.provider);
+      }
       const next = _nextWaterfallProvider(opts.provider) || getWaterfallProvider();
       if (next && next.provider !== opts.provider) {
         try {
@@ -4537,4 +4609,4 @@ async function* chatStreamTimed(opts) {
   }
 }
 
-module.exports = { chat: chatTimed, chatStream: chatStreamTimed, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, markProviderAuthDead, isProviderAuthDead, WATERFALL_ORDER, claudeCliEnv, isRefusal, GODMODE_PROMPT, UNRESTRICTED_SYSTEM_PROMPT, getOpenRouterKeys, nextOpenRouterKey };
+module.exports = { chat: chatTimed, chatStream: chatStreamTimed, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT: AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, markProviderAuthDead, isProviderAuthDead, WATERFALL_ORDER, claudeCliEnv, isRefusal, GODMODE_PROMPT, UNRESTRICTED_SYSTEM_PROMPT, getOpenRouterKeys, nextOpenRouterKey, codexCliComplete, isCodexNativeModel, isCliLane };

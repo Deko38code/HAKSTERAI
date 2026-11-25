@@ -64,6 +64,9 @@ function runtimeHealth() {
     fastP99ThresholdMs: 100,
     activeRuns: activeAgentRuns.size,
     activeUsers: users.size,
+    // activeRuns counts every request in flight — queued or running. The gate's
+    // own reading says which is which, so nothing here has to be inferred.
+    runGate: agentRunGate.state(),
   };
 }
 
@@ -75,7 +78,7 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const { Readable } = require('node:stream');
-const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv } = require('./providers');
+const { chat, chatStream, listModels, generateImage, analyzeImage, PROVIDERS, estimateCost, AGENT_TOOLS, AGENT_SYSTEM_PROMPT, buildAgentSystemPrompt, executeAgentTool, sanitizeMessagesForProvider, getFirecrawlKeys, firecrawlScrape, firecrawlSearch, getWaterfallProvider, markProviderRateLimited, isProviderRateLimited, WATERFALL_ORDER, claudeCliEnv, codexCliComplete } = require('./providers');
 const { formatProjectInventory } = require('./projectInventory');
 const { buildCustomerChatDirective } = require('./customer-mode');
 const { installPasskeyRoutes } = require('./passkey');
@@ -86,6 +89,59 @@ const stuckMonitor = require('./agent/stuckMonitor');
 const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName, kiroRoundBudget } = require('./agent/loop');
 const autolearn = require('./agent/autolearn');
 const taskState = require('./agent/task-state');
+// ── Multi-user run gate ───────────────────────────────────────────────────
+// One claude-cli turn costs ~635 MB on this box (247 MB for `claude -p` plus
+// 388 MB for its six core MCP servers — measured 2026-11-26). The fifth
+// concurrent turn is what pushes the Dell into swap, and once it swaps every
+// session lags, not just the extra one. The gate holds concurrency to what the
+// hardware can carry and queues the excess, so the turns that are running stay
+// fast. It decides only *when* a turn starts: no model, route, provider, plan or
+// allowance is involved (CLAUDE.md §19.3, §22.4, §26). One instance for the
+// whole process — providers.js admits through the same one.
+const { agentRunGate } = require('./agent/run-gate');
+
+/**
+ * Take a run slot for one streaming request, or end the response with a clear
+ * reason. Resolves `true` when the caller may proceed (holding a slot that is
+ * released when the response closes, or the moment the client goes away while
+ * queued) and `false` when the request was already answered and must stop.
+ */
+async function admitStreamingRun(req, res) {
+  let releaseFn = null;
+  let released = false;
+  let clientGone = false;
+  const release = () => {
+    if (released || !releaseFn) return;
+    released = true;
+    try { releaseFn(); } catch { /* the gate keeps its own count */ }
+  };
+  res.on('close', () => { clientGone = true; release(); });
+  if (res.writableEnded || res.destroyed) clientGone = true;
+  try {
+    releaseFn = await agentRunGate.acquire({
+      userId: (req.user && req.user.id) || null,
+      onQueued: ({ ahead, active, maxConcurrent }) => {
+        if (res.writableEnded || res.destroyed) return;
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'queued', ahead, running: active, max: maxConcurrent })}\n\n`);
+          // The installed client ignores unknown event types, so the wait is
+          // also put on the phase line it already renders — shown, not silent.
+          res.write(`data: ${JSON.stringify({ type: 'phase', phase: `QUEUED · ${active}/${maxConcurrent} running, ${ahead} ahead` })}\n\n`);
+        } catch { /* the socket went away between the check and the write */ }
+      },
+    });
+  } catch (gateErr) {
+    try {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: gateErr.message, code: gateErr.code || 'busy' })}\n\n`);
+      res.write('data: [DONE]\n\n');
+    } catch { /* stream already closed */ }
+    try { res.end(); } catch { /* already ended */ }
+    return false;
+  }
+  // The client left while queued: hand the slot straight back, do no work.
+  if (clientGone) { release(); return false; }
+  return true;
+}
 
 // ── MCP Integration — merge MCP tools into the agent tool list ────────────
 let ALL_TOOLS = AGENT_TOOLS; // starts as built-in only; expanded after MCP loads
@@ -5343,6 +5399,11 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
   res.flushHeaders();
   mirrorSSEToAgentSubscribers(res, { sessionId });
 
+  // ── Admission: queue this run instead of oversubscribing the box ────────
+  // Nothing below this point starts a model call until a slot is held, so N
+  // users arriving at once costs a queue, not N times 635 MB of swap.
+  if (!(await admitStreamingRun(req, res))) return;
+
   // Emit initial phase event AFTER headers are set
   res.write(`data: ${JSON.stringify({ type: 'phase', phase: phaseName(currentPhase), turn: 0 })}\n\n`);
 
@@ -5858,6 +5919,58 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
       console.error('[claude-cli] run failed:', err.message || err);
       res.write(`data: ${JSON.stringify({ type: 'error', error: (err.message || String(err)).slice(0, 500) })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'done', provider: 'claude-cli', model: agentModel })}\n\n`);
+    } finally {
+      clearInterval(heartbeat);
+      res.end();
+    }
+    return;
+  }
+
+  // ── codex-cli: a CLI lane, not an HTTP one (§46) ─────────────────────────
+  // `codex` authenticates through its own login (the owner's Codex Pro
+  // subscription), exactly like claude-cli — so it must be shelled out to,
+  // never handed to the OpenAI SDK. Before this block existed, codex-cli sat
+  // at position 2 of WATERFALL_ORDER and the generic client called an OpenAI
+  // endpoint with no key: a 401, which markProviderAuthDead then turned into a
+  // 30-minute bench. That was the "all the fallbacks are down" failure (§46.1,
+  // §46.3). The turn now runs through codexCliComplete — the same function the
+  // chat lanes already use, keeping its read-only sandbox — and answers as
+  // plain text. It is never given `-m` for a model it does not serve: that
+  // check lives in codexCliComplete itself (§46.2).
+  if (cfg.type === 'codex-cli') {
+    try {
+      const codexLastUser = messages.filter(m => m.role === 'user').pop();
+      const codexCtxTags = String(getMessageText(codexLastUser?.content) || '')
+        .split(/\s+/).filter(w => w.length > 3).slice(0, 10);
+      let codexSysPrompt = buildAgentSystemPrompt(workDir, codexCtxTags, { lowToken });
+      const codexSysMsg = messages.find(m => m.role === 'system');
+      const codexClientSys = codexSysMsg ? getMessageText(codexSysMsg.content) : '';
+      if (isAutonomousMode) {
+        codexSysPrompt += `\n=== AUTONOMOUS MODE (${effectiveApprovalMode === 'full-auto' ? 'FULL-AUTO' : 'AUTO-EDIT'}) ===\n`
+          + 'Do the work to completion without asking, and end with a short rundown of what was done and verified.\n';
+      }
+      if (codexClientSys) codexSysPrompt += `\n=== CLIENT DIRECTIVE ===\n${codexClientSys}\n`;
+      const codexRes = await codexCliComplete({
+        model: agentModel,
+        messages,
+        system: codexSysPrompt,
+      });
+      res.write(`data: ${JSON.stringify({ type: 'delta', content: codexRes.content })}\n\n`);
+      res.write(`data: ${JSON.stringify({
+        type: 'done',
+        provider: 'codex-cli',
+        model: agentModel,
+        inputTokens: codexRes.inputTokens,
+        outputTokens: codexRes.outputTokens,
+        cachedInputTokens: codexRes.cachedInputTokens,
+        // Cost 0: this lane rides the owner's Codex Pro subscription, not a
+        // metered API (§26.4). Tokens stay exact.
+        cost: 0,
+      })}\n\n`);
+    } catch (err) {
+      console.error('[codex-cli] run failed:', err.message || err);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: (err.message || String(err)).slice(0, 500) })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', provider: 'codex-cli', model: agentModel })}\n\n`);
     } finally {
       clearInterval(heartbeat);
       res.end();
@@ -6631,6 +6744,11 @@ ${dirListing}
           for (const _n of [provider, ...WATERFALL_ORDER]) {
             if (_waterfallTried.has(_n) || isProviderRateLimited(_n)) continue;
             if (!PROVIDERS[_n]) continue;
+            // §46.1 — this loop speaks the OpenAI streaming protocol only. A CLI
+            // lane (claude-cli, codex-cli) is dispatched by its own block at the
+            // top of this handler, so rotating INTO one here would hand it to an
+            // HTTP client and 401. Skip it; the next HTTP lane is the fallback.
+            if (PROVIDERS[_n].type === 'claude-cli' || PROVIDERS[_n].type === 'codex-cli') continue;
             _next = _n; break;
           }
           if (_next) {
