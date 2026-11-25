@@ -1,5 +1,6 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
+import { BrandLine } from './HeroLogo.jsx';
 
 /* DebugView — the TUI's own debugger (owner, 2026-11-24: "add debugger to").
  *
@@ -113,6 +114,7 @@ export default function DebugView({
         <text fg="cyan" attributes={TextAttributes.BOLD}>◇ Debugger</text>
         <text fg="gray">{clip(stats ? `live · ${Math.max(0, Math.round((Date.now() - stats.at) / 1000))}s ago` : 'sampling…', Math.max(0, w - 12))}</text>
       </box>
+      <BrandLine width={w} subtitle="debugger" />
       <text fg="gray">{clip('r reset counters · pgup/pgdn scroll · esc back — every figure is measured, "—" means no sample yet', w - 2)}</text>
 
       <Section width={w} title="RENDER" hint={render ? `${fmtNum(render.total)} app renders` : ''} />

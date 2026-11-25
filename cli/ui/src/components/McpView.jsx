@@ -1,5 +1,6 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
+import { BrandLine } from './HeroLogo.jsx';
 
 /* McpView — the MCP server manager, the terminal's answer to Claude CLI's
  * `/mcp`. Owner, 2026-11-24: "fix our popout /menu for all our cli settings
@@ -57,7 +58,8 @@ export default function McpView({
   // Budget inside the box: border 2 + title 1 + footer 1 = 4 chrome rows; the
   // server list takes at most half of what is left so the tool list always has
   // somewhere to render.
-  const body = Math.max(3, h - 4);
+  // -5 not -4: one row of the box now carries the brand line.
+  const body = Math.max(3, h - 5);
   const listRows = Math.max(1, Math.min(servers.length, Math.ceil(body / 2)));
   const sel = Math.max(0, Math.min(selected, Math.max(0, servers.length - 1)));
   const start = Math.max(0, Math.min(sel - Math.floor(listRows / 2), Math.max(0, servers.length - listRows)));
@@ -76,6 +78,7 @@ export default function McpView({
           {clip(`${live}/${servers.length} live · ${tools} tools${servers.length > listRows ? ` · ${start}↑ ${Math.max(0, servers.length - start - shown.length)}↓` : ''}`, inner - 14)}
         </text>
       </box>
+      <BrandLine width={inner} subtitle="mcp servers" />
       <box style={{ width: inner, flexDirection: 'column' }}>
         {shown.length === 0 ? (
           <text fg="gray">{clip('no servers reported — is the server reachable?', inner)}</text>

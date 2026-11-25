@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { TextAttributes } from '@opentui/core';
+import { BrandLine } from './HeroLogo.jsx';
 import ScrollPanel from './ScrollPanel.jsx';
 import { diffLines, lastSnapshot, linesOf } from '../utils/scripts.js';
 
@@ -65,7 +66,8 @@ export default function ScriptsView({
   // then the panes get everything else. Nothing may exceed `h`.
   const listRows = Math.min(6, Math.max(1, scripts.length || 1));
   const listPanelRows = listRows + 3; // border 2 + title 1
-  const snapshotRows = Math.max(5, h - listPanelRows - 1); // -1: the snapshot title
+  // -2: the brand line and the snapshot title each take a row.
+  const snapshotRows = Math.max(5, h - listPanelRows - 2);
   const paneRows = Math.max(2, snapshotRows - 3); // pane panels: border 2 + title 1
 
   const src = useMemo(() => (chosen ? linesOf(chosen) : []), [chosen]);
@@ -82,6 +84,7 @@ export default function ScriptsView({
 
   return (
     <box style={{ width: w, height: h, flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
+      <BrandLine width={w} subtitle="live scripts" />
       <ScrollPanel
         width={w}
         title={`⌘ Live scripts · ${scripts.length}`}

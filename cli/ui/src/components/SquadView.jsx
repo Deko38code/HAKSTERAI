@@ -1,5 +1,6 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
+import { BrandLine } from './HeroLogo.jsx';
 import ScrollPanel from './ScrollPanel.jsx';
 
 /* SquadView — the sub-agents this CLI can call, with their real tools.
@@ -31,7 +32,8 @@ export default function SquadView({
   const chosen = peers[Math.min(selected, Math.max(0, peers.length - 1))] || null;
   const listRows = Math.min(8, Math.max(1, peers.length || 1));
   const listPanelRows = listRows + 3;
-  const toolsRows = Math.max(2, h - listPanelRows - 3);
+  // -4: the brand line sits above the two panels.
+  const toolsRows = Math.max(2, h - listPanelRows - 4);
   const up = peers.filter((p) => p.up).length;
   const lazy = peers.filter((p) => p.state === 'lazy').length;
   const DOT = { live: '● ', lazy: '◐ ', down: '○ ' };
@@ -39,6 +41,7 @@ export default function SquadView({
 
   return (
     <box style={{ width: w, height: h, flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
+      <BrandLine width={w} subtitle="sub-agents" />
       <ScrollPanel
         width={w}
         title={`⍟ Squad · ${up}/${peers.length} live${lazy ? ` · ${lazy} lazy` : ''}`}

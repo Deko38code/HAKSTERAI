@@ -1,5 +1,6 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
+import { BrandLine } from './HeroLogo.jsx';
 import ScrollPanel from './ScrollPanel.jsx';
 import { META } from '../../../src/prefs.js';
 
@@ -45,12 +46,14 @@ export default function SettingsView({
   const changed = list.filter((r) => String(r.value) !== String(r.default)).length;
 
   return (
-    <ScrollPanel
+    <box style={{ width: w, flexDirection: 'column', flexShrink: 0 }}>
+      <BrandLine width={w} subtitle="settings" />
+      <ScrollPanel
       width={w}
       title={`⚙ Settings${changed ? ` · ${changed} changed` : ''}`}
       hint="↑↓ select · enter change · r reset · esc back"
       total={list.length}
-      rows={contentRows}
+      rows={Math.max(3, contentRows - 1)}
       selected={Math.min(selected, Math.max(0, list.length - 1))}
       initial="top"
       empty="no settings — prefs.js lists none"
@@ -80,6 +83,7 @@ export default function SettingsView({
           </box>
         );
       }}
-    </ScrollPanel>
+      </ScrollPanel>
+    </box>
   );
 }

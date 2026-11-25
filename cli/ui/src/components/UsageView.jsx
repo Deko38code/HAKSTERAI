@@ -1,5 +1,6 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
+import { BrandLine } from './HeroLogo.jsx';
 import { clip } from './LiveSidebar.jsx';
 
 /* UsageView — this account's usage, the way Claude's /usage page reads.
@@ -102,6 +103,7 @@ export default function UsageView({ width = 80, height = 24, usage = null, refre
   if (!data) {
     return (
       <box style={{ width: w, border: true, borderStyle: 'rounded', borderColor: 'green', flexDirection: 'column', flexShrink: 0 }}>
+        <BrandLine width={inner} subtitle="usage" />
         {line('◔ Usage', 'green', true)}
         <Row w={inner}><text> </text></Row>
         {line(err || (usage && usage.loading ? 'loading usage…' : 'no usage data yet'), err ? 'yellow' : 'gray')}
@@ -136,6 +138,7 @@ export default function UsageView({ width = 80, height = 24, usage = null, refre
 
   return (
     <box style={{ width: w, border: true, borderStyle: 'rounded', borderColor: 'green', flexDirection: 'column', flexShrink: 0 }}>
+      <BrandLine width={inner} subtitle="usage" />
       {line(`◔ Usage · ${account || 'this account'} · plan ${plan}`, 'green', true)}
       {line(capped
         ? `Plan allowance ${fmtNum(used)} / ${fmtNum(limit)} calls · ${pct}% · resets in ${until(resets.planResetAt)}`

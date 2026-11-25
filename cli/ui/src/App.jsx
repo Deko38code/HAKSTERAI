@@ -885,16 +885,22 @@ export default function App({ version = '0.1.0' }) {
         // `/danger clear` removes the stored one. It is the same value and the
         // same file `hakster config sudo` uses, so both surfaces agree (§9, §23:
         // the password is never echoed, logged or put in argv).
+        // Owner, 2026-11-26: "make sure dangerous command window opens with our
+        // /menu and password and our logo". Bare `/danger` — which is what the
+        // /menu's "Approval password" row runs — now OPENS the masked window
+        // (brand line + hidden field) instead of only printing a notice, so the
+        // window is one keystroke away from the menu. `/danger status` keeps the
+        // report, `/danger clear` still removes the stored value.
         const verb = String(arg || '').trim().toLowerCase();
-        if (verb === 'set') { setDangerSetup(true); return; }
+        if (verb === 'set' || verb === 'open' || verb === '') { setDangerSetup(true); return; }
         if (verb === 'clear') {
           const r = clearDangerPassword();
           showNotice(r.ok ? '◆ approval password cleared' : `◆ not cleared — ${r.reason || 'write failed'}`);
           return;
         }
         const s = dangerPasswordState();
-        if (!s.set) { showNotice('◆ no approval password — /danger set (typed hidden)'); return; }
-        showNotice(`◆ password set · ${s.length} chars · from ${s.source === 'env' ? 'HAKSTER_DANGER_PASSWORD' : '~/.hakster/config.json'} · /danger set to change · /danger clear to remove`);
+        if (!s.set) { showNotice('◆ no approval password — /danger opens the window (typed hidden)'); return; }
+        showNotice(`◆ password set · ${s.length} chars · from ${s.source === 'env' ? 'HAKSTER_DANGER_PASSWORD' : '~/.hakster/config.json'} · /danger to change · /danger clear to remove · /danger status`);
         return;
       }
       case '/clear':

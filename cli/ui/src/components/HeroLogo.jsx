@@ -56,6 +56,30 @@ export function heroRowCount(width) {
   return (heroFits(width) ? HERO_WORDMARK.length : 0) + 1;
 }
 
+/**
+ * BrandLine — the one-row form of the mark.
+ *
+ * A card that opens (a /menu page, a gate, a popout) cannot always spare the
+ * five rows of block letters, and clipping them reads as noise. This draws the
+ * same `◆ HAKSTER-AI` name HeroLogo falls back to at narrow widths — one row,
+ * green, with an optional right-hand subtitle. Same glyph table, same green, so
+ * the splash, the popouts and every opened card cannot drift apart.
+ */
+export function BrandLine({ width = 60, subtitle = '', indent = 0 }) {
+  const w = Math.max(1, Number(width) || 60);
+  const pad = ' '.repeat(Math.max(0, indent));
+  const tag = `${pad}◆ ${HERO_NAME}`;
+  const sub = String(subtitle == null ? '' : subtitle);
+  const room = Math.max(0, w - tag.length - 2);
+  const shown = !sub ? '' : sub.length <= room ? sub : `${sub.slice(0, Math.max(0, room - 1))}…`;
+  return (
+    <box style={{ width: w, flexDirection: 'row', flexShrink: 0 }}>
+      <text fg={HERO_GREEN} attributes={TextAttributes.BOLD}>{tag}</text>
+      {shown ? <text fg="gray">{`  ${shown}`}</text> : null}
+    </box>
+  );
+}
+
 export default function HeroLogo({ width = 60, indent = 0, subtitle = '', name = true }) {
   const pad = ' '.repeat(Math.max(0, indent));
   const blocks = heroFits((Number(width) || 60) - indent);
