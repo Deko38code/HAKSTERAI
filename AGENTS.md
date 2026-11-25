@@ -626,3 +626,137 @@ Memory"**. What it makes binding here:
    header ◈ bar in `cli/ui/src/App.jsx`).
 6. **HaksterAI only.** Nothing here writes into Junkalot, PhantomIDE or another project (§16, §38.8).
    Pinned by `cli/ui/__tests__/recap-memory.test.mjs` and `meter.test.mjs`.
+
+
+---
+
+## Session Log — 2026-11-26 (CLI latency, streaming, addressable recap, memory-DB exact restore)
+
+_Appended at the end of this file; nothing above was rewritten, reordered or removed.
+Backup before this append: `AGENTS.md.bak-20261125T200821Z` (48905 B, size-verified)._
+
+### 1. CLI latency — no config, route, model or rate touched
+- **Byte-stable system prompt.** `buildAgentSystemPrompt()` embedded `Project inventory generated
+  <ISO timestamp>`, so every rebuild changed bytes and blew the ~24k-token prompt cache. The stamp is
+  gone from the prompt path; the prompt now builds in **136 ms (was ~2.5 s)** and is cache-stable.
+- **Memory write-on-read removed.** `getMemoryContext()` bumped `updated_at` on every read, so its own
+  ordering reshuffled each call and every age read "just now" — a second cache-killer. Reads no longer
+  write; relative ages are rendered, not stored.
+- **Duplicated steering removed on the `claude-cli` lane.** The spawned `claude` already loads
+  `haksterAi/CLAUDE.md` (byte-identical to `haksterAi/AGENTS.md`, sha256 `0c7af095…`), so the lane was
+  sending the same 48.9 KB twice. `buildAgentSystemPrompt()` gained a `steering` mode whose cache key
+  includes it; the lane now appends only the master `/home/ghost/AGENTS.md` head.
+  Lane prompt **94,882 → 58,889 chars (−38 %, ~9,000 tokens/turn)**; RULE #0, the CineVault roster and
+  IPTV authorization all retained. Pinned by `server/__smoke__/prompt-steering-probe.mjs` (12 checks).
+
+### 2. The `claude-cli` lane streams instead of buffering
+- It called the blocking `claudeCliComplete()` and emitted the whole answer as one delta — 11.3 s of
+  dead air, then everything at once. Added `claudeCliStream()`
+  (`--output-format stream-json --include-partial-messages`); `chatStream` yields text as it arrives and
+  falls back to the blocking call only when a lane yielded nothing (a lane that streamed is never
+  re-run, so an answer cannot print twice). Token counts now come from the CLI's own usage.
+- Measured on the real lane: **first token 1.99 s**, total 2.51 s (was 2.89 s of silence then the whole
+  answer). No model, route, provider, plan or allowance changed.
+
+### 3. The idle recap is full and its ids are addressable
+- New `cli/ui/src/components/RecapPanel.jsx`: the full recap while idle at the bottom, on the row the
+  spinner vacates — run id, what the run was, its mistakes, counted tools/learned/points/mem, session
+  totals, and the session's recap ids with `/recap #id`. Takes only rows the transcript can spare
+  (never below 4), so a short terminal keeps the one-row receipt and no other panel moves.
+- Two defects made `#id` point nowhere and are fixed: `recap` was missing from `CATEGORIES` in
+  `server/src/memory.js` (every keyed write threw and was swallowed), and when a run's entry deduped
+  into an earlier one the new run's id tag was dropped with it (`autolearn.js` now merges ids, bounded
+  to the 8 newest).
+
+### 4. `data/hakster.db` — corruption cause and exact restore ("no diff")
+- **Symptom:** `integrity_check` → `database disk image is malformed`; every `saveMemory` and recall
+  threw, so the agent had no long-term memory.
+- **Cause, proven from the file:** the live server (pid 359024) held `hakster.db-wal` (4.2 MB, inode
+  21576729) and `-shm` **already unlinked**, while the on-disk `-wal` was a different inode
+  (21579794, **0 bytes**, created 04:37). A `hakster.db.rebuilt-…` file at **04:25 is 0 bytes** and no
+  tracked script writes that name — an ad-hoc "rebuild" step wrote nothing and the WAL/SHM were then
+  replaced under the live connection. On top of that, **page 20 (the `memories` root) had its
+  right-most child pointer overwritten with page 295**, an index leaf of `security_notifications`.
+- **Restore, exactly:** the 4.2 MB unlinked WAL was still readable and was captured
+  (`data/hakster.db-wal-rescue-<stamp>.bin`); its 563 current-generation frames were checksum-verified
+  (little-endian WAL checksums) and its committed pages replayed over the main image. Page 20 was
+  rebuilt as a valid interior page (children 106 key 12, 107 key 28, right-most 108). Every table was
+  then extracted with exact storage classes and inserted into a fresh DB with the **original schema SQL
+  byte-identical (102 objects)** and **exact rowids**.
+- **Verified:** `integrity_check = ok`; **43/43 tables identical hash-for-hash** to the source
+  snapshot; `sqlite_sequence` identical; **2,184 rows**; `memories` **33 rows, rowids 1–33**, 0
+  differences against an independent raw b-tree walk; `journal_mode = wal`, page size 4096,
+  user_version/application_id unchanged. A live `saveMemory` → `getMemory` → `searchMemories` →
+  `deleteMemory` round-trip through the app's own engine succeeded and was removed again.
+- **Installed** by atomic `os.replace`; corrupt original kept as
+  `data/hakster.db.corrupt-<stamp>`; orphaned sidecars moved to `*.orphaned-<stamp>`. **No service was
+  restarted and no CLI session was killed** — the running server keeps its old inode and picks the new
+  file up on its next idle reload (§37, §45).
+- **Open item:** the every-5-minute failover sync has been hashing an identical DB image across runs
+  (a live WAL-mode DB that never changes ⇒ the snapshot ignores the WAL). It should read through the
+  WAL (SQLite backup API) rather than copy the main file. Reported, not changed — it is a standby-copy
+  defect, not a cause of this corruption.
+
+---
+
+## Section 46 Added — A Fallback Is Only A Fallback If The Run Path Can Run It (2026-11-26)
+
+_Added: 2026-11-26, owner-directed ("add rule"). Backup before the edit:
+`AGENTS.md.bak-20261125T230559Z` (54,377 B, sha256 `7209782…`, size-verified); master-rulebook backup
+`CLAUDE.md.bak-20261125T230559Z` (86,412 B, sha256 `ccb72e4…`, size-verified). Nothing above this line was
+rewritten, reordered or removed — this is an appended entry, exactly as the §35–§40 entries were._
+
+`/home/ghost/CLAUDE.md` is now **§1–§46**. §46 is **"A Fallback Is Only A Fallback If The Run Path Can
+Actually Run It — And A Lane Never Poisons Itself"**. What it makes binding here:
+
+1. Every provider in `WATERFALL_ORDER` has a dispatch at every entry point that can hand it work, verified
+   by `grep -c "<provider>" <entry point>` — 0 means it cannot run and must not be in the ladder.
+2. A lane receives only the model it serves: the locked wire model is never forwarded into another
+   provider's `-m`, and a foreign name resolves to empty so the provider uses its own default (§22 untouched).
+3. `markProviderAuthDead` fires on a real provider auth rejection only. Our own HTTP-to-CLI wiring bug never
+   disables a lane for 30 minutes; any disabled lane reports its provider, reason and duration.
+4. A fallback is proven by one real call through its own binary before it is counted as redundancy.
+5. No model, route, provider order, rate, plan or allowance moves (§19.3, §22.4, §26). HaksterAI only (§16).
+
+Measured at adoption: `codex-cli` sits at **position 2 of 35** in `server/src/providers.js`
+`WATERFALL_ORDER`, while `server/src/index.js` contains **zero** occurrences of `codex-cli` — the
+`claude-cli` dispatch block exists (`if (cfg.type === 'claude-cli')`, ~line 5516) and codex has none — so the
+agent path handed a CLI provider to a generic HTTP client, took a `401`, and `markProviderAuthDead` disabled
+the lane. Separately the Ollama wire model was forwarded into `codex -m` (`model_not_found`), while
+`codex exec` without `-m` answered fine. The dispatch fix is the next change; this rule sets the bar it must
+meet.
+
+---
+
+## Section 47 Added — Every Safe Change Is Committed, And No Change Is A Setback (2026-11-26)
+
+_Appended 2026-11-26 at the owner's direction ("always commit if safe and make project better rule no
+setbacks"; "and never expose secrets"). Nothing above this line was rewritten, reordered or removed.
+Backups taken and hash-verified before the edit: `CLAUDE.md.bak-20261125T232011Z` (93,311 B, sha256
+`5a131439ca2f…`), `haksterAi/AGENTS.md.bak-20261125T232011Z` (56,528 B, sha256 `12a678a807dd…`)._
+
+`/home/ghost/CLAUDE.md` is now **§1–§47**. §47 is **"Every Safe Change Is Committed, And No Change Is A
+Setback"**. What it makes binding here:
+
+1. **Commit in the session that made the change.** A real, verified, scoped change is committed before the
+   session reports finished — never left as a working tree for the next session to rediscover (§28, §42.6).
+   Four gates define safe: it is what the owner asked for (§3); the narrowest check passed (`node --check`,
+   the probe, the build, the live health check); it is staged **by filename**, never `git add -A`/`.` (§8,
+   §28.3); and the secret scan is clean (§31).
+2. **No setbacks.** Every commit leaves the project equal or better on what is measured: tests and probes no
+   fewer passing, services answering, the §38.5 latency bar no worse, both boxes on the same commit (§41). A
+   change that removes working behaviour, disables a lane or hides a failure does not ship.
+3. **Verified means measured against the thing it changes** — a named symptom and a before/after reading,
+   or one real round-trip for a lane (§13). "It compiles" is not evidence.
+4. **Unrelated dirt is left exactly as it was** — not committed, stashed, cleaned or reverted; stage by name
+   and say in the report what was left alone (§8.4).
+5. **A change that cannot be proven is reported, not forced** — committed on its code-level check, with the
+   unrun check named by its exact command (§10, §13, §37, §45).
+6. **A commit is not a deploy and never restarts anything** beyond the paths already armed (§37, §41, §45).
+7. **Better, not busier** — the requested change done properly plus a loose end on the same path, never
+   unrequested scope or a redesign dressed as an improvement.
+8. **Never expose secrets** — nothing in a commit, diff, log, tarball, build note or report carries a key,
+   token, cookie, `.env` value, portal credential or signed URL (§9, §23, §31). Findings are reported by
+   key name only. A secret in a stage or in history is exposed: rotate, then the owner decides (§23.2).
+9. **HaksterAI scope** — this project's own repository and its two boxes; nothing in it authorises a commit
+   or a write into Junkalot, PhantomIDE or another project (§16).
