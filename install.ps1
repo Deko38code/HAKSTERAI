@@ -95,15 +95,59 @@
   $tarExe = Get-Command tar.exe -ErrorAction SilentlyContinue
   if (-not $tarExe) { Fail 'tar.exe is missing. It ships with Windows 10 1803+; on an older build install Node.js and run: npm install -g hakster-cli' }
 
+  # ── what the server says the newest build is ────────────────────────────
+  # Owner, 2026-11-26: "all cli any user etc install need to get latest updates".
+  # /cli/latest.json advertises the version and the SHA-256 of ui-fb.mjs; the
+  # package is checked against it (§39.3), so a cached copy cannot install an
+  # older build. Best effort: with no endpoint the install goes ahead and says so.
+  $latestVersion = ''
+  $latestBundle = ''
+  try {
+    $latest = Invoke-RestMethod -Uri "$Origin/cli/latest.json" -UseBasicParsing -TimeoutSec 15
+    if ($latest) {
+      $latestVersion = [string]$latest.version
+      $latestBundle = [string]$latest.bundleSha256
+    }
+    if ($latestVersion) { Say "OK latest published build is v$latestVersion" }
+  } catch { }
+
   Say ".. downloading the CLI from $Origin"
   $cliTgz = Join-Path $Tmp 'cli.tar.gz'
   try { Invoke-WebRequest -Uri "$Origin/cli/pkg.tar.gz" -OutFile $cliTgz -UseBasicParsing }
   catch { Fail "could not download the CLI package: $($_.Exception.Message)" }
   & $tarExe.Source -xzf $cliTgz -C $Tmp
-  if (-not (Test-Path (Join-Path $Tmp 'cli\package.json'))) { Fail 'could not unpack the CLI package' }
+  $cliDir = Join-Path $Tmp 'cli'
+  if (-not (Test-Path (Join-Path $cliDir 'package.json'))) { Fail 'could not unpack the CLI package' }
+
+  if ($latestBundle -and (Test-Path (Join-Path $cliDir 'ui-fb.mjs'))) {
+    $gotBundle = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $cliDir 'ui-fb.mjs')).Hash.ToLower()
+    if ($gotBundle -ne $latestBundle.ToLower()) {
+      Say '.. the copy served did not match the advertised build - asking once more past the cache'
+      $retry = Join-Path $Tmp 'cli-fresh.tar.gz'
+      $freshDir = Join-Path $Tmp 'cli-fresh'
+      try {
+        Invoke-WebRequest -Uri "$Origin/cli/pkg.tar.gz?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" -OutFile $retry -UseBasicParsing
+        New-Item -ItemType Directory -Path $freshDir -Force | Out-Null
+        & $tarExe.Source -xzf $retry -C $freshDir
+        if (Test-Path (Join-Path $freshDir 'cli\ui-fb.mjs')) {
+          $gotFresh = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $freshDir 'cli\ui-fb.mjs')).Hash.ToLower()
+          if ($gotFresh -eq $latestBundle.ToLower()) { $cliDir = Join-Path $freshDir 'cli' }
+        }
+      } catch { }
+      if ((Get-FileHash -Algorithm SHA256 -Path (Join-Path $cliDir 'ui-fb.mjs')).Hash.ToLower() -eq $latestBundle.ToLower()) {
+        Say 'OK the package matches the published build (sha256 verified)'
+      } else {
+        Say '! the package served does not match the published bundle hash - installing the copy that arrived; re-run this installer later to pick up the newest build'
+      }
+    } else {
+      Say 'OK the package matches the published build (sha256 verified)'
+    }
+  } else {
+    Say '.. the server did not advertise a build to verify against - installing the package as served'
+  }
 
   Say '.. installing the CLI (this takes a minute)'
-  Push-Location (Join-Path $Tmp 'cli')
+  Push-Location $cliDir
   try {
     $packed = (& npm pack --silent --pack-destination $Tmp . 2>$null) | Select-Object -Last 1
     if (-not $packed -or -not $packed.EndsWith('.tgz')) { Fail 'could not pack the CLI for install' }
@@ -161,6 +205,12 @@
   try { $version = (& $HaksterCmd --version 2>$null | Select-Object -First 1) } catch { }
   Say ''
   if ($version) { Say "Installed: HaksterAI CLI $version" } else { Say 'Installed: HaksterAI CLI (version did not answer - check: hakster --version)' }
+  if ($version -and $latestVersion -and ($version -ne $latestVersion)) {
+    Say "  the server advertises v$latestVersion - re-run this installer to pick it up"
+  }
+  # §42: every install stays on the newest released build. This one is a package
+  # install, so it does that by itself; say how to ask now.
+  Say "  updates: automatic - 'hakster update' checks now; a newer build applies at the next start"
   Say ''
   Say 'Next (open a new terminal so PATH applies):'
   Say '  1) sign in - a magic link opens in your browser, press Allow:'

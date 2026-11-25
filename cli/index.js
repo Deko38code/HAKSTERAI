@@ -600,7 +600,15 @@ program
     const res = await updater.checkForUpdate();
     if (res.status === 'current') console.log(`${C.green}✓ up to date${C.reset} ${C.gray}(v${res.version || running.version})${C.reset}`);
     else if (res.status === 'staged') console.log(`${C.green}✓ v${res.version} downloaded and verified${C.reset} ${C.gray}— applies on the next launch${C.reset}`);
-    else if (res.status === 'blocked') console.log(`${C.yellow}⬆ v${res.version} downloaded and verified${C.reset} ${C.gray}— source checkout: not applied automatically${C.reset}`);
+    else if (res.status === 'blocked') {
+      // A git checkout is the owner's to move (§8), so the only route to a
+      // self-updating install is the installer, which installs the published
+      // package beside it (§42). Say that instead of leaving "pull" as a dead end.
+      const origin = String(res.source || loadConfig().server || '').replace(/\/+$/, '');
+      console.log(`${C.yellow}⬆ v${res.version} downloaded and verified${C.reset} ${C.gray}— source checkout: not applied automatically${C.reset}`);
+      console.log(`${C.gray}  to switch this machine to a self-updating install (the checkout is left untouched):${C.reset}`);
+      console.log(`${C.gray}    curl -fsSL ${origin || 'https://haksterai.com'}/install.sh | sh${C.reset}`);
+    }
     else console.log(`${C.red}✗ update check failed${C.reset} ${C.gray}${res.reason || res.status}${C.reset}`);
   });
 

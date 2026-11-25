@@ -109,11 +109,70 @@ else
   say "✓ Node $(node -v) installed in $RUNTIME/$NAME"
 fi
 
+# ── what the server says the newest build is ──────────────────────────────
+# Owner, 2026-11-26: "all cli any user etc install need to get latest updates".
+# The update contract (§39.3) is /cli/latest.json: the version and the SHA-256
+# of ui-fb.mjs. A cached copy from a CDN or a proxy would otherwise install an
+# older build than the one advertised, so the package is checked against it.
+# Best effort — if the endpoint is missing, the install goes ahead unverified
+# and says so (§13: never claim a check that did not run).
+LATEST_VERSION=""
+LATEST_BUNDLE=""
+json_field() { # json_field <file> <key>
+  node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(j[process.argv[2]]||""))}catch{}' "$1" "$2" 2>/dev/null || true
+}
+if fetch "$ORIGIN/cli/latest.json" "$TMP/latest.json" 2>/dev/null; then
+  LATEST_VERSION=$(json_field "$TMP/latest.json" version)
+  LATEST_BUNDLE=$(json_field "$TMP/latest.json" bundleSha256)
+  if [ -n "$LATEST_VERSION" ]; then say "✓ latest published build is v$LATEST_VERSION"; fi
+fi
+
 # ── the CLI itself ────────────────────────────────────────────────────────
+# Installed from the package the server publishes, never from a git checkout:
+# an installed package updates itself (§42), a checkout cannot.
 say "… downloading the CLI from $ORIGIN"
-fetch "$ORIGIN/cli/pkg.tar.gz" "$TMP/cli.tar.gz" || fail "could not download the CLI package"
-tar -xzf "$TMP/cli.tar.gz" -C "$TMP" || fail "could not unpack the CLI package"
-cd "$TMP/cli"
+CLI_SRC="$TMP/cli"
+CHECKOUT=no
+if fetch "$ORIGIN/cli/pkg.tar.gz" "$TMP/cli.tar.gz"; then
+  tar -xzf "$TMP/cli.tar.gz" -C "$TMP" || fail "could not unpack the CLI package"
+  [ -f "$TMP/cli/package.json" ] || fail "the downloaded package has no cli/package.json"
+  if [ -n "$LATEST_BUNDLE" ]; then
+    GOT_BUNDLE=$(sha256_of "$TMP/cli/ui-fb.mjs" || true)
+    if [ "$GOT_BUNDLE" != "$LATEST_BUNDLE" ]; then
+      say "… the copy served did not match the advertised build — asking once more past the cache"
+      if fetch "$ORIGIN/cli/pkg.tar.gz?t=$(date +%s 2>/dev/null || echo 1)" "$TMP/cli-fresh.tar.gz" 2>/dev/null; then
+        mkdir -p "$TMP/cli-fresh"
+        if tar -xzf "$TMP/cli-fresh.tar.gz" -C "$TMP/cli-fresh" 2>/dev/null \
+           && [ -f "$TMP/cli-fresh/cli/package.json" ]; then
+          CLI_SRC="$TMP/cli-fresh/cli"
+          GOT_BUNDLE=$(sha256_of "$CLI_SRC/ui-fb.mjs" || true)
+        fi
+      fi
+    fi
+    if [ -n "$GOT_BUNDLE" ] && [ "$GOT_BUNDLE" = "$LATEST_BUNDLE" ]; then
+      say "✓ the package matches the published build (sha256 verified)"
+    else
+      say "⚠ the package served does not match the published bundle hash — installing the copy that arrived; re-run this installer later to pick up the newest build"
+    fi
+  else
+    say "… the server did not advertise a build to verify against — installing the package as served"
+  fi
+else
+  # Fallback: the package endpoint did not answer, so build from source. This
+  # works, but a checkout never rewrites itself (§8) — re-run this installer to
+  # move it forward. Nothing existing is removed.
+  say "… the package endpoint did not answer — falling back to a source clone"
+  command -v git >/dev/null 2>&1 || fail "could not download the CLI package and git is not available for the fallback"
+  DEST="$HOME/.local/share/haksterai-cli"
+  if [ -e "$DEST" ]; then DEST="$DEST-$(date +%Y%m%dT%H%M%S 2>/dev/null || echo backup)"; fi
+  mkdir -p "$(dirname "$DEST")"
+  git clone --depth 1 https://github.com/Deko38code/haksterAi.git "$DEST" >/dev/null 2>&1 \
+    || fail "could not download the CLI package or fetch its source"
+  CLI_SRC="$DEST/cli"
+  CHECKOUT=yes
+  say "⚠ installed from a source checkout at $DEST — it will report 'pull to update'; re-run this installer to move it forward"
+fi
+cd "$CLI_SRC"
 say "… installing the CLI (this takes a minute)"
 # Installing this folder with `npm install -g .` would create a link back into
 # this temp directory, and the cleanup at the end would then delete what the
@@ -191,8 +250,22 @@ VERSION=$("$HAKSTER_BIN" --version 2>/dev/null | tr -d '\n' || echo "")
 say ""
 if [ -n "$VERSION" ]; then
   say "Installed: HaksterAI CLI $VERSION"
+  if [ -n "$LATEST_VERSION" ] && [ "$VERSION" != "$LATEST_VERSION" ]; then
+    say "  the server advertises v$LATEST_VERSION — re-run this installer to pick it up"
+  fi
 else
   say "Installed: HaksterAI CLI (version did not answer — check 'hakster --version')"
+fi
+# §42: every install stays on the newest released build. This one is a package
+# install, so it does that by itself — say it, and say how to ask now. An older
+# git-checkout install left on the machine is untouched and never rewritten (§8).
+if [ "$CHECKOUT" = no ] && [ -d "$HOME/.local/share/haksterai-cli/.git" ]; then
+  say "  an older source checkout is still at ~/.local/share/haksterai-cli — left untouched; 'hakster' now runs the self-updating package"
+fi
+if [ "$CHECKOUT" = yes ]; then
+  say "  updates: this is a source checkout — re-run this installer to update it"
+else
+  say "  updates: automatic — 'hakster update' checks now; a newer build applies at the next start"
 fi
 say ""
 say "Next:"
