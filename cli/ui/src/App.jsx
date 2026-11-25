@@ -33,6 +33,7 @@ import Recap from './components/Recap.jsx';
 import DebugView from './components/DebugView.jsx';
 import TodoPanel from './components/TodoPanel.jsx';
 import Transcript from './components/Transcript.jsx';
+import { composerRows as composerHeight } from './utils/wrap.js';
 import useAgentStream from './hooks/useAgentStream.js';
 import useServerWatch from './hooks/useServerWatch.js';
 import useHostStats from './hooks/useHostStats.js';
@@ -626,7 +627,7 @@ export default function App({ version = '0.1.0' }) {
       const key = `installed:${update.version}`;
       if (updateAnnounced.current === key) return;
       updateAnnounced.current = key;
-      showNotice(`✓ CLI v${update.version} installed — restart the CLI to see the changes`);
+      showNotice('✔ Update installed · Restart to update');
       return;
     }
     if (update.status !== 'staged' && update.status !== 'blocked') return;
@@ -1203,8 +1204,30 @@ export default function App({ version = '0.1.0' }) {
         fs.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + '\n');
       } catch {}
     }
-    // Ctrl+C always exits, from anywhere.
+    // Ctrl+C copies the current selection and only exits when nothing is
+    // selected (owner, 2026-11-25: "fix the copy & paste don't work ... in his
+    // cli"). The TUI holds the mouse for its own drag-selection, so the
+    // terminal's native copy never sees the text; this hands it over with OSC
+    // 52, which is the clipboard every modern terminal understands over SSH too.
+    // Nothing selected keeps the old behaviour — Ctrl+C still quits.
     if (key.ctrl && key.name === 'c') {
+      let copied = 0;
+      try {
+        if (renderer && renderer.hasSelection) {
+          const text = renderer.getSelection ? renderer.getSelection()?.getSelectedText?.() : '';
+          if (text && text.length) {
+            renderer.copyToClipboardOSC52(text);
+            copied = text.length;
+          }
+          renderer.clearSelection();
+        }
+      } catch {
+        /* no selection, no clipboard — fall through and quit as before */
+      }
+      if (copied) {
+        showNotice(`✔ copied ${copied} chars`);
+        return;
+      }
       agent.abort();
       renderer.destroy();
       return;
@@ -1437,11 +1460,18 @@ export default function App({ version = '0.1.0' }) {
     if (key.name === 'pageup' || key.name === 'pagedown') return;
 
     // ↑/↓ in the composer walk the typed-line history (the one place in the
-    // chat view an arrow is not a scroll — the transcript owns PgUp/PgDn, and a
-    // single-line input has no vertical cursor to move). Shift/Ctrl/Alt chords
-    // are left for other bindings.
+    // chat view an arrow is not a scroll — the transcript owns PgUp/PgDn).
+    // Shift/Ctrl/Alt chords are left for other bindings.
+    //
+    // The composer is a wrapping textarea now (owner, 2026-11-25), so a draft
+    // that already holds a newline keeps its arrows: there ↑/↓ move the caret
+    // between lines, which is what anyone writing a multi-line task expects.
+    // Only a single-line draft recalls history, and the event is consumed so
+    // the editor does not also move its cursor.
     if (focus === 'composer' && !key.ctrl && !key.meta && !key.shift
-      && (key.name === 'up' || key.name === 'down') && inputHistory.length > 0) {
+      && (key.name === 'up' || key.name === 'down') && inputHistory.length > 0
+      && !String(draft ?? '').includes('\n')) {
+      if (typeof key.preventDefault === 'function') key.preventDefault();
       if (key.name === 'up') {
         if (histIdx === -1) draftStash.current = draft;
         const next = histIdx === -1 ? inputHistory.length - 1 : Math.max(0, histIdx - 1);
@@ -1693,7 +1723,10 @@ export default function App({ version = '0.1.0' }) {
   // source checkout this is the normal case after an update lands: nothing can
   // be swapped under a git tree (§8), so the only step left is a restart —
   // and that is exactly what it says (owner, 2026-11-25: "should say installed
-  // restart cli to see changes", to the right of cpu/ram).
+  // restart cli to see changes", to the right of cpu/ram; and 2026-11-25:
+  // "i want our update to say this when its done in cli —
+  // ✔ Update installed · Restart to update", which is the wording used here,
+  // U+2714 without a variation selector so it stays a mono glyph).
   const updateInstalled = !!(update && !update.applied && update.status === 'installed' && update.version);
   const updatePending = updateInstalled || !!(update && !update.applied
     && (update.status === 'staged' || update.status === 'blocked'));
@@ -1703,10 +1736,10 @@ export default function App({ version = '0.1.0' }) {
     ? [null]
     : (updateInstalled
       ? [
-          `⬆ v${update.version} installed · restart CLI to see changes`,
-          '⬆ installed · restart CLI to see changes',
-          '⬆ restart CLI to see changes',
-          '⬆ restart CLI',
+          '✔ Update installed · Restart to update',
+          '✔ installed · Restart to update',
+          '✔ Restart to update',
+          '✔ restart',
         ]
       : updateBlocked
       ? [
@@ -1937,7 +1970,12 @@ export default function App({ version = '0.1.0' }) {
   // two rows for the middle boxes, so a short window shrinks the popout instead
   // of pushing the status bar off the bottom (it windows its own list anyway).
   const MENU_ROWS = Math.max(6, Math.min(26, (rows || 30) - 12, (rows || 30) - chromeNoComposer - 2));
-  const composerRows = menuOpen ? MENU_ROWS : 5;
+  // The composer is a wrapping textarea, so it takes the rows its draft actually
+  // needs (owner, 2026-11-25: "needs to know when to go to new line not go off
+  // the screen"). The measurement is shared with the component that draws it —
+  // ui/src/utils/wrap.js — so the row budget and the real box cannot disagree.
+  const composerInputW = Math.max(8, mainW - 6);
+  const composerRows = menuOpen ? MENU_ROWS : composerHeight(draft, composerInputW, 6);
   // A short terminal gets a shorter checklist rather than a status bar that has
   // been pushed off the bottom — the panel scrolls, so nothing is hidden.
   const todoVisible = (rows || 30) >= 34 ? 6 : 3;
@@ -2499,11 +2537,16 @@ export default function App({ version = '0.1.0' }) {
                 screen. PgUp/PgDn page it and Ctrl+T opens the full reasoning;
                 a capped tool result points at the pane that holds the rest —
                 ▶ Output in the right sidebar, ▶ Result on a narrow terminal. */}
-            <box style={{ flexShrink: 0, overflow: 'hidden' }}>
+            {/* The wrapper grows into any height the row arithmetic left over
+                (owner, 2026-11-25: the input bar must start at the bottom, never
+                mid-screen), so leftover rows become transcript space instead of
+                a gap under the status bar. */}
+            <box style={{ flexGrow: 1, flexShrink: 0, overflow: 'hidden' }}>
               <Transcript
                 messages={agent.messages}
                 width={mainW}
                 height={transcriptRows}
+                grow
                 scrollRef={scrollRef}
                 live={agent.status !== 'idle'}
                 expandThinking={expandThinking}
@@ -2549,7 +2592,7 @@ export default function App({ version = '0.1.0' }) {
                         ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ''} · it sends when this run ends · esc stop`
                         : attachment
                           ? `⊸ ${attachment.name} ${Math.round(attachment.bytes / 1024)}K · enter sends it · /attach clear`
-                          : 'enter send · ↑ history · /menu commands · /attach · pgup scroll · q quit'
+                          : 'enter send · alt+enter newline · ctrl+c copies · ↑ history · /menu'
                   }
                   adSlot={
                     <AdRailSlot

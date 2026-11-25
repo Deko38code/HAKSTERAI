@@ -29,6 +29,24 @@ import { estimateRows } from '../utils/transcript-rows.js';
  * deep scrollback on a 40-row terminal. */
 const MAX_TURNS = 40;
 
+/** Content-box layout for the scroll window.
+ *
+ * Owner, 2026-11-25: "make input bar and output panel edges almost touch ... will
+ * make our output panel bigger". The scroll box's content element is always at
+ * least the viewport tall, so a short session used to stack its turns at the TOP
+ * and leave the leftover rows blank above the composer — the panel looked like it
+ * stopped mid-screen and the input bar floated away from it. Justifying the
+ * content to the end floats the oldest visible row up instead: the newest line
+ * sits on the composer's top border, and the panel reads at its real height.
+ * When the turns are taller than the viewport the box is already exactly its
+ * natural height, so this changes nothing and paging/scrolling behave as before.
+ *
+ * Hoisted, not an inline object literal, so a re-render does not hand the
+ * scrollbox a fresh prop identity every frame (the transcript is the expensive
+ * node; see the memo note at the bottom of this file).
+ */
+const CONTENT_OPTIONS = { justifyContent: 'flex-end' };
+
 /** The native scrollbar: one column, arrow ends, a dim track and a bright
  *  thumb. `trackOptions` and `arrowOptions` are the ScrollBar primitive's own
  *  names — this is OpenTUI's bar, not a hand-drawn one. */
@@ -59,9 +77,22 @@ function turnWeight(message) {
   return n;
 }
 
-function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true, outputLabel = '▶ Output' }) {
+function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true, outputLabel = '▶ Output', grow = false }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
+  // Owner, 2026-11-25: "fix the input bar to always on startup be at bottom not
+  // in the middle so output panels can have space". The row arithmetic below is
+  // exact once the terminal size is known, but on the very first frame (and on
+  // any terminal that reports a taller size later) the column's children summed
+  // to fewer rows than the screen, so everything stacked at the top and the
+  // composer floated mid-screen. In `grow` mode the transcript claims the
+  // column's leftover height instead: the box never renders shorter than its
+  // budget (minHeight) and never shrinks below it, so the input bar and status
+  // bar sit on the bottom row whatever the arithmetic said.
+  const frame = grow
+    ? { flexGrow: 1, flexShrink: 0, minHeight: budget }
+    : { height: budget, flexShrink: 0 };
+  const growInner = grow ? { flexGrow: 1, flexShrink: 1 } : {};
   const boxRef = useRef(null);
   // `follow` is the operator's intent, not a guess from scrollTop: a run that
   // streams a row pushes the content down before the sticky logic can notice,
@@ -149,7 +180,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
       // fresh start the composer floated up under a one-line hint with a big
       // blank gap beneath it instead of sitting at the bottom of the screen.
       // The hint is bottom-aligned so it hugs the composer row.
-      <box style={{ width, height: budget, flexShrink: 0, overflow: 'hidden', flexDirection: 'column', justifyContent: 'flex-end' }}>
+      <box style={{ width, ...frame, overflow: 'hidden', flexDirection: 'column', justifyContent: 'flex-end' }}>
         <text fg="gray">{emptyHint || 'Ask for something and the agent runs it.'}</text>
       </box>
     );
@@ -165,18 +196,20 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
   const compact = budget < 12 || contentW < 40;
 
   return (
-    <box style={{ width, height: budget, flexShrink: 0, overflow: 'hidden' }}>
+    <box style={{ width, ...frame, overflow: 'hidden' }}>
       <scrollbox
         ref={setBox}
         style={{
           width,
           height: budget,
+          ...growInner,
           stickyScroll: true,
           stickyStart: 'bottom',
           scrollY: true,
           scrollX: false,
           viewportCulling: true,
         }}
+        contentOptions={CONTENT_OPTIONS}
         scrollbarOptions={SCROLLBAR_OPTIONS}
       >
         {hidden > 0 ? (
