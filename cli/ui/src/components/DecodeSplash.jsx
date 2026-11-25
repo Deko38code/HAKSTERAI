@@ -4,6 +4,7 @@ import path from 'node:path';
 import { TextAttributes } from '@opentui/core';
 import { useRenderer } from '@opentui/react';
 import { deleteImage, deletePlacement, heroPath, isSupported, moveCursor, placeById, placeImage } from '../../../src/kitty-graphics.js';
+import { HERO_WORDMARK, HERO_W, HERO_GREEN } from './HeroLogo.jsx';
 
 /* DecodeSplash — the CLI's start screen: five lines decode at the same time.
  *
@@ -26,21 +27,9 @@ const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
  * narrower terminals fall back to the "◆ haksterAi" line the splash already
  * decodes.
  */
-const HERO_FONT = {
-  H: ['█   █', '█   █', '█████', '█   █', '█   █'],
-  A: [' ███ ', '█   █', '█████', '█   █', '█   █'],
-  K: ['█   █', '█  █ ', '███  ', '█  █ ', '█   █'],
-  S: [' ████', '█    ', ' ███ ', '    █', '████ '],
-  T: ['█████', '  █  ', '  █  ', '  █  ', '  █  '],
-  E: ['█████', '█    ', '████ ', '█    ', '█████'],
-  R: ['████ ', '█   █', '████ ', '█  █ ', '█   █'],
-};
-const HERO_WORD = 'HAKSTER';
-// Built from the glyph table so every row is exactly the same width — a
-// hand-aligned block wordmark drifts by a cell and reads as noise.
-const HERO_WORDMARK = [0, 1, 2, 3, 4].map((row) => HERO_WORD.split('').map((ch) => HERO_FONT[ch][row]).join(' '));
-const HERO_W = Math.max(...HERO_WORDMARK.map((l) => l.length));
-const HERO_GREEN = '#00ff41';
+// The block wordmark lives in HeroLogo.jsx — one glyph table for the whole CLI
+// (owner, 2026-11-25: the same logo on the start screen, the /menu popout and
+// the approval gate). See the import at the top of this file.
 
 /* The Matrix rain behind the start screen.
  *

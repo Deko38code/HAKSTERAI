@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
 import { TextAttributes } from '@opentui/core';
 import { getDangerPassword, isSudoCommand } from '../utils/danger-password.js';
+import HeroLogo from './HeroLogo.jsx';
 
 /* ApprovalPrompt — the gate the server parks a run behind.
  *
@@ -22,13 +23,17 @@ import { getDangerPassword, isSudoCommand } from '../utils/danger-password.js';
  * The text CLI sends neither `permanent` nor a session scope, and so allowlists
  * forever on a single yes; asking which one you meant is the improvement.
  *
- * A sudo command is a stricter case. When an approval password is configured the
- * literal password is required, entered masked — approving elevated execution
- * with a bare `y` would make the password setting decorative. A wrong password
- * does not deny the request, it just refuses that attempt, because denying on a
- * typo would let a mistyped character destroy the run. Without a password
- * configured, a sudo command still demands an explicit `y` rather than any
- * keystroke, which is at least as strict as the CLI's behaviour.
+ * When an approval password is configured, EVERY dangerous command asks for it,
+ * entered masked — not just `sudo`. Owner, 2026-11-25: "make sure the dangerous
+ * commands prompt popout win works for my password". The text CLI
+ * (cli/index.js) has always asked for the password on any dangerous command
+ * once one is set; the TUI asked only on sudo, so an `rm -rf` sailed through on
+ * a single `y` while the same command in the text CLI was gated. The two now
+ * behave the same. A wrong password does not deny the request, it just refuses
+ * that attempt, because denying on a typo would let a mistyped character
+ * destroy the run. Without a password configured, a dangerous command still
+ * demands an explicit `y` rather than any keystroke, and the panel says how to
+ * set one.
  */
 export default function ApprovalPrompt({ width = 80, request, onAnswer }) {
   const [password, setPassword] = useState('');
@@ -38,7 +43,7 @@ export default function ApprovalPrompt({ width = 80, request, onAnswer }) {
   const toolCallId = request && request.toolCallId;
   const sudo = isSudoCommand(command);
   const dangerPassword = getDangerPassword();
-  const needsPassword = sudo && !!dangerPassword;
+  const needsPassword = !!dangerPassword;
 
   // A new request is a new question: never leave a half-typed password or a
   // stale "wrong password" note in front of the next one.
@@ -113,6 +118,8 @@ export default function ApprovalPrompt({ width = 80, request, onAnswer }) {
         paddingRight: 1,
       }}
     >
+      <HeroLogo width={inner} subtitle={sudo ? 'sudo approval' : 'dangerous command'} />
+
       <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
         <text fg={sudo ? 'red' : 'yellow'} attributes={TextAttributes.BOLD}>
           {sudo ? 'sudo approval required' : 'approval required'}
@@ -142,18 +149,21 @@ export default function ApprovalPrompt({ width = 80, request, onAnswer }) {
           <text fg="gray">enter approves · esc denies</text>
         </>
       ) : (
-        <text>
-          <span fg="green" attributes={TextAttributes.BOLD}>y</span>
-          <span fg="gray">{' allow this session  · '}</span>
-          {!sudo ? (
-            <>
-              <span fg="cyan" attributes={TextAttributes.BOLD}>a</span>
-              <span fg="gray">{' allow always  · '}</span>
-            </>
-          ) : null}
-          <span fg="red" attributes={TextAttributes.BOLD}>n</span>
-          <span fg="gray">{' deny'}</span>
-        </text>
+        <>
+          <text fg="gray">{'no password set — /danger set'.slice(0, Math.max(0, inner))}</text>
+          <text>
+            <span fg="green" attributes={TextAttributes.BOLD}>y</span>
+            <span fg="gray">{' allow this session  · '}</span>
+            {!sudo ? (
+              <>
+                <span fg="cyan" attributes={TextAttributes.BOLD}>a</span>
+                <span fg="gray">{' allow always  · '}</span>
+              </>
+            ) : null}
+            <span fg="red" attributes={TextAttributes.BOLD}>n</span>
+            <span fg="gray">{' deny'}</span>
+          </text>
+        </>
       )}
     </box>
   );

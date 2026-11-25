@@ -1,6 +1,7 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
 import { gutterChar, overflows } from '../utils/panel-scroll.js';
+import HeroLogo, { heroRowCount } from './HeroLogo.jsx';
 
 /* CatalogPopout — the `/menu` popout, crush-style.
  *
@@ -46,12 +47,18 @@ export default function CatalogPopout({
   const inner = Math.max(1, w - 4);
   const h = Math.max(6, Number(height) || 20);
 
+  // The owner's hero mark heads the popout (owner, 2026-11-25, asking for the
+  // startup logo on the popout menu with his name). It is chrome, so the list
+  // window shrinks by exactly its height, and a popout too short to afford it
+  // draws the one-line name instead of eating the catalog.
+  const heroRows = heroRowCount(inner);
+  const showHero = h >= heroRows + 9;
   // Window the list around the selection so the popout never needs to scroll
   // the terminal itself. The box is exactly `h` rows: border 2 + title 1 +
-  // filter 1 + list + footer 1, so the list gets h - 5. (It used to claim
-  // h - 4, one row more than it drew, which pushed the row under it — the
-  // composer slot — down the screen.)
-  const bodyRows = Math.max(3, h - 5);
+  // filter 1 + list + footer 1 (plus the hero when shown), so the list gets the
+  // rest. (It used to claim h - 4, one row more than it drew, which pushed the
+  // row under it — the composer slot — down the screen.)
+  const bodyRows = Math.max(3, h - 5 - (showHero ? heroRows : 0));
   const selRow = selectable[Math.min(selected, selectable.length - 1)] ?? 0;
   const start = Math.max(0, Math.min(selRow - Math.floor(bodyRows / 2), Math.max(0, rows.length - bodyRows)));
   const shown = rows.slice(start, start + bodyRows);
@@ -67,6 +74,7 @@ export default function CatalogPopout({
 
   return (
     <box style={{ width: w, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'cyan', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
+      {showHero ? <HeroLogo width={inner} /> : null}
       <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
         <text fg="cyan" attributes={TextAttributes.BOLD}>◇ Catalog</text>
         <text fg="gray">{clip(hiddenAbove || hiddenBelow ? `${hiddenAbove}↑ ${hiddenBelow}↓ · ↑↓ · enter · esc` : '↑↓ select · enter apply · esc close', inner - 10)}</text>

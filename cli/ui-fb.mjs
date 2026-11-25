@@ -1497,16 +1497,16 @@ var require_catalog = __commonJS({
 });
 
 // src/index.jsx
-import React30 from "react";
+import React32 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React29, { useCallback as useCallback6, useEffect as useEffect18, useRef as useRef13, useState as useState18 } from "react";
+import React31, { useCallback as useCallback6, useEffect as useEffect18, useRef as useRef13, useState as useState19 } from "react";
 import fs10 from "node:fs";
 import path8 from "node:path";
-import { useKeyboard as useKeyboard7, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
-import { TextAttributes as TextAttributes21 } from "@opentui/core";
+import { useKeyboard as useKeyboard8, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
+import { TextAttributes as TextAttributes23 } from "@opentui/core";
 
 // src/components/DockAd.jsx
 var import_ad_client = __toESM(require_ad_client());
@@ -1618,9 +1618,9 @@ function DockAd({
 }
 
 // src/components/ApprovalPrompt.jsx
-import React2, { useEffect as useEffect2, useState as useState2 } from "react";
+import React3, { useEffect as useEffect2, useState as useState2 } from "react";
 import { useKeyboard as useKeyboard2 } from "@opentui/react";
-import { TextAttributes as TextAttributes2 } from "@opentui/core";
+import { TextAttributes as TextAttributes3 } from "@opentui/core";
 
 // src/utils/danger-password.js
 import fs from "node:fs";
@@ -1640,9 +1640,109 @@ function getDangerPassword() {
 function isSudoCommand(command) {
   return /^\s*sudo\b/i.test(String(command || ""));
 }
+function dangerPasswordSource() {
+  if (process.env.HAKSTER_DANGER_PASSWORD) return "env";
+  try {
+    const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    if (cfg && typeof cfg.dangerPassword === "string" && cfg.dangerPassword) return "config";
+  } catch {
+  }
+  return null;
+}
+function dangerPasswordState() {
+  const source = dangerPasswordSource();
+  const pw = getDangerPassword();
+  return { set: !!pw, length: pw ? pw.length : 0, source };
+}
+function setDangerPassword(value) {
+  const pw = String(value == null ? "" : value);
+  if (!pw) return { ok: false, reason: "empty" };
+  let cfg = {};
+  try {
+    cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8")) || {};
+  } catch {
+    cfg = {};
+  }
+  cfg.dangerPassword = pw;
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 448 });
+    fs.writeFileSync(CONFIG_FILE, `${JSON.stringify(cfg, null, 2)}
+`, { mode: 384 });
+    fs.chmodSync(CONFIG_FILE, 384);
+  } catch (e) {
+    return { ok: false, reason: e && e.message || "write failed" };
+  }
+  return { ok: true, envOverride: !!process.env.HAKSTER_DANGER_PASSWORD };
+}
+function clearDangerPassword() {
+  let cfg = {};
+  try {
+    cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8")) || {};
+  } catch {
+    return { ok: true, removed: false };
+  }
+  if (!("dangerPassword" in cfg)) return { ok: true, removed: false };
+  delete cfg.dangerPassword;
+  try {
+    fs.writeFileSync(CONFIG_FILE, `${JSON.stringify(cfg, null, 2)}
+`, { mode: 384 });
+    fs.chmodSync(CONFIG_FILE, 384);
+  } catch (e) {
+    return { ok: false, reason: e && e.message || "write failed" };
+  }
+  return { ok: true, removed: true };
+}
+
+// src/components/HeroLogo.jsx
+import React2 from "react";
+import { TextAttributes as TextAttributes2 } from "@opentui/core";
+import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
+var HERO_FONT = {
+  H: ["\u2588   \u2588", "\u2588   \u2588", "\u2588\u2588\u2588\u2588\u2588", "\u2588   \u2588", "\u2588   \u2588"],
+  A: [" \u2588\u2588\u2588 ", "\u2588   \u2588", "\u2588\u2588\u2588\u2588\u2588", "\u2588   \u2588", "\u2588   \u2588"],
+  K: ["\u2588   \u2588", "\u2588  \u2588 ", "\u2588\u2588\u2588  ", "\u2588  \u2588 ", "\u2588   \u2588"],
+  S: [" \u2588\u2588\u2588\u2588", "\u2588    ", " \u2588\u2588\u2588 ", "    \u2588", "\u2588\u2588\u2588\u2588 "],
+  T: ["\u2588\u2588\u2588\u2588\u2588", "  \u2588  ", "  \u2588  ", "  \u2588  ", "  \u2588  "],
+  E: ["\u2588\u2588\u2588\u2588\u2588", "\u2588    ", "\u2588\u2588\u2588\u2588 ", "\u2588    ", "\u2588\u2588\u2588\u2588\u2588"],
+  R: ["\u2588\u2588\u2588\u2588 ", "\u2588   \u2588", "\u2588\u2588\u2588\u2588 ", "\u2588  \u2588 ", "\u2588   \u2588"]
+};
+var HERO_WORD = "HAKSTER";
+var HERO_NAME = "HAKSTERAI";
+var HERO_GREEN = "#00ff41";
+var HERO_WORDMARK = [0, 1, 2, 3, 4].map(
+  (row) => HERO_WORD.split("").map((ch) => HERO_FONT[ch][row]).join(" ")
+);
+var HERO_W = Math.max(...HERO_WORDMARK.map((l) => l.length));
+function heroFits(width) {
+  return Math.max(0, Number(width) || 0) >= HERO_W;
+}
+function heroRowCount(width) {
+  return (heroFits(width) ? HERO_WORDMARK.length : 0) + 1;
+}
+function HeroLogo({ width = 60, indent = 0, subtitle = "", name = true }) {
+  const pad = " ".repeat(Math.max(0, indent));
+  const blocks = heroFits((Number(width) || 60) - indent);
+  const rows = [];
+  if (blocks) {
+    HERO_WORDMARK.forEach((row, i) => {
+      rows.push(
+        /* @__PURE__ */ jsx2("box", { style: { flexDirection: "row", flexShrink: 0 }, children: /* @__PURE__ */ jsx2("text", { fg: HERO_GREEN, attributes: TextAttributes2.BOLD, children: pad + row }) }, `hero:${i}`)
+      );
+    });
+  }
+  if (name) {
+    rows.push(
+      /* @__PURE__ */ jsxs2("box", { style: { flexDirection: "row", flexShrink: 0 }, children: [
+        /* @__PURE__ */ jsx2("text", { fg: HERO_GREEN, attributes: TextAttributes2.BOLD, children: pad + (blocks ? "" : "\u25C6 ") + HERO_NAME }),
+        subtitle ? /* @__PURE__ */ jsx2("text", { fg: "gray", children: `  ${subtitle}` }) : null
+      ] }, "hero:name")
+    );
+  }
+  return /* @__PURE__ */ jsx2("box", { style: { flexDirection: "column", flexShrink: 0 }, children: rows });
+}
 
 // src/components/ApprovalPrompt.jsx
-import { Fragment, jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
+import { Fragment, jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
 function ApprovalPrompt({ width = 80, request, onAnswer }) {
   const [password, setPassword] = useState2("");
   const [wrong, setWrong] = useState2(false);
@@ -1650,7 +1750,7 @@ function ApprovalPrompt({ width = 80, request, onAnswer }) {
   const toolCallId = request && request.toolCallId;
   const sudo = isSudoCommand(command);
   const dangerPassword = getDangerPassword();
-  const needsPassword = sudo && !!dangerPassword;
+  const needsPassword = !!dangerPassword;
   useEffect2(() => {
     setPassword("");
     setWrong(false);
@@ -1689,7 +1789,7 @@ function ApprovalPrompt({ width = 80, request, onAnswer }) {
   });
   if (!request) return null;
   const inner = Math.max(8, (width || 80) - 4);
-  return /* @__PURE__ */ jsxs2(
+  return /* @__PURE__ */ jsxs3(
     "box",
     {
       style: {
@@ -1702,41 +1802,118 @@ function ApprovalPrompt({ width = 80, request, onAnswer }) {
         paddingRight: 1
       },
       children: [
-        /* @__PURE__ */ jsxs2("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-          /* @__PURE__ */ jsx2("text", { fg: sudo ? "red" : "yellow", attributes: TextAttributes2.BOLD, children: sudo ? "sudo approval required" : "approval required" }),
-          /* @__PURE__ */ jsx2("text", { fg: "gray", children: request.toolName })
+        /* @__PURE__ */ jsx3(HeroLogo, { width: inner, subtitle: sudo ? "sudo approval" : "dangerous command" }),
+        /* @__PURE__ */ jsxs3("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+          /* @__PURE__ */ jsx3("text", { fg: sudo ? "red" : "yellow", attributes: TextAttributes3.BOLD, children: sudo ? "sudo approval required" : "approval required" }),
+          /* @__PURE__ */ jsx3("text", { fg: "gray", children: request.toolName })
         ] }),
-        /* @__PURE__ */ jsx2("text", { fg: "gray", children: request.reason }),
-        command ? /* @__PURE__ */ jsxs2("text", { children: [
-          /* @__PURE__ */ jsx2("span", { fg: "gray", children: "$ " }),
+        /* @__PURE__ */ jsx3("text", { fg: "gray", children: request.reason }),
+        command ? /* @__PURE__ */ jsxs3("text", { children: [
+          /* @__PURE__ */ jsx3("span", { fg: "gray", children: "$ " }),
           String(command).slice(0, Math.max(8, inner - 2))
         ] }) : null,
-        needsPassword ? /* @__PURE__ */ jsxs2(Fragment, { children: [
-          /* @__PURE__ */ jsxs2("box", { style: { width: inner, flexDirection: "row" }, children: [
-            /* @__PURE__ */ jsx2("text", { fg: "yellow", attributes: TextAttributes2.BOLD, children: "password " }),
-            /* @__PURE__ */ jsx2("text", { fg: password ? "white" : "gray", children: password ? "*".repeat(password.length) : "the agent approval password" })
+        needsPassword ? /* @__PURE__ */ jsxs3(Fragment, { children: [
+          /* @__PURE__ */ jsxs3("box", { style: { width: inner, flexDirection: "row" }, children: [
+            /* @__PURE__ */ jsx3("text", { fg: "yellow", attributes: TextAttributes3.BOLD, children: "password " }),
+            /* @__PURE__ */ jsx3("text", { fg: password ? "white" : "gray", children: password ? "*".repeat(password.length) : "the agent approval password" })
           ] }),
-          wrong ? /* @__PURE__ */ jsx2("text", { fg: "red", children: "wrong password \u2014 try again, or esc to deny" }) : null,
-          /* @__PURE__ */ jsx2("text", { fg: "gray", children: "enter approves \xB7 esc denies" })
-        ] }) : /* @__PURE__ */ jsxs2("text", { children: [
-          /* @__PURE__ */ jsx2("span", { fg: "green", attributes: TextAttributes2.BOLD, children: "y" }),
-          /* @__PURE__ */ jsx2("span", { fg: "gray", children: " allow this session  \xB7 " }),
-          !sudo ? /* @__PURE__ */ jsxs2(Fragment, { children: [
-            /* @__PURE__ */ jsx2("span", { fg: "cyan", attributes: TextAttributes2.BOLD, children: "a" }),
-            /* @__PURE__ */ jsx2("span", { fg: "gray", children: " allow always  \xB7 " })
-          ] }) : null,
-          /* @__PURE__ */ jsx2("span", { fg: "red", attributes: TextAttributes2.BOLD, children: "n" }),
-          /* @__PURE__ */ jsx2("span", { fg: "gray", children: " deny" })
+          wrong ? /* @__PURE__ */ jsx3("text", { fg: "red", children: "wrong password \u2014 try again, or esc to deny" }) : null,
+          /* @__PURE__ */ jsx3("text", { fg: "gray", children: "enter approves \xB7 esc denies" })
+        ] }) : /* @__PURE__ */ jsxs3(Fragment, { children: [
+          /* @__PURE__ */ jsx3("text", { fg: "gray", children: "no password set \u2014 /danger set".slice(0, Math.max(0, inner)) }),
+          /* @__PURE__ */ jsxs3("text", { children: [
+            /* @__PURE__ */ jsx3("span", { fg: "green", attributes: TextAttributes3.BOLD, children: "y" }),
+            /* @__PURE__ */ jsx3("span", { fg: "gray", children: " allow this session  \xB7 " }),
+            !sudo ? /* @__PURE__ */ jsxs3(Fragment, { children: [
+              /* @__PURE__ */ jsx3("span", { fg: "cyan", attributes: TextAttributes3.BOLD, children: "a" }),
+              /* @__PURE__ */ jsx3("span", { fg: "gray", children: " allow always  \xB7 " })
+            ] }) : null,
+            /* @__PURE__ */ jsx3("span", { fg: "red", attributes: TextAttributes3.BOLD, children: "n" }),
+            /* @__PURE__ */ jsx3("span", { fg: "gray", children: " deny" })
+          ] })
         ] })
       ]
     }
   );
 }
 
+// src/components/DangerPasswordPrompt.jsx
+import React4, { useState as useState3 } from "react";
+import { useKeyboard as useKeyboard3 } from "@opentui/react";
+import { TextAttributes as TextAttributes4 } from "@opentui/core";
+import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
+function DangerPasswordPrompt({ width = 60, onSave, onCancel }) {
+  const [first, setFirst] = useState3("");
+  const [value, setValue] = useState3("");
+  const [mismatch, setMismatch] = useState3(false);
+  const w = Math.max(24, Number(width) || 60);
+  const inner = Math.max(8, w - 4);
+  const confirming = first !== "";
+  useKeyboard3((key) => {
+    if (key.ctrl && key.name === "c") return;
+    const name = key.name ? String(key.name) : "";
+    if (name === "escape") {
+      onCancel();
+      return;
+    }
+    if (name === "return") {
+      if (!confirming) {
+        if (!value) return;
+        setFirst(value);
+        setValue("");
+        return;
+      }
+      if (value === first) {
+        onSave(value);
+        return;
+      }
+      setFirst("");
+      setValue("");
+      setMismatch(true);
+      return;
+    }
+    if (name === "backspace" || name === "delete") {
+      if (mismatch) setMismatch(false);
+      setValue((v) => v.slice(0, -1));
+      return;
+    }
+    if (name.length === 1) {
+      if (mismatch) setMismatch(false);
+      setValue((v) => v + name);
+    }
+  });
+  return /* @__PURE__ */ jsxs4(
+    "box",
+    {
+      style: {
+        width: w,
+        flexDirection: "column",
+        border: true,
+        borderStyle: "rounded",
+        borderColor: "yellow",
+        paddingLeft: 1,
+        paddingRight: 1,
+        flexShrink: 0
+      },
+      children: [
+        /* @__PURE__ */ jsx4(HeroLogo, { width: inner, subtitle: "approval password" }),
+        /* @__PURE__ */ jsx4("text", { fg: "gray", children: "Dangerous and sudo commands will ask for this password in the approval window." }),
+        /* @__PURE__ */ jsxs4("box", { style: { width: inner, flexDirection: "row" }, children: [
+          /* @__PURE__ */ jsx4("text", { fg: "yellow", attributes: TextAttributes4.BOLD, children: confirming ? "again    " : "password " }),
+          /* @__PURE__ */ jsx4("text", { fg: value ? "white" : "gray", children: value ? "*".repeat(value.length) : confirming ? "type it again" : "typed hidden" }),
+          value ? /* @__PURE__ */ jsx4("text", { fg: "gray", children: `  ${value.length} chars` }) : null
+        ] }),
+        mismatch ? /* @__PURE__ */ jsx4("text", { fg: "red", children: "they did not match \u2014 nothing saved, start again" }) : null,
+        /* @__PURE__ */ jsx4("text", { fg: "gray", children: confirming ? "enter saves \xB7 esc cancels \xB7 stored in ~/.hakster/config.json (mode 600)" : "enter continues \xB7 esc cancels \xB7 typed hidden, never echoed" })
+      ]
+    }
+  );
+}
+
 // src/components/Composer.jsx
-import React3 from "react";
-import { TextAttributes as TextAttributes3 } from "@opentui/core";
-import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
+import React5 from "react";
+import { TextAttributes as TextAttributes5 } from "@opentui/core";
+import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
 var clipHint = (s, n) => {
   const t = String(s == null ? "" : s);
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
@@ -1753,7 +1930,7 @@ function Composer({
   adSlot
 }) {
   const inner = Math.max(8, (width || 80) - 4);
-  return /* @__PURE__ */ jsxs3(
+  return /* @__PURE__ */ jsxs5(
     "box",
     {
       style: {
@@ -1766,9 +1943,9 @@ function Composer({
         paddingRight: 1
       },
       children: [
-        /* @__PURE__ */ jsxs3("box", { style: { width: inner, flexDirection: "row" }, children: [
-          /* @__PURE__ */ jsx3("text", { fg: disabled ? "gray" : "cyan", attributes: TextAttributes3.BOLD, children: disabled ? "\u2026 " : "\u203A " }),
-          focused && !disabled ? /* @__PURE__ */ jsx3(
+        /* @__PURE__ */ jsxs5("box", { style: { width: inner, flexDirection: "row" }, children: [
+          /* @__PURE__ */ jsx5("text", { fg: disabled ? "gray" : "cyan", attributes: TextAttributes5.BOLD, children: disabled ? "\u2026 " : "\u203A " }),
+          focused && !disabled ? /* @__PURE__ */ jsx5(
             "input",
             {
               style: { width: Math.max(1, inner - 2), flexGrow: 1, flexShrink: 1 },
@@ -1780,17 +1957,17 @@ function Composer({
               },
               focused: true
             }
-          ) : /* @__PURE__ */ jsx3("text", { fg: "gray", children: value || (disabled ? "working\u2026" : placeholder) })
+          ) : /* @__PURE__ */ jsx5("text", { fg: "gray", children: value || (disabled ? "working\u2026" : placeholder) })
         ] }),
         adSlot,
-        /* @__PURE__ */ jsx3("box", { style: { width: inner }, children: /* @__PURE__ */ jsx3("text", { fg: "gray", children: clipHint(hint || "enter send \xB7 esc stop \xB7 tab focus \xB7 ctrl+c quit", inner) }) })
+        /* @__PURE__ */ jsx5("box", { style: { width: inner }, children: /* @__PURE__ */ jsx5("text", { fg: "gray", children: clipHint(hint || "enter send \xB7 esc stop \xB7 tab focus \xB7 ctrl+c quit", inner) }) })
       ]
     }
   );
 }
 
 // src/components/GridLayout.jsx
-import React4 from "react";
+import React6 from "react";
 
 // src/hooks/useGridLayout.js
 import { useMemo } from "react";
@@ -1849,13 +2026,13 @@ function useGridLayout(items, availableWidth) {
 }
 
 // src/components/GridLayout.jsx
-import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
+import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
 function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, marginTop = 0 }) {
   const { columns, columnWidths, columnGroups } = useGridLayout(items, availableWidth);
   if (items.length === 0) return null;
   const isMultiColumn = columns > 1;
-  return /* @__PURE__ */ jsxs4("box", { style: { flexDirection: "column", gap: isMultiColumn ? 1 : 0, width: availableWidth, marginTop }, children: [
-    /* @__PURE__ */ jsx4(
+  return /* @__PURE__ */ jsxs6("box", { style: { flexDirection: "column", gap: isMultiColumn ? 1 : 0, width: availableWidth, marginTop }, children: [
+    /* @__PURE__ */ jsx6(
       "box",
       {
         style: {
@@ -1867,7 +2044,7 @@ function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, mar
         children: columnGroups.map((columnItems, colIdx) => {
           const columnKey = columnItems[0] ? getItemKey(columnItems[0]) : `col-${colIdx}`;
           const colWidth = columnWidths[colIdx] ?? availableWidth;
-          return /* @__PURE__ */ jsx4(
+          return /* @__PURE__ */ jsx6(
             "box",
             {
               style: {
@@ -1877,7 +2054,7 @@ function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, mar
                 flexShrink: 0,
                 minWidth: MIN_COLUMN_WIDTH
               },
-              children: columnItems.map((item, idx) => /* @__PURE__ */ jsx4("box", { style: { width: colWidth }, children: renderItem(item, idx, colWidth) }, getItemKey(item)))
+              children: columnItems.map((item, idx) => /* @__PURE__ */ jsx6("box", { style: { width: colWidth }, children: renderItem(item, idx, colWidth) }, getItemKey(item)))
             },
             columnKey
           );
@@ -1890,22 +2067,22 @@ function GridLayout({ items, availableWidth, getItemKey, renderItem, footer, mar
 var GridLayout_default = GridLayout;
 
 // src/components/GridPanel.jsx
-import React5 from "react";
-import { TextAttributes as TextAttributes4 } from "@opentui/core";
-import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
+import React7 from "react";
+import { TextAttributes as TextAttributes6 } from "@opentui/core";
+import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 function GridPanel({ title, cols = 4, width, children, borderColor = "gray", hint, dense = false }) {
   const inner = Math.max(1, (width || 80) - 4);
   const titleText = String(title || "");
   const hintText = String(hint || "");
   const hintWidth = Math.max(0, inner - titleText.length - 1);
   const clippedHint = hintText.length <= hintWidth ? hintText : hintWidth > 1 ? `${hintText.slice(0, hintWidth - 1)}\u2026` : "";
-  const body = dense ? React5.Children.map(children, (child) => React5.isValidElement(child) && child.type === Cell ? React5.cloneElement(child, { dense: true }) : child) : children;
-  return /* @__PURE__ */ jsxs5("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor, paddingLeft: 1, paddingRight: 1 }, children: [
-    /* @__PURE__ */ jsxs5("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx5("text", { fg: "cyan", attributes: TextAttributes4.BOLD, children: titleText.slice(0, inner) }),
-      clippedHint ? /* @__PURE__ */ jsx5("text", { fg: "gray", children: clippedHint }) : null
+  const body = dense ? React7.Children.map(children, (child) => React7.isValidElement(child) && child.type === Cell ? React7.cloneElement(child, { dense: true }) : child) : children;
+  return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor, paddingLeft: 1, paddingRight: 1 }, children: [
+    /* @__PURE__ */ jsxs7("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx7("text", { fg: "cyan", attributes: TextAttributes6.BOLD, children: titleText.slice(0, inner) }),
+      clippedHint ? /* @__PURE__ */ jsx7("text", { fg: "gray", children: clippedHint }) : null
     ] }),
-    /* @__PURE__ */ jsx5("box", { style: { width: inner, flexDirection: "row", flexWrap: "wrap" }, children: body })
+    /* @__PURE__ */ jsx7("box", { style: { width: inner, flexDirection: "row", flexWrap: "wrap" }, children: body })
   ] });
 }
 function Cell({ label, value, w = 18, color = "white", dense = false }) {
@@ -1915,33 +2092,33 @@ function Cell({ label, value, w = 18, color = "white", dense = false }) {
   };
   if (dense) {
     const lw = Math.max(3, Math.min(Math.floor(w / 2), 8));
-    return /* @__PURE__ */ jsxs5("box", { style: { width: Math.max(1, w), flexDirection: "row", flexShrink: 0, marginRight: 1 }, children: [
-      /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip8(label, lw) }),
-      /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: ` ${clip8(value, Math.max(1, w - lw - 1))}` })
+    return /* @__PURE__ */ jsxs7("box", { style: { width: Math.max(1, w), flexDirection: "row", flexShrink: 0, marginRight: 1 }, children: [
+      /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip8(label, lw) }),
+      /* @__PURE__ */ jsx7("text", { fg: color, attributes: TextAttributes6.BOLD, children: ` ${clip8(value, Math.max(1, w - lw - 1))}` })
     ] });
   }
-  return /* @__PURE__ */ jsxs5("box", { style: { width: Math.max(1, w), flexDirection: "column", flexShrink: 0, marginRight: 1 }, children: [
-    /* @__PURE__ */ jsx5("text", { fg: "gray", children: clip8(label, w) }),
-    /* @__PURE__ */ jsx5("text", { fg: color, attributes: TextAttributes4.BOLD, children: clip8(value, w) })
+  return /* @__PURE__ */ jsxs7("box", { style: { width: Math.max(1, w), flexDirection: "column", flexShrink: 0, marginRight: 1 }, children: [
+    /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip8(label, w) }),
+    /* @__PURE__ */ jsx7("text", { fg: color, attributes: TextAttributes6.BOLD, children: clip8(value, w) })
   ] });
 }
 function Meter({ value, max = 100, w = 16, color = "green" }) {
   const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
   const filled = Math.round(pct * w);
-  return /* @__PURE__ */ jsxs5("text", { children: [
-    /* @__PURE__ */ jsx5("span", { fg: color, children: "\u2588".repeat(filled) }),
-    /* @__PURE__ */ jsx5("span", { fg: "gray", children: "\u2591".repeat(Math.max(0, w - filled)) }),
-    /* @__PURE__ */ jsx5("span", { fg: "gray", children: ` ${String(Math.round(pct * 100)).padStart(3)}%` })
+  return /* @__PURE__ */ jsxs7("text", { children: [
+    /* @__PURE__ */ jsx7("span", { fg: color, children: "\u2588".repeat(filled) }),
+    /* @__PURE__ */ jsx7("span", { fg: "gray", children: "\u2591".repeat(Math.max(0, w - filled)) }),
+    /* @__PURE__ */ jsx7("span", { fg: "gray", children: ` ${String(Math.round(pct * 100)).padStart(3)}%` })
   ] });
 }
 function Spark({ data = [], w = 24 }) {
   const blocks = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
-  if (!data.length) return /* @__PURE__ */ jsx5("text", { fg: "gray", children: "\u2581".repeat(w) });
+  if (!data.length) return /* @__PURE__ */ jsx7("text", { fg: "gray", children: "\u2581".repeat(w) });
   const window = data.slice(-w);
   const max = Math.max(...window, 1);
   const min = Math.min(...window, 0);
   const span = max - min || 1;
-  return /* @__PURE__ */ jsx5("text", { fg: "cyan", children: window.map((v, i) => {
+  return /* @__PURE__ */ jsx7("text", { fg: "cyan", children: window.map((v, i) => {
     const idx = Math.round((v - min) / span * (blocks.length - 1));
     return blocks[Math.max(0, Math.min(blocks.length - 1, idx))];
   }).join("") });
@@ -1949,9 +2126,9 @@ function Spark({ data = [], w = 24 }) {
 var GridPanel_default = GridPanel;
 
 // src/components/LiveSidebar.jsx
-import React7, { useEffect as useEffect4, useRef as useRef2, useState as useState4 } from "react";
-import { TextAttributes as TextAttributes5 } from "@opentui/core";
-import { useKeyboard as useKeyboard3 } from "@opentui/react";
+import React9, { useEffect as useEffect4, useRef as useRef2, useState as useState5 } from "react";
+import { TextAttributes as TextAttributes7 } from "@opentui/core";
+import { useKeyboard as useKeyboard4 } from "@opentui/react";
 
 // src/utils/panel-scroll.js
 var maxStartOf = (total, rows) => {
@@ -2013,10 +2190,10 @@ var keyMatches = (key, name, mod = "none") => {
 // src/components/LiveImageViewer.jsx
 var import_kitty_graphics = __toESM(require_kitty_graphics());
 var import_live_image = __toESM(require_live_image());
-import React6, { useEffect as useEffect3, useRef, useState as useState3 } from "react";
+import React8, { useEffect as useEffect3, useRef, useState as useState4 } from "react";
 import fs2 from "node:fs";
 import { useRenderer } from "@opentui/react";
-import { Fragment as Fragment2, jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 function LiveImageViewer({
   width = 40,
   height = 6,
@@ -2028,7 +2205,7 @@ function LiveImageViewer({
   const h = Math.max(2, Number(height) || 6);
   const renderer2 = useRenderer();
   const boxRef = useRef(null);
-  const [state, setState] = useState3({ status: "waiting" });
+  const [state, setState] = useState4({ status: "waiting" });
   const ref = source && source.ref ? String(source.ref) : "";
   useEffect3(() => {
     let cancelled = false;
@@ -2134,10 +2311,10 @@ function LiveImageViewer({
       if (placed) withPaused(() => (0, import_kitty_graphics.deleteImage)(placed.id));
     };
   }, [ready, state.file, w, h, renderer2]);
-  const line = (text, fg) => /* @__PURE__ */ jsx6("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx6("text", { fg, children: clip(text, w) }) });
-  const pad = (n) => Array.from({ length: Math.max(0, n) }, (_, i) => /* @__PURE__ */ jsx6("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx6("text", { children: " " }) }, `pad:${i}`));
+  const line = (text, fg) => /* @__PURE__ */ jsx8("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg, children: clip(text, w) }) });
+  const pad = (n) => Array.from({ length: Math.max(0, n) }, (_, i) => /* @__PURE__ */ jsx8("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { children: " " }) }, `pad:${i}`));
   if (ready) {
-    return /* @__PURE__ */ jsx6("box", { ref: boxRef, style: { width: w, height: h, flexShrink: 0 } });
+    return /* @__PURE__ */ jsx8("box", { ref: boxRef, style: { width: w, height: h, flexShrink: 0 } });
   }
   const head = state.status === "error" ? `\u25A6 ${state.reason}` : state.status === "loading" ? "\u25A6 loading\u2026" : "\u25A6 image";
   const name = label || source && source.name || "";
@@ -2148,14 +2325,14 @@ function LiveImageViewer({
     [where ? supported ? "in terminal: kitty graphics" : "no graphics here \u2014 open this link:" : "", "gray"],
     [where, "cyan"]
   ];
-  return /* @__PURE__ */ jsxs6(Fragment2, { children: [
+  return /* @__PURE__ */ jsxs8(Fragment2, { children: [
     rows.slice(0, h).map(([text, fg], i) => line(text, i === 0 ? fg : fg)),
     pad(h - rows.length)
   ] });
 }
 
 // src/components/LiveSidebar.jsx
-import { Fragment as Fragment3, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+import { Fragment as Fragment3, jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 var isWide = (cp) => cp >= 4352 && cp <= 4447 || cp === 9001 || cp === 9002 || cp >= 9728 && cp <= 10175 || cp >= 11008 && cp <= 11263 || cp >= 11904 && cp <= 42191 || cp >= 44032 && cp <= 55203 || cp >= 63744 && cp <= 64255 || cp >= 65072 && cp <= 65135 || cp >= 65280 && cp <= 65376 || cp >= 65504 && cp <= 65510 || cp >= 126976 && cp <= 129791;
 var cellWidth = (ch) => {
   const cp = ch.codePointAt(0);
@@ -2179,9 +2356,9 @@ var clip = (s, n) => {
 };
 function Row({ width, k, v, color = "white" }) {
   const kw = Math.min(10, Math.max(4, Math.floor(width / 3)));
-  return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip(k, kw) }),
-    /* @__PURE__ */ jsx7("text", { fg: color, attributes: TextAttributes5.BOLD, children: clip(v, Math.max(1, width - kw - 1)) })
+  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx9("text", { fg: "gray", children: clip(k, kw) }),
+    /* @__PURE__ */ jsx9("text", { fg: color, attributes: TextAttributes7.BOLD, children: clip(v, Math.max(1, width - kw - 1)) })
   ] });
 }
 var EVENT_COLOR = {
@@ -2216,26 +2393,26 @@ var clock = (ts) => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 function EventLine({ width, line, compact = false }) {
-  return /* @__PURE__ */ jsx7("box", { style: { width, flexShrink: 0 }, children: /* @__PURE__ */ jsxs7("text", { children: [
-    compact ? null : /* @__PURE__ */ jsx7("span", { fg: "gray", children: `${clock(line.ts)} ` }),
-    /* @__PURE__ */ jsx7("span", { fg: EVENT_COLOR[line.kind] || "white", children: `${EVENT_GLYPH[line.kind] || "\u2022"} ` }),
-    /* @__PURE__ */ jsx7("span", { fg: line.kind === "err" ? "red" : "white", children: clip(line.text, Math.max(1, width - (compact ? 2 : 8))) })
+  return /* @__PURE__ */ jsx9("box", { style: { width, flexShrink: 0 }, children: /* @__PURE__ */ jsxs9("text", { children: [
+    compact ? null : /* @__PURE__ */ jsx9("span", { fg: "gray", children: `${clock(line.ts)} ` }),
+    /* @__PURE__ */ jsx9("span", { fg: EVENT_COLOR[line.kind] || "white", children: `${EVENT_GLYPH[line.kind] || "\u2022"} ` }),
+    /* @__PURE__ */ jsx9("span", { fg: line.kind === "err" ? "red" : "white", children: clip(line.text, Math.max(1, width - (compact ? 2 : 8))) })
   ] }) });
 }
 function ScrollRow({ width, children, gutter }) {
-  return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
+  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
     children,
-    gutter ? /* @__PURE__ */ jsx7("text", { fg: "gray", children: gutter }) : null
+    gutter ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: gutter }) : null
   ] });
 }
 function Panel({ width, title, hint, children, borderColor = "gray" }) {
   const inner = Math.max(1, width - 4);
-  return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor, paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs7("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx7("text", { fg: "cyan", attributes: TextAttributes5.BOLD, children: clip(title, inner) }),
-      hint ? /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip(hint, Math.max(0, inner - title.length - 1)) }) : null
+  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "column", border: true, borderStyle: "rounded", borderColor, paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs9("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx9("text", { fg: "cyan", attributes: TextAttributes7.BOLD, children: clip(title, inner) }),
+      hint ? /* @__PURE__ */ jsx9("text", { fg: "gray", children: clip(hint, Math.max(0, inner - title.length - 1)) }) : null
     ] }),
-    /* @__PURE__ */ jsx7("box", { style: { width: inner, flexDirection: "column" }, children })
+    /* @__PURE__ */ jsx9("box", { style: { width: inner, flexDirection: "column" }, children })
   ] });
 }
 function LiveSidebar({
@@ -2301,9 +2478,9 @@ function LiveSidebar({
     const rank = (x) => x.initialized || (x.toolCount || 0) > 0 ? 0 : x.lazy ? 1 : 2;
     return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name));
   });
-  const [actOffset, setActOffset] = useState4(null);
-  const [outOffset, setOutOffset] = useState4(null);
-  const [mcpOffset, setMcpOffset] = useState4(null);
+  const [actOffset, setActOffset] = useState5(null);
+  const [outOffset, setOutOffset] = useState5(null);
+  const [mcpOffset, setMcpOffset] = useState5(null);
   const prevAct = useRef2(activity.length);
   const prevOut = useRef2(liveLines.length);
   useEffect4(() => {
@@ -2333,7 +2510,7 @@ function LiveSidebar({
       return next >= max ? null : next;
     });
   };
-  useKeyboard3((key) => {
+  useKeyboard4((key) => {
     if (!key || key.ctrl) return;
     const name = key.name;
     if (name === "home" || name === "end") {
@@ -2368,10 +2545,10 @@ function LiveSidebar({
   const outBody = Math.max(1, inner - (outGutter ? 1 : 0));
   const actHint = !activity.length ? busy ? "waiting" : "0" : scrollHint(activity.length, activityRows, actStart, actOffset == null);
   const outHint = !liveLines.length ? busy ? "live" : "last" : scrollHint(liveLines.length, outputRows, outStart, outOffset == null);
-  return /* @__PURE__ */ jsxs7("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25C8 Live", hint: liveHint, children: [
-      liveRows >= 1 ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "tool", v: tool || "\u2014" }) : null,
-      liveRows >= 2 ? /* @__PURE__ */ jsx7(
+  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs9(Panel, { width, title: "\u25C8 Live", hint: liveHint, children: [
+      liveRows >= 1 ? /* @__PURE__ */ jsx9(Row, { width: inner, k: "tool", v: tool || "\u2014" }) : null,
+      liveRows >= 2 ? /* @__PURE__ */ jsx9(
         Row,
         {
           width: inner,
@@ -2381,10 +2558,10 @@ function LiveSidebar({
         }
       ) : null
     ] }),
-    showUsage ? /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25D4 Usage", hint: busy ? "live" : "session", children: [
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "tools", v: compact ? String(Number(usage && usage.tools) || 0) : `${Number(usage && usage.tools) || 0} calls`, color: "cyan" }),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "web", v: compact ? String(Number(usage && usage.web) || 0) : `${Number(usage && usage.web) || 0} calls`, color: "blue" }),
-      /* @__PURE__ */ jsx7(
+    showUsage ? /* @__PURE__ */ jsxs9(Panel, { width, title: "\u25D4 Usage", hint: busy ? "live" : "session", children: [
+      /* @__PURE__ */ jsx9(Row, { width: inner, k: "tools", v: compact ? String(Number(usage && usage.tools) || 0) : `${Number(usage && usage.tools) || 0} calls`, color: "cyan" }),
+      /* @__PURE__ */ jsx9(Row, { width: inner, k: "web", v: compact ? String(Number(usage && usage.web) || 0) : `${Number(usage && usage.web) || 0} calls`, color: "blue" }),
+      /* @__PURE__ */ jsx9(
         Row,
         {
           width: inner,
@@ -2393,10 +2570,10 @@ function LiveSidebar({
           color: Number(usage && usage.fail) > 0 ? "yellow" : "green"
         }
       ),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "requests", v: Number(usage && usage.requests) || 0 }),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "turns", v: Number(usage && usage.turns) || 0 }),
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "tokens", v: usage && usage.tokensKnown ? `${fmtTok(usage.inTok)} / ${fmtTok(usage.outTok)}` : "\u2014", color: "white" }),
-      /* @__PURE__ */ jsx7(
+      /* @__PURE__ */ jsx9(Row, { width: inner, k: "requests", v: Number(usage && usage.requests) || 0 }),
+      /* @__PURE__ */ jsx9(Row, { width: inner, k: "turns", v: Number(usage && usage.turns) || 0 }),
+      /* @__PURE__ */ jsx9(Row, { width: inner, k: "tokens", v: usage && usage.tokensKnown ? `${fmtTok(usage.inTok)} / ${fmtTok(usage.outTok)}` : "\u2014", color: "white" }),
+      /* @__PURE__ */ jsx9(
         Row,
         {
           width: inner,
@@ -2406,8 +2583,8 @@ function LiveSidebar({
         }
       )
     ] }) : null,
-    showMemory ? /* @__PURE__ */ jsx7(Panel, { width, title: "\u25C8 Memory", hint: memory ? `${memory.total} entries` : "\u2026", children: !memory ? /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip("\u2014", inner) }) }) : memory.banks.length === 0 ? /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip("empty", inner) }) }) : /* @__PURE__ */ jsxs7(Fragment3, { children: [
-      (memory.banks.length > 4 ? memory.banks.slice(0, 4) : memory.banks).map((b) => /* @__PURE__ */ jsx7(
+    showMemory ? /* @__PURE__ */ jsx9(Panel, { width, title: "\u25C8 Memory", hint: memory ? `${memory.total} entries` : "\u2026", children: !memory ? /* @__PURE__ */ jsx9("box", { style: { width: inner }, children: /* @__PURE__ */ jsx9("text", { fg: "gray", children: clip("\u2014", inner) }) }) : memory.banks.length === 0 ? /* @__PURE__ */ jsx9("box", { style: { width: inner }, children: /* @__PURE__ */ jsx9("text", { fg: "gray", children: clip("empty", inner) }) }) : /* @__PURE__ */ jsxs9(Fragment3, { children: [
+      (memory.banks.length > 4 ? memory.banks.slice(0, 4) : memory.banks).map((b) => /* @__PURE__ */ jsx9(
         Row,
         {
           width: inner,
@@ -2417,8 +2594,8 @@ function LiveSidebar({
         },
         b.slug
       )),
-      memory.banks.length < 4 && memory.newest ? /* @__PURE__ */ jsx7(Row, { width: inner, k: "newest", v: `${memory.newest.slug} ${clock(memory.newest.last)}`, color: "gray" }) : null,
-      /* @__PURE__ */ jsx7(
+      memory.banks.length < 4 && memory.newest ? /* @__PURE__ */ jsx9(Row, { width: inner, k: "newest", v: `${memory.newest.slug} ${clock(memory.newest.last)}`, color: "gray" }) : null,
+      /* @__PURE__ */ jsx9(
         Row,
         {
           width: inner,
@@ -2428,9 +2605,9 @@ function LiveSidebar({
         }
       )
     ] }) }) : null,
-    activityRows ? /* @__PURE__ */ jsx7(Panel, { width, title: "\u26A1 Activity", hint: actHint, children: activity.length === 0 ? /* @__PURE__ */ jsxs7(Fragment3, { children: [
-      /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip(busy ? "waiting for events\u2026" : "\u2014", inner) }) }),
-      Array.from({ length: Math.max(0, activityRows - 1) }, (_, i) => /* @__PURE__ */ jsx7("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx7("text", { children: " " }) }, `apad:${i}`))
+    activityRows ? /* @__PURE__ */ jsx9(Panel, { width, title: "\u26A1 Activity", hint: actHint, children: activity.length === 0 ? /* @__PURE__ */ jsxs9(Fragment3, { children: [
+      /* @__PURE__ */ jsx9("box", { style: { width: inner }, children: /* @__PURE__ */ jsx9("text", { fg: "gray", children: clip(busy ? "waiting for events\u2026" : "\u2014", inner) }) }),
+      Array.from({ length: Math.max(0, activityRows - 1) }, (_, i) => /* @__PURE__ */ jsx9("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx9("text", { children: " " }) }, `apad:${i}`))
     ] }) : (
       // Exactly `activityRows` rows whether two events or twenty have
       // arrived: the panel (and the bar's track) keeps its height while a
@@ -2438,22 +2615,22 @@ function LiveSidebar({
       // pace with the newest line.
       Array.from({ length: activityRows }, (_, i) => {
         const line = activity[actStart + i];
-        return /* @__PURE__ */ jsx7(
+        return /* @__PURE__ */ jsx9(
           ScrollRow,
           {
             width: inner,
             gutter: actGutter ? gutterChar(i, activityRows, activity.length, actStart) : null,
-            children: line ? /* @__PURE__ */ jsx7(EventLine, { width: actBody, line, compact }) : /* @__PURE__ */ jsx7("box", { style: { width: actBody }, children: /* @__PURE__ */ jsx7("text", { children: " " }) })
+            children: line ? /* @__PURE__ */ jsx9(EventLine, { width: actBody, line, compact }) : /* @__PURE__ */ jsx9("box", { style: { width: actBody }, children: /* @__PURE__ */ jsx9("text", { children: " " }) })
           },
           `e:${actStart + i}:${i}`
         );
       })
     ) }) : null,
-    outputRows ? /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25B6 Output", hint: outHint, children: [
-      /* @__PURE__ */ jsx7(Row, { width: inner, k: "call", v: liveTool ? clip(liveTool, Math.max(1, inner - 5)) : "\u2014", color: liveTool ? "cyan" : "gray" }),
-      liveImage && outputRows >= 3 ? /* @__PURE__ */ jsx7(LiveImageViewer, { width: inner, height: outputRows, source: liveImage, graphics }) : liveLines.length === 0 ? /* @__PURE__ */ jsxs7(Fragment3, { children: [
-        /* @__PURE__ */ jsx7("box", { style: { width: inner }, children: /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip(busy ? "waiting for output\u2026" : "\u2014", inner) }) }),
-        Array.from({ length: Math.max(0, outputRows - 1) }, (_, i) => /* @__PURE__ */ jsx7("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx7("text", { children: " " }) }, `opad:${i}`))
+    outputRows ? /* @__PURE__ */ jsxs9(Panel, { width, title: "\u25B6 Output", hint: outHint, children: [
+      /* @__PURE__ */ jsx9(Row, { width: inner, k: "call", v: liveTool ? clip(liveTool, Math.max(1, inner - 5)) : "\u2014", color: liveTool ? "cyan" : "gray" }),
+      liveImage && outputRows >= 3 ? /* @__PURE__ */ jsx9(LiveImageViewer, { width: inner, height: outputRows, source: liveImage, graphics }) : liveLines.length === 0 ? /* @__PURE__ */ jsxs9(Fragment3, { children: [
+        /* @__PURE__ */ jsx9("box", { style: { width: inner }, children: /* @__PURE__ */ jsx9("text", { fg: "gray", children: clip(busy ? "waiting for output\u2026" : "\u2014", inner) }) }),
+        Array.from({ length: Math.max(0, outputRows - 1) }, (_, i) => /* @__PURE__ */ jsx9("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx9("text", { children: " " }) }, `opad:${i}`))
       ] }) : (
         // Same contract as Activity: the tail is drawn in a fixed-height
         // window, padded to `outputRows`, with the ▲/█/▼ bar on every row —
@@ -2461,24 +2638,24 @@ function LiveSidebar({
         // appearing late on a panel that grew to meet it.
         Array.from({ length: outputRows }, (_, i) => {
           const index = outStart + i;
-          return /* @__PURE__ */ jsx7(
+          return /* @__PURE__ */ jsx9(
             ScrollRow,
             {
               width: inner,
               gutter: outGutter ? gutterChar(i, outputRows, liveLines.length, outStart) : null,
-              children: index < liveLines.length ? /* @__PURE__ */ jsx7("box", { style: { width: outBody }, children: /* @__PURE__ */ jsx7("text", { fg: index === liveLines.length - 1 ? "white" : "gray", children: clip(liveLines[index], outBody) }) }) : /* @__PURE__ */ jsx7("box", { style: { width: outBody }, children: /* @__PURE__ */ jsx7("text", { children: " " }) })
+              children: index < liveLines.length ? /* @__PURE__ */ jsx9("box", { style: { width: outBody }, children: /* @__PURE__ */ jsx9("text", { fg: index === liveLines.length - 1 ? "white" : "gray", children: clip(liveLines[index], outBody) }) }) : /* @__PURE__ */ jsx9("box", { style: { width: outBody }, children: /* @__PURE__ */ jsx9("text", { children: " " }) })
             },
             `o:${index}:${i}`
           );
         })
       )
     ] }) : null,
-    maxServers > 0 ? /* @__PURE__ */ jsxs7(Panel, { width, title: "\u25CE MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
+    maxServers > 0 ? /* @__PURE__ */ jsxs9(Panel, { width, title: "\u25CE MCP servers", hint: servers.length ? `${live}/${servers.length}` : "\u2026", children: [
       shownServers.map((s, i) => {
         const up = !!s.initialized || (s.toolCount || 0) > 0;
         const lazy = !!s.lazy && !up;
         const bar = mcpOverflow ? gutterChar(i, mcpVisible, ordered.length, mcpStart) : null;
-        return /* @__PURE__ */ jsx7(ScrollRow, { width: inner, gutter: bar, children: /* @__PURE__ */ jsx7(
+        return /* @__PURE__ */ jsx9(ScrollRow, { width: inner, gutter: bar, children: /* @__PURE__ */ jsx9(
           Row,
           {
             width: Math.max(1, inner - (bar ? 1 : 0)),
@@ -2488,7 +2665,7 @@ function LiveSidebar({
           }
         ) }, s.name);
       }),
-      moreAbove || moreBelow ? /* @__PURE__ */ jsx7(
+      moreAbove || moreBelow ? /* @__PURE__ */ jsx9(
         Row,
         {
           width: inner,
@@ -2502,11 +2679,11 @@ function LiveSidebar({
 }
 
 // src/components/LiveOutputPanel.jsx
-import React8 from "react";
+import React10 from "react";
 
 // src/hooks/usePanelScroll.js
-import { useCallback, useEffect as useEffect5, useRef as useRef3, useState as useState5 } from "react";
-import { useKeyboard as useKeyboard4 } from "@opentui/react";
+import { useCallback, useEffect as useEffect5, useRef as useRef3, useState as useState6 } from "react";
+import { useKeyboard as useKeyboard5 } from "@opentui/react";
 function usePanelScroll({
   total = 0,
   rows = 0,
@@ -2516,7 +2693,7 @@ function usePanelScroll({
   selected = null,
   autoResume = false
 }) {
-  const [offset, setOffsetState] = useState5(initial === "top" ? 0 : null);
+  const [offset, setOffsetState] = useState6(initial === "top" ? 0 : null);
   const n = Math.max(0, Math.trunc(Number(total) || 0));
   const r = Math.max(0, Math.trunc(Number(rows) || 0));
   const start2 = selected == null ? clampStart(offset, n, r) : nearestStart(selected, n, r);
@@ -2537,7 +2714,7 @@ function usePanelScroll({
   );
   const toTop = useCallback(() => setOffsetState(0), []);
   const toBottom = useCallback(() => setOffsetState(null), []);
-  useKeyboard4((key) => {
+  useKeyboard5((key) => {
     if (!enabled || !bindings || !r) return;
     const names = ["up", "down", "pageup", "pagedown", "home", "end", "left", "right"];
     for (const name of names) {
@@ -2568,7 +2745,7 @@ function usePanelScroll({
 }
 
 // src/components/LiveOutputPanel.jsx
-import { Fragment as Fragment4, jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+import { Fragment as Fragment4, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 function LiveOutputPanel({
   width = 80,
   rows = 3,
@@ -2591,22 +2768,22 @@ function LiveOutputPanel({
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
   const emptyHint = phase === "thinking" ? "reasoning above \u2014 the answer lands here" : phase === "running" ? "tool running\u2026" : "waiting for the first token\u2026";
   const hint = image ? `image${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : list.length ? `${state.hint("")}${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : busy ? "" : "last";
-  return /* @__PURE__ */ jsxs8(Panel, { width: w, title: busy ? "\u25B6 Live" : "\u25B6 Result", hint, children: [
-    callRow ? /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: call ? "cyan" : "gray", children: clip(call || "\u2014", inner) }) }) : null,
-    image && r >= 3 ? /* @__PURE__ */ jsx8(LiveImageViewer, { width: bodyW, height: r, source: image, graphics }) : list.length === 0 ? /* @__PURE__ */ jsxs8(Fragment4, { children: [
-      /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { fg: "gray", children: busy ? clip(emptyHint, inner) : " " }) }),
-      Array.from({ length: Math.max(0, r - 1) }, (_, i) => /* @__PURE__ */ jsx8("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx8("text", { children: " " }) }, `pad:${i}`))
+  return /* @__PURE__ */ jsxs10(Panel, { width: w, title: busy ? "\u25B6 Live" : "\u25B6 Result", hint, children: [
+    callRow ? /* @__PURE__ */ jsx10("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx10("text", { fg: call ? "cyan" : "gray", children: clip(call || "\u2014", inner) }) }) : null,
+    image && r >= 3 ? /* @__PURE__ */ jsx10(LiveImageViewer, { width: bodyW, height: r, source: image, graphics }) : list.length === 0 ? /* @__PURE__ */ jsxs10(Fragment4, { children: [
+      /* @__PURE__ */ jsx10("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx10("text", { fg: "gray", children: busy ? clip(emptyHint, inner) : " " }) }),
+      Array.from({ length: Math.max(0, r - 1) }, (_, i) => /* @__PURE__ */ jsx10("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx10("text", { children: " " }) }, `pad:${i}`))
     ] }) : Array.from({ length: r }, (_, i) => {
       const index = state.start + i;
-      return /* @__PURE__ */ jsx8(ScrollRow, { width: inner, gutter: gutterOn ? state.gutter(i) : null, children: index < list.length ? /* @__PURE__ */ jsx8("box", { style: { width: bodyW }, children: /* @__PURE__ */ jsx8("text", { fg: index === list.length - 1 ? "white" : "gray", children: clip(list[index], bodyW) }) }) : /* @__PURE__ */ jsx8("box", { style: { width: bodyW }, children: /* @__PURE__ */ jsx8("text", { children: " " }) }) }, `o:${i}`);
+      return /* @__PURE__ */ jsx10(ScrollRow, { width: inner, gutter: gutterOn ? state.gutter(i) : null, children: index < list.length ? /* @__PURE__ */ jsx10("box", { style: { width: bodyW }, children: /* @__PURE__ */ jsx10("text", { fg: index === list.length - 1 ? "white" : "gray", children: clip(list[index], bodyW) }) }) : /* @__PURE__ */ jsx10("box", { style: { width: bodyW }, children: /* @__PURE__ */ jsx10("text", { children: " " }) }) }, `o:${i}`);
     })
   ] });
 }
 
 // src/components/UsageView.jsx
-import React9 from "react";
-import { TextAttributes as TextAttributes6 } from "@opentui/core";
-import { Fragment as Fragment5, jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
+import React11 from "react";
+import { TextAttributes as TextAttributes8 } from "@opentui/core";
+import { Fragment as Fragment5, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var BLOCKS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
 function fmtNum(n) {
   const v = Number(n) || 0;
@@ -2639,12 +2816,12 @@ function since(ts) {
 function Bar({ w, pct, color = "green" }) {
   const width = Math.max(4, w);
   if (pct == null) {
-    return /* @__PURE__ */ jsx9("text", { fg: "gray", children: "\u2591".repeat(width) });
+    return /* @__PURE__ */ jsx11("text", { fg: "gray", children: "\u2591".repeat(width) });
   }
   const filled = Math.max(0, Math.min(width, Math.round(width * pct / 100)));
-  return /* @__PURE__ */ jsxs9("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx9("text", { fg: color, children: "\u2588".repeat(filled) }),
-    /* @__PURE__ */ jsx9("text", { fg: "gray", children: "\u2591".repeat(width - filled) })
+  return /* @__PURE__ */ jsxs11("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx11("text", { fg: color, children: "\u2588".repeat(filled) }),
+    /* @__PURE__ */ jsx11("text", { fg: "gray", children: "\u2591".repeat(width - filled) })
   ] });
 }
 function sparkline(series, width) {
@@ -2663,7 +2840,7 @@ function sparkline(series, width) {
   const text = shown2.map((d) => max === 0 ? BLOCKS[0] : BLOCKS[Math.min(BLOCKS.length - 1, Math.round(d.calls / max * (BLOCKS.length - 1)))]).join("");
   return { text, max, shown: shown2 };
 }
-var Row2 = ({ children, w }) => /* @__PURE__ */ jsx9("box", { style: { width: w, flexShrink: 0 }, children });
+var Row2 = ({ children, w }) => /* @__PURE__ */ jsx11("box", { style: { width: w, flexShrink: 0 }, children });
 function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15, account = "" }) {
   const w = Math.max(30, Number(width) || 80);
   const inner = w - 2;
@@ -2671,11 +2848,11 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
   const err = usage && usage.error ? usage.error : "";
   const updated = usage && usage.updatedAt ? since(usage.updatedAt) : "\u2014";
   const rate = refreshSeconds > 0 ? `every ${refreshSeconds}s` : "paused";
-  const line = (text, fg = "white", bold = false) => /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9("text", { fg, attributes: bold ? TextAttributes6.BOLD : 0, children: clip(text, inner) }) });
+  const line = (text, fg = "white", bold = false) => /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg, attributes: bold ? TextAttributes8.BOLD : 0, children: clip(text, inner) }) });
   if (!data) {
-    return /* @__PURE__ */ jsxs9("box", { style: { width: w, border: true, borderStyle: "rounded", borderColor: "green", flexDirection: "column", flexShrink: 0 }, children: [
+    return /* @__PURE__ */ jsxs11("box", { style: { width: w, border: true, borderStyle: "rounded", borderColor: "green", flexDirection: "column", flexShrink: 0 }, children: [
       line("\u25D4 Usage", "green", true),
-      /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9("text", { children: " " }) }),
+      /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) }),
       line(err || (usage && usage.loading ? "loading usage\u2026" : "no usage data yet"), err ? "yellow" : "gray"),
       line(err ? "fix: hakster login \xB7 then r to retry \xB7 esc to go back" : "r refresh \xB7 esc back", "gray")
     ] });
@@ -2700,51 +2877,51 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
     { label: "This month", w: month, until: resets.monthlyAt }
   ];
   const biggest = Math.max(used, 1);
-  return /* @__PURE__ */ jsxs9("box", { style: { width: w, border: true, borderStyle: "rounded", borderColor: "green", flexDirection: "column", flexShrink: 0 }, children: [
+  return /* @__PURE__ */ jsxs11("box", { style: { width: w, border: true, borderStyle: "rounded", borderColor: "green", flexDirection: "column", flexShrink: 0 }, children: [
     line(`\u25D4 Usage \xB7 ${account || "this account"} \xB7 plan ${plan}`, "green", true),
     line(
       capped ? `Plan allowance ${fmtNum(used)} / ${fmtNum(limit)} calls \xB7 ${pct}% \xB7 resets in ${until(resets.planResetAt)}` : `Plan allowance ${fmtNum(used)} calls \xB7 no call cap on this plan${resets.planWindow ? ` \xB7 window ${resets.planWindow}` : ""}`,
       capped ? "white" : "gray"
     ),
-    /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9(Bar, { w: Math.max(10, Math.min(inner, 48)), pct, color: pct != null && pct >= 90 ? "red" : pct != null && pct >= 70 ? "yellow" : "green" }) }),
-    /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9("text", { children: " " }) }),
+    /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11(Bar, { w: Math.max(10, Math.min(inner, 48)), pct, color: pct != null && pct >= 90 ? "red" : pct != null && pct >= 70 ? "yellow" : "green" }) }),
+    /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) }),
     windowRows.map(({ label, w: win, until: resetAt }) => {
       const calls = Number(win.calls) || 0;
       const share = biggest > 0 ? Math.min(100, Math.round(calls / biggest * 100)) : 0;
       const tokens = `in ${fmtNum(win.inputTokens)} \xB7 out ${fmtNum(win.outputTokens)}`;
-      return /* @__PURE__ */ jsxs9("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
+      return /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
         line(`${label.padEnd(10)} ${fmtNum(calls).padStart(6)} calls \xB7 ${tokens} \xB7 ${win.agentCalls || 0} agent / ${win.chatCalls || 0} chat`, "white"),
-        /* @__PURE__ */ jsxs9("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx9("text", { fg: "gray", children: " ".repeat(11) }),
-          /* @__PURE__ */ jsx9(Bar, { w: Math.max(8, Math.min(40, inner - 26)), pct: share, color: "cyan" }),
-          /* @__PURE__ */ jsx9("text", { fg: "gray", children: ` resets in ${until(resetAt)}` })
+        /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
+          /* @__PURE__ */ jsx11("text", { fg: "gray", children: " ".repeat(11) }),
+          /* @__PURE__ */ jsx11(Bar, { w: Math.max(8, Math.min(40, inner - 26)), pct: share, color: "cyan" }),
+          /* @__PURE__ */ jsx11("text", { fg: "gray", children: ` resets in ${until(resetAt)}` })
         ] })
       ] }, label);
     }),
-    /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9("text", { children: " " }) }),
+    /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) }),
     line(`14-day calls  ${spark.text}  peak ${fmtNum(spark.max)}/day`, "white"),
     line(`   ${spark.shown.length ? `${spark.shown[0].key.slice(5)} \u2192 ${spark.shown[spark.shown.length - 1].key.slice(5)}` : ""}`, "gray"),
-    /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9("text", { children: " " }) }),
+    /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) }),
     line(webPct != null ? `Web research ${webUsed} / ${webLimit} \xB7 ${webPct}%` : `Web research ${data.webResearchLimit === -1 ? "unlimited on this plan" : `${webUsed} used`}`, "white"),
     line(`Tokens all time  in ${fmtNum(data.tokenUsage && data.tokenUsage.inputTokens)} \xB7 out ${fmtNum(data.tokenUsage && data.tokenUsage.outputTokens)} \xB7 tool calls ${fmtNum(data.tokenUsage && data.tokenUsage.toolCalls)} \xB7 last ${since(data.tokenUsage && data.tokenUsage.lastUsedAt)}`, "gray"),
     line(`Token balance ${fmtNum(data.tokenBalance)} \xB7 live: ${rate} \xB7 updated ${updated}`, "gray"),
-    /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9("text", { children: " " }) }),
-    data.ownerMeter ? /* @__PURE__ */ jsxs9(Fragment5, { children: [
+    /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) }),
+    data.ownerMeter ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
       line(`Billing meter (owner view)  $${Number(data.ownerMeter.monthMeterUsd || 0).toFixed(2)} this ${data.ownerMeter.windowDays || 30}d \xB7 all-time $${Number(data.ownerMeter.meterUsd || 0).toFixed(2)}`, "green"),
       line(`   at $${Number(data.ownerMeter.rateInPerMTok || 0).toFixed(2)} in / $${Number(data.ownerMeter.rateOutPerMTok || 0).toFixed(2)} out per Mtok \xB7 ${clip(`source ${data.ownerMeter.source || "junkalot.co"}${data.ownerMeter.live ? " \xB7 live" : " \xB7 stale"}`, inner - 6)}`, "gray"),
       line(`   ${data.ownerMeter.shareOfPlanPct == null ? "no monthly plan price" : `${Number(data.ownerMeter.shareOfPlanPct).toFixed(2)}% of $${Number(data.ownerMeter.planUsdMonth || 0).toFixed(0)} plan`}${Number(data.ownerMeter.overageUsd) > 0 ? ` \xB7 over by $${Number(data.ownerMeter.overageUsd).toFixed(2)}` : ""} \xB7 meter, not an invoice`, "gray"),
-      /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9("text", { children: " " }) })
+      /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) })
     ] }) : null,
-    Array.isArray(data.tokenWiring && data.tokenWiring.recent) && data.tokenWiring.recent.length ? /* @__PURE__ */ jsxs9(Fragment5, { children: [
+    Array.isArray(data.tokenWiring && data.tokenWiring.recent) && data.tokenWiring.recent.length ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
       line("Recent calls", "green"),
-      data.tokenWiring.recent.slice(0, Math.max(0, Math.min(5, height - 16))).map((r, i) => /* @__PURE__ */ jsx9(Row2, { w: inner, children: /* @__PURE__ */ jsx9("text", { fg: "gray", children: clip(`${new Date(Number(r.created_at) * 1e3).toISOString().slice(5, 16).replace("T", " ")}  ${String(r.endpoint || "").padEnd(16)} ${String(r.model || r.provider || "").slice(0, 18).padEnd(18)} in ${fmtNum(r.input_tokens)} out ${fmtNum(r.output_tokens)}`, inner) }) }, `recent:${i}`))
+      data.tokenWiring.recent.slice(0, Math.max(0, Math.min(5, height - 16))).map((r, i) => /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: clip(`${new Date(Number(r.created_at) * 1e3).toISOString().slice(5, 16).replace("T", " ")}  ${String(r.endpoint || "").padEnd(16)} ${String(r.model || r.provider || "").slice(0, 18).padEnd(18)} in ${fmtNum(r.input_tokens)} out ${fmtNum(r.output_tokens)}`, inner) }) }, `recent:${i}`))
     ] }) : null,
     line("r refresh \xB7 ] faster \xB7 [ slower \xB7 PgUp/PgDn scroll \xB7 esc back", "gray")
   ] });
 }
 
 // src/hooks/useServerUsage.js
-import { useCallback as useCallback2, useEffect as useEffect6, useRef as useRef4, useState as useState6 } from "react";
+import { useCallback as useCallback2, useEffect as useEffect6, useRef as useRef4, useState as useState7 } from "react";
 import fs3 from "node:fs";
 import os2 from "node:os";
 import path2 from "node:path";
@@ -2759,7 +2936,7 @@ function configuredServer() {
   return DEFAULT_API;
 }
 function useServerUsage(refreshSeconds = 15, enabled = true) {
-  const [state, setState] = useState6({ data: null, error: null, updatedAt: null, loading: true });
+  const [state, setState] = useState7({ data: null, error: null, updatedAt: null, loading: true });
   const timerRef = useRef4(null);
   const aliveRef = useRef4(true);
   const load = useCallback2(async () => {
@@ -2806,15 +2983,15 @@ function useServerUsage(refreshSeconds = 15, enabled = true) {
 var import_live_image2 = __toESM(require_live_image());
 
 // src/components/MonitorFeed.jsx
-import React10, { useState as useState7 } from "react";
-import { useKeyboard as useKeyboard5 } from "@opentui/react";
-import { Fragment as Fragment6, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+import React12, { useState as useState8 } from "react";
+import { useKeyboard as useKeyboard6 } from "@opentui/react";
+import { Fragment as Fragment6, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 function EventLine2({ width, line }) {
   const compact = width < 30;
-  return /* @__PURE__ */ jsx10("box", { style: { width, flexShrink: 0 }, children: /* @__PURE__ */ jsxs10("text", { children: [
-    compact ? null : /* @__PURE__ */ jsx10("span", { fg: "gray", children: `${clock(line.ts)} ` }),
-    /* @__PURE__ */ jsx10("span", { fg: EVENT_COLOR[line.kind] || "white", children: `${EVENT_GLYPH[line.kind] || "\u2022"} ` }),
-    /* @__PURE__ */ jsx10("span", { fg: line.kind === "err" ? "red" : "white", children: clip(line.text, Math.max(1, width - (compact ? 2 : 8))) })
+  return /* @__PURE__ */ jsx12("box", { style: { width, flexShrink: 0 }, children: /* @__PURE__ */ jsxs12("text", { children: [
+    compact ? null : /* @__PURE__ */ jsx12("span", { fg: "gray", children: `${clock(line.ts)} ` }),
+    /* @__PURE__ */ jsx12("span", { fg: EVENT_COLOR[line.kind] || "white", children: `${EVENT_GLYPH[line.kind] || "\u2022"} ` }),
+    /* @__PURE__ */ jsx12("span", { fg: line.kind === "err" ? "red" : "white", children: clip(line.text, Math.max(1, width - (compact ? 2 : 8))) })
   ] }) });
 }
 function MonitorFeed({
@@ -2829,15 +3006,15 @@ function MonitorFeed({
   const h = Math.max(0, Number(height) || 0);
   const outRows = h >= 44 ? 12 : h >= 32 ? 8 : h >= 22 ? 5 : h >= 14 ? 3 : 0;
   const feedRows = Math.max(0, h - (outRows ? outRows + 4 : 0) - 3);
-  const [offset, setOffset] = useState7(null);
-  const [outOffset, setOutOffset] = useState7(null);
+  const [offset, setOffset] = useState8(null);
+  const [outOffset, setOutOffset] = useState8(null);
   const feedStart = clampStart(offset, activity.length, feedRows || 1);
   const outStart = clampStart(outOffset, liveLines.length, outRows || 1);
   const feedGutter = feedRows > 0 && activity.length > feedRows;
   const outGutter = outRows > 0 && liveLines.length > outRows;
   const feedBody = Math.max(1, inner - (feedGutter ? 1 : 0));
   const outBody = Math.max(1, inner - (outGutter ? 1 : 0));
-  useKeyboard5((key) => {
+  useKeyboard6((key) => {
     if (!key || key.ctrl || key.meta || !key.shift) return;
     const name = key.name;
     const setter = feedRows ? setOffset : outRows ? setOutOffset : null;
@@ -2860,40 +3037,40 @@ function MonitorFeed({
   });
   const feedHint = !activity.length ? busy ? "waiting" : "0" : feedGutter ? `${feedStart + 1}-${Math.min(activity.length, feedStart + feedRows)}/${activity.length}${offset != null ? " \u21E3" : ""}` : String(activity.length);
   const outHint = outGutter ? `${outStart + 1}-${Math.min(liveLines.length, outStart + outRows)}/${liveLines.length}${outOffset != null ? " \u21E3" : ""}` : busy ? "live" : "last";
-  return /* @__PURE__ */ jsxs10("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
-    feedRows ? /* @__PURE__ */ jsx10(Panel, { width, title: "\u26A1 Live activity", hint: feedHint, children: activity.length === 0 ? /* @__PURE__ */ jsxs10(Fragment6, { children: [
-      /* @__PURE__ */ jsx10("box", { style: { width: inner }, children: /* @__PURE__ */ jsx10("text", { fg: "gray", children: clip(busy ? "waiting for events\u2026" : "no events this session \u2014 run a task", inner) }) }),
-      Array.from({ length: Math.max(0, feedRows - 1) }, (_, i) => /* @__PURE__ */ jsx10("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx10("text", { children: " " }) }, `pad:${i}`))
+  return /* @__PURE__ */ jsxs12("box", { style: { width, flexDirection: "column", flexShrink: 0 }, children: [
+    feedRows ? /* @__PURE__ */ jsx12(Panel, { width, title: "\u26A1 Live activity", hint: feedHint, children: activity.length === 0 ? /* @__PURE__ */ jsxs12(Fragment6, { children: [
+      /* @__PURE__ */ jsx12("box", { style: { width: inner }, children: /* @__PURE__ */ jsx12("text", { fg: "gray", children: clip(busy ? "waiting for events\u2026" : "no events this session \u2014 run a task", inner) }) }),
+      Array.from({ length: Math.max(0, feedRows - 1) }, (_, i) => /* @__PURE__ */ jsx12("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx12("text", { children: " " }) }, `pad:${i}`))
     ] }) : (
       // Exactly `feedRows` rows: the bar's track is full height from the
       // first event, and the newest line stays on the bottom row as the
       // feed streams (§ all-panels rule).
       Array.from({ length: feedRows }, (_, i) => {
         const line = activity[feedStart + i];
-        return /* @__PURE__ */ jsx10(
+        return /* @__PURE__ */ jsx12(
           ScrollRow,
           {
             width: inner,
             gutter: feedGutter ? gutterChar(i, feedRows, activity.length, feedStart) : null,
-            children: line ? /* @__PURE__ */ jsx10(EventLine2, { width: feedBody, line }) : /* @__PURE__ */ jsx10("box", { style: { width: feedBody }, children: /* @__PURE__ */ jsx10("text", { children: " " }) })
+            children: line ? /* @__PURE__ */ jsx12(EventLine2, { width: feedBody, line }) : /* @__PURE__ */ jsx12("box", { style: { width: feedBody }, children: /* @__PURE__ */ jsx12("text", { children: " " }) })
           },
           `e:${feedStart + i}:${i}`
         );
       })
     ) }) : null,
-    outRows ? /* @__PURE__ */ jsxs10(Panel, { width, title: "\u25B6 Output", hint: outHint, children: [
-      /* @__PURE__ */ jsx10("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx10("text", { fg: liveTool ? "cyan" : "gray", children: clip(liveTool || "no tool call yet", inner) }) }),
-      liveLines.length === 0 ? /* @__PURE__ */ jsxs10(Fragment6, { children: [
-        /* @__PURE__ */ jsx10("box", { style: { width: inner }, children: /* @__PURE__ */ jsx10("text", { fg: "gray", children: clip(busy ? "waiting for output\u2026" : "\u2014", inner) }) }),
-        Array.from({ length: Math.max(0, outRows - 1) }, (_, i) => /* @__PURE__ */ jsx10("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx10("text", { children: " " }) }, `pad:${i}`))
+    outRows ? /* @__PURE__ */ jsxs12(Panel, { width, title: "\u25B6 Output", hint: outHint, children: [
+      /* @__PURE__ */ jsx12("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx12("text", { fg: liveTool ? "cyan" : "gray", children: clip(liveTool || "no tool call yet", inner) }) }),
+      liveLines.length === 0 ? /* @__PURE__ */ jsxs12(Fragment6, { children: [
+        /* @__PURE__ */ jsx12("box", { style: { width: inner }, children: /* @__PURE__ */ jsx12("text", { fg: "gray", children: clip(busy ? "waiting for output\u2026" : "\u2014", inner) }) }),
+        Array.from({ length: Math.max(0, outRows - 1) }, (_, i) => /* @__PURE__ */ jsx12("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx12("text", { children: " " }) }, `pad:${i}`))
       ] }) : Array.from({ length: outRows }, (_, i) => {
         const index = outStart + i;
-        return /* @__PURE__ */ jsx10(
+        return /* @__PURE__ */ jsx12(
           ScrollRow,
           {
             width: inner,
             gutter: outGutter ? gutterChar(i, outRows, liveLines.length, outStart) : null,
-            children: index < liveLines.length ? /* @__PURE__ */ jsx10("box", { style: { width: outBody }, children: /* @__PURE__ */ jsx10("text", { fg: index === liveLines.length - 1 ? "white" : "gray", children: clip(liveLines[index], outBody) }) }) : /* @__PURE__ */ jsx10("box", { style: { width: outBody }, children: /* @__PURE__ */ jsx10("text", { children: " " }) })
+            children: index < liveLines.length ? /* @__PURE__ */ jsx12("box", { style: { width: outBody }, children: /* @__PURE__ */ jsx12("text", { fg: index === liveLines.length - 1 ? "white" : "gray", children: clip(liveLines[index], outBody) }) }) : /* @__PURE__ */ jsx12("box", { style: { width: outBody }, children: /* @__PURE__ */ jsx12("text", { children: " " }) })
           },
           `o:${index}:${i}`
         );
@@ -2904,26 +3081,13 @@ function MonitorFeed({
 
 // src/components/DecodeSplash.jsx
 var import_kitty_graphics2 = __toESM(require_kitty_graphics());
-import React11, { useEffect as useEffect7, useRef as useRef5, useState as useState8 } from "react";
+import React13, { useEffect as useEffect7, useRef as useRef5, useState as useState9 } from "react";
 import fs4 from "node:fs";
 import path3 from "node:path";
-import { TextAttributes as TextAttributes7 } from "@opentui/core";
+import { TextAttributes as TextAttributes9 } from "@opentui/core";
 import { useRenderer as useRenderer2 } from "@opentui/react";
-import { Fragment as Fragment7, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
+import { Fragment as Fragment7, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
 var GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-var HERO_FONT = {
-  H: ["\u2588   \u2588", "\u2588   \u2588", "\u2588\u2588\u2588\u2588\u2588", "\u2588   \u2588", "\u2588   \u2588"],
-  A: [" \u2588\u2588\u2588 ", "\u2588   \u2588", "\u2588\u2588\u2588\u2588\u2588", "\u2588   \u2588", "\u2588   \u2588"],
-  K: ["\u2588   \u2588", "\u2588  \u2588 ", "\u2588\u2588\u2588  ", "\u2588  \u2588 ", "\u2588   \u2588"],
-  S: [" \u2588\u2588\u2588\u2588", "\u2588    ", " \u2588\u2588\u2588 ", "    \u2588", "\u2588\u2588\u2588\u2588 "],
-  T: ["\u2588\u2588\u2588\u2588\u2588", "  \u2588  ", "  \u2588  ", "  \u2588  ", "  \u2588  "],
-  E: ["\u2588\u2588\u2588\u2588\u2588", "\u2588    ", "\u2588\u2588\u2588\u2588 ", "\u2588    ", "\u2588\u2588\u2588\u2588\u2588"],
-  R: ["\u2588\u2588\u2588\u2588 ", "\u2588   \u2588", "\u2588\u2588\u2588\u2588 ", "\u2588  \u2588 ", "\u2588   \u2588"]
-};
-var HERO_WORD = "HAKSTER";
-var HERO_WORDMARK = [0, 1, 2, 3, 4].map((row) => HERO_WORD.split("").map((ch) => HERO_FONT[ch][row]).join(" "));
-var HERO_W = Math.max(...HERO_WORDMARK.map((l) => l.length));
-var HERO_GREEN = "#00ff41";
 var RAIN_GLYPHS = "\uFF71\uFF72\uFF73\uFF74\uFF75\uFF76\uFF77\uFF78\uFF79\uFF7A\uFF7B\uFF7C\uFF7D\uFF7E\uFF7F\uFF80\uFF81\uFF82\uFF83\uFF84\uFF85\uFF86\uFF87\uFF88\uFF89\uFF8A\uFF8B\uFF8C\uFF8D\uFF8E\uFF8F\uFF90\uFF91\uFF92\uFF93\uFF94\uFF95\uFF96\uFF97\uFF98\uFF99\uFF9A\uFF9B\uFF9C\uFF9D0123456789";
 var RAIN_COLORS = { head: "#d8ffe6", near: "#00ff41", tail: "#0a5c22" };
 function rainHash(a, b, c) {
@@ -2960,20 +3124,20 @@ function MatrixRain({ width, height, frame }) {
         continue;
       }
       if (pending) {
-        parts.push(/* @__PURE__ */ jsx11("span", { children: " ".repeat(pending) }, `p${parts.length}`));
+        parts.push(/* @__PURE__ */ jsx13("span", { children: " ".repeat(pending) }, `p${parts.length}`));
         pending = 0;
       }
       const glyph = RAIN_GLYPHS[rainHash(s.c, r, Math.floor(frame / 2)) % RAIN_GLYPHS.length];
       const color = dist === 0 ? RAIN_COLORS.head : dist <= 2 ? RAIN_COLORS.near : RAIN_COLORS.tail;
-      parts.push(/* @__PURE__ */ jsx11("span", { fg: color, children: glyph }, `g${parts.length}`));
+      parts.push(/* @__PURE__ */ jsx13("span", { fg: color, children: glyph }, `g${parts.length}`));
       pending = 1;
     }
-    if (pending) parts.push(/* @__PURE__ */ jsx11("span", { children: " ".repeat(pending) }, `t${parts.length}`));
+    if (pending) parts.push(/* @__PURE__ */ jsx13("span", { children: " ".repeat(pending) }, `t${parts.length}`));
     rows.push(
-      /* @__PURE__ */ jsx11("box", { style: { width: w, flexDirection: "row", flexShrink: 0, height: 1 }, children: /* @__PURE__ */ jsx11("text", { children: parts }) }, `rain:${r}`)
+      /* @__PURE__ */ jsx13("box", { style: { width: w, flexDirection: "row", flexShrink: 0, height: 1 }, children: /* @__PURE__ */ jsx13("text", { children: parts }) }, `rain:${r}`)
     );
   }
-  return /* @__PURE__ */ jsx11("box", { style: { position: "absolute", left: 0, top: 0, width: w, height: h, flexDirection: "column", overflow: "hidden" }, children: rows });
+  return /* @__PURE__ */ jsx13("box", { style: { position: "absolute", left: 0, top: 0, width: w, height: h, flexDirection: "column", overflow: "hidden" }, children: rows });
 }
 var ART_FILE = "haksterai-hero.art.json";
 var _heroArt;
@@ -3009,7 +3173,7 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0 }) {
     let run = null;
     let runN = 0;
     const flush = () => {
-      if (run && runN) parts.push(/* @__PURE__ */ jsx11("span", { fg: run.fg, bg: run.bg, children: "\u2580".repeat(runN) }, `a${parts.length}`));
+      if (run && runN) parts.push(/* @__PURE__ */ jsx13("span", { fg: run.fg, bg: run.bg, children: "\u2580".repeat(runN) }, `a${parts.length}`));
       run = null;
       runN = 0;
     };
@@ -3020,7 +3184,7 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0 }) {
         flush();
         const glyph = RAIN_GLYPHS[rainHash(c, r, Math.floor(frame / 2)) % RAIN_GLYPHS.length];
         const color = dist === 0 ? RAIN_COLORS.head : dist <= 2 ? RAIN_COLORS.near : RAIN_COLORS.tail;
-        parts.push(/* @__PURE__ */ jsx11("span", { fg: color, bg: pixel(c, r * 2 + 1), children: glyph }, `r${parts.length}`));
+        parts.push(/* @__PURE__ */ jsx13("span", { fg: color, bg: pixel(c, r * 2 + 1), children: glyph }, `r${parts.length}`));
       } else {
         const fg = pixel(c, r * 2);
         const bg = pixel(c, r * 2 + 1);
@@ -3034,10 +3198,10 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0 }) {
     }
     flush();
     out.push(
-      /* @__PURE__ */ jsx11("box", { style: { width: cols, height: 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx11("text", { children: parts }) }, `hb:${r}`)
+      /* @__PURE__ */ jsx13("box", { style: { width: cols, height: 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx13("text", { children: parts }) }, `hb:${r}`)
     );
   }
-  return /* @__PURE__ */ jsx11("box", { style: { position: "absolute", left, top, width: cols, height: rows, flexDirection: "column", overflow: "hidden" }, children: out });
+  return /* @__PURE__ */ jsx13("box", { style: { position: "absolute", left, top, width: cols, height: rows, flexDirection: "column", overflow: "hidden" }, children: out });
 }
 function artSize(width, height, reservedRows) {
   const art = loadHeroArt();
@@ -3069,7 +3233,7 @@ function scrambleLine(text, reveal, frame) {
   return out;
 }
 function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55, graphics = true }) {
-  const [frame, setFrame] = useState8(0);
+  const [frame, setFrame] = useState9(0);
   const renderer2 = useRenderer2();
   const doneRef = useRef5(onDone);
   doneRef.current = onDone;
@@ -3085,7 +3249,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
   } catch {
     heroAsset = false;
   }
-  const [heroFailed, setHeroFailed] = useState8(false);
+  const [heroFailed, setHeroFailed] = useState9(false);
   const artFit = !imageAllowed || heroFailed ? artSize(width, height, lines.length + 3) : { cols: 0, rows: 0 };
   const showArt = artFit.cols >= 24 && artFit.rows >= 8;
   const showWordmark = !showArt && (!heroAsset || heroFailed);
@@ -3161,7 +3325,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
       if (placed) withPausedRenderer(() => (0, import_kitty_graphics2.deleteImage)(placed.id));
     };
   }, [graphics, renderer2, width, height, lines.length]);
-  return /* @__PURE__ */ jsxs11(
+  return /* @__PURE__ */ jsxs13(
     "box",
     {
       style: {
@@ -3173,8 +3337,8 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
         overflow: "hidden"
       },
       children: [
-        /* @__PURE__ */ jsx11(MatrixRain, { width, height, frame }),
-        showArt ? /* @__PURE__ */ jsx11(
+        /* @__PURE__ */ jsx13(MatrixRain, { width, height, frame }),
+        showArt ? /* @__PURE__ */ jsx13(
           HeroBackdrop,
           {
             cols: artFit.cols,
@@ -3184,7 +3348,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
             top: Math.max(0, Math.floor((height - artFit.rows) / 2))
           }
         ) : null,
-        /* @__PURE__ */ jsxs11(
+        /* @__PURE__ */ jsxs13(
           "box",
           {
             style: {
@@ -3198,12 +3362,12 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
               alignItems: "center"
             },
             children: [
-              showWordmark && width >= HERO_W && height >= 14 ? /* @__PURE__ */ jsxs11(Fragment7, { children: [
-                HERO_WORDMARK.map((row, i) => /* @__PURE__ */ jsx11("box", { style: { flexDirection: "row", flexShrink: 0 }, children: /* @__PURE__ */ jsx11("text", { fg: HERO_GREEN, attributes: TextAttributes7.BOLD, children: row }) }, `hero:${i}`)),
-                /* @__PURE__ */ jsx11("box", { style: { height: 1, flexShrink: 0 } })
+              showWordmark && width >= HERO_W && height >= 14 ? /* @__PURE__ */ jsxs13(Fragment7, { children: [
+                HERO_WORDMARK.map((row, i) => /* @__PURE__ */ jsx13("box", { style: { flexDirection: "row", flexShrink: 0 }, children: /* @__PURE__ */ jsx13("text", { fg: HERO_GREEN, attributes: TextAttributes9.BOLD, children: row }) }, `hero:${i}`)),
+                /* @__PURE__ */ jsx13("box", { style: { height: 1, flexShrink: 0 } })
               ] }) : null,
-              lines.map((line, i) => /* @__PURE__ */ jsx11("box", { style: { flexDirection: "row", flexShrink: 0 }, children: /* @__PURE__ */ jsx11("text", { fg: line.color || "gray", attributes: line.bold ? TextAttributes7.BOLD : 0, children: scrambleLine(line.text, reveal, frame + i) }) }, `d:${i}`)),
-              /* @__PURE__ */ jsx11("box", { style: { flexDirection: "row", flexShrink: 0 }, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: done ? " " : scrambleLine("\u259A\u259A\u259A\u259A\u259A\u259A\u259A\u259A", frame, frame) }) })
+              lines.map((line, i) => /* @__PURE__ */ jsx13("box", { style: { flexDirection: "row", flexShrink: 0 }, children: /* @__PURE__ */ jsx13("text", { fg: line.color || "gray", attributes: line.bold ? TextAttributes9.BOLD : 0, children: scrambleLine(line.text, reveal, frame + i) }) }, `d:${i}`)),
+              /* @__PURE__ */ jsx13("box", { style: { flexDirection: "row", flexShrink: 0 }, children: /* @__PURE__ */ jsx13("text", { fg: "gray", children: done ? " " : scrambleLine("\u259A\u259A\u259A\u259A\u259A\u259A\u259A\u259A", frame, frame) }) })
             ]
           }
         )
@@ -3213,9 +3377,9 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
 }
 
 // src/components/MenuPalette.jsx
-import React12 from "react";
-import { TextAttributes as TextAttributes8 } from "@opentui/core";
-import { jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
+import React14 from "react";
+import { TextAttributes as TextAttributes10 } from "@opentui/core";
+import { jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
 var MENU_ITEMS = [
   { cmd: "/model", label: "Models", detail: "switch the model for this session" },
   { cmd: "/auto", label: "Autonomy", detail: "ask \xB7 edit \xB7 full \u2014 how far it runs alone" },
@@ -3232,6 +3396,7 @@ var MENU_ITEMS = [
   { cmd: "/debug", label: "Debugger", detail: "render times \xB7 event-loop lag \xB7 tools \xB7 server build" },
   { cmd: "/update", label: "Update", detail: "check \xB7 downloads in-session \xB7 applies on restart" },
   { cmd: "/settings", label: "Settings", detail: "every CLI setting \xB7 change it in place" },
+  { cmd: "/danger", label: "Approval password", detail: "set the password dangerous commands ask for \xB7 typed hidden" },
   { cmd: "/graphics", label: "Kitty graphics", detail: "real logo image in kitty/Ghostty/WezTerm \xB7 report or on/off" },
   { cmd: "/clear", label: "Clear transcript", detail: "start the conversation over" },
   { cmd: "/help", label: "Help", detail: "keys and commands" },
@@ -3239,9 +3404,9 @@ var MENU_ITEMS = [
 ];
 
 // src/components/CatalogPopout.jsx
-import React13 from "react";
-import { TextAttributes as TextAttributes9 } from "@opentui/core";
-import { jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
+import React15 from "react";
+import { TextAttributes as TextAttributes11 } from "@opentui/core";
+import { jsx as jsx15, jsxs as jsxs15 } from "react/jsx-runtime";
 var clip2 = (s, n) => {
   const t = String(s == null ? "" : s);
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
@@ -3264,7 +3429,9 @@ function CatalogPopout({
   const w = Math.max(24, Number(width) || 72);
   const inner = Math.max(1, w - 4);
   const h = Math.max(6, Number(height) || 20);
-  const bodyRows = Math.max(3, h - 5);
+  const heroRows = heroRowCount(inner);
+  const showHero = h >= heroRows + 9;
+  const bodyRows = Math.max(3, h - 5 - (showHero ? heroRows : 0));
   const selRow = selectable[Math.min(selected, selectable.length - 1)] ?? 0;
   const start2 = Math.max(0, Math.min(selRow - Math.floor(bodyRows / 2), Math.max(0, rows.length - bodyRows)));
   const shown2 = rows.slice(start2, start2 + bodyRows);
@@ -3273,23 +3440,24 @@ function CatalogPopout({
   const gutterOn = overflows(rows.length, bodyRows);
   const bodyW = Math.max(8, inner - (gutterOn ? 1 : 0));
   const compact = bodyW < 40;
-  return /* @__PURE__ */ jsxs13("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "cyan", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs13("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx13("text", { fg: "cyan", attributes: TextAttributes9.BOLD, children: "\u25C7 Catalog" }),
-      /* @__PURE__ */ jsx13("text", { fg: "gray", children: clip2(hiddenAbove || hiddenBelow ? `${hiddenAbove}\u2191 ${hiddenBelow}\u2193 \xB7 \u2191\u2193 \xB7 enter \xB7 esc` : "\u2191\u2193 select \xB7 enter apply \xB7 esc close", inner - 10) })
+  return /* @__PURE__ */ jsxs15("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "cyan", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
+    showHero ? /* @__PURE__ */ jsx15(HeroLogo, { width: inner }) : null,
+    /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx15("text", { fg: "cyan", attributes: TextAttributes11.BOLD, children: "\u25C7 Catalog" }),
+      /* @__PURE__ */ jsx15("text", { fg: "gray", children: clip2(hiddenAbove || hiddenBelow ? `${hiddenAbove}\u2191 ${hiddenBelow}\u2193 \xB7 \u2191\u2193 \xB7 enter \xB7 esc` : "\u2191\u2193 select \xB7 enter apply \xB7 esc close", inner - 10) })
     ] }),
-    /* @__PURE__ */ jsxs13("box", { style: { width: inner, flexDirection: "row" }, children: [
-      /* @__PURE__ */ jsx13("text", { fg: "yellow", children: "\u2315 " }),
-      /* @__PURE__ */ jsx13("text", { fg: "white", children: clip2(query, inner - 2) })
+    /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row" }, children: [
+      /* @__PURE__ */ jsx15("text", { fg: "yellow", children: "\u2315 " }),
+      /* @__PURE__ */ jsx15("text", { fg: "white", children: clip2(query, inner - 2) })
     ] }),
-    /* @__PURE__ */ jsxs13("box", { style: { width: inner, flexDirection: "column" }, children: [
-      shown2.length === 0 ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: clip2("no match \u2014 backspace to widen, esc to close", inner) }) : shown2.map((row, i) => {
+    /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "column" }, children: [
+      shown2.length === 0 ? /* @__PURE__ */ jsx15("text", { fg: "gray", children: clip2("no match \u2014 backspace to widen, esc to close", inner) }) : shown2.map((row, i) => {
         const abs = start2 + i;
         const gutter = gutterOn ? gutterChar(i, bodyRows, rows.length, start2) : null;
         if (row.kind === "header") {
-          return /* @__PURE__ */ jsxs13("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
-            /* @__PURE__ */ jsx13("text", { fg: "gray", attributes: TextAttributes9.BOLD, children: clip2(`\u2014 ${row.label} \u2014`, bodyW) }),
-            gutter ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: gutter }) : null
+          return /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
+            /* @__PURE__ */ jsx15("text", { fg: "gray", attributes: TextAttributes11.BOLD, children: clip2(`\u2014 ${row.label} \u2014`, bodyW) }),
+            gutter ? /* @__PURE__ */ jsx15("text", { fg: "gray", children: gutter }) : null
           ] }, `h:${row.label}`);
         }
         const isSel = abs === selRow;
@@ -3297,25 +3465,25 @@ function CatalogPopout({
         const detail = compact ? "" : String(row.detail || "");
         const valueW = detail ? Math.min(detail.length, Math.max(0, Math.floor(bodyW / 2))) : 0;
         const labelW = Math.max(8, bodyW - (valueW ? valueW + 1 : 0));
-        return /* @__PURE__ */ jsxs13("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx13("text", { fg: isSel ? "yellow" : color, attributes: isSel ? TextAttributes9.BOLD : 0, children: clip2(`${isSel ? "\u25B8 " : "  "}${row.label}`, labelW) }),
-          valueW ? /* @__PURE__ */ jsx13("text", { fg: isSel ? "white" : "gray", children: ` ${clip2(detail, valueW)}` }) : null,
-          gutter ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: gutter }) : null
+        return /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
+          /* @__PURE__ */ jsx15("text", { fg: isSel ? "yellow" : color, attributes: isSel ? TextAttributes11.BOLD : 0, children: clip2(`${isSel ? "\u25B8 " : "  "}${row.label}`, labelW) }),
+          valueW ? /* @__PURE__ */ jsx15("text", { fg: isSel ? "white" : "gray", children: ` ${clip2(detail, valueW)}` }) : null,
+          gutter ? /* @__PURE__ */ jsx15("text", { fg: "gray", children: gutter }) : null
         ] }, `${row.kind}:${row.label}`);
       }),
-      Array.from({ length: Math.max(0, bodyRows - Math.max(1, shown2.length)) }, (_, i) => /* @__PURE__ */ jsx13("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx13("text", { children: " " }) }, `pad:${i}`))
+      Array.from({ length: Math.max(0, bodyRows - Math.max(1, shown2.length)) }, (_, i) => /* @__PURE__ */ jsx15("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx15("text", { children: " " }) }, `pad:${i}`))
     ] }),
-    /* @__PURE__ */ jsx13("box", { style: { width: inner, flexDirection: "row" }, children: /* @__PURE__ */ jsx13("text", { fg: "gray", children: clip2(filter || "type to filter \xB7 a model row switches this session \xB7 esc closes", inner) }) })
+    /* @__PURE__ */ jsx15("box", { style: { width: inner, flexDirection: "row" }, children: /* @__PURE__ */ jsx15("text", { fg: "gray", children: clip2(filter || "type to filter \xB7 a model row switches this session \xB7 esc closes", inner) }) })
   ] });
 }
 
 // src/components/SettingsView.jsx
-import React15 from "react";
-import { TextAttributes as TextAttributes10 } from "@opentui/core";
+import React17 from "react";
+import { TextAttributes as TextAttributes12 } from "@opentui/core";
 
 // src/components/ScrollPanel.jsx
-import React14 from "react";
-import { jsx as jsx14 } from "react/jsx-runtime";
+import React16 from "react";
+import { jsx as jsx16 } from "react/jsx-runtime";
 function ScrollPanel({
   width = 40,
   title = "",
@@ -3350,17 +3518,17 @@ function ScrollPanel({
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
   const compact = compactWhen == null ? bodyW < 24 || r < 5 : !!compactWhen;
   const titleHint = n === 0 ? busy ? "waiting" : hint : overflows(n, r) ? state.hint(hint) : hint || String(n);
-  return /* @__PURE__ */ jsx14(Panel, { width: w, title, hint: titleHint, borderColor, children: n === 0 || r === 0 ? /* @__PURE__ */ jsx14("box", { style: { width: inner }, children: /* @__PURE__ */ jsx14("text", { fg: "gray", children: clip(busy ? "waiting\u2026" : empty, inner) }) }) : Array.from({ length: r }, (_, i) => {
+  return /* @__PURE__ */ jsx16(Panel, { width: w, title, hint: titleHint, borderColor, children: n === 0 || r === 0 ? /* @__PURE__ */ jsx16("box", { style: { width: inner }, children: /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip(busy ? "waiting\u2026" : empty, inner) }) }) : Array.from({ length: r }, (_, i) => {
     const index = state.start + i;
     const row = index < n ? children(index, { width: bodyW, compact, selected: index === selected }) : null;
-    return /* @__PURE__ */ jsx14(ScrollRow, { width: inner, gutter: gutterOn ? state.gutter(i) : null, children: row == null ? /* @__PURE__ */ jsx14("box", { style: { width: bodyW }, children: /* @__PURE__ */ jsx14("text", { children: " " }) }) : row }, `row-${i}`);
+    return /* @__PURE__ */ jsx16(ScrollRow, { width: inner, gutter: gutterOn ? state.gutter(i) : null, children: row == null ? /* @__PURE__ */ jsx16("box", { style: { width: bodyW }, children: /* @__PURE__ */ jsx16("text", { children: " " }) }) : row }, `row-${i}`);
   }) });
 }
 var ScrollPanel_default = ScrollPanel;
 
 // src/components/SettingsView.jsx
 var import_prefs = __toESM(require_prefs());
-import { jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
+import { jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
 var clip3 = (s, n) => {
   const t = String(s == null ? "" : s);
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
@@ -3381,7 +3549,7 @@ function SettingsView({
   const contentRows = Math.max(3, Number(rows) || 16);
   const keyW = Math.min(14, Math.max(8, ...list.map((r) => String(r.key).length)));
   const changed = list.filter((r) => String(r.value) !== String(r.default)).length;
-  return /* @__PURE__ */ jsx15(
+  return /* @__PURE__ */ jsx17(
     ScrollPanel_default,
     {
       width: w,
@@ -3402,11 +3570,11 @@ function SettingsView({
         const value = showValue(row.value);
         const valueW = Math.min(12, Math.max(3, value.length));
         const detailW = Math.max(0, rowW - keyW - valueW - 6);
-        return /* @__PURE__ */ jsxs14("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx15("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes10.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clip3(String(row.key).padEnd(keyW), keyW)}` }),
-          /* @__PURE__ */ jsx15("text", { fg: active ? "yellow" : valueColor(row.value), attributes: isChanged ? TextAttributes10.BOLD : 0, children: ` ${clip3(value, valueW).padEnd(valueW)}` }),
-          /* @__PURE__ */ jsx15("text", { fg: isChanged ? "yellow" : "gray", children: isChanged ? "*" : " " }),
-          !compact && detailW > 3 ? /* @__PURE__ */ jsx15("text", { fg: "gray", children: ` ${clip3(meta.detail || meta.label || "", detailW - 1)}` }) : null
+        return /* @__PURE__ */ jsxs16("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
+          /* @__PURE__ */ jsx17("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes12.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clip3(String(row.key).padEnd(keyW), keyW)}` }),
+          /* @__PURE__ */ jsx17("text", { fg: active ? "yellow" : valueColor(row.value), attributes: isChanged ? TextAttributes12.BOLD : 0, children: ` ${clip3(value, valueW).padEnd(valueW)}` }),
+          /* @__PURE__ */ jsx17("text", { fg: isChanged ? "yellow" : "gray", children: isChanged ? "*" : " " }),
+          !compact && detailW > 3 ? /* @__PURE__ */ jsx17("text", { fg: "gray", children: ` ${clip3(meta.detail || meta.label || "", detailW - 1)}` }) : null
         ] });
       }
     }
@@ -3414,9 +3582,9 @@ function SettingsView({
 }
 
 // src/components/McpView.jsx
-import React16 from "react";
-import { TextAttributes as TextAttributes11 } from "@opentui/core";
-import { Fragment as Fragment8, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
+import React18 from "react";
+import { TextAttributes as TextAttributes13 } from "@opentui/core";
+import { Fragment as Fragment8, jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
 var clip4 = (s, n) => {
   const t = String(s == null ? "" : s);
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
@@ -3455,12 +3623,12 @@ function McpView({
   const active = servers[sel];
   const toolRows = Math.max(0, body - listRows - 1);
   const toolLines = active ? wrap(Array.isArray(active.tools) && active.tools.length ? active.tools : ["(no tools listed)"], inner - 2) : [];
-  return /* @__PURE__ */ jsxs15("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "blue", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx16("text", { fg: "blue", attributes: TextAttributes11.BOLD, children: "\u25CE MCP servers" }),
-      /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4(`${live}/${servers.length} live \xB7 ${tools} tools${servers.length > listRows ? ` \xB7 ${start2}\u2191 ${Math.max(0, servers.length - start2 - shown2.length)}\u2193` : ""}`, inner - 14) })
+  return /* @__PURE__ */ jsxs17("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "blue", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs17("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx18("text", { fg: "blue", attributes: TextAttributes13.BOLD, children: "\u25CE MCP servers" }),
+      /* @__PURE__ */ jsx18("text", { fg: "gray", children: clip4(`${live}/${servers.length} live \xB7 ${tools} tools${servers.length > listRows ? ` \xB7 ${start2}\u2191 ${Math.max(0, servers.length - start2 - shown2.length)}\u2193` : ""}`, inner - 14) })
     ] }),
-    /* @__PURE__ */ jsx16("box", { style: { width: inner, flexDirection: "column" }, children: shown2.length === 0 ? /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4("no servers reported \u2014 is the server reachable?", inner) }) : shown2.map((s, i) => {
+    /* @__PURE__ */ jsx18("box", { style: { width: inner, flexDirection: "column" }, children: shown2.length === 0 ? /* @__PURE__ */ jsx18("text", { fg: "gray", children: clip4("no servers reported \u2014 is the server reachable?", inner) }) : shown2.map((s, i) => {
       const abs = start2 + i;
       const isSel = abs === sel;
       const up = s.initialized || (Number(s.toolCount) || 0) > 0;
@@ -3471,31 +3639,31 @@ function McpView({
         s.initialized === false ? "down" : "",
         s.pid ? `pid ${s.pid}` : ""
       ].filter(Boolean).join(" \xB7 ");
-      return /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
-        /* @__PURE__ */ jsx16("text", { fg: isSel ? "yellow" : up ? "green" : "red", attributes: isSel ? TextAttributes11.BOLD : 0, children: `${isSel ? "\u25B8 " : "  "}${up ? "\u25CF" : "\u25CB"} ${clip4(s.name, Math.max(8, Math.floor(inner / 2)))}` }),
-        /* @__PURE__ */ jsx16("text", { fg: isSel ? "white" : "gray", children: ` ${clip4(notes, Math.max(4, inner - Math.floor(inner / 2) - 5))}` })
+      return /* @__PURE__ */ jsxs17("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
+        /* @__PURE__ */ jsx18("text", { fg: isSel ? "yellow" : up ? "green" : "red", attributes: isSel ? TextAttributes13.BOLD : 0, children: `${isSel ? "\u25B8 " : "  "}${up ? "\u25CF" : "\u25CB"} ${clip4(s.name, Math.max(8, Math.floor(inner / 2)))}` }),
+        /* @__PURE__ */ jsx18("text", { fg: isSel ? "white" : "gray", children: ` ${clip4(notes, Math.max(4, inner - Math.floor(inner / 2) - 5))}` })
       ] }, `s:${s.name}`);
     }) }),
-    toolRows > 0 ? /* @__PURE__ */ jsxs15(Fragment8, { children: [
-      /* @__PURE__ */ jsx16("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx16("text", { fg: "gray", attributes: TextAttributes11.BOLD, children: clip4(`\u2014 tools \xB7 ${active ? active.name : "\u2014"} \u2014`, inner) }) }),
-      /* @__PURE__ */ jsx16("box", { style: { width: inner, flexDirection: "column" }, children: (() => {
+    toolRows > 0 ? /* @__PURE__ */ jsxs17(Fragment8, { children: [
+      /* @__PURE__ */ jsx18("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx18("text", { fg: "gray", attributes: TextAttributes13.BOLD, children: clip4(`\u2014 tools \xB7 ${active ? active.name : "\u2014"} \u2014`, inner) }) }),
+      /* @__PURE__ */ jsx18("box", { style: { width: inner, flexDirection: "column" }, children: (() => {
         const overflow = toolLines.length > toolRows;
         const visible = overflow ? toolLines.slice(0, Math.max(0, toolRows - 1)) : toolLines.slice(0, toolRows);
         const pad = Math.max(0, toolRows - visible.length - (overflow ? 1 : 0));
-        return /* @__PURE__ */ jsxs15(Fragment8, { children: [
-          visible.map((line, i) => /* @__PURE__ */ jsx16("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx16("text", { fg: "white", children: clip4(`  ${line}`, inner) }) }, `t:${i}`)),
-          overflow ? /* @__PURE__ */ jsx16("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4(`  \u2026 ${toolLines.length - visible.length} more tool rows`, inner) }) }) : null,
-          Array.from({ length: pad }, (_, i) => /* @__PURE__ */ jsx16("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx16("text", { children: " " }) }, `tp:${i}`))
+        return /* @__PURE__ */ jsxs17(Fragment8, { children: [
+          visible.map((line, i) => /* @__PURE__ */ jsx18("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx18("text", { fg: "white", children: clip4(`  ${line}`, inner) }) }, `t:${i}`)),
+          overflow ? /* @__PURE__ */ jsx18("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx18("text", { fg: "gray", children: clip4(`  \u2026 ${toolLines.length - visible.length} more tool rows`, inner) }) }) : null,
+          Array.from({ length: pad }, (_, i) => /* @__PURE__ */ jsx18("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx18("text", { children: " " }) }, `tp:${i}`))
         ] });
       })() })
     ] }) : null,
-    /* @__PURE__ */ jsx16("box", { style: { width: inner }, children: /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4("\u2191\u2193 select \xB7 r re-read \xB7 esc back \xB7 servers come from .hakster/mcp.json", inner) }) })
+    /* @__PURE__ */ jsx18("box", { style: { width: inner }, children: /* @__PURE__ */ jsx18("text", { fg: "gray", children: clip4("\u2191\u2193 select \xB7 r re-read \xB7 esc back \xB7 servers come from .hakster/mcp.json", inner) }) })
   ] });
 }
 
 // src/components/ScriptsView.jsx
-import React17, { useMemo as useMemo2 } from "react";
-import { TextAttributes as TextAttributes12 } from "@opentui/core";
+import React19, { useMemo as useMemo2 } from "react";
+import { TextAttributes as TextAttributes14 } from "@opentui/core";
 
 // src/utils/scripts.js
 import fs5 from "node:fs";
@@ -3611,7 +3779,7 @@ function diffLines(prev, next) {
 var linesOf = (entry) => sourceOf(entry);
 
 // src/components/ScriptsView.jsx
-import { jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
+import { jsx as jsx19, jsxs as jsxs18 } from "react/jsx-runtime";
 var STATUS_COLOR = {
   idle: "gray",
   running: "yellow",
@@ -3661,8 +3829,8 @@ function ScriptsView({
   const lines = Array.isArray(run.lines) ? run.lines : [];
   const wide = w >= 100;
   const halfW = Math.floor((w - 2) / 2);
-  return /* @__PURE__ */ jsxs16("box", { style: { width: w, height: h, flexDirection: "column", overflow: "hidden", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx17(
+  return /* @__PURE__ */ jsxs18("box", { style: { width: w, height: h, flexDirection: "column", overflow: "hidden", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx19(
       ScrollPanel_default,
       {
         width: w,
@@ -3679,19 +3847,19 @@ function ScriptsView({
           const active = index === selected;
           const isRunning = run.status === "running" && run.script && run.script.id === s.id;
           const tag = compact ? "" : `${s.tag} `;
-          return /* @__PURE__ */ jsxs16("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
-            /* @__PURE__ */ jsx17("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes12.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clipLine(`${tag}${s.label}`, Math.max(8, rowW - 12))}` }),
-            isRunning ? /* @__PURE__ */ jsx17("text", { fg: "yellow", children: " \u25CF running" }) : null
+          return /* @__PURE__ */ jsxs18("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
+            /* @__PURE__ */ jsx19("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes14.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clipLine(`${tag}${s.label}`, Math.max(8, rowW - 12))}` }),
+            isRunning ? /* @__PURE__ */ jsx19("text", { fg: "yellow", children: " \u25CF running" }) : null
           ] });
         }
       }
     ),
-    /* @__PURE__ */ jsxs16("box", { style: { width: w, height: 1, flexShrink: 0, flexDirection: "row" }, children: [
-      /* @__PURE__ */ jsx17("text", { fg: "#00ff41", attributes: TextAttributes12.BOLD, children: clipLine(`\u25C6 OMP SNAPSHOT \xB7 ${chosen ? chosen.label : "\u2014"}`, Math.max(8, w - 24)) }),
-      /* @__PURE__ */ jsx17("text", { fg: "gray", children: `  ${changed ? `${changed} changed` : "source"} \xB7 ours vs live` })
+    /* @__PURE__ */ jsxs18("box", { style: { width: w, height: 1, flexShrink: 0, flexDirection: "row" }, children: [
+      /* @__PURE__ */ jsx19("text", { fg: "#00ff41", attributes: TextAttributes14.BOLD, children: clipLine(`\u25C6 OMP SNAPSHOT \xB7 ${chosen ? chosen.label : "\u2014"}`, Math.max(8, w - 24)) }),
+      /* @__PURE__ */ jsx19("text", { fg: "gray", children: `  ${changed ? `${changed} changed` : "source"} \xB7 ours vs live` })
     ] }),
-    wide ? /* @__PURE__ */ jsxs16("box", { style: { width: w, flexDirection: "row", flexShrink: 0 }, children: [
-      /* @__PURE__ */ jsx17(
+    wide ? /* @__PURE__ */ jsxs18("box", { style: { width: w, flexDirection: "row", flexShrink: 0 }, children: [
+      /* @__PURE__ */ jsx19(
         ScrollPanel_default,
         {
           width: halfW,
@@ -3703,11 +3871,11 @@ function ScriptsView({
           initial: "follow",
           children: (index, { width: rowW }) => {
             const mark = diff[index]?.mark || "";
-            return /* @__PURE__ */ jsx17("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx17("text", { fg: mark === "+" ? "green" : mark === "-" ? "red" : "gray", children: clipLine(diffRows[index] || " ", rowW) }) });
+            return /* @__PURE__ */ jsx19("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx19("text", { fg: mark === "+" ? "green" : mark === "-" ? "red" : "gray", children: clipLine(diffRows[index] || " ", rowW) }) });
           }
         }
       ),
-      /* @__PURE__ */ jsx17(
+      /* @__PURE__ */ jsx19(
         ScrollPanel_default,
         {
           width: w - halfW,
@@ -3718,10 +3886,10 @@ function ScriptsView({
           borderColor: STATUS_COLOR[run.status] || "gray",
           initial: "follow",
           empty: run.status === "running" ? "waiting for output\u2026" : "not run yet \u2014 enter runs the selected script",
-          children: (index, { width: rowW }) => /* @__PURE__ */ jsx17("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx17("text", { fg: index === lines.length - 1 ? "white" : "gray", children: clipLine(lines[index] || " ", rowW) }) })
+          children: (index, { width: rowW }) => /* @__PURE__ */ jsx19("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx19("text", { fg: index === lines.length - 1 ? "white" : "gray", children: clipLine(lines[index] || " ", rowW) }) })
         }
       )
-    ] }) : /* @__PURE__ */ jsx17(
+    ] }) : /* @__PURE__ */ jsx19(
       ScrollPanel_default,
       {
         width: w,
@@ -3732,15 +3900,15 @@ function ScriptsView({
         borderColor: STATUS_COLOR[run.status] || "gray",
         initial: "follow",
         empty: run.status === "running" ? "waiting for output\u2026" : "not run yet \u2014 enter runs the selected script",
-        children: (index, { width: rowW }) => /* @__PURE__ */ jsx17("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx17("text", { fg: index === lines.length - 1 ? "white" : "gray", children: clipLine(lines[index] || " ", rowW) }) })
+        children: (index, { width: rowW }) => /* @__PURE__ */ jsx19("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx19("text", { fg: index === lines.length - 1 ? "white" : "gray", children: clipLine(lines[index] || " ", rowW) }) })
       }
     )
   ] });
 }
 
 // src/components/SquadView.jsx
-import React18 from "react";
-import { TextAttributes as TextAttributes13 } from "@opentui/core";
+import React20 from "react";
+import { TextAttributes as TextAttributes15 } from "@opentui/core";
 
 // src/utils/squad.js
 var PEER_PATTERN = /agent|squad|subagent|codex|kiro|phantom|hermes|claude-code|hivemind|miniforge|serena|stealth|bounty/i;
@@ -3760,7 +3928,7 @@ function peersFromMcp(mcp) {
 }
 
 // src/components/SquadView.jsx
-import { jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
+import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
 function SquadView({
   width = 80,
   height = 20,
@@ -3778,8 +3946,8 @@ function SquadView({
   const lazy = peers.filter((p) => p.state === "lazy").length;
   const DOT = { live: "\u25CF ", lazy: "\u25D0 ", down: "\u25CB " };
   const TINT = { live: "green", lazy: "cyan", down: "red" };
-  return /* @__PURE__ */ jsxs17("box", { style: { width: w, height: h, flexDirection: "column", overflow: "hidden", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx18(
+  return /* @__PURE__ */ jsxs19("box", { style: { width: w, height: h, flexDirection: "column", overflow: "hidden", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx20(
       ScrollPanel_default,
       {
         width: w,
@@ -3794,15 +3962,15 @@ function SquadView({
           const p = peers[index];
           if (!p) return null;
           const active = index === selected;
-          return /* @__PURE__ */ jsxs17("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
-            /* @__PURE__ */ jsx18("text", { fg: active ? "yellow" : TINT[p.state] || "red", attributes: active ? TextAttributes13.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${DOT[p.state] || "\u25CB "}` }),
-            /* @__PURE__ */ jsx18("text", { fg: active ? "yellow" : "white", children: p.name.padEnd(Math.min(16, Math.max(8, rowW - 16))) }),
-            /* @__PURE__ */ jsx18("text", { fg: "gray", children: `${p.tools.length} tools \xB7 ${p.state}` })
+          return /* @__PURE__ */ jsxs19("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
+            /* @__PURE__ */ jsx20("text", { fg: active ? "yellow" : TINT[p.state] || "red", attributes: active ? TextAttributes15.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${DOT[p.state] || "\u25CB "}` }),
+            /* @__PURE__ */ jsx20("text", { fg: active ? "yellow" : "white", children: p.name.padEnd(Math.min(16, Math.max(8, rowW - 16))) }),
+            /* @__PURE__ */ jsx20("text", { fg: "gray", children: `${p.tools.length} tools \xB7 ${p.state}` })
           ] });
         }
       }
     ),
-    /* @__PURE__ */ jsx18(
+    /* @__PURE__ */ jsx20(
       ScrollPanel_default,
       {
         width: w,
@@ -3816,7 +3984,7 @@ function SquadView({
         children: (index, { width: rowW, compact }) => {
           const tool = chosen && chosen.tools[index];
           if (!tool) return null;
-          return /* @__PURE__ */ jsx18("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx18("text", { fg: "white", children: compact ? tool : `mcp__${chosen.name}__${tool}` }) });
+          return /* @__PURE__ */ jsx20("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx20("text", { fg: "white", children: compact ? tool : `mcp__${chosen.name}__${tool}` }) });
         }
       }
     )
@@ -3824,8 +3992,8 @@ function SquadView({
 }
 
 // src/components/ServicesPanel.jsx
-import React19 from "react";
-import { TextAttributes as TextAttributes14 } from "@opentui/core";
+import React21 from "react";
+import { TextAttributes as TextAttributes16 } from "@opentui/core";
 
 // ../smartness.mjs
 import fs6 from "node:fs";
@@ -4036,7 +4204,7 @@ function portLabel(entry, max = 14) {
 }
 
 // src/components/ServicesPanel.jsx
-import { jsx as jsx19, jsxs as jsxs18 } from "react/jsx-runtime";
+import { jsx as jsx21, jsxs as jsxs20 } from "react/jsx-runtime";
 var CELL_W = 16;
 function servicesGridRows(width, count, dense = false) {
   const inner = Math.max(1, (Number(width) || 80) - 4);
@@ -4079,11 +4247,11 @@ function ServicesPanel({
     const leftover = Math.max(0, inner - head.length - used);
     const tails = !scanOk ? ["scan unavailable", "scan \u2026", "\u2026"] : hiddenSvc > 0 ? [`+${hiddenSvc}  +${others.length} ports`, `+${hiddenSvc}  +${others.length}`, `+${hiddenSvc + others.length}`] : others.length ? [`+${others.length} other ports`, `+${others.length} ports`, `+${others.length}`] : [];
     const tail = tails.find((t) => t.length <= leftover) || "";
-    return /* @__PURE__ */ jsx19("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: /* @__PURE__ */ jsxs18("text", { children: [
-      /* @__PURE__ */ jsx19("span", { fg: "cyan", attributes: TextAttributes14.BOLD, children: "Services " }),
-      /* @__PURE__ */ jsx19("span", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: `${up}/${list.length} online  ` }),
-      shown2.map((s) => /* @__PURE__ */ jsx19("span", { fg: s.up ? "green" : "red", children: s.text }, s.port)),
-      /* @__PURE__ */ jsx19("span", { fg: scanOk ? "gray" : "yellow", children: tail })
+    return /* @__PURE__ */ jsx21("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: /* @__PURE__ */ jsxs20("text", { children: [
+      /* @__PURE__ */ jsx21("span", { fg: "cyan", attributes: TextAttributes16.BOLD, children: "Services " }),
+      /* @__PURE__ */ jsx21("span", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: `${up}/${list.length} online  ` }),
+      shown2.map((s) => /* @__PURE__ */ jsx21("span", { fg: s.up ? "green" : "red", children: s.text }, s.port)),
+      /* @__PURE__ */ jsx21("span", { fg: scanOk ? "gray" : "yellow", children: tail })
     ] }) });
   }
   const cells = list.map((s) => ({
@@ -4115,7 +4283,7 @@ function ServicesPanel({
   const overflow = cells.length - capacity;
   const shownCells = overflow > 0 ? cells.slice(0, capacity - 1) : cells;
   const hiddenCells = cells.length - shownCells.length;
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs20(
     GridPanel_default,
     {
       title: "\u25A3 Services on ports",
@@ -4127,21 +4295,21 @@ function ServicesPanel({
         Math.max(6, w - 24)
       ),
       children: [
-        shownCells.map((c) => /* @__PURE__ */ jsx19(Cell, { label: c.label, value: c.value, w: CELL_W, color: c.color, dense }, c.key)),
-        hiddenCells > 0 ? /* @__PURE__ */ jsx19(Cell, { label: "more", value: `+${hiddenCells} cells`, w: CELL_W, color: "cyan", dense }, "__more") : null
+        shownCells.map((c) => /* @__PURE__ */ jsx21(Cell, { label: c.label, value: c.value, w: CELL_W, color: c.color, dense }, c.key)),
+        hiddenCells > 0 ? /* @__PURE__ */ jsx21(Cell, { label: "more", value: `+${hiddenCells} cells`, w: CELL_W, color: "cyan", dense }, "__more") : null
       ]
     }
   );
 }
 
 // src/components/StatusServicesPanel.jsx
-import React21 from "react";
-import { TextAttributes as TextAttributes16 } from "@opentui/core";
+import React23 from "react";
+import { TextAttributes as TextAttributes18 } from "@opentui/core";
 
 // src/components/SystemPanel.jsx
-import React20 from "react";
-import { TextAttributes as TextAttributes15 } from "@opentui/core";
-import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
+import React22 from "react";
+import { TextAttributes as TextAttributes17 } from "@opentui/core";
+import { jsx as jsx22, jsxs as jsxs21 } from "react/jsx-runtime";
 var clip6 = (s, n) => {
   const t = String(s == null ? "" : s);
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
@@ -4171,35 +4339,35 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   const compact = `\u{1F9E0} ${score}% ${arrow} ${smartLabel(score)}  \u2726 ${points}p${ptsArrow} autolearn  ctx ${ctxPct}%${hostShort}`;
   const terse = `\u{1F9E0} ${score}% \u2726 ${points}p${ptsArrow} ctx ${ctxPct}%${hostShort}`;
   if (fullLen <= w) {
-    return /* @__PURE__ */ jsx20("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs19("text", { children: [
-      /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), attributes: TextAttributes15.BOLD, children: "\u{1F9E0} " }),
-      /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), children: "\u2588".repeat(sc.filled) }),
-      /* @__PURE__ */ jsx20("span", { fg: "gray", children: "\u2591".repeat(sc.empty) }),
-      /* @__PURE__ */ jsx20("span", { fg: "white", attributes: TextAttributes15.BOLD, children: ` ${score}% ` }),
-      /* @__PURE__ */ jsx20("span", { fg: arrowColorFg, children: arrow }),
-      /* @__PURE__ */ jsx20("span", { fg: "gray", children: ` ${smartLabel(score)}` }),
-      /* @__PURE__ */ jsx20("span", { fg: "gray", children: "   " }),
-      /* @__PURE__ */ jsx20("span", { fg: barColor("points", points), attributes: TextAttributes15.BOLD, children: "\u2726 " }),
-      /* @__PURE__ */ jsx20("span", { fg: barColor("points", points), children: "\u2588".repeat(ac.filled) }),
-      /* @__PURE__ */ jsx20("span", { fg: "gray", children: "\u2591".repeat(ac.empty) }),
-      /* @__PURE__ */ jsx20("span", { fg: "white", attributes: TextAttributes15.BOLD, children: ` ${points}p` }),
-      /* @__PURE__ */ jsx20("span", { fg: ptsArrowColor, children: ptsArrow }),
-      /* @__PURE__ */ jsx20("span", { fg: "gray", children: " autolearn   " }),
-      /* @__PURE__ */ jsx20("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "ctx " }),
-      /* @__PURE__ */ jsx20("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "\u2588".repeat(cc.filled) }),
-      /* @__PURE__ */ jsx20("span", { fg: "gray", children: "\u2591".repeat(cc.empty) }),
-      /* @__PURE__ */ jsx20("span", { fg: "white", children: ` ${ctxPct}%` }),
-      hostTxt ? /* @__PURE__ */ jsx20("span", { fg: "gray", children: "   " }) : null,
-      hostTxt ? /* @__PURE__ */ jsx20("span", { fg: heat(cpuPct), children: `cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`}` }) : null,
-      hostTxt ? /* @__PURE__ */ jsx20("span", { fg: heat(memPct), children: `  ram ${memPct == null ? "\u2014" : `${memPct}%`}` }) : null,
-      hostTxt ? /* @__PURE__ */ jsx20("span", { fg: heat(swapPct), children: `  swap ${swapPct == null ? "\u2014" : `${swapPct}%`}` }) : null
+    return /* @__PURE__ */ jsx22("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs21("text", { children: [
+      /* @__PURE__ */ jsx22("span", { fg: barColor("smart", score), attributes: TextAttributes17.BOLD, children: "\u{1F9E0} " }),
+      /* @__PURE__ */ jsx22("span", { fg: barColor("smart", score), children: "\u2588".repeat(sc.filled) }),
+      /* @__PURE__ */ jsx22("span", { fg: "gray", children: "\u2591".repeat(sc.empty) }),
+      /* @__PURE__ */ jsx22("span", { fg: "white", attributes: TextAttributes17.BOLD, children: ` ${score}% ` }),
+      /* @__PURE__ */ jsx22("span", { fg: arrowColorFg, children: arrow }),
+      /* @__PURE__ */ jsx22("span", { fg: "gray", children: ` ${smartLabel(score)}` }),
+      /* @__PURE__ */ jsx22("span", { fg: "gray", children: "   " }),
+      /* @__PURE__ */ jsx22("span", { fg: barColor("points", points), attributes: TextAttributes17.BOLD, children: "\u2726 " }),
+      /* @__PURE__ */ jsx22("span", { fg: barColor("points", points), children: "\u2588".repeat(ac.filled) }),
+      /* @__PURE__ */ jsx22("span", { fg: "gray", children: "\u2591".repeat(ac.empty) }),
+      /* @__PURE__ */ jsx22("span", { fg: "white", attributes: TextAttributes17.BOLD, children: ` ${points}p` }),
+      /* @__PURE__ */ jsx22("span", { fg: ptsArrowColor, children: ptsArrow }),
+      /* @__PURE__ */ jsx22("span", { fg: "gray", children: " autolearn   " }),
+      /* @__PURE__ */ jsx22("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "ctx " }),
+      /* @__PURE__ */ jsx22("span", { fg: ctxPct > 85 ? "red" : ctxPct > 60 ? "yellow" : "green", children: "\u2588".repeat(cc.filled) }),
+      /* @__PURE__ */ jsx22("span", { fg: "gray", children: "\u2591".repeat(cc.empty) }),
+      /* @__PURE__ */ jsx22("span", { fg: "white", children: ` ${ctxPct}%` }),
+      hostTxt ? /* @__PURE__ */ jsx22("span", { fg: "gray", children: "   " }) : null,
+      hostTxt ? /* @__PURE__ */ jsx22("span", { fg: heat(cpuPct), children: `cpu ${cpuPct == null ? "\u2014" : `${cpuPct}%`}` }) : null,
+      hostTxt ? /* @__PURE__ */ jsx22("span", { fg: heat(memPct), children: `  ram ${memPct == null ? "\u2014" : `${memPct}%`}` }) : null,
+      hostTxt ? /* @__PURE__ */ jsx22("span", { fg: heat(swapPct), children: `  swap ${swapPct == null ? "\u2014" : `${swapPct}%`}` }) : null
     ] }) });
   }
-  return /* @__PURE__ */ jsx20("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx20("text", { children: /* @__PURE__ */ jsx20("span", { fg: barColor("smart", score), attributes: TextAttributes15.BOLD, children: clip6(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
+  return /* @__PURE__ */ jsx22("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx22("text", { children: /* @__PURE__ */ jsx22("span", { fg: barColor("smart", score), attributes: TextAttributes17.BOLD, children: clip6(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
 }
 
 // src/components/StatusServicesPanel.jsx
-import { jsx as jsx21, jsxs as jsxs20 } from "react/jsx-runtime";
+import { jsx as jsx23, jsxs as jsxs22 } from "react/jsx-runtime";
 var CELL_W2 = 16;
 function gridShape(width, n) {
   const inner = Math.max(1, (Number(width) || 80) - 4);
@@ -4265,25 +4433,25 @@ function StatusServicesPanel({
   const items = hidden > 0 ? [...shown2, { key: "__more", label: "more", value: `+${hidden}`, color: "cyan" }] : shown2;
   const rows = [];
   for (let i = 0; i < items.length; i += perRow) rows.push(items.slice(i, i + perRow));
-  return /* @__PURE__ */ jsxs20("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs20("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsxs20("text", { children: [
-        /* @__PURE__ */ jsx21("span", { fg: stateColor, attributes: TextAttributes16.BOLD, children: offline ? "\u25CB " : online ? "\u25CF " : "\u25CC " }),
-        /* @__PURE__ */ jsx21("span", { fg: "cyan", attributes: TextAttributes16.BOLD, children: "\u25C6 haksterAi" }),
-        /* @__PURE__ */ jsx21("span", { fg: stateColor, children: ` \xB7 ${stateTxt}` }),
-        showGuardHere ? /* @__PURE__ */ jsx21("span", { fg: guardBad ? "red" : "gray", children: `   ${guardTxt}` }) : null
+  return /* @__PURE__ */ jsxs22("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs22("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsxs22("text", { children: [
+        /* @__PURE__ */ jsx23("span", { fg: stateColor, attributes: TextAttributes18.BOLD, children: offline ? "\u25CB " : online ? "\u25CF " : "\u25CC " }),
+        /* @__PURE__ */ jsx23("span", { fg: "cyan", attributes: TextAttributes18.BOLD, children: "\u25C6 haksterAi" }),
+        /* @__PURE__ */ jsx23("span", { fg: stateColor, children: ` \xB7 ${stateTxt}` }),
+        showGuardHere ? /* @__PURE__ */ jsx23("span", { fg: guardBad ? "red" : "gray", children: `   ${guardTxt}` }) : null
       ] }),
-      rightText ? /* @__PURE__ */ jsx21("text", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: rightText }) : null
+      rightText ? /* @__PURE__ */ jsx23("text", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: rightText }) : null
     ] }),
-    showMeters ? /* @__PURE__ */ jsx21(SystemPanel, { width: inner, meters, ctxUsed, ctxMax, host }) : null,
-    rows.map((row, i) => /* @__PURE__ */ jsx21("box", { style: { width: inner, flexDirection: "row" }, children: row.map((c) => /* @__PURE__ */ jsx21(Cell, { label: c.label, value: c.value, w: CELL_W2, color: c.color, dense }, c.key)) }, `r${i}`))
+    showMeters ? /* @__PURE__ */ jsx23(SystemPanel, { width: inner, meters, ctxUsed, ctxMax, host }) : null,
+    rows.map((row, i) => /* @__PURE__ */ jsx23("box", { style: { width: inner, flexDirection: "row" }, children: row.map((c) => /* @__PURE__ */ jsx23(Cell, { label: c.label, value: c.value, w: CELL_W2, color: c.color, dense }, c.key)) }, `r${i}`))
   ] });
 }
 
 // src/components/StatusBar.jsx
-import React22 from "react";
-import { TextAttributes as TextAttributes17 } from "@opentui/core";
-import { jsx as jsx22, jsxs as jsxs21 } from "react/jsx-runtime";
+import React24 from "react";
+import { TextAttributes as TextAttributes19 } from "@opentui/core";
+import { jsx as jsx24, jsxs as jsxs23 } from "react/jsx-runtime";
 var STATUS_STYLES = {
   idle: { text: "ready", color: "gray" },
   connecting: { text: "can't reach server\u2026", color: "yellow" },
@@ -4335,15 +4503,15 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
   if (shown2.length === 1 && shown2[0].text.length > avail) {
     shown2[0] = { ...shown2[0], text: `${shown2[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
   }
-  return /* @__PURE__ */ jsxs21("box", { style: { width: barW, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1, overflow: "hidden", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx22("text", { fg: "gray", children: `${leftText}${hintText}` }),
-    /* @__PURE__ */ jsx22("text", { children: shown2.map((seg, i) => /* @__PURE__ */ jsx22("span", { fg: seg.color, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) })
+  return /* @__PURE__ */ jsxs23("box", { style: { width: barW, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1, overflow: "hidden", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx24("text", { fg: "gray", children: `${leftText}${hintText}` }),
+    /* @__PURE__ */ jsx24("text", { children: shown2.map((seg, i) => /* @__PURE__ */ jsx24("span", { fg: seg.color, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) })
   ] });
 }
 
 // src/components/CrushStatus.jsx
-import React23, { useEffect as useEffect8, useState as useState9 } from "react";
-import { jsx as jsx23, jsxs as jsxs22 } from "react/jsx-runtime";
+import React25, { useEffect as useEffect8, useState as useState10 } from "react";
+import { jsx as jsx25, jsxs as jsxs24 } from "react/jsx-runtime";
 var SPINNER_MS = 300;
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
@@ -4362,7 +4530,7 @@ function formatElapsed2(ms) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
 }
 function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
-  const [frame, setFrame] = useState9(0);
+  const [frame, setFrame] = useState10(0);
   useEffect8(() => {
     const timer = setInterval(() => setFrame((value) => value + 1), SPINNER_MS);
     return () => clearInterval(timer);
@@ -4374,27 +4542,27 @@ function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   const gradColor = `rgb(${grad},${Math.floor(grad * 0.7)},${Math.floor(grad * 1.2)})`;
   const phrase = activity || info.phrases[Math.floor(frame / 20) % info.phrases.length];
   const shimmer = [0, 1, 2].map((offset) => SHIMMER[(frame + offset) % SHIMMER.length]).join("");
-  return /* @__PURE__ */ jsx23("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs22("text", { children: [
-    /* @__PURE__ */ jsx23("span", { fg: gradColor, children: "\u27E6" }),
-    /* @__PURE__ */ jsx23("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
-    /* @__PURE__ */ jsx23("span", { fg: gradColor, children: "\u27E7" }),
+  return /* @__PURE__ */ jsx25("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs24("text", { children: [
+    /* @__PURE__ */ jsx25("span", { fg: gradColor, children: "\u27E6" }),
+    /* @__PURE__ */ jsx25("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
+    /* @__PURE__ */ jsx25("span", { fg: gradColor, children: "\u27E7" }),
     " ",
-    /* @__PURE__ */ jsx23("span", { children: info.emoji }),
+    /* @__PURE__ */ jsx25("span", { children: info.emoji }),
     " ",
-    /* @__PURE__ */ jsx23("span", { fg: info.color, children: normalizedPhase }),
+    /* @__PURE__ */ jsx25("span", { fg: info.color, children: normalizedPhase }),
     " ",
-    /* @__PURE__ */ jsx23("span", { fg: "#a5b4c3", children: phrase }),
+    /* @__PURE__ */ jsx25("span", { fg: "#a5b4c3", children: phrase }),
     " ",
-    /* @__PURE__ */ jsx23("span", { fg: gradColor, children: shimmer }),
+    /* @__PURE__ */ jsx25("span", { fg: gradColor, children: shimmer }),
     " ",
-    /* @__PURE__ */ jsx23("span", { fg: "gray", children: formatElapsed2(elapsedMs) }),
-    Number(queued) > 0 ? /* @__PURE__ */ jsx23("span", { fg: "#d29922", children: `  \u25CC ${Number(queued)} queued` }) : null
+    /* @__PURE__ */ jsx25("span", { fg: "gray", children: formatElapsed2(elapsedMs) }),
+    Number(queued) > 0 ? /* @__PURE__ */ jsx25("span", { fg: "#d29922", children: `  \u25CC ${Number(queued)} queued` }) : null
   ] }) });
 }
 
 // src/components/Recap.jsx
-import React24 from "react";
-import { jsx as jsx24 } from "react/jsx-runtime";
+import React26 from "react";
+import { jsx as jsx26 } from "react/jsx-runtime";
 function fmtCount(n) {
   const v = Math.max(0, Number(n) || 0);
   if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
@@ -4461,13 +4629,13 @@ function Recap({
   if (shown2.length === 1 && shown2[0].text.length > avail) {
     shown2[0] = { ...shown2[0], text: `${shown2[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
   }
-  return /* @__PURE__ */ jsx24("box", { style: { width: barW, flexDirection: "row", paddingLeft: 1, overflow: "hidden", flexShrink: 0 }, children: /* @__PURE__ */ jsx24("text", { children: shown2.map((seg, i) => /* @__PURE__ */ jsx24("span", { fg: seg.fg, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) }) });
+  return /* @__PURE__ */ jsx26("box", { style: { width: barW, flexDirection: "row", paddingLeft: 1, overflow: "hidden", flexShrink: 0 }, children: /* @__PURE__ */ jsx26("text", { children: shown2.map((seg, i) => /* @__PURE__ */ jsx26("span", { fg: seg.fg, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) }) });
 }
 
 // src/components/DebugView.jsx
-import React25 from "react";
-import { TextAttributes as TextAttributes18 } from "@opentui/core";
-import { jsx as jsx25, jsxs as jsxs23 } from "react/jsx-runtime";
+import React27 from "react";
+import { TextAttributes as TextAttributes20 } from "@opentui/core";
+import { jsx as jsx27, jsxs as jsxs25 } from "react/jsx-runtime";
 var clip7 = (s, n) => {
   const t = String(s == null ? "" : s);
   if (n <= 0) return "";
@@ -4496,15 +4664,15 @@ var fmtDur = (sec) => {
 var yesNo = (v) => v ? "yes" : "no";
 function Row3({ width, labelW, label, value, color = "white" }) {
   const valueW = Math.max(4, width - labelW - 4);
-  return /* @__PURE__ */ jsxs23("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx25("text", { fg: "gray", children: `  ${clip7(label, labelW).padEnd(labelW)} ` }),
-    /* @__PURE__ */ jsx25("text", { fg: color, children: clip7(value, valueW) })
+  return /* @__PURE__ */ jsxs25("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsx27("text", { fg: "gray", children: `  ${clip7(label, labelW).padEnd(labelW)} ` }),
+    /* @__PURE__ */ jsx27("text", { fg: color, children: clip7(value, valueW) })
   ] });
 }
 function Section({ width, title, hint }) {
-  return /* @__PURE__ */ jsxs23("box", { style: { width, flexDirection: "row", flexShrink: 0, justifyContent: "space-between" }, children: [
-    /* @__PURE__ */ jsx25("text", { fg: "cyan", attributes: TextAttributes18.BOLD, children: `\u25B8 ${title}` }),
-    hint ? /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip7(hint, Math.max(0, width - title.length - 8)) }) : null
+  return /* @__PURE__ */ jsxs25("box", { style: { width, flexDirection: "row", flexShrink: 0, justifyContent: "space-between" }, children: [
+    /* @__PURE__ */ jsx27("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: `\u25B8 ${title}` }),
+    hint ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip7(hint, Math.max(0, width - title.length - 8)) }) : null
   ] });
 }
 function slowestTools(messages, limit = 5) {
@@ -4534,45 +4702,45 @@ function DebugView({
   const lag = stats && stats.lag ? stats.lag : null;
   const proc = stats && stats.proc ? stats.proc : null;
   const srv = version && version.server ? version.server : null;
-  const tools = React25.useMemo(() => slowestTools(messages), [messages]);
+  const tools = React27.useMemo(() => slowestTools(messages), [messages]);
   const ctx = session.ctxPct == null ? "\u2014" : `${session.ctxPct}%`;
   const tokens = session.tokensKnown ? `${fmtNum2(session.inTok)} in / ${fmtNum2(session.outTok)} out` : "not reported";
   const auto = session.autoMode || "\u2014";
-  return /* @__PURE__ */ jsxs23("box", { style: { width: w, flexDirection: "column" }, children: [
-    /* @__PURE__ */ jsxs23("box", { style: { width: w, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx25("text", { fg: "cyan", attributes: TextAttributes18.BOLD, children: "\u25C7 Debugger" }),
-      /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip7(stats ? `live \xB7 ${Math.max(0, Math.round((Date.now() - stats.at) / 1e3))}s ago` : "sampling\u2026", Math.max(0, w - 12)) })
+  return /* @__PURE__ */ jsxs25("box", { style: { width: w, flexDirection: "column" }, children: [
+    /* @__PURE__ */ jsxs25("box", { style: { width: w, flexDirection: "row", justifyContent: "space-between" }, children: [
+      /* @__PURE__ */ jsx27("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: "\u25C7 Debugger" }),
+      /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip7(stats ? `live \xB7 ${Math.max(0, Math.round((Date.now() - stats.at) / 1e3))}s ago` : "sampling\u2026", Math.max(0, w - 12)) })
     ] }),
-    /* @__PURE__ */ jsx25("text", { fg: "gray", children: clip7('r reset counters \xB7 pgup/pgdn scroll \xB7 esc back \u2014 every figure is measured, "\u2014" means no sample yet', w - 2) }),
-    /* @__PURE__ */ jsx25(Section, { width: w, title: "RENDER", hint: render ? `${fmtNum2(render.total)} app renders` : "" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "rate", value: render && render.perSec != null ? `${render.perSec.toFixed(1)} / s` : "\u2014", color: render && render.perSec != null && render.perSec > 8 ? "yellow" : "white" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "last", value: fmtMs(render && render.last), color: render && render.last > 50 ? "red" : "white" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "p50 / p95", value: render ? `${fmtMs(render.p50)} / ${fmtMs(render.p95)}` : "\u2014", color: render && render.p95 > 50 ? "yellow" : "white" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "max", value: fmtMs(render && render.max), color: render && render.max > 120 ? "red" : "white" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "samples", value: render ? `${fmtNum2(render.samples)} renders in this window` : "\u2014" }),
-    /* @__PURE__ */ jsx25(Section, { width: w, title: "EVENT LOOP", hint: lag ? `${fmtNum2(lag.samples)} samples \xB7 50 ms timer` : "" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "lag p50", value: fmtMs(lag && lag.p50), color: lag && lag.p50 > 20 ? "yellow" : "white" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "lag p95", value: fmtMs(lag && lag.p95), color: lag && lag.p95 > 40 ? "yellow" : "white" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "lag max", value: fmtMs(lag && lag.max), color: lag && lag.max > 120 ? "red" : "white" }),
-    /* @__PURE__ */ jsx25(Section, { width: w, title: "PROCESS" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "pid", value: proc ? `${proc.pid} \xB7 up ${fmtDur(proc.uptimeSec)} (page open)` : "\u2014" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "rss / heap", value: proc ? `${fmtBytes(proc.rss)} \xB7 ${fmtBytes(proc.heapUsed)} of ${fmtBytes(proc.heapTotal)}` : "\u2014" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "handles", value: proc ? proc.handles == null ? "unavailable" : fmtNum2(proc.handles) : "\u2014" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "runtime", value: proc ? `node ${proc.node}${proc.bun ? ` \xB7 bun ${proc.bun}` : ""}` : "\u2014" }),
-    /* @__PURE__ */ jsx25(Section, { width: w, title: "TERMINAL" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "size", value: `${fmtNum2(terminal.cols)} x ${fmtNum2(terminal.rows)}` }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "graphics", value: terminal.graphics ? "kitty supported" : "none (half-block only)", color: terminal.graphics ? "green" : "gray" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "bundle", value: terminal.version ? `v${terminal.version}` : "\u2014" }),
-    /* @__PURE__ */ jsx25(Section, { width: w, title: "SESSION", hint: session.connected ? "server connected" : "server offline" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "view \xB7 phase", value: `${session.view || "chat"} \xB7 ${session.phase || "idle"}` }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "model", value: `${session.model || "\u2014"} \xB7 ${session.provider || "\u2014"}` }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "auto \xB7 handoff", value: `${auto}${session.handoff ? " \xB7 handoff on" : " \xB7 handoff off"}` }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "turns \xB7 tools", value: `${fmtNum2(session.turns)} turns \xB7 ${fmtNum2(session.tools)} calls (${fmtNum2(session.ok)} ok, ${fmtNum2(session.fail)} failed) \xB7 ${fmtNum2(session.web)} web` }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "tokens \xB7 ctx", value: `${tokens} \xB7 ctx ${ctx}`, color: session.tokensKnown ? "white" : "gray" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "files", value: session.guard ? `${session.guard.present}/${session.guard.total} guarded` : "\u2014" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "trust", value: session.trust == null ? "\u2014" : fmtNum2(session.trust) }),
-    /* @__PURE__ */ jsx25(Section, { width: w, title: "TOOLS", hint: tools.length ? "slowest calls this session" : "" }),
-    tools.length === 0 ? /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "none", value: "no timed tool calls yet", color: "gray" }) : tools.map((t, i) => /* @__PURE__ */ jsx25(
+    /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip7('r reset counters \xB7 pgup/pgdn scroll \xB7 esc back \u2014 every figure is measured, "\u2014" means no sample yet', w - 2) }),
+    /* @__PURE__ */ jsx27(Section, { width: w, title: "RENDER", hint: render ? `${fmtNum2(render.total)} app renders` : "" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "rate", value: render && render.perSec != null ? `${render.perSec.toFixed(1)} / s` : "\u2014", color: render && render.perSec != null && render.perSec > 8 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "last", value: fmtMs(render && render.last), color: render && render.last > 50 ? "red" : "white" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "p50 / p95", value: render ? `${fmtMs(render.p50)} / ${fmtMs(render.p95)}` : "\u2014", color: render && render.p95 > 50 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "max", value: fmtMs(render && render.max), color: render && render.max > 120 ? "red" : "white" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "samples", value: render ? `${fmtNum2(render.samples)} renders in this window` : "\u2014" }),
+    /* @__PURE__ */ jsx27(Section, { width: w, title: "EVENT LOOP", hint: lag ? `${fmtNum2(lag.samples)} samples \xB7 50 ms timer` : "" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "lag p50", value: fmtMs(lag && lag.p50), color: lag && lag.p50 > 20 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "lag p95", value: fmtMs(lag && lag.p95), color: lag && lag.p95 > 40 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "lag max", value: fmtMs(lag && lag.max), color: lag && lag.max > 120 ? "red" : "white" }),
+    /* @__PURE__ */ jsx27(Section, { width: w, title: "PROCESS" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "pid", value: proc ? `${proc.pid} \xB7 up ${fmtDur(proc.uptimeSec)} (page open)` : "\u2014" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "rss / heap", value: proc ? `${fmtBytes(proc.rss)} \xB7 ${fmtBytes(proc.heapUsed)} of ${fmtBytes(proc.heapTotal)}` : "\u2014" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "handles", value: proc ? proc.handles == null ? "unavailable" : fmtNum2(proc.handles) : "\u2014" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "runtime", value: proc ? `node ${proc.node}${proc.bun ? ` \xB7 bun ${proc.bun}` : ""}` : "\u2014" }),
+    /* @__PURE__ */ jsx27(Section, { width: w, title: "TERMINAL" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "size", value: `${fmtNum2(terminal.cols)} x ${fmtNum2(terminal.rows)}` }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "graphics", value: terminal.graphics ? "kitty supported" : "none (half-block only)", color: terminal.graphics ? "green" : "gray" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "bundle", value: terminal.version ? `v${terminal.version}` : "\u2014" }),
+    /* @__PURE__ */ jsx27(Section, { width: w, title: "SESSION", hint: session.connected ? "server connected" : "server offline" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "view \xB7 phase", value: `${session.view || "chat"} \xB7 ${session.phase || "idle"}` }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "model", value: `${session.model || "\u2014"} \xB7 ${session.provider || "\u2014"}` }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "auto \xB7 handoff", value: `${auto}${session.handoff ? " \xB7 handoff on" : " \xB7 handoff off"}` }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "turns \xB7 tools", value: `${fmtNum2(session.turns)} turns \xB7 ${fmtNum2(session.tools)} calls (${fmtNum2(session.ok)} ok, ${fmtNum2(session.fail)} failed) \xB7 ${fmtNum2(session.web)} web` }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "tokens \xB7 ctx", value: `${tokens} \xB7 ctx ${ctx}`, color: session.tokensKnown ? "white" : "gray" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "files", value: session.guard ? `${session.guard.present}/${session.guard.total} guarded` : "\u2014" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "trust", value: session.trust == null ? "\u2014" : fmtNum2(session.trust) }),
+    /* @__PURE__ */ jsx27(Section, { width: w, title: "TOOLS", hint: tools.length ? "slowest calls this session" : "" }),
+    tools.length === 0 ? /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "none", value: "no timed tool calls yet", color: "gray" }) : tools.map((t, i) => /* @__PURE__ */ jsx27(
       Row3,
       {
         width: w,
@@ -4583,11 +4751,11 @@ function DebugView({
       },
       `${t.name}-${i}`
     )),
-    /* @__PURE__ */ jsx25(Section, { width: w, title: "SERVER", hint: versionErr ? "" : version ? "live /api/version" : "" }),
-    versionErr ? /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "error", value: versionErr, color: "red" }) : null,
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "web build", value: version && version.build ? version.build : "\u2014" }),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "server build", value: srv && srv.build ? srv.build : "\u2014" }),
-    /* @__PURE__ */ jsx25(
+    /* @__PURE__ */ jsx27(Section, { width: w, title: "SERVER", hint: versionErr ? "" : version ? "live /api/version" : "" }),
+    versionErr ? /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "error", value: versionErr, color: "red" }) : null,
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "web build", value: version && version.build ? version.build : "\u2014" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "server build", value: srv && srv.build ? srv.build : "\u2014" }),
+    /* @__PURE__ */ jsx27(
       Row3,
       {
         width: w,
@@ -4597,7 +4765,7 @@ function DebugView({
         color: srv && srv.applying ? "yellow" : srv && srv.stale ? "yellow" : "white"
       }
     ),
-    /* @__PURE__ */ jsx25(
+    /* @__PURE__ */ jsx27(
       Row3,
       {
         width: w,
@@ -4607,15 +4775,15 @@ function DebugView({
         color: srv && srv.cliAttached ? "green" : "white"
       }
     ),
-    /* @__PURE__ */ jsx25(Row3, { width: w, labelW, label: "mcp", value: session.mcp ? `${fmtNum2(session.mcp.up)}/${fmtNum2(session.mcp.total)} servers up` : "\u2014" }),
-    /* @__PURE__ */ jsx25("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx25("text", { fg: "gray", children: " " }) })
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "mcp", value: session.mcp ? `${fmtNum2(session.mcp.up)}/${fmtNum2(session.mcp.total)} servers up` : "\u2014" }),
+    /* @__PURE__ */ jsx27("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx27("text", { fg: "gray", children: " " }) })
   ] });
 }
 
 // src/components/TodoPanel.jsx
-import React26 from "react";
-import { TextAttributes as TextAttributes19 } from "@opentui/core";
-import { jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
+import React28 from "react";
+import { TextAttributes as TextAttributes21 } from "@opentui/core";
+import { jsx as jsx28, jsxs as jsxs26 } from "react/jsx-runtime";
 var GLYPH_DONE = "\u2713";
 var GLYPH_TODO = "\u25CB";
 var EMPTY_TEXT = "No todos yet \u2014 the agent's checklist appears here once it creates one.";
@@ -4623,7 +4791,7 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   const list = Array.isArray(todos) ? todos : [];
   const completed = list.filter((t) => t && t.done).length;
   const title = width && width < 34 ? `Todos ${completed}/${list.length}` : `Todos \u2014 ${completed}/${list.length} completed`;
-  return /* @__PURE__ */ jsx26(
+  return /* @__PURE__ */ jsx28(
     ScrollPanel_default,
     {
       width,
@@ -4637,9 +4805,9 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
         const todo = list[index] || {};
         const done = !!todo.done;
         const text = clip(todo.text || "", Math.max(1, bodyW - 2));
-        return /* @__PURE__ */ jsxs24("box", { style: { width: bodyW, flexDirection: "row", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx26("text", { fg: done ? "green" : "gray", attributes: done || compact ? 0 : TextAttributes19.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
-          /* @__PURE__ */ jsx26("text", { fg: done ? "white" : "gray", children: ` ${text}` })
+        return /* @__PURE__ */ jsxs26("box", { style: { width: bodyW, flexDirection: "row", flexShrink: 0 }, children: [
+          /* @__PURE__ */ jsx28("text", { fg: done ? "green" : "gray", attributes: done || compact ? 0 : TextAttributes21.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
+          /* @__PURE__ */ jsx28("text", { fg: done ? "white" : "gray", children: ` ${text}` })
         ] });
       }
     }
@@ -4647,13 +4815,13 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
 }
 
 // src/components/Transcript.jsx
-import React28, { useEffect as useEffect10, useRef as useRef6, useState as useState11 } from "react";
-import { useKeyboard as useKeyboard6 } from "@opentui/react";
+import React30, { useEffect as useEffect10, useRef as useRef6, useState as useState12 } from "react";
+import { useKeyboard as useKeyboard7 } from "@opentui/react";
 
 // src/components/MessageBlock.jsx
-import React27, { useEffect as useEffect9, useState as useState10 } from "react";
-import { TextAttributes as TextAttributes20 } from "@opentui/core";
-import { Fragment as Fragment9, jsx as jsx27, jsxs as jsxs25 } from "react/jsx-runtime";
+import React29, { useEffect as useEffect9, useState as useState11 } from "react";
+import { TextAttributes as TextAttributes22 } from "@opentui/core";
+import { Fragment as Fragment9, jsx as jsx29, jsxs as jsxs27 } from "react/jsx-runtime";
 var RESULT_LINES = 3;
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
@@ -4675,26 +4843,26 @@ function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand,
   const ended = Number(endedAt) || 0;
   if (live) {
     const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
-    return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
-      label ? /* @__PURE__ */ jsxs25("text", { children: [
-        /* @__PURE__ */ jsx27("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
-        /* @__PURE__ */ jsx27("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur2(Date.now() - started)}` : ""}` })
+    return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
+      label ? /* @__PURE__ */ jsxs27("text", { children: [
+        /* @__PURE__ */ jsx29("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
+        /* @__PURE__ */ jsx29("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur2(Date.now() - started)}` : ""}` })
       ] }) : null,
-      window.lines.map((line, i) => /* @__PURE__ */ jsx27("text", { fg: "gray", children: line.trim() }, `th-${i}`))
+      window.lines.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "gray", children: line.trim() }, `th-${i}`))
     ] });
   }
   if (!expand) {
     const label2 = started && ended ? thoughtFor(ended - started) : lastLine(text);
-    return /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip(`\u22EF ${label2}`, Math.max(4, width)) });
+    return /* @__PURE__ */ jsx29("text", { fg: "gray", children: clip(`\u22EF ${label2}`, Math.max(4, width)) });
   }
-  return /* @__PURE__ */ jsx27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: String(text || "").replace(/\r/g, "").split("\n").filter((l) => l.trim()).map((line, i) => /* @__PURE__ */ jsx27("text", { fg: "gray", children: line.trim() }, `td-${i}`)) });
+  return /* @__PURE__ */ jsx29("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: String(text || "").replace(/\r/g, "").split("\n").filter((l) => l.trim()).map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "gray", children: line.trim() }, `td-${i}`)) });
 }
 function ProseBlock({ text, live, width, compact }) {
-  if (!live) return /* @__PURE__ */ jsx27("text", { fg: "white", children: String(text) });
+  if (!live) return /* @__PURE__ */ jsx29("text", { fg: "white", children: String(text) });
   const window = tailWindow(text, compact ? 3 : LIVE_TEXT_LINES);
-  return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
-    window.hidden ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: `\u22EF ${window.hidden} earlier line${window.hidden === 1 ? "" : "s"} (writing)` }) : null,
-    window.lines.map((line, i) => /* @__PURE__ */ jsx27("text", { fg: "white", children: line.trim() }, `pr-${i}`))
+  return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
+    window.hidden ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: `\u22EF ${window.hidden} earlier line${window.hidden === 1 ? "" : "s"} (writing)` }) : null,
+    window.lines.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "white", children: line.trim() }, `pr-${i}`))
   ] });
 }
 var SPINNER_FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
@@ -4720,7 +4888,7 @@ function fmtDur2(ms) {
   return n < 1e3 ? `${n}ms` : `${(n / 1e3).toFixed(1)}s`;
 }
 function useSpinnerFrame(active) {
-  const [frame, setFrame] = useState10(0);
+  const [frame, setFrame] = useState11(0);
   useEffect9(() => {
     if (!active) return void 0;
     const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), TOOL_SPINNER_MS);
@@ -4743,23 +4911,23 @@ function ToolRow({ tool, width, compact = false, outputLabel = "\u25B6 Output" }
   const limit = compact ? 1 : RESULT_LINES;
   const lines = shown2 ? shown2.slice(0, limit) : [];
   const hidden = shown2 ? Math.max(0, shown2.length - lines.length) : 0;
-  return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsxs25("text", { children: [
-      /* @__PURE__ */ jsxs25("span", { fg: colour, children: [
+  return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
+    /* @__PURE__ */ jsxs27("text", { children: [
+      /* @__PURE__ */ jsxs27("span", { fg: colour, children: [
         glyph,
         " "
       ] }),
-      /* @__PURE__ */ jsx27("span", { fg: "white", children: name }),
-      args ? /* @__PURE__ */ jsx27("span", { fg: "gray", children: ` ${clip(args, argW)}` }) : null,
-      dur ? /* @__PURE__ */ jsx27("span", { fg: "gray", children: `  ${dur}` }) : null
+      /* @__PURE__ */ jsx29("span", { fg: "white", children: name }),
+      args ? /* @__PURE__ */ jsx29("span", { fg: "gray", children: ` ${clip(args, argW)}` }) : null,
+      dur ? /* @__PURE__ */ jsx29("span", { fg: "gray", children: `  ${dur}` }) : null
     ] }),
-    lines.map((line, i) => /* @__PURE__ */ jsx27("text", { fg: failed ? "red" : "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
-    pending && !lines.length ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip("\u2502 waiting for output\u2026", Math.max(4, width)) }) : null,
+    lines.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: failed ? "red" : "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
+    pending && !lines.length ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: clip("\u2502 waiting for output\u2026", Math.max(4, width)) }) : null,
     hidden > 0 ? (
       // The pointer names the pane that actually holds the rest: the right
       // ◈ Live → ▶ Output on a wide terminal, the middle ▶ Result box on a
       // narrow one (owner, 2026-11-24: one live panel, on the right).
-      /* @__PURE__ */ jsx27("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 ${outputLabel}` })
+      /* @__PURE__ */ jsx29("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 ${outputLabel}` })
     ) : null
   ] });
 }
@@ -4769,22 +4937,22 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
   const inner = Math.max(8, (width || 80) - 4);
   if (message.role === "system") {
-    return /* @__PURE__ */ jsx27("box", { style: { width, flexShrink: 0, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx27("text", { fg: border, children: String(message.text || "") }) });
+    return /* @__PURE__ */ jsx29("box", { style: { width, flexShrink: 0, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx29("text", { fg: border, children: String(message.text || "") }) });
   }
   const tools = Array.isArray(message.tools) ? message.tools : [];
   const rounds = (Array.isArray(message.rounds) ? message.rounds : []).filter(
     (r) => r && (r.text && String(r.text).trim() || r.thinking && String(r.thinking).trim() || Array.isArray(r.tools) && r.tools.length)
   );
-  return /* @__PURE__ */ jsxs25("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
-    compact ? null : /* @__PURE__ */ jsx27("text", { fg: border, attributes: TextAttributes20.BOLD, children: roleStyle.label }),
-    message.images ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: `\u22B8 ${message.imageName || `${message.images} image`}` }) : null,
+  return /* @__PURE__ */ jsxs27("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
+    compact ? null : /* @__PURE__ */ jsx29("text", { fg: border, attributes: TextAttributes22.BOLD, children: roleStyle.label }),
+    message.images ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: `\u22B8 ${message.imageName || `${message.images} image`}` }) : null,
     rounds.length ? rounds.map((round, i) => {
       const tail = live && i === rounds.length - 1;
       const roundTools = Array.isArray(round.tools) ? round.tools : [];
       const proseLive = tail && roundTools.length === 0;
       const thinkLive = proseLive && String(round.thinking || "").trim() !== "" && String(round.text || "").trim() === "";
-      return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width: inner, flexShrink: 0 }, children: [
-        round.thinking && String(round.thinking).trim() ? /* @__PURE__ */ jsx27(
+      return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width: inner, flexShrink: 0 }, children: [
+        round.thinking && String(round.thinking).trim() ? /* @__PURE__ */ jsx29(
           ThinkingBlock,
           {
             text: round.thinking,
@@ -4797,11 +4965,11 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
             label: showLiveLabel
           }
         ) : null,
-        round.text && String(round.text).trim() ? /* @__PURE__ */ jsx27(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
-        roundTools.map((tool, j) => /* @__PURE__ */ jsx27(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}-${j}`))
+        round.text && String(round.text).trim() ? /* @__PURE__ */ jsx29(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
+        roundTools.map((tool, j) => /* @__PURE__ */ jsx29(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}-${j}`))
       ] }, `round-${i}`);
-    }) : /* @__PURE__ */ jsxs25(Fragment9, { children: [
-      message.thinking ? /* @__PURE__ */ jsx27(
+    }) : /* @__PURE__ */ jsxs27(Fragment9, { children: [
+      message.thinking ? /* @__PURE__ */ jsx29(
         ThinkingBlock,
         {
           text: message.thinking,
@@ -4814,20 +4982,20 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
           label: showLiveLabel
         }
       ) : null,
-      message.text ? /* @__PURE__ */ jsx27(ProseBlock, { text: message.text, live: live && !tools.length, width: inner, compact }) : !message.thinking && tools.length === 0 ? (
+      message.text ? /* @__PURE__ */ jsx29(ProseBlock, { text: message.text, live: live && !tools.length, width: inner, compact }) : !message.thinking && tools.length === 0 ? (
         // Same duplicate, one row lower: the plain "thinking…" under the
         // live spinner. Only drawn where the spinner row is absent.
-        showLiveLabel ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: "thinking\u2026" }) : null
+        showLiveLabel ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: "thinking\u2026" }) : null
       ) : null,
-      tools.map((tool, i) => /* @__PURE__ */ jsx27(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}`))
+      tools.map((tool, i) => /* @__PURE__ */ jsx29(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}`))
     ] })
   ] });
 }
-var MemoMessageBlock = React27.memo(MessageBlock);
+var MemoMessageBlock = React29.memo(MessageBlock);
 var MessageBlock_default = MemoMessageBlock;
 
 // src/components/Transcript.jsx
-import { jsx as jsx28, jsxs as jsxs26 } from "react/jsx-runtime";
+import { jsx as jsx30, jsxs as jsxs28 } from "react/jsx-runtime";
 var MAX_TURNS = 40;
 var SCROLLBAR_OPTIONS = {
   width: 1,
@@ -4856,7 +5024,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
   const boxRef = useRef6(null);
-  const [follow, setFollow] = useState11(true);
+  const [follow, setFollow] = useState12(true);
   const capped = list.slice(-MAX_TURNS);
   const hidden = list.length - capped.length;
   const listSig = `${capped.reduce((n, m) => n + turnWeight(m) + 7, 0)}:${capped.length}:${hidden}`;
@@ -4890,7 +5058,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
     const id = setInterval(pinToTail, 100);
     return () => clearInterval(id);
   }, [follow, live]);
-  useKeyboard6((key) => {
+  useKeyboard7((key) => {
     const box = boxRef.current;
     if (!box) return;
     const name = key.name;
@@ -4919,12 +5087,12 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
       // fresh start the composer floated up under a one-line hint with a big
       // blank gap beneath it instead of sitting at the bottom of the screen.
       // The hint is bottom-aligned so it hugs the composer row.
-      /* @__PURE__ */ jsx28("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden", flexDirection: "column", justifyContent: "flex-end" }, children: /* @__PURE__ */ jsx28("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) })
+      /* @__PURE__ */ jsx30("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden", flexDirection: "column", justifyContent: "flex-end" }, children: /* @__PURE__ */ jsx30("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) })
     );
   }
   const contentW = Math.max(8, (Number(width) || 80) - 1);
   const compact = budget < 12 || contentW < 40;
-  return /* @__PURE__ */ jsx28("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsxs26(
+  return /* @__PURE__ */ jsx30("box", { style: { width, height: budget, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsxs28(
     "scrollbox",
     {
       ref: setBox,
@@ -4939,8 +5107,8 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
       },
       scrollbarOptions: SCROLLBAR_OPTIONS,
       children: [
-        hidden > 0 ? /* @__PURE__ */ jsx28("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
-        /* @__PURE__ */ jsx28("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message, i) => /* @__PURE__ */ jsx28("box", { style: { marginBottom: compact ? 0 : 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx28(
+        hidden > 0 ? /* @__PURE__ */ jsx30("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
+        /* @__PURE__ */ jsx30("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message, i) => /* @__PURE__ */ jsx30("box", { style: { marginBottom: compact ? 0 : 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx30(
           MessageBlock_default,
           {
             message,
@@ -4956,11 +5124,11 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
     }
   ) });
 }
-var MemoTranscript = React28.memo(Transcript);
+var MemoTranscript = React30.memo(Transcript);
 var Transcript_default = MemoTranscript;
 
 // src/hooks/useAgentStream.js
-import { useCallback as useCallback3, useEffect as useEffect11, useRef as useRef7, useState as useState12 } from "react";
+import { useCallback as useCallback3, useEffect as useEffect11, useRef as useRef7, useState as useState13 } from "react";
 var import_ladder = __toESM(require_ladder());
 var DEFAULT_API2 = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
@@ -5048,7 +5216,7 @@ function useAgentStream({
   // turn so nothing typed is ever dropped (owner, 2026-11-24).
   onSteerUndelivered
 } = {}) {
-  const [messages, setMessages] = useState12([]);
+  const [messages, setMessages] = useState13([]);
   const messagesRef = useRef7([]);
   useEffect11(() => {
     messagesRef.current = messages;
@@ -5057,23 +5225,23 @@ function useAgentStream({
   useEffect11(() => {
     onSteerUndeliveredRef.current = onSteerUndelivered;
   }, [onSteerUndelivered]);
-  const [todos, setTodos] = useState12([]);
-  const [status, setStatus] = useState12("idle");
-  const [error, setError] = useState12(null);
-  const [elapsedMs, setElapsedMs] = useState12(0);
-  const [activity, setActivity] = useState12([]);
-  const [requests, setRequests] = useState12(0);
-  const [tokens, setTokens] = useState12({ in: 0, out: 0, reported: false });
+  const [todos, setTodos] = useState13([]);
+  const [status, setStatus] = useState13("idle");
+  const [error, setError] = useState13(null);
+  const [elapsedMs, setElapsedMs] = useState13(0);
+  const [activity, setActivity] = useState13([]);
+  const [requests, setRequests] = useState13(0);
+  const [tokens, setTokens] = useState13({ in: 0, out: 0, reported: false });
   const requestsRef = useRef7(0);
   const pushActivity = useCallback3((kind, text) => {
     const line = { kind: String(kind || "sys"), text: String(text == null ? "" : text), ts: Date.now() };
     setActivity((prev) => prev.length >= 60 ? [...prev.slice(prev.length - 59), line] : [...prev, line]);
   }, []);
-  const [pendingConfirm, setPendingConfirm] = useState12(null);
+  const [pendingConfirm, setPendingConfirm] = useState13(null);
   const pendingConfirmRef = useRef7(null);
   const meterRef = useRef7(null);
   if (!meterRef.current) meterRef.current = createMeter();
-  const [meters, setMeters] = useState12(() => meterRef.current.snapshot());
+  const [meters, setMeters] = useState13(() => meterRef.current.snapshot());
   const toolMetaRef = useRef7(/* @__PURE__ */ new Map());
   const lastToolRef = useRef7(null);
   const syncMeters = useCallback3(() => setMeters(meterRef.current.snapshot()), []);
@@ -5803,7 +5971,7 @@ function useServerWatch({ api, busy = false, onRecovered } = {}) {
 var useServerWatch_default = useServerWatch;
 
 // src/hooks/useHostStats.js
-import { useEffect as useEffect13, useRef as useRef9, useState as useState13 } from "react";
+import { useEffect as useEffect13, useRef as useRef9, useState as useState14 } from "react";
 import os4 from "node:os";
 import fs7 from "node:fs";
 var readText = (p) => {
@@ -5853,7 +6021,7 @@ var shown = (s) => [
   Math.floor((s.uptimeS || 0) / 60)
 ].join("|");
 function useHostStats(intervalMs = 1e3) {
-  const [stats, setStats] = useState13(null);
+  const [stats, setStats] = useState14(null);
   const prevRef = useRef9(null);
   const smoothRef = useRef9(null);
   const memRef = useRef9(null);
@@ -5922,7 +6090,7 @@ function useHostStats(intervalMs = 1e3) {
 }
 
 // src/hooks/useDebugStats.js
-import { useCallback as useCallback4, useEffect as useEffect14, useRef as useRef10, useState as useState14 } from "react";
+import { useCallback as useCallback4, useEffect as useEffect14, useRef as useRef10, useState as useState15 } from "react";
 import process2 from "node:process";
 
 // src/utils/debug-metrics.js
@@ -6018,9 +6186,9 @@ function processSnapshot(startedAtMs) {
   };
 }
 function useDebugStats({ enabled = false, api = "http://localhost:3579", refreshMs = 1e3 } = {}) {
-  const [snap, setSnap] = useState14(null);
-  const [version, setVersion] = useState14(null);
-  const [versionErr, setVersionErr] = useState14(null);
+  const [snap, setSnap] = useState15(null);
+  const [version, setVersion] = useState15(null);
+  const [versionErr, setVersionErr] = useState15(null);
   const openedAt = useRef10(Date.now());
   const sample = useCallback4(() => {
     setSnap({
@@ -6081,7 +6249,7 @@ function useDebugStats({ enabled = false, api = "http://localhost:3579", refresh
 }
 
 // src/hooks/useMemoryBank.js
-import { useEffect as useEffect15, useState as useState15 } from "react";
+import { useEffect as useEffect15, useState as useState16 } from "react";
 import fs8 from "node:fs";
 import os5 from "node:os";
 import path6 from "node:path";
@@ -6126,7 +6294,7 @@ function readMemoryBanks(dir = BANK_DIR) {
   return { banks, total, clusters: tagCounts.size, topTags, newest, sampledAt: Date.now() };
 }
 function useMemoryBank(intervalMs = 1e4) {
-  const [state, setState] = useState15(() => readMemoryBanks());
+  const [state, setState] = useState16(() => readMemoryBanks());
   useEffect15(() => {
     const tick = () => setState((prev) => readMemoryBanks() || prev);
     const id = setInterval(tick, intervalMs);
@@ -6142,7 +6310,7 @@ function useMemoryBank(intervalMs = 1e4) {
 // src/hooks/useCliUpdate.js
 var import_updater = __toESM(require_updater());
 var import_prefs2 = __toESM(require_prefs());
-import { useEffect as useEffect16, useRef as useRef11, useState as useState16 } from "react";
+import { useEffect as useEffect16, useRef as useRef11, useState as useState17 } from "react";
 import fs9 from "node:fs";
 import path7 from "node:path";
 function readStartup() {
@@ -6177,7 +6345,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
   const startup = useRef11(null);
   if (startup.current === null) startup.current = readStartup();
   const applied = startup.current.applied;
-  const [state, setState] = useState16(startup.current.status);
+  const [state, setState] = useState17(startup.current.status);
   const diskNewer = () => {
     try {
       if (!sessionVersion) return null;
@@ -6256,19 +6424,19 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
 }
 
 // src/hooks/useScriptRunner.js
-import { useCallback as useCallback5, useEffect as useEffect17, useRef as useRef12, useState as useState17 } from "react";
+import { useCallback as useCallback5, useEffect as useEffect17, useRef as useRef12, useState as useState18 } from "react";
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
 var TIMEOUT_MS = 12e4;
 function useScriptRunner() {
-  const [scripts] = useState17(() => {
+  const [scripts] = useState18(() => {
     try {
       return discoverScripts();
     } catch {
       return [];
     }
   });
-  const [run, setRun] = useState17({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
+  const [run, setRun] = useState18({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
   const procRef = useRef12(null);
   const timerRef = useRef12(null);
   const seq2 = useRef12(0);
@@ -6411,7 +6579,7 @@ var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
 var import_kitty_graphics3 = __toESM(require_kitty_graphics());
 var import_ad_client2 = __toESM(require_ad_client());
-import { Fragment as Fragment10, jsx as jsx29, jsxs as jsxs27 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx31, jsxs as jsxs29 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 6;
 var MCP_PANEL_SETTLE_MS = 8e3;
@@ -6503,51 +6671,52 @@ function App({ version = "0.1.0" }) {
   const renderT0 = noteRenderStart();
   const renderer2 = useRenderer3();
   const { width: cols, height: rows } = useTerminalDimensions();
-  React29.useLayoutEffect(() => {
+  React31.useLayoutEffect(() => {
     noteRenderEnd(renderT0);
   });
-  const [view, setView] = useState18("chat");
-  const [focus, setFocus] = useState18("composer");
-  const [adsOn, setAdsOn] = useState18(() => readPrefs().ads !== false);
-  const [dockExpanded, setDockExpanded] = useState18(false);
-  const [draft, setDraft] = useState18("");
-  const [inputHistory, setInputHistory] = useState18(() => (0, import_input_history.loadInputHistory)());
-  const [histIdx, setHistIdx] = useState18(-1);
+  const [view, setView] = useState19("chat");
+  const [focus, setFocus] = useState19("composer");
+  const [adsOn, setAdsOn] = useState19(() => readPrefs().ads !== false);
+  const [dockExpanded, setDockExpanded] = useState19(false);
+  const [draft, setDraft] = useState19("");
+  const [inputHistory, setInputHistory] = useState19(() => (0, import_input_history.loadInputHistory)());
+  const [histIdx, setHistIdx] = useState19(-1);
   const draftStash = useRef13("");
-  const [model, setModel] = useState18(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
-  const [provider, setProvider] = useState18(() => process.env.HAKSTER_PROVIDER || readPrefs().provider || "");
-  const [modelIdx, setModelIdx] = useState18(0);
+  const [model, setModel] = useState19(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
+  const [provider, setProvider] = useState19(() => process.env.HAKSTER_PROVIDER || readPrefs().provider || "");
+  const [modelIdx, setModelIdx] = useState19(0);
   const prefsRef = useRef13(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
-  const [handoffOn, setHandoffOn] = useState18(() => prefsRef.current.autoHandoff !== false);
-  const [autoMode, setAutoMode] = useState18(() => {
+  const [handoffOn, setHandoffOn] = useState19(() => prefsRef.current.autoHandoff !== false);
+  const [autoMode, setAutoMode] = useState19(() => {
     const saved = String(prefsRef.current.autoMode || "");
     return AUTO_MODES.has(saved) ? saved : "auto-edit";
   });
-  const [expandThinking, setExpandThinking] = useState18(() => prefsRef.current.thinkingExpanded === true);
-  const [usageRefresh, setUsageRefresh] = useState18(() => {
+  const [expandThinking, setExpandThinking] = useState19(() => prefsRef.current.thinkingExpanded === true);
+  const [usageRefresh, setUsageRefresh] = useState19(() => {
     const n = Number(prefsRef.current.usageRefresh);
     return Number.isFinite(n) && n >= 0 ? n : 15;
   });
-  const [introDone, setIntroDone] = useState18(() => process.env.HAKSTER_NO_INTRO === "1" || readPrefs().intro === false);
-  const [status, setStatus] = useState18(null);
-  const [statusErr, setStatusErr] = useState18(null);
-  const [mcp, setMcp] = useState18(null);
-  const [history, setHistory] = useState18([]);
-  const [menuOpen, setMenuOpen] = useState18(false);
-  const [scriptIdx, setScriptIdx] = useState18(0);
-  const [squadIdx, setSquadIdx] = useState18(0);
-  const [menuIndex, setMenuIndex] = useState18(0);
-  const [menuQuery, setMenuQuery] = useState18("");
-  const [settingsIdx, setSettingsIdx] = useState18(0);
-  const [mcpIdx, setMcpIdx] = useState18(0);
-  const [prefsTick, setPrefsTick] = useState18(0);
-  const [notice, setNotice] = useState18(null);
-  const [scan, setScan] = useState18({ ok: false, ports: [], procs: {}, at: 0 });
-  const [guard, setGuard] = useState18(null);
-  const [pointsHistory, setPointsHistory] = useState18([]);
-  const [attachment, setAttachment] = useState18(null);
-  const [steerQueue, setSteerQueue] = useState18([]);
+  const [introDone, setIntroDone] = useState19(() => process.env.HAKSTER_NO_INTRO === "1" || readPrefs().intro === false);
+  const [status, setStatus] = useState19(null);
+  const [statusErr, setStatusErr] = useState19(null);
+  const [mcp, setMcp] = useState19(null);
+  const [history, setHistory] = useState19([]);
+  const [menuOpen, setMenuOpen] = useState19(false);
+  const [dangerSetup, setDangerSetup] = useState19(false);
+  const [scriptIdx, setScriptIdx] = useState19(0);
+  const [squadIdx, setSquadIdx] = useState19(0);
+  const [menuIndex, setMenuIndex] = useState19(0);
+  const [menuQuery, setMenuQuery] = useState19("");
+  const [settingsIdx, setSettingsIdx] = useState19(0);
+  const [mcpIdx, setMcpIdx] = useState19(0);
+  const [prefsTick, setPrefsTick] = useState19(0);
+  const [notice, setNotice] = useState19(null);
+  const [scan, setScan] = useState19({ ok: false, ports: [], procs: {}, at: 0 });
+  const [guard, setGuard] = useState19(null);
+  const [pointsHistory, setPointsHistory] = useState19([]);
+  const [attachment, setAttachment] = useState19(null);
+  const [steerQueue, setSteerQueue] = useState19([]);
   const scrollRef = useRef13(null);
   const dashRef = useRef13(null);
   const usageRef = useRef13(null);
@@ -6663,7 +6832,7 @@ function App({ version = "0.1.0" }) {
   const ctxMax = import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
   const ctxUsed = Number(status && (status.tokens || status.contextUsed) || 0);
   const meters = agent.meters || null;
-  const lastAssistant = React29.useMemo(() => {
+  const lastAssistant = React31.useMemo(() => {
     for (let i = agent.messages.length - 1; i >= 0; i--) {
       if (agent.messages[i].role === "assistant") return agent.messages[i];
     }
@@ -6672,19 +6841,19 @@ function App({ version = "0.1.0" }) {
   const lastTool = lastAssistant && Array.isArray(lastAssistant.tools) && lastAssistant.tools.length ? lastAssistant.tools[lastAssistant.tools.length - 1] : null;
   const liveToolTxt = lastTool ? `${lastTool.name}${toolArgLine(lastTool.args)}` : "";
   const livePhase = !agent.busy ? "result" : lastAssistant && String(lastAssistant.text || "").trim() ? "writing" : lastAssistant && String(lastAssistant.thinking || "").trim() ? "thinking" : lastTool && lastTool.result == null ? "running" : "waiting";
-  const liveLines = React29.useMemo(() => {
+  const liveLines = React31.useMemo(() => {
     if (!lastAssistant) return [];
     const toLines = (v) => String(v == null ? "" : v).replace(/\r/g, "").split("\n").filter((l) => l.trim());
     const text = toLines(lastAssistant.text);
     const result = lastTool && lastTool.result != null ? toLines(lastTool.result) : [];
     return text.length ? text : result;
   }, [lastAssistant, lastTool]);
-  const liveImage = React29.useMemo(() => lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null, [lastAssistant, lastTool]);
+  const liveImage = React31.useMemo(() => lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null, [lastAssistant, lastTool]);
   const host = useHostStats(1e3);
   const memory = useMemoryBank(1e4);
   const update = useCliUpdate(void 0, version);
   const runner = useScriptRunner_default();
-  const { userTurns, toolCalls, webCalls } = React29.useMemo(() => {
+  const { userTurns, toolCalls, webCalls } = React31.useMemo(() => {
     const msgs = agent.messages;
     let turns = 0;
     let calls = 0;
@@ -6752,7 +6921,7 @@ function App({ version = "0.1.0" }) {
       update.status === "blocked" ? `\u2B06 CLI v${update.version} staged \u2014 this is a source checkout; nothing was written, pull/install when ready` : `\u2B06 CLI v${update.version} staged \u2014 applies when the CLI restarts`
     );
   }, [update, showNotice]);
-  const settingsRows = React29.useMemo(() => {
+  const settingsRows = React31.useMemo(() => {
     void prefsTick;
     let rows2 = [];
     try {
@@ -6944,13 +7113,32 @@ function App({ version = "0.1.0" }) {
           !update || update.status === "idle" || update.status === "checking" ? "\u2B06 update \u2014 checking the server for a newer CLI\u2026" : update.status === "applied" || update.applied && update.applied.version ? `\u2B06 update \u2014 running v${version}, installed on this start${update.applied && update.applied.from ? ` (was v${update.applied.from})` : ""}` : update.status === "current" ? `\u2B06 update \u2014 up to date (v${update.version || version})` : update.status === "installed" ? `\u2713 update \u2014 v${update.version} is installed on disk; this session is v${version} \u2014 restart the CLI to see the changes` : update.status === "staged" ? `\u2B06 update \u2014 v${update.version} staged; applies when the CLI restarts` : update.status === "blocked" ? `\u2B06 update \u2014 v${update.version} staged; source checkout, not applied (pull/install when ready)` : `\u2B06 update \u2014 check failed: ${update.reason || "unknown"}`
         );
         return;
+      case "/danger": {
+        const verb = String(arg || "").trim().toLowerCase();
+        if (verb === "set") {
+          setDangerSetup(true);
+          return;
+        }
+        if (verb === "clear") {
+          const r = clearDangerPassword();
+          showNotice(r.ok ? "\u25C6 approval password cleared" : `\u25C6 not cleared \u2014 ${r.reason || "write failed"}`);
+          return;
+        }
+        const s = dangerPasswordState();
+        if (!s.set) {
+          showNotice("\u25C6 no approval password \u2014 /danger set (typed hidden)");
+          return;
+        }
+        showNotice(`\u25C6 password set \xB7 ${s.length} chars \xB7 from ${s.source === "env" ? "HAKSTER_DANGER_PASSWORD" : "~/.hakster/config.json"} \xB7 /danger set to change \xB7 /danger clear to remove`);
+        return;
+      }
       case "/clear":
         agent.clear();
         setSteerQueue([]);
         showNotice("transcript cleared \xB7 steer queue emptied");
         return;
       case "/help":
-        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /clear /quit");
+        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /clear /quit");
         return;
       case "/quit":
       case "/exit":
@@ -7107,7 +7295,7 @@ function App({ version = "0.1.0" }) {
     for (let i = 0; i < line.length; i += mcpPanelWidth) rows2.push(line.slice(i, i + mcpPanelWidth));
     return rows2;
   });
-  const [mcpPanelCleared, setMcpPanelCleared] = useState18(false);
+  const [mcpPanelCleared, setMcpPanelCleared] = useState19(false);
   const mcpToolCallKey = latestMcpTool ? `${latestMcpTool.id || latestMcpTool.name || "mcp"}:${latestMcpTool.result == null ? "live" : "done"}` : "";
   useEffect18(() => {
     const live = !!latestMcpTool && latestMcpTool.result == null && agent.busy;
@@ -7127,10 +7315,19 @@ function App({ version = "0.1.0" }) {
     },
     [agent]
   );
+  const saveDangerPassword = useCallback6((value) => {
+    const r = setDangerPassword(value);
+    setDangerSetup(false);
+    if (!r.ok) {
+      showNotice(r.reason === "empty" ? "\u25C6 nothing saved \u2014 the field was empty" : `\u25C6 not saved \u2014 ${r.reason}`);
+      return;
+    }
+    showNotice(r.envOverride ? "\u25C6 saved to config, but HAKSTER_DANGER_PASSWORD is set and takes precedence" : `\u25C6 approval password saved (${String(value || "").length} chars) \u2014 dangerous and sudo commands will ask for it`);
+  }, [showNotice]);
   const cycleFocus = useCallback6(() => {
     setFocus((f) => f === "composer" ? "ad" : "composer");
   }, []);
-  useKeyboard7((key) => {
+  useKeyboard8((key) => {
     if (process.env.HAKSTER_TUI_KEYLOG) {
       try {
         fs10.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
@@ -7142,6 +7339,7 @@ function App({ version = "0.1.0" }) {
       renderer2.destroy();
       return;
     }
+    if (dangerSetup) return;
     if (menuOpen) {
       const n = catalogSelectable.length || 1;
       if (key.name === "escape") {
@@ -7762,7 +7960,7 @@ function App({ version = "0.1.0" }) {
       color: "#00ff41",
       bold: true
     } : update && update.status === "blocked" ? { text: `update v${update.version} held \xB7 source checkout`, color: "gray" } : update && update.status === "staged" ? { text: `update v${update.version} staged \xB7 applies on restart`, color: "yellow" } : { text: "up to date \xB7 updates check live", color: "gray" };
-    return /* @__PURE__ */ jsx29(
+    return /* @__PURE__ */ jsx31(
       DecodeSplash,
       {
         width: cols || 100,
@@ -7784,27 +7982,27 @@ function App({ version = "0.1.0" }) {
       }
     );
   }
-  return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
-    /* @__PURE__ */ jsxs27("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
-      /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "row" }, children: [
-        statusBoxShown ? null : /* @__PURE__ */ jsxs27(Fragment10, { children: [
-          /* @__PURE__ */ jsx29("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes21.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
-          /* @__PURE__ */ jsx29("text", { fg: "cyan", attributes: TextAttributes21.BOLD, children: "\u25C6 haksterAi" }),
-          /* @__PURE__ */ jsx29("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
-          headerFiles ? /* @__PURE__ */ jsx29("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
+  return /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
+    /* @__PURE__ */ jsxs29("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
+      /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "row" }, children: [
+        statusBoxShown ? null : /* @__PURE__ */ jsxs29(Fragment10, { children: [
+          /* @__PURE__ */ jsx31("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes23.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
+          /* @__PURE__ */ jsx31("text", { fg: "cyan", attributes: TextAttributes23.BOLD, children: "\u25C6 haksterAi" }),
+          /* @__PURE__ */ jsx31("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
+          headerFiles ? /* @__PURE__ */ jsx31("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
         ] }),
-        headerMeter ? /* @__PURE__ */ jsxs27("text", { children: [
-          statusBoxShown ? null : /* @__PURE__ */ jsx29("span", { fg: "gray", children: "   " }),
-          headerMeter.parts.map((part, i) => /* @__PURE__ */ jsx29("span", { fg: part.fg, attributes: part.bold ? TextAttributes21.BOLD : 0, children: part.t }, i))
+        headerMeter ? /* @__PURE__ */ jsxs29("text", { children: [
+          statusBoxShown ? null : /* @__PURE__ */ jsx31("span", { fg: "gray", children: "   " }),
+          headerMeter.parts.map((part, i) => /* @__PURE__ */ jsx31("span", { fg: part.fg, attributes: part.bold ? TextAttributes23.BOLD : 0, children: part.t }, i))
         ] }) : null
       ] }),
-      headerRight ? /* @__PURE__ */ jsx29("text", { children: headerRight.parts.map((part, i) => /* @__PURE__ */ jsx29("span", { fg: part.fg, attributes: part.bold ? TextAttributes21.BOLD : 0, children: part.t }, i)) }) : null
+      headerRight ? /* @__PURE__ */ jsx31("text", { children: headerRight.parts.map((part, i) => /* @__PURE__ */ jsx31("span", { fg: part.fg, attributes: part.bold ? TextAttributes23.BOLD : 0, children: part.t }, i)) }) : null
     ] }),
-    statusErr ? /* @__PURE__ */ jsx29("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs27("text", { fg: "red", children: [
+    statusErr ? /* @__PURE__ */ jsx31("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs29("text", { fg: "red", children: [
       "server unreachable \u2014 ",
       statusErr
     ] }) }) : null,
-    view === "models" ? /* @__PURE__ */ jsx29(
+    view === "models" ? /* @__PURE__ */ jsx31(
       ScrollPanel_default,
       {
         width: panelW,
@@ -7819,9 +8017,9 @@ function App({ version = "0.1.0" }) {
           const pick = pickerModels[index];
           const active = index === modelIdx;
           const vendorW = compact ? 7 : 11;
-          return /* @__PURE__ */ jsxs27("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
-            /* @__PURE__ */ jsx29("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes21.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clipLine2(pick.vendor, vendorW)}` }),
-            /* @__PURE__ */ jsx29("text", { fg: active ? "yellow" : "white", children: ` ${clipLine2(pick.value, Math.max(4, rowW - vendorW - 3))}` })
+          return /* @__PURE__ */ jsxs29("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
+            /* @__PURE__ */ jsx31("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes23.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clipLine2(pick.vendor, vendorW)}` }),
+            /* @__PURE__ */ jsx31("text", { fg: active ? "yellow" : "white", children: ` ${clipLine2(pick.value, Math.max(4, rowW - vendorW - 3))}` })
           ] });
         }
       }
@@ -7829,7 +8027,7 @@ function App({ version = "0.1.0" }) {
       /* The full settings page: every key in cli-prefs.json, its live value
          and what it does. Same row budget as the models picker so the status
          bar never moves. */
-      /* @__PURE__ */ jsx29(
+      /* @__PURE__ */ jsx31(
         SettingsView,
         {
           width: panelW,
@@ -7841,7 +8039,7 @@ function App({ version = "0.1.0" }) {
     ) : view === "mcp" ? (
       /* The MCP server manager: each server's real state from
          /api/agent/mcp-status, with the selected server's tool names. */
-      /* @__PURE__ */ jsx29(
+      /* @__PURE__ */ jsx31(
         McpView,
         {
           width: panelW,
@@ -7850,7 +8048,7 @@ function App({ version = "0.1.0" }) {
           selected: mcpIdx
         }
       )
-    ) : view === "scripts" ? /* @__PURE__ */ jsx29(
+    ) : view === "scripts" ? /* @__PURE__ */ jsx31(
       ScriptsView,
       {
         width: panelW,
@@ -7859,7 +8057,7 @@ function App({ version = "0.1.0" }) {
         selected: scriptIdx,
         run: runner.run
       }
-    ) : view === "squad" ? /* @__PURE__ */ jsx29(
+    ) : view === "squad" ? /* @__PURE__ */ jsx31(
       SquadView,
       {
         width: panelW,
@@ -7871,13 +8069,13 @@ function App({ version = "0.1.0" }) {
       /* One scrollable page, like the dashboard: the page can be taller than
          a short terminal, so it scrolls with OpenTUI's own ▲/█/▼ bar instead
          of clipping the last measured rows (§ all-panels rule). */
-      /* @__PURE__ */ jsx29("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
+      /* @__PURE__ */ jsx31("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
         "scrollbox",
         {
           ref: usageRef,
           style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
           scrollbarOptions: PAGE_SCROLLBAR,
-          children: /* @__PURE__ */ jsx29(
+          children: /* @__PURE__ */ jsx31(
             UsageView,
             {
               width: Math.max(1, panelW - 1),
@@ -7895,13 +8093,13 @@ function App({ version = "0.1.0" }) {
          plus the box's build state from /api/version. Every field is a sample
          this process took or a value the server reported; "\u2014" is printed
          where there is no sample yet. */
-      /* @__PURE__ */ jsx29("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
+      /* @__PURE__ */ jsx31("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
         "scrollbox",
         {
           ref: debugRef,
           style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
           scrollbarOptions: PAGE_SCROLLBAR,
-          children: /* @__PURE__ */ jsx29(
+          children: /* @__PURE__ */ jsx31(
             DebugView,
             {
               width: Math.max(1, panelW - 1),
@@ -7948,50 +8146,50 @@ function App({ version = "0.1.0" }) {
          stack, so a short terminal clipped the services grid and pushed the
          status bar off the bottom. PgUp/PgDn (and ↑/↓, Home/End) scroll it;
          the panel cells auto-compact to one line on a short screen. */
-      /* @__PURE__ */ jsx29("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
+      /* @__PURE__ */ jsx31("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
         "scrollbox",
         {
           ref: dashRef,
           style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
           scrollbarOptions: PAGE_SCROLLBAR,
-          children: /* @__PURE__ */ jsxs27("box", { style: { width: Math.max(1, panelW - 1), flexDirection: "column" }, children: [
-            /* @__PURE__ */ jsx29(
+          children: /* @__PURE__ */ jsxs29("box", { style: { width: Math.max(1, panelW - 1), flexDirection: "column" }, children: [
+            /* @__PURE__ */ jsx31(
               GridLayout_default,
               {
                 items: dashboardItems,
                 availableWidth: Math.max(1, panelW - 1),
                 getItemKey: (item) => item.key,
-                renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx29(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, dense: dashDense, children: item.cells.map((c) => /* @__PURE__ */ jsx29(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)), dense: dashDense }, c.label)) })
+                renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx31(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, dense: dashDense, children: item.cells.map((c) => /* @__PURE__ */ jsx31(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)), dense: dashDense }, c.label)) })
               }
             ),
-            /* @__PURE__ */ jsxs27(
+            /* @__PURE__ */ jsxs29(
               GridPanel_default,
               {
                 title: "\u25C9 Meters",
                 width: Math.max(1, panelW - 1),
                 hint: `${smartLabel(meters ? meters.score : 0)} \xB7 ${meterPoints}p autolearn`,
                 children: [
-                  /* @__PURE__ */ jsxs27("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx29("text", { fg: "gray", children: "smartness   " }),
-                    /* @__PURE__ */ jsx29(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
-                    /* @__PURE__ */ jsx29("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
+                  /* @__PURE__ */ jsxs29("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
+                    /* @__PURE__ */ jsx31("text", { fg: "gray", children: "smartness   " }),
+                    /* @__PURE__ */ jsx31(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
+                    /* @__PURE__ */ jsx31("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
                   ] }),
-                  /* @__PURE__ */ jsxs27("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx29("text", { fg: "gray", children: "autolearn   " }),
-                    /* @__PURE__ */ jsx29(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
-                    /* @__PURE__ */ jsx29("text", { fg: "white", children: ` ${meterPoints}p` }),
-                    /* @__PURE__ */ jsx29("text", { fg: arrowColor(meters && meters.pointsDelta), children: meterArrow(meters && meters.pointsDelta) }),
-                    /* @__PURE__ */ jsx29("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx29(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
+                  /* @__PURE__ */ jsxs29("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
+                    /* @__PURE__ */ jsx31("text", { fg: "gray", children: "autolearn   " }),
+                    /* @__PURE__ */ jsx31(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
+                    /* @__PURE__ */ jsx31("text", { fg: "white", children: ` ${meterPoints}p` }),
+                    /* @__PURE__ */ jsx31("text", { fg: arrowColor(meters && meters.pointsDelta), children: meterArrow(meters && meters.pointsDelta) }),
+                    /* @__PURE__ */ jsx31("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx31(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
                   ] }),
-                  /* @__PURE__ */ jsxs27("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx29("text", { fg: "gray", children: "context     " }),
-                    /* @__PURE__ */ jsx29(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
-                    /* @__PURE__ */ jsx29("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
+                  /* @__PURE__ */ jsxs29("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
+                    /* @__PURE__ */ jsx31("text", { fg: "gray", children: "context     " }),
+                    /* @__PURE__ */ jsx31(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
+                    /* @__PURE__ */ jsx31("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
                   ] })
                 ]
               }
             ),
-            /* @__PURE__ */ jsx29(ServicesPanel, { width: dashServicesWidth, services, scan, showAll: true, dense: dashDense, maxCells: dashServicesCapacity })
+            /* @__PURE__ */ jsx31(ServicesPanel, { width: dashServicesWidth, services, scan, showAll: true, dense: dashDense, maxCells: dashServicesCapacity })
           ] })
         }
       ) })
@@ -8000,13 +8198,13 @@ function App({ version = "0.1.0" }) {
          services on top, then the big activity feed and live output beside
          the sidebar. Shift+↑/↓ scrolls the feed, shift+End resumes follow,
          esc returns to the chat. Nothing runs from here; it only watches. */
-      /* @__PURE__ */ jsxs27(Fragment10, { children: [
-        /* @__PURE__ */ jsxs27("box", { style: { width: panelW, paddingLeft: 1, paddingRight: 1, flexDirection: "column", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx29(SystemPanel, { width: bodyW, meters, ctxUsed, ctxMax, host }),
-          /* @__PURE__ */ jsx29(ServicesPanel, { width: bodyW, services, scan, dense, maxCells: monitorServicesCapacity })
+      /* @__PURE__ */ jsxs29(Fragment10, { children: [
+        /* @__PURE__ */ jsxs29("box", { style: { width: panelW, paddingLeft: 1, paddingRight: 1, flexDirection: "column", flexShrink: 0 }, children: [
+          /* @__PURE__ */ jsx31(SystemPanel, { width: bodyW, meters, ctxUsed, ctxMax, host }),
+          /* @__PURE__ */ jsx31(ServicesPanel, { width: bodyW, services, scan, dense, maxCells: monitorServicesCapacity })
         ] }),
-        /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
-          /* @__PURE__ */ jsx29("box", { style: { width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
+        /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+          /* @__PURE__ */ jsx31("box", { style: { width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
             MonitorFeed,
             {
               width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW,
@@ -8017,12 +8215,12 @@ function App({ version = "0.1.0" }) {
               busy: agent.busy
             }
           ) }),
-          sideW ? /* @__PURE__ */ jsx29("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx29(LiveSidebar, { ...sidebarProps, height: monitorRows, feed: false }) }) : null
+          sideW ? /* @__PURE__ */ jsx31("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx31(LiveSidebar, { ...sidebarProps, height: monitorRows, feed: false }) }) : null
         ] })
       ] })
-    ) : /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
-      /* @__PURE__ */ jsxs27("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
-        /* @__PURE__ */ jsx29(
+    ) : /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
+      /* @__PURE__ */ jsxs29("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
+        /* @__PURE__ */ jsx31(
           StatusServicesPanel,
           {
             width: mainW,
@@ -8039,7 +8237,7 @@ function App({ version = "0.1.0" }) {
             dense: true
           }
         ),
-        showTodo ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
+        showTodo ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
           TodoPanel,
           {
             todos: agent.todos,
@@ -8048,7 +8246,7 @@ function App({ version = "0.1.0" }) {
             maxVisibleRows: Math.min(agent.todos.length, todoVisible)
           }
         ) }) : null,
-        showLiveBox ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
+        showLiveBox ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
           LiveOutputPanel,
           {
             width: mainW,
@@ -8062,7 +8260,7 @@ function App({ version = "0.1.0" }) {
             bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
           }
         ) }) : null,
-        showMcpPanel ? /* @__PURE__ */ jsx29(
+        showMcpPanel ? /* @__PURE__ */ jsx31(
           ScrollPanel_default,
           {
             width: mainW,
@@ -8074,11 +8272,11 @@ function App({ version = "0.1.0" }) {
             bindings: { up: "ctrl", down: "ctrl", pageup: "ctrl", pagedown: "ctrl", home: "ctrl", end: "ctrl" },
             empty: "Waiting for MCP server output\u2026",
             borderColor: "magenta",
-            children: (index, { width: rowW }) => /* @__PURE__ */ jsx29("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx29("text", { fg: "white", children: clipLine2(String(mcpOutputLines[index] || " "), rowW) }) })
+            children: (index, { width: rowW }) => /* @__PURE__ */ jsx31("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx31("text", { fg: "white", children: clipLine2(String(mcpOutputLines[index] || " "), rowW) }) })
           },
           latestMcpTool.id || latestMcpTool.name || "mcp"
         ) : null,
-        /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
+        /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
           DockAd,
           {
             width: mainW,
@@ -8088,7 +8286,7 @@ function App({ version = "0.1.0" }) {
             expanded: dockExpanded
           }
         ) }),
-        approving ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
+        approving ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
           ApprovalPrompt,
           {
             width: mainW,
@@ -8096,8 +8294,19 @@ function App({ version = "0.1.0" }) {
             onAnswer: answerApproval
           }
         ) }) : null,
-        notice ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx29("text", { fg: "cyan", children: clipLine2(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
-        /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx29(
+        dangerSetup ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
+          DangerPasswordPrompt,
+          {
+            width: mainW,
+            onSave: saveDangerPassword,
+            onCancel: () => {
+              setDangerSetup(false);
+              showNotice("\u25C6 cancelled \u2014 nothing changed");
+            }
+          }
+        ) }) : null,
+        notice ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx31("text", { fg: "cyan", children: clipLine2(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
+        /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
           Transcript_default,
           {
             messages: agent.messages,
@@ -8111,7 +8320,7 @@ function App({ version = "0.1.0" }) {
             emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
           }
         ) }),
-        /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx29(
+        /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx31(
           CatalogPopout,
           {
             width: mainW,
@@ -8121,17 +8330,17 @@ function App({ version = "0.1.0" }) {
             selected: menuIndex,
             query: menuQuery
           }
-        ) : /* @__PURE__ */ jsx29(
+        ) : /* @__PURE__ */ jsx31(
           Composer,
           {
             width: mainW,
             value: draft,
             onChange: setDraft,
             onSubmit: submit,
-            focused: focus === "composer" && !approving,
+            focused: focus === "composer" && !approving && !dangerSetup,
             disabled: false,
             hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u22B8 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 \u2191 history \xB7 /menu commands \xB7 /attach \xB7 pgup scroll \xB7 q quit",
-            adSlot: /* @__PURE__ */ jsx29(
+            adSlot: /* @__PURE__ */ jsx31(
               DockAd,
               {
                 width: Math.max(8, mainW - 4),
@@ -8143,7 +8352,7 @@ function App({ version = "0.1.0" }) {
             )
           }
         ) }),
-        showCrushStatus ? /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
+        showCrushStatus ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
           CrushStatus,
           {
             width: mainW,
@@ -8156,7 +8365,7 @@ function App({ version = "0.1.0" }) {
           // Idle: the same row states what the finished run did instead of
           // leaving it blank (owner, 2026-11-24: "add recap in cli when
           // agent is idle").
-          /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
+          /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
             Recap,
             {
               width: mainW,
@@ -8178,9 +8387,9 @@ function App({ version = "0.1.0" }) {
           ) })
         ) : null
       ] }),
-      sideW ? /* @__PURE__ */ jsx29("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx29(LiveSidebar, { ...sidebarProps }) }) : null
+      sideW ? /* @__PURE__ */ jsx31("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx31(LiveSidebar, { ...sidebarProps }) }) : null
     ] }),
-    /* @__PURE__ */ jsx29("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx29(
+    /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
       StatusBar,
       {
         width: panelW,
@@ -8216,7 +8425,7 @@ async function start({ version = "0.1.0" } = {}) {
     backgroundColor: process.env.HAKSTER_TUI_OPAQUE || import_prefs4.default.load().opaqueBackdrop ? "#000000" : "transparent"
   });
   root = createRoot(renderer);
-  root.render(React30.createElement(App, { version }));
+  root.render(React32.createElement(App, { version }));
   return {
     unmount() {
       if (root) {

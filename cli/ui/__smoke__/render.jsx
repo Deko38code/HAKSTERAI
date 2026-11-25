@@ -531,6 +531,32 @@ export async function run({ adsPort }) {
   const c1 = confirmCalls[1] || {};
   const cPassword = confirmCalls[2] || {};
 
+  // ── 7. The /menu popout carries the hero mark and the name ─────────────
+  // Owner, 2026-11-25: "add the hero logo i have as my startup on the popout
+  // menu and dangerous command window to if you can with his name". The popout
+  // is drawn as chrome above a fixed-height list, so this frame also proves the
+  // hero did not push the catalog's own rows off the screen.
+  const menuSetup = await createTestRenderer({ width: 120, height: 40 });
+  const menuRoot = createRoot(menuSetup.renderer);
+  flushSync(() => menuRoot.render(React.createElement(App, { version: 'smoke' })));
+  await menuSetup.flush();
+  await settle(500);
+  flushSync(() => {
+    for (const ch of '/menu') menuSetup.mockInput.pressKey(ch);
+  });
+  await menuSetup.flush();
+  flushSync(() => menuSetup.mockInput.pressEnter());
+  await settle(300);
+  await menuSetup.flush();
+  const menuFrame = menuSetup.captureCharFrame();
+  flushSync(() => menuSetup.mockInput.pressEscape());
+  await menuSetup.flush();
+  await settle(80);
+  const afterMenuFrame = menuSetup.captureCharFrame();
+  menuRoot.unmount();
+  menuSetup.renderer.destroy();
+  await settle(50);
+
   const checks = [
     // ── baseline chrome ──
     ['header renders', /haksterAi/.test(idleFrame)],
@@ -593,6 +619,8 @@ export async function run({ adsPort }) {
     // ── a held approval ──
     ['approval prompt replaces nothing and is shown', /approval required/.test(approvalFrame)],
     ['approval prompt names the command', /rm -rf \/tmp\/hakster-build/.test(approvalFrame)],
+    ['the approval window draws the hero with its name', /HAKSTERAI/.test(approvalFrame) && /█████/.test(approvalFrame)],
+    ['with no password set the window says how to set one', /\/danger set/.test(approvalFrame)],
     ['the run is still parked while the prompt is up', !/is finished\./.test(approvalFrame)],
     ['answering releases the held stream', /rm -rf \/tmp\/hakster-build is finished\./.test(afterApprove)],
     [
@@ -646,6 +674,13 @@ export async function run({ adsPort }) {
     ['the workspace keeps the sub-agent output after the panel clears', /CODEX-MARKER/.test(mcpClearFrame)],
     ['a call with no result still shows while its turn runs', /MCP Output/.test(abandonedLiveFrame)],
     ['a call that never returns does not pin the panel after the turn ends', !/MCP Output/.test(abandonedClearFrame)],
+
+    // ── the /menu popout's hero mark ──
+    ['the popout opens', /◇ Catalog/.test(menuFrame)],
+    ['the popout draws the hero wordmark', /█████/.test(menuFrame) && /█   █/.test(menuFrame)],
+    ['the popout carries the HAKSTERAI name', /HAKSTERAI/.test(menuFrame)],
+    ['the catalog still lists its sections below the hero', /AGENTS/.test(menuFrame) && /MODELS/.test(menuFrame)],
+    ['esc closes the popout', !/◇ Catalog/.test(afterMenuFrame)],
   ];
 
 

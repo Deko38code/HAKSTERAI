@@ -1,5 +1,6 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
+import HeroLogo from './HeroLogo.jsx';
 
 /* MenuPalette — the `/menu` popout for the terminal, mirroring HakTerm's
  * command palette (CLI Agents / `#cmd-palette`).
@@ -25,6 +26,7 @@ export const MENU_ITEMS = [
   { cmd: '/debug', label: 'Debugger', detail: 'render times · event-loop lag · tools · server build' },
   { cmd: '/update', label: 'Update', detail: 'check · downloads in-session · applies on restart' },
   { cmd: '/settings', label: 'Settings', detail: 'every CLI setting · change it in place' },
+  { cmd: '/danger', label: 'Approval password', detail: 'set the password dangerous commands ask for · typed hidden' },
   { cmd: '/graphics', label: 'Kitty graphics', detail: 'real logo image in kitty/Ghostty/WezTerm · report or on/off' },
   { cmd: '/clear', label: 'Clear transcript', detail: 'start the conversation over' },
   { cmd: '/help', label: 'Help', detail: 'keys and commands' },
@@ -40,6 +42,7 @@ export default function MenuPalette({ width = 60, selected = 0 }) {
   const inner = Math.max(1, width - 4);
   return (
     <box style={{ width, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'cyan', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
+      <HeroLogo width={inner} />
       <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
         <text fg="cyan" attributes={TextAttributes.BOLD}>◇ Menu</text>
         <text fg="gray">{clip('↑↓ select · enter run · esc close', inner - 6)}</text>

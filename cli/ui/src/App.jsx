@@ -5,6 +5,8 @@ import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react'
 import { TextAttributes } from '@opentui/core';
 import AdRailSlot from './components/DockAd.jsx';
 import ApprovalPrompt from './components/ApprovalPrompt.jsx';
+import DangerPasswordPrompt from './components/DangerPasswordPrompt.jsx';
+import { clearDangerPassword, dangerPasswordState, setDangerPassword } from './utils/danger-password.js';
 import Composer from './components/Composer.jsx';
 import GridLayout from './components/GridLayout.jsx';
 import GridPanel, { Cell, Meter, Spark } from './components/GridPanel.jsx';
@@ -274,6 +276,9 @@ export default function App({ version = '0.1.0' }) {
   // `/menu` popout (HakTerm's command palette, in the terminal). Closed on
   // start — never auto-opens; esc closes it without running anything.
   const [menuOpen, setMenuOpen] = useState(false);
+  // `/danger set` — the masked entry for the approval password dangerous
+  // commands ask for. Closed until asked for; it owns the keyboard while open.
+  const [dangerSetup, setDangerSetup] = useState(false);
   // The Lab views: our live scripts (with the OMP snapshot compare window) and
   // the sub-agent squad. Both are read from real state — the checkout and the
   // server's own /api/agent/mcp-status.
@@ -856,13 +861,31 @@ export default function App({ version = '0.1.0' }) {
                   : `⬆ update — check failed: ${update.reason || 'unknown'}`,
         );
         return;
+      case '/danger': {
+        // The approval password dangerous commands ask for, set from inside the
+        // CLI instead of a second terminal. `/danger set` opens a masked field;
+        // `/danger clear` removes the stored one. It is the same value and the
+        // same file `hakster config sudo` uses, so both surfaces agree (§9, §23:
+        // the password is never echoed, logged or put in argv).
+        const verb = String(arg || '').trim().toLowerCase();
+        if (verb === 'set') { setDangerSetup(true); return; }
+        if (verb === 'clear') {
+          const r = clearDangerPassword();
+          showNotice(r.ok ? '◆ approval password cleared' : `◆ not cleared — ${r.reason || 'write failed'}`);
+          return;
+        }
+        const s = dangerPasswordState();
+        if (!s.set) { showNotice('◆ no approval password — /danger set (typed hidden)'); return; }
+        showNotice(`◆ password set · ${s.length} chars · from ${s.source === 'env' ? 'HAKSTER_DANGER_PASSWORD' : '~/.hakster/config.json'} · /danger set to change · /danger clear to remove`);
+        return;
+      }
       case '/clear':
         agent.clear();
         setSteerQueue([]);
         showNotice('transcript cleared · steer queue emptied');
         return;
       case '/help':
-        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /clear /quit');
+        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /clear /quit');
         return;
       case '/quit':
       case '/exit':
@@ -1105,6 +1128,22 @@ export default function App({ version = '0.1.0' }) {
     [agent],
   );
 
+  // Save the approval password the owner typed into the masked field. The
+  // value goes straight into ~/.hakster/config.json (mode 600) by
+  // setDangerPassword and is never echoed back — the notice states its length,
+  // not its content (§9, §23).
+  const saveDangerPassword = useCallback((value) => {
+    const r = setDangerPassword(value);
+    setDangerSetup(false);
+    if (!r.ok) {
+      showNotice(r.reason === 'empty' ? '◆ nothing saved — the field was empty' : `◆ not saved — ${r.reason}`);
+      return;
+    }
+    showNotice(r.envOverride
+      ? '◆ saved to config, but HAKSTER_DANGER_PASSWORD is set and takes precedence'
+      : `◆ approval password saved (${String(value || '').length} chars) — dangerous and sudo commands will ask for it`);
+  }, [showNotice]);
+
   const cycleFocus = useCallback(() => {
     setFocus((f) => (f === 'composer' ? 'ad' : 'composer'));
   }, []);
@@ -1123,6 +1162,11 @@ export default function App({ version = '0.1.0' }) {
       renderer.destroy();
       return;
     }
+
+    // The approval-password entry owns every key while it is open, exactly as
+    // the approval gate does. The field is masked because DangerPasswordPrompt
+    // reads the keys itself; nothing here ever sees the value.
+    if (dangerSetup) return;
 
     // The /menu popout owns the keyboard while it is open; esc closes it
     // without running anything, enter runs the highlighted command.
@@ -2304,6 +2348,16 @@ export default function App({ version = '0.1.0' }) {
               </box>
             ) : null}
 
+            {dangerSetup ? (
+              <box style={{ flexShrink: 0 }}>
+                <DangerPasswordPrompt
+                  width={mainW}
+                  onSave={saveDangerPassword}
+                  onCancel={() => { setDangerSetup(false); showNotice('◆ cancelled — nothing changed'); }}
+                />
+              </box>
+            ) : null}
+
             {notice ? (
               <box style={{ flexShrink: 0, width: mainW }}>
                 {/* One row, always — a long /ports or /help notice is clipped
@@ -2352,7 +2406,7 @@ export default function App({ version = '0.1.0' }) {
                   value={draft}
                   onChange={setDraft}
                   onSubmit={submit}
-                  focused={focus === 'composer' && !approving}
+                  focused={focus === 'composer' && !approving && !dangerSetup}
                   // The input never locks while the agent works (owner,
                   // 2026-11-24: "i can type while agent is working need steer
                   // que"). Enter queues the text; the drain effect above sends
