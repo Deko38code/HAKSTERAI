@@ -222,20 +222,20 @@ export default function App({ version = '0.1.0' }) {
   // default and falls through (§22 — the pinned HAKSTERAI-FLASH config;
   // the wire model and relay are unchanged, only the display name moved).
   const [model, setModel] = useState(() => (process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || PRIMARY_MODEL));
-  // Speed, without moving the config (owner, 2026-11-25: "takes almost 17-20
-  // sec ... can you fix make faster without breaking our config"). The pinned
-  // HAKSTERAI-FLASH model answers in ~0.9 s straight from the 127.0.0.1:11434
-  // relay; driving the same turn through the claude-cli harness costs 11-13 s
-  // per turn, because that lane spawns the whole Claude Code CLI for every
-  // request (measured 2026-11-25 on this box: relay 0.75-0.9 s, claude-cli
-  // 11.1-12.7 s, raw `claude -p` floor 5.8 s). So the default lane is the
-  // pinned provider itself. Nothing locked moves (§22/§35): the wire model,
-  // the relay, the provider and the ladder in src/models/ladder.js are
-  // untouched — this only says which lane answers first, and auto-handoff
-  // still falls back to claude-cli -> Codex -> the server waterfall when this
-  // lane fails. An explicit HAKSTER_PROVIDER, a saved /provider pick or a
-  // model picked in /model still wins.
-  const [provider, setProvider] = useState(() => process.env.HAKSTER_PROVIDER || readPrefs().provider || PRIMARY_PROVIDER);
+  // No provider pin by default: the ladder's tier 1 answers (CLAUDE.md §22 —
+  // the pinned HAKSTERAI-FLASH config; the wire model and relay are unchanged,
+  // only the display name moved). The 2026-11-25 speed commit pinned
+  // PRIMARY_PROVIDER here to skip the claude-cli spawn cost, but that lane
+  // breaks tool calling on this box (owner, 2026-11-25: "model skipped tool
+  // calling ... fix back"): driven through the server loop, a turn that calls a
+  // tool comes back with empty content after the tool result and the model
+  // re-issues the identical call until the duplicate-call loop guard stops the
+  // run — measured on ollama/deepseek-v4.1-flash:cloud, 3x list_dir, then
+  // loop_detected, where claude-cli makes one tool call and answers. So tier 1
+  // (claude-cli) answers again and the ladder behind it is unchanged. An
+  // explicit HAKSTER_PROVIDER, a saved /provider pick or a model picked in
+  // /model still wins.
+  const [provider, setProvider] = useState(() => process.env.HAKSTER_PROVIDER || readPrefs().provider || '');
   const [modelIdx, setModelIdx] = useState(0);
   // Auto handoff: HAKSTERAI-FLASH → Codex → server waterfall. On unless the
   // owner turned it off; the choice is remembered between sessions.
