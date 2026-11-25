@@ -880,7 +880,7 @@ var require_updater = __commonJS({
         dir
       };
     }
-    function isSourceCheckout(explicitDir) {
+    function isSourceCheckout2(explicitDir) {
       return fs11.existsSync(path9.join(cliDirOf2(explicitDir), "..", ".git"));
     }
     function serverUrl() {
@@ -1005,7 +1005,7 @@ var require_updater = __commonJS({
         }
         return { status: "current", version: running.version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
       }
-      const blocked = isSourceCheckout(opts.cliDir) ? "source-checkout" : null;
+      const blocked = isSourceCheckout2(opts.cliDir) ? "source-checkout" : null;
       const pending = {
         version: staged.version,
         bundleSha: staged.bundleSha,
@@ -1053,7 +1053,7 @@ var require_updater = __commonJS({
         backupDir: pending.backupDir || ""
       };
     }
-    function applyPending(explicitDir) {
+    function applyPending2(explicitDir) {
       const pending = pendingInfo2();
       if (!pending) return null;
       const target = cliDirOf2(explicitDir);
@@ -1063,7 +1063,7 @@ var require_updater = __commonJS({
         writeJson(PENDING_FILE, { ...pending, state: "superseded", supersededAt: (/* @__PURE__ */ new Date()).toISOString() });
         return { applied: false, reason: `superseded by the running v${runningInfo(target).version}`, version: pending.version };
       }
-      if (isSourceCheckout(target)) return { applied: false, reason: "source-checkout", version: pending.version };
+      if (isSourceCheckout2(target)) return { applied: false, reason: "source-checkout", version: pending.version };
       const running = runningInfo(target);
       if (sameBuild(pending, running)) {
         writeJson(PENDING_FILE, { ...pending, matchedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current" });
@@ -1108,7 +1108,10 @@ var require_updater = __commonJS({
         return { action: "current", pending, running };
       }
       if (pending.superseded) return { action: "none", pending, running };
-      if (isSourceCheckout(opts.cliDir)) return { action: "blocked", pending, running };
+      if (isSourceCheckout2(opts.cliDir)) return { action: "blocked", pending, running };
+      if (String(process.env.HAKSTER_UPDATE_PROMPT || "").toLowerCase() !== "ask") {
+        return { action: "auto", pending, running };
+      }
       const stdin = process.stdin;
       const stdout = process.stdout;
       const tty = !!(stdin && stdin.isTTY && stdout && stdout.isTTY);
@@ -1175,12 +1178,12 @@ var require_updater = __commonJS({
     }
     module.exports = {
       checkForUpdate: checkForUpdate2,
-      applyPending,
+      applyPending: applyPending2,
       appliedNotice: appliedNotice2,
       pendingInfo: pendingInfo2,
       promptStagedUpdate,
       runningInfo,
-      isSourceCheckout,
+      isSourceCheckout: isSourceCheckout2,
       cliDirOf: cliDirOf2,
       UPDATES_DIR,
       PENDING_FILE
@@ -6988,6 +6991,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
   const diskNewer = () => {
     try {
       if (!sessionVersion) return null;
+      if ((0, import_updater.isSourceCheckout)()) return null;
       const diskVersion = String(
         JSON.parse(fs9.readFileSync(path7.join((0, import_updater.cliDirOf)(), "package.json"), "utf8")).version || ""
       );
@@ -7033,9 +7037,31 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
       try {
         const res = await (0, import_updater.checkForUpdate)();
         if (!alive) return;
+        let installedNow = null;
+        if (res.status === "staged" && !applied) {
+          try {
+            const a = (0, import_updater.applyPending)();
+            if (a && a.applied) installedNow = a;
+            else if (a && a.reason && /dependenc/i.test(String(a.reason))) {
+              installedNow = { needsInstall: true };
+            }
+          } catch {
+          }
+        }
         setState((prev) => {
           if (applied) return prev;
           if (prev.status === "installed" && diskNewer()) return prev;
+          if (installedNow && installedNow.applied) {
+            return {
+              status: "installed",
+              version: installedNow.version,
+              from: installedNow.from,
+              checkedAt: (/* @__PURE__ */ new Date()).toISOString()
+            };
+          }
+          if (installedNow && installedNow.needsInstall) {
+            return { status: "staged", version: res.version, needsInstall: true, checkedAt: res.checkedAt };
+          }
           return {
             status: res.status,
             version: res.version,
@@ -8511,6 +8537,7 @@ function App({ version = "0.1.0" }) {
     ram: heatFg(host && host.memPct)
   };
   const updateInstalled = !!(update && !update.applied && update.status === "installed" && update.version);
+  const updateNeedsInstall = !updateInstalled && !!(update && update.needsInstall);
   const updatePending = updateInstalled || !!(update && !update.applied && (update.status === "staged" || update.status === "blocked"));
   const updateBlocked = !updateInstalled && updatePending && update.status === "blocked";
   const updateVer = updatePending && update.version ? ` v${update.version}` : "";
@@ -8519,6 +8546,10 @@ function App({ version = "0.1.0" }) {
     "\u2714 installed \xB7 Restart to update",
     "\u2714 Restart to update",
     "\u2714 restart"
+  ] : updateNeedsInstall ? [
+    `\u2B06 update${updateVer} \xB7 re-run the installer`,
+    "\u2B06 re-run the installer",
+    "\u2B06 installer"
   ] : updateBlocked ? [
     `\u2B06 update${updateVer} \xB7 pull to update`,
     "\u2B06 update \xB7 pull to update",

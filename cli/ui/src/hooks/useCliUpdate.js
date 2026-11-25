@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import fs from 'node:fs';
 import path from 'node:path';
-import { appliedNotice, checkForUpdate, pendingInfo, cliDirOf } from '../../../src/updater.js';
+import { appliedNotice, applyPending, checkForUpdate, isSourceCheckout, pendingInfo, cliDirOf } from '../../../src/updater.js';
 import prefs from '../../../src/prefs.js';
 
 /* useCliUpdate — the Claude Code update model in the TUI: the running session
@@ -75,6 +75,12 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000, sessionVersion
   const diskNewer = () => {
     try {
       if (!sessionVersion) return null;
+      // A source checkout never has anything installed into it (§8) — the tree
+      // changing under a running session is the developer editing, not an
+      // update landing. Owner, 2026-11-26 ("dont dell auto install on its own";
+      // "it says it already on dell up top") — so the Dell's header stays clean
+      // and no "Update installed" reaches a checkout.
+      if (isSourceCheckout()) return null;
       // package.json only: this runs on a short interval, so it must stay
       // cheap (no bundle hashing on the render loop's timer).
       const diskVersion = String(
@@ -137,12 +143,43 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000, sessionVersion
       try {
         const res = await checkForUpdate();
         if (!alive) return;
+        // Claude-Code behaviour (owner, 2026-11-26: "need ours auto like claude
+        // does says update installed restart cli"). A verified stage is installed
+        // right away, inside the running session, so the only step left is a
+        // restart — which is what the badge says. A source checkout is refused by
+        // the updater itself (§8), so nothing is ever written there.
+        let installedNow = null;
+        if (res.status === 'staged' && !applied) {
+          try {
+            const a = applyPending();
+            if (a && a.applied) installedNow = a;
+            // A stage whose dependencies changed cannot be swapped in by copy
+            // alone; say so (with the installer as the fix) rather than promise
+            // an install on restart that would not happen.
+            else if (a && a.reason && /dependenc/i.test(String(a.reason))) {
+              installedNow = { needsInstall: true };
+            }
+          } catch {
+            /* keep the stage — the next start can still apply it */
+          }
+        }
         setState((prev) => {
           // The install confirmation outranks the network answer: this session
           // is running the version an earlier start installed.
           if (applied) return prev;
           // Nor does a later check talk over a newer build already on disk.
           if (prev.status === 'installed' && diskNewer()) return prev;
+          if (installedNow && installedNow.applied) {
+            return {
+              status: 'installed',
+              version: installedNow.version,
+              from: installedNow.from,
+              checkedAt: new Date().toISOString(),
+            };
+          }
+          if (installedNow && installedNow.needsInstall) {
+            return { status: 'staged', version: res.version, needsInstall: true, checkedAt: res.checkedAt };
+          }
           return {
             status: res.status,
             version: res.version,

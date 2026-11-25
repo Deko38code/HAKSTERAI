@@ -1729,15 +1729,22 @@ export default function App({ version = '0.1.0' }) {
   // written into (§8), so it says pull rather than promising an install.
   // Nothing renders for current / checking / error: a badge that cries wolf is
   // worse than none, and the check re-runs on its own interval.
-  // A build already installed on disk that this session is not running. On a
-  // source checkout this is the normal case after an update lands: nothing can
-  // be swapped under a git tree (§8), so the only step left is a restart —
-  // and that is exactly what it says (owner, 2026-11-25: "should say installed
-  // restart cli to see changes", to the right of cpu/ram; and 2026-11-25:
-  // "i want our update to say this when its done in cli —
+  // A build already installed on disk that this session is not running. For a
+  // package install that is an update this session installed itself (owner,
+  // 2026-11-26: "need ours auto like claude does"), so the only step left is a
+  // restart — and that is exactly what it says (owner, 2026-11-25: "should say
+  // installed restart cli to see changes", to the right of cpu/ram; and
+  // 2026-11-25: "i want our update to say this when its done in cli —
   // ✔ Update installed · Restart to update", which is the wording used here,
-  // U+2714 without a variation selector so it stays a mono glyph).
+  // U+2714 without a variation selector so it stays a mono glyph). A source
+  // checkout never installs anything (§8), so its header carries no install
+  // badge at all (owner, 2026-11-26: "dont dell auto install on its own";
+  // "it says it already on dell up top … and tells me to restart to").
   const updateInstalled = !!(update && !update.applied && update.status === 'installed' && update.version);
+  // A verified stage whose dependencies changed cannot be copied in by itself:
+  // it is not an install-on-restart case, it needs the installer. Rare, but the
+  // badge must not promise an install that cannot happen (§10, §38.6).
+  const updateNeedsInstall = !updateInstalled && !!(update && update.needsInstall);
   const updatePending = updateInstalled || !!(update && !update.applied
     && (update.status === 'staged' || update.status === 'blocked'));
   const updateBlocked = !updateInstalled && updatePending && update.status === 'blocked';
@@ -1750,6 +1757,12 @@ export default function App({ version = '0.1.0' }) {
           '✔ installed · Restart to update',
           '✔ Restart to update',
           '✔ restart',
+        ]
+      : updateNeedsInstall
+      ? [
+          `⬆ update${updateVer} · re-run the installer`,
+          '⬆ re-run the installer',
+          '⬆ installer',
         ]
       : updateBlocked
       ? [

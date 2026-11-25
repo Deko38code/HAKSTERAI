@@ -41,10 +41,9 @@ try {
   const mod = await import('./src/updater.js');
   const updater = mod && typeof mod.applyPending === 'function' ? mod : mod && mod.default;
   if (updater) {
-    // The owner's startup choice (2026-11-23): "install now or wait til next
-    // one option on startup if update available". A staged package is applied
-    // here only when the operator says install, or when there is no terminal
-    // to ask (a piped start keeps the old apply-what-was-verified behaviour).
+    // A staged package is applied here before the bundle is imported, without
+    // asking (owner, 2026-11-26: "need ours auto like claude does"). The old
+    // [i/w] choice is still reachable with HAKSTER_UPDATE_PROMPT=ask.
     let go = true;
     if (typeof updater.promptStagedUpdate === 'function') {
       const choice = await updater.promptStagedUpdate();

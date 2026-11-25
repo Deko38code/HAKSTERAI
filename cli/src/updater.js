@@ -380,6 +380,16 @@ async function promptStagedUpdate(opts = {}) {
   if (pending.superseded) return { action: 'none', pending, running };
   if (isSourceCheckout(opts.cliDir)) return { action: 'blocked', pending, running };
 
+  // Claude-Code behaviour (owner, 2026-11-26: "need ours auto like claude does
+  // says update installed restart cli"). A stage is already downloaded and
+  // hash-verified; the only question left was "install now or next time", and
+  // the answer is now — so a start applies it without asking. The old [i/w]
+  // prompt stays available behind HAKSTER_UPDATE_PROMPT=ask for anyone who
+  // wants to choose. Never reached on a source checkout (refused above, §8).
+  if (String(process.env.HAKSTER_UPDATE_PROMPT || '').toLowerCase() !== 'ask') {
+    return { action: 'auto', pending, running };
+  }
+
   const stdin = process.stdin;
   const stdout = process.stdout;
   const tty = !!(stdin && stdin.isTTY && stdout && stdout.isTTY);

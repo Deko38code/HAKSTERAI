@@ -562,10 +562,9 @@ try {
   // This file lives in cli/, so __dirname is the CLI directory the updater
   // checks and updates — and the TUI it spawns inherits the same value.
   process.env.HAKSTER_CLI_DIR = process.env.HAKSTER_CLI_DIR || __dirname;
-  // An interactive TUI start asks first ("install now / wait until next one",
-  // owner 2026-11-23) and does the swap in tui-entry.mjs before the bundle is
-  // imported. Applying here too would consume the stage before the operator
-  // ever saw the choice.
+  // An interactive TUI start applies the stage in tui-entry.mjs before the
+  // bundle is imported (auto since 2026-11-26: "need ours auto like claude
+  // does"); applying here too would consume it twice.
   const interactiveTui = _isTerminalUi && process.stdin.isTTY && process.stdout.isTTY;
   _updateApplied = interactiveTui ? null : require('./src/updater').applyPending();
 } catch (_) {
