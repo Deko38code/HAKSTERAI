@@ -5,6 +5,7 @@ import { TextAttributes } from '@opentui/core';
 import { useRenderer } from '@opentui/react';
 import { deleteImage, deletePlacement, heroPath, isSupported, moveCursor, placeById, placeImage } from '../../../src/kitty-graphics.js';
 import { HERO_WORDMARK, HERO_W, HERO_GREEN } from './HeroLogo.jsx';
+import { scScramble } from '../utils/crush-scrambler.js';
 
 /* DecodeSplash — the CLI's start screen: five lines decode at the same time.
  *
@@ -15,8 +16,6 @@ import { HERO_WORDMARK, HERO_W, HERO_GREEN } from './HeroLogo.jsx';
  * the five lines are the CLI's real name, version, model, server state and the
  * keys that work. `/settings intro off` skips it.
  */
-const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-
 /* The startup hero when the terminal cannot show the PNG.
  *
  * Owner, 2026-11-23: "make sure the hero logo show on startup in our cli". The
@@ -204,20 +203,15 @@ function artSize(width, height, reservedRows) {
   return { cols, rows };
 }
 
+/* The splash scramble is CrushTerminal's own `scScramble` (utils/crush-
+ * scrambler.js), so the start screen and the reasoning block scramble with one
+ * function — same letters, same case, spaces and punctuation untouched. Only
+ * the part still to the right of the reveal is scrambled; the revealed prefix
+ * is the real text (owner, 2026-11-23: "decodes 5 lines simultaneously"). */
 function scrambleLine(text, reveal, frame) {
   const t = String(text == null ? '' : text);
-  let out = '';
-  let index = 0;
-  for (const ch of t) {
-    if (index < reveal || !/[A-Za-z0-9]/.test(ch)) {
-      out += ch;
-    } else {
-      const seed = (Math.imul(index + frame + 1, 2654435761) + ch.charCodeAt(0) * 101) >>> 0;
-      out += GLYPHS[seed % GLYPHS.length];
-    }
-    index += 1;
-  }
-  return out;
+  const head = t.slice(0, Math.max(0, reveal));
+  return head + scScramble(t.slice(head.length), head.length, frame + 1);
 }
 
 export default function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55, graphics = true }) {

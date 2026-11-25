@@ -2583,6 +2583,7 @@ export default function App({ version = '0.1.0' }) {
                   // describes the real run and not a timer (owner, 2026-11-25).
                   progressAt={agent.progressAtRef?.current || 0}
                   trend={agent.meters?.health?.trend || 'steady'}
+                  loopAt={agent.loopAt || 0}
                 />
               </box>
             ) : showRecap ? (

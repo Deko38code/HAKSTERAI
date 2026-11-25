@@ -547,6 +547,12 @@ export async function run({ adsPort }) {
   flushSync(() => small.mockInput.pressKey('t', { ctrl: true }));
   await small.flush();
   await settle(120);
+  // The reopened block comes up in the CrushTerminal decoder: the "Reasoning"
+  // box is there at once, the words are still scrambled, and they settle a few
+  // frames later (owner, 2026-11-25: the scrambler, "10 lines at a time").
+  const expandedBoxFrame = small.captureCharFrame();
+  await settle(1500);
+  await small.flush();
   const expandedFrame = small.captureCharFrame();
   flushSync(() => small.mockInput.pressKey('t', { ctrl: true }));
   await small.flush();
@@ -644,7 +650,8 @@ export async function run({ adsPort }) {
     ['submitted prompt appears in the transcript', /fix the bug/.test(chatFrame)],
     ['streamed answer appears', /Patched the handler and added a test\./.test(chatFrame)],
     ['finished reasoning folds to one line', /⋯ Thought for \d+s/.test(chatFrame)],
-    ['ctrl+t reopens a folded thought', /Checking the bundle sizes first/.test(expandedFrame)],
+    ['ctrl+t reopens a folded thought in the decoder box', /\+-{8,}-\+/.test(expandedBoxFrame)],
+    ['the reopened thought decodes back to its own words', /Reasoning/.test(expandedFrame) && /Checking the bundle sizes first/.test(expandedFrame)],
     ['todo panel reflects the checklist tool', /1\/2 completed/.test(chatFrame)],
     // Anchored to the keystroke: the dashboard panel titles must appear in the
     // frame captured right after the `d` keypress.

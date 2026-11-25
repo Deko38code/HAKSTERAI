@@ -193,6 +193,10 @@ export function useAgentStream({
   // phase phrase for a call-a-tool nudge. A plain ref, because every event
   // already re-renders the app — this only has to be readable at paint.
   const progressAtRef = useRef(0);
+  // When the server last proved a loop (same call repeated). The status row
+  // reads it for a few seconds so "stuck" is visible the moment it is real, not
+  // only after the silence clock runs out (owner, 2026-11-25).
+  const [loopAt, setLoopAt] = useState(0);
   const [requests, setRequests] = useState(0);
   const [tokens, setTokens] = useState({ in: 0, out: 0, reported: false });
   const requestsRef = useRef(0);
@@ -523,6 +527,7 @@ export function useAgentStream({
       // The stall clock starts with the run: silence is measured from here until
       // the first event lands.
       progressAtRef.current = Date.now();
+      setLoopAt(0);
       // A new turn starts a new round budget for the meter; the session's
       // smartness and points carry over, exactly as the old CLI's did.
       try { meterRef.current.resetTask(); syncMeters(); } catch { /* metering is best-effort */ }
@@ -757,6 +762,7 @@ export function useAgentStream({
             // A loop break is a real penalty in the old CLI (-10) — the same
             // cost here, so the bar tells the truth about a bad run.
             try { meterRef.current.bump(-10); syncMeters(); } catch { /* metering is best-effort */ }
+            setLoopAt(Date.now());
             pushActivity('err', 'loop detected');
             append({ id: nextId('sys'), role: 'system', tone: 'warn', text: evt.message || 'loop detected' });
             break;
@@ -1216,6 +1222,7 @@ export function useAgentStream({
     requestsRef.current = 0;
     startedAtRef.current = null;
     progressAtRef.current = 0;
+    setLoopAt(0);
   }, [abort, setPending]);
 
   const busy =
@@ -1237,6 +1244,7 @@ export function useAgentStream({
     lastRecap,
     activity,
     progressAtRef,
+    loopAt,
     requests,
     tokens,
     pendingConfirm,

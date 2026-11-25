@@ -3099,8 +3099,145 @@ import fs4 from "node:fs";
 import path3 from "node:path";
 import { TextAttributes as TextAttributes9 } from "@opentui/core";
 import { useRenderer as useRenderer2 } from "@opentui/react";
+
+// src/utils/crush-scrambler.js
+var SC_COLORS = ["#875fff", "#af87ff", "#d7afff", "#ff87ff", "#d787ff", "#afafff", "#c084fc", "#9d7fff", "#a78bfa", "#7c3aed"];
+var SC_EN_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+var SC_EN_LOWER = "abcdefghijklmnopqrstuvwxyz";
+var SC_LETTER = /[A-Za-z]/;
+var SC_MAX_CHARS = 900;
+var SC_BATCH_LINES = 10;
+var SC_TICK_MS = 90;
+var _scNonce = 0;
+function scScramble(text, offset = 0, nonce = 1) {
+  const src = String(text == null ? "" : text);
+  let out = "";
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    const pos = i + offset;
+    if (SC_LETTER.test(ch)) {
+      const alphabet = ch === ch.toUpperCase() ? SC_EN_UPPER : SC_EN_LOWER;
+      const s = Math.imul(pos + nonce + 1, 2654435761) + ch.charCodeAt(0) * 101 >>> 0;
+      let next = alphabet[s % alphabet.length];
+      if (next === ch) next = alphabet[(s + 13) % alphabet.length];
+      out += next;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+function nextScrambleNonce() {
+  _scNonce = (_scNonce + 1) % 1e9;
+  return _scNonce + (Math.random() * 1e9 | 0);
+}
+function scReasonBox(text, { columns = 72, scrambled = false, nonce = 1, colorIndex = 0 } = {}) {
+  const color = SC_COLORS[Math.abs(Number(colorIndex) || 0) % SC_COLORS.length];
+  const lines = String(text == null ? "" : text).split("\n");
+  const cols = Math.floor(Number(columns) || 72);
+  const bar = "-".repeat(Math.min(72, Math.max(8, cols - 4)));
+  let out = `
++${bar}+
+`;
+  out += "| Reasoning |\n";
+  out += `+${bar}+
+`;
+  for (const line of lines) {
+    const trimmed = line.replace(/\s+$/, "");
+    out += `| ${scrambled ? scScramble(trimmed, 0, nonce) : trimmed}
+`;
+  }
+  out += `+${bar}+
+`;
+  return { text: out, color };
+}
+function hash(a, b) {
+  let h = Math.imul(a + 1, 374761393) + Math.imul(b + 1, 668265263);
+  h = Math.imul(h ^ h >>> 13, 1274126177);
+  return ((h ^ h >>> 16) >>> 0) / 4294967296;
+}
+function wavePlan(text, { columns = 80, batchLines = SC_BATCH_LINES, nonce = 1 } = {}) {
+  const final = String(text == null ? "" : text);
+  if (!final || final.length > SC_MAX_CHARS) return null;
+  const initial = scScramble(final, 0, nonce || 1);
+  const visualColumns = Math.max(28, Math.floor(Number(columns) || 80));
+  const lines = [];
+  let line = [];
+  let column = 0;
+  for (let i = 0; i < final.length; i += 1) {
+    if (SC_LETTER.test(final[i]) && initial[i] !== final[i]) line.push(i);
+    if (final.charCodeAt(i) === 10 || ++column >= visualColumns) {
+      if (line.length) lines.push(line);
+      line = [];
+      column = 0;
+    }
+  }
+  if (line.length) lines.push(line);
+  const total = lines.reduce((n, chars) => n + chars.length, 0);
+  if (!total) return null;
+  const batchSize = Math.max(1, Math.floor(Number(batchLines) || SC_BATCH_LINES));
+  const batchCount = Math.ceil(lines.length / batchSize);
+  const averageLineLength = total / lines.length;
+  const framesPerBatch = Math.min(6, Math.max(3, Math.ceil(averageLineLength / 16)));
+  return {
+    final,
+    initial,
+    lines,
+    batchSize,
+    batchCount,
+    steps: framesPerBatch * batchCount,
+    scrambleFrames: Math.min(2, Math.max(1, Math.ceil(total / 1e3)))
+  };
+}
+function waveFrames(plan) {
+  return plan ? plan.scrambleFrames + plan.steps : 0;
+}
+function waveText(plan, frame) {
+  if (!plan) return { text: "", done: true, progress: 1 };
+  const f = Math.max(0, Math.floor(Number(frame) || 0));
+  const { final, initial, lines, batchSize, batchCount, steps, scrambleFrames } = plan;
+  const current = initial.split("");
+  if (f < scrambleFrames) {
+    for (const chars of lines) {
+      for (const idx of chars) {
+        const alphabet = final[idx] === final[idx].toUpperCase() ? SC_EN_UPPER : SC_EN_LOWER;
+        current[idx] = alphabet[Math.floor(hash(f, idx) * alphabet.length)];
+      }
+    }
+    return { text: current.join(""), done: false, progress: 0 };
+  }
+  const step = f - scrambleFrames + 1;
+  const p = Math.min(1, step / Math.max(1, steps));
+  const batchProgress = p * batchCount;
+  const activeBatch = Math.min(batchCount - 1, Math.floor(batchProgress));
+  const lineProgress = Math.min(1, batchProgress - activeBatch);
+  const eased = 1 - Math.pow(1 - lineProgress, 3);
+  for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
+    const chars = lines[lineNo];
+    const batchNo = Math.floor(lineNo / batchSize);
+    const lineTarget = batchNo < activeBatch ? chars.length : batchNo > activeBatch ? 0 : Math.min(chars.length, Math.max(1, Math.floor(eased * chars.length)));
+    for (let i = 0; i < chars.length; i += 1) {
+      const idx = chars[i];
+      const shouldFlicker = batchNo > activeBatch || batchNo === activeBatch && (i >= lineTarget || lineProgress < 0.25 && hash(f, idx) < 0.35);
+      if (shouldFlicker) {
+        const alphabet = final[idx] === final[idx].toUpperCase() ? SC_EN_UPPER : SC_EN_LOWER;
+        current[idx] = alphabet[Math.floor(hash(f + 7, idx) * alphabet.length)];
+      } else {
+        current[idx] = final[idx];
+      }
+    }
+  }
+  const done = step >= steps;
+  return { text: done ? final : current.join(""), done, progress: p };
+}
+function waveColor(colorIndex, frame, progress = 0) {
+  const base = Math.abs(Number(colorIndex) || 0);
+  const idx = (base + Math.floor((Number(progress) || 0) * 4)) % SC_COLORS.length;
+  return SC_COLORS[idx];
+}
+
+// src/components/DecodeSplash.jsx
 import { Fragment as Fragment7, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
-var GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 var RAIN_GLYPHS = "\uFF71\uFF72\uFF73\uFF74\uFF75\uFF76\uFF77\uFF78\uFF79\uFF7A\uFF7B\uFF7C\uFF7D\uFF7E\uFF7F\uFF80\uFF81\uFF82\uFF83\uFF84\uFF85\uFF86\uFF87\uFF88\uFF89\uFF8A\uFF8B\uFF8C\uFF8D\uFF8E\uFF8F\uFF90\uFF91\uFF92\uFF93\uFF94\uFF95\uFF96\uFF97\uFF98\uFF99\uFF9A\uFF9B\uFF9C\uFF9D0123456789";
 var RAIN_COLORS = { head: "#d8ffe6", near: "#00ff41", tail: "#0a5c22" };
 function rainHash(a, b, c) {
@@ -3232,18 +3369,8 @@ function artSize(width, height, reservedRows) {
 }
 function scrambleLine(text, reveal, frame) {
   const t = String(text == null ? "" : text);
-  let out = "";
-  let index = 0;
-  for (const ch of t) {
-    if (index < reveal || !/[A-Za-z0-9]/.test(ch)) {
-      out += ch;
-    } else {
-      const seed = Math.imul(index + frame + 1, 2654435761) + ch.charCodeAt(0) * 101 >>> 0;
-      out += GLYPHS[seed % GLYPHS.length];
-    }
-    index += 1;
-  }
-  return out;
+  const head = t.slice(0, Math.max(0, reveal));
+  return head + scScramble(t.slice(head.length), head.length, frame + 1);
 }
 function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55, graphics = true }) {
   const [frame, setFrame] = useState9(0);
@@ -4628,6 +4755,7 @@ var STUCK_PHRASES = {
   ]
 };
 var RESUME_PHRASE = "Back on task \xB7 continuing the checklist";
+var LOOP_PHRASE = "Loop detected \u2014 stop repeating and change the approach";
 function isResume(from, to) {
   const a = String(from || "").toUpperCase();
   const b = String(to || "").toUpperCase();
@@ -4707,9 +4835,10 @@ function phraseAt(list, index) {
   const i = Math.max(0, Math.floor(Number(index) || 0)) % items.length;
   return items[i];
 }
-function phraseFor({ phase, tool, activity = "", index = 0, resumed = false, stalledMs = 0 } = {}) {
+function phraseFor({ phase, tool, activity = "", index = 0, resumed = false, stalledMs = 0, loop = false } = {}) {
   const normalized = String(phase || "DEFAULT").toUpperCase();
   const info = PHASE_PHRASES[normalized] ? normalized : "DEFAULT";
+  if (loop) return { text: LOOP_PHRASE, kind: "loop" };
   if (resumed) return { text: RESUME_PHRASE, kind: "resume" };
   const name = tool && (tool.name || tool.tool_name) ? String(tool.name || tool.tool_name) : "";
   if (name) {
@@ -4726,6 +4855,7 @@ function phraseFor({ phase, tool, activity = "", index = 0, resumed = false, sta
 // src/components/CrushStatus.jsx
 import { jsx as jsx25, jsxs as jsxs24 } from "react/jsx-runtime";
 var SPINNER_MS = 300;
+var LOOP_HOLD_MS = 9e3;
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
 var GRADIENT = [51, 87, 117, 153, 117, 87];
@@ -4755,7 +4885,8 @@ function CrushStatus({
   elapsedMs,
   queued = 0,
   progressAt = 0,
-  trend = "steady"
+  trend = "steady",
+  loopAt = 0
 }) {
   const [frame, setFrame] = useState10(0);
   useEffect8(() => {
@@ -4781,13 +4912,15 @@ function CrushStatus({
   }, [normalizedPhase]);
   const resumed = Date.now() < resumeUntilRef.current;
   const phraseIndex = Math.floor(now / PHRASE_MS);
+  const looping = Number(loopAt) > 0 && now - Number(loopAt) < LOOP_HOLD_MS;
   const phrase = phraseFor({
     phase: normalizedPhase,
     tool: tool && (tool.name || tool.tool_name) ? tool : null,
     activity,
     index: phraseIndex,
     resumed,
-    stalledMs
+    stalledMs,
+    loop: looping
   });
   const heat = heatOf({ trend, stalledMs });
   const tint = heatColor(heat);
@@ -4805,7 +4938,7 @@ function CrushStatus({
     " ",
     /* @__PURE__ */ jsx25("span", { fg: tint, children: heatWord(heat) }),
     " \xB7 ",
-    /* @__PURE__ */ jsx25("span", { fg: phrase.kind === "stuck" ? "#f85149" : phrase.kind === "tool" ? "#3fb950" : "#a5b4c3", children: shown2 }),
+    /* @__PURE__ */ jsx25("span", { fg: phrase.kind === "stuck" || phrase.kind === "loop" ? "#f85149" : phrase.kind === "tool" ? "#3fb950" : "#a5b4c3", children: shown2 }),
     " ",
     /* @__PURE__ */ jsx25("span", { fg: gradColor, children: shimmer }),
     " ",
@@ -5090,7 +5223,7 @@ import React30, { useEffect as useEffect10, useRef as useRef7, useState as useSt
 import { useKeyboard as useKeyboard7 } from "@opentui/react";
 
 // src/components/MessageBlock.jsx
-import React29, { useEffect as useEffect9, useState as useState11 } from "react";
+import React29, { useEffect as useEffect9, useMemo as useMemo4, useState as useState11 } from "react";
 import { TextAttributes as TextAttributes22 } from "@opentui/core";
 import { Fragment as Fragment10, jsx as jsx29, jsxs as jsxs27 } from "react/jsx-runtime";
 var RESULT_LINES = 3;
@@ -5108,25 +5241,65 @@ function tailWindow(value, n) {
   return { lines: lines.slice(-n), hidden: Math.max(0, lines.length - n) };
 }
 var thoughtFor = (ms) => `Thought for ${Math.max(1, Math.round((Number(ms) || 0) / 1e3))}s`;
+function useWaveClock(steps, key) {
+  const [frame, setFrame] = useState11(0);
+  useEffect9(() => {
+    setFrame(0);
+    if (!steps) return void 0;
+    const id = setInterval(() => {
+      setFrame((f) => {
+        if (f + 1 >= steps) {
+          clearInterval(id);
+          return steps;
+        }
+        return f + 1;
+      });
+    }, SC_TICK_MS);
+    return () => clearInterval(id);
+  }, [steps, key]);
+  return frame;
+}
+function DecodedReasoning({ text, width }) {
+  const columns = Math.max(24, Number(width) || 72);
+  const plain = useMemo4(() => scReasonBox(text, { columns }), [text, columns]);
+  const nonce = useMemo4(() => nextScrambleNonce(), [text, columns]);
+  const plan = useMemo4(() => wavePlan(plain.text, { columns, nonce }), [plain, columns, nonce]);
+  const steps = waveFrames(plan);
+  const frame = useWaveClock(steps, plan);
+  const out = plan ? waveText(plan, frame) : { text: plain.text, done: true, progress: 1 };
+  const color = out.done ? plain.color : waveColor(0, frame, out.progress);
+  const lines = out.text.replace(/^\n/, "").replace(/\n$/, "").split("\n");
+  return /* @__PURE__ */ jsx29("box", { style: { flexDirection: "column", width: columns, flexShrink: 0, overflow: "hidden" }, children: lines.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: color, children: line }, `rd-${i}`)) });
+}
 function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand, label = true }) {
   const frame = useSpinnerFrame(live);
   const started = Number(startedAt) || 0;
   const ended = Number(endedAt) || 0;
+  const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
+  const newest = window.lines.length ? window.lines[window.lines.length - 1] : "";
+  const settled = window.lines.slice(0, -1);
+  const newestPlan = useMemo4(
+    () => live ? wavePlan(newest, { columns: Math.max(24, Number(width) || 72), nonce: nextScrambleNonce() }) : null,
+    [live, newest, width]
+  );
+  const newestSteps = waveFrames(newestPlan);
+  const newestFrame = useWaveClock(newestSteps, newestPlan);
+  const newestWave = newestPlan ? waveText(newestPlan, newestFrame) : { text: newest, done: true, progress: 1 };
   if (live) {
-    const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
     return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
       label ? /* @__PURE__ */ jsxs27("text", { children: [
         /* @__PURE__ */ jsx29("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
         /* @__PURE__ */ jsx29("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur2(Date.now() - started)}` : ""}` })
       ] }) : null,
-      window.lines.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "gray", children: line.trim() }, `th-${i}`))
+      settled.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "gray", children: line.trim() }, `th-${i}`)),
+      newest ? /* @__PURE__ */ jsx29("text", { fg: newestWave.done ? "gray" : waveColor(0, newestFrame, newestWave.progress), children: (newestWave.done ? newest : newestWave.text).trim() }) : null
     ] });
   }
   if (!expand) {
     const label2 = started && ended ? thoughtFor(ended - started) : lastLine(text);
     return /* @__PURE__ */ jsx29("text", { fg: "gray", children: clip(`\u22EF ${label2}`, Math.max(4, width)) });
   }
-  return /* @__PURE__ */ jsx29("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: String(text || "").replace(/\r/g, "").split("\n").filter((l) => l.trim()).map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "gray", children: line.trim() }, `td-${i}`)) });
+  return /* @__PURE__ */ jsx29(DecodedReasoning, { text, width });
 }
 function ProseBlock({ text, live, width, compact }) {
   if (!live) return /* @__PURE__ */ jsx29("text", { fg: "white", children: String(text) });
@@ -5502,6 +5675,7 @@ function useAgentStream({
   const [elapsedMs, setElapsedMs] = useState13(0);
   const [activity, setActivity] = useState13([]);
   const progressAtRef = useRef8(0);
+  const [loopAt, setLoopAt] = useState13(0);
   const [requests, setRequests] = useState13(0);
   const [tokens, setTokens] = useState13({ in: 0, out: 0, reported: false });
   const requestsRef = useRef8(0);
@@ -5716,6 +5890,7 @@ function useAgentStream({
       startedAtRef.current = Date.now();
       setElapsedMs(0);
       progressAtRef.current = Date.now();
+      setLoopAt(0);
       try {
         meterRef.current.resetTask();
         syncMeters();
@@ -5897,6 +6072,7 @@ function useAgentStream({
               syncMeters();
             } catch {
             }
+            setLoopAt(Date.now());
             pushActivity("err", "loop detected");
             append({ id: nextId("sys"), role: "system", tone: "warn", text: evt.message || "loop detected" });
             break;
@@ -6238,6 +6414,7 @@ function useAgentStream({
     requestsRef.current = 0;
     startedAtRef.current = null;
     progressAtRef.current = 0;
+    setLoopAt(0);
   }, [abort, setPending]);
   const busy = status === "connecting" || status === "reconnecting" || status === "streaming" || status === "thinking" || status === "approval";
   return {
@@ -6252,6 +6429,7 @@ function useAgentStream({
     lastRecap,
     activity,
     progressAtRef,
+    loopAt,
     requests,
     tokens,
     pendingConfirm,
@@ -8838,7 +9016,8 @@ function App({ version = "0.1.0" }) {
             elapsedMs: agent.elapsedMs,
             queued: steerQueue.length,
             progressAt: agent.progressAtRef?.current || 0,
-            trend: agent.meters?.health?.trend || "steady"
+            trend: agent.meters?.health?.trend || "steady",
+            loopAt: agent.loopAt || 0
           }
         ) }) : showRecap ? (
           // Idle: the same row states what the finished run did instead of

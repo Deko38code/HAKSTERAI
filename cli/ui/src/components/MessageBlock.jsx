@@ -1,6 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { TextAttributes } from '@opentui/core';
 import { clip } from './LiveSidebar.jsx';
+import {
+  SC_TICK_MS,
+  nextScrambleNonce,
+  scReasonBox,
+  waveColor,
+  waveFrames,
+  wavePlan,
+  waveText,
+} from '../utils/crush-scrambler.js';
 
 /* A shell result is capped in the transcript. A 4 KB `npm run build` dump is
  * ~40 wrapped rows: at that size the turn's prose is shoved above the window
@@ -57,12 +66,69 @@ const thoughtFor = (ms) => `Thought for ${Math.max(1, Math.round((Number(ms) || 
 
 /** One reasoning block. Live while it is being written (spinner, elapsed, tail
  *  of the text); finished it is one line unless `expand` is on. */
+/** One decode ticker. Stops itself once the wave has settled, so a finished
+ *  block costs zero renders — the same rule the pending-card spinner follows. */
+function useWaveClock(steps, key) {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    setFrame(0);
+    if (!steps) return undefined;
+    const id = setInterval(() => {
+      setFrame((f) => {
+        if (f + 1 >= steps) {
+          clearInterval(id);
+          return steps;
+        }
+        return f + 1;
+      });
+    }, SC_TICK_MS);
+    return () => clearInterval(id);
+    // `key` restarts the wave when the text it was planned for changes.
+  }, [steps, key]);
+  return frame;
+}
+
+/** Reasoning drawn through the CrushTerminal decoder: the "Reasoning" box,
+ *  scrambled, then wave-decoded band by band (10 visual lines at a time — the
+ *  owner's number). Used for the reopened block; the live block decodes only
+ *  its newest line, because the rest is still being written. */
+function DecodedReasoning({ text, width }) {
+  const columns = Math.max(24, Number(width) || 72);
+  const plain = useMemo(() => scReasonBox(text, { columns }), [text, columns]);
+  const nonce = useMemo(() => nextScrambleNonce(), [text, columns]);
+  const plan = useMemo(() => wavePlan(plain.text, { columns, nonce }), [plain, columns, nonce]);
+  const steps = waveFrames(plan);
+  const frame = useWaveClock(steps, plan);
+  const out = plan ? waveText(plan, frame) : { text: plain.text, done: true, progress: 1 };
+  const color = out.done ? plain.color : waveColor(0, frame, out.progress);
+  const lines = out.text.replace(/^\n/, '').replace(/\n$/, '').split('\n');
+  return (
+    <box style={{ flexDirection: 'column', width: columns, flexShrink: 0, overflow: 'hidden' }}>
+      {lines.map((line, i) => (
+        <text key={`rd-${i}`} fg={color}>{line}</text>
+      ))}
+    </box>
+  );
+}
+
 function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand, label = true }) {
   const frame = useSpinnerFrame(live);
   const started = Number(startedAt) || 0;
   const ended = Number(endedAt) || 0;
+  // The newest reasoning line runs through the decoder while it is being
+  // written: it stays scrambled and settles the moment the next line starts.
+  // Earlier lines are already settled prose and are drawn plainly.
+  const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
+  const newest = window.lines.length ? window.lines[window.lines.length - 1] : '';
+  const settled = window.lines.slice(0, -1);
+  const newestPlan = useMemo(
+    () => (live ? wavePlan(newest, { columns: Math.max(24, Number(width) || 72), nonce: nextScrambleNonce() }) : null),
+    [live, newest, width],
+  );
+  const newestSteps = waveFrames(newestPlan);
+  const newestFrame = useWaveClock(newestSteps, newestPlan);
+  const newestWave = newestPlan ? waveText(newestPlan, newestFrame) : { text: newest, done: true, progress: 1 };
   if (live) {
-    const window = tailWindow(text, compact ? 1 : LIVE_THINK_LINES);
     return (
       <box style={{ flexDirection: 'column', width, flexShrink: 0 }}>
         {/* The run's own spinner row under the composer already states the
@@ -78,9 +144,14 @@ function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand,
         ) : null}
         {/* Not clipped: reasoning is prose and must keep its words; the count is
             what stays bounded while it streams. */}
-        {window.lines.map((line, i) => (
+        {settled.map((line, i) => (
           <text key={`th-${i}`} fg="gray">{line.trim()}</text>
         ))}
+        {newest ? (
+          <text fg={newestWave.done ? 'gray' : waveColor(0, newestFrame, newestWave.progress)}>
+            {(newestWave.done ? newest : newestWave.text).trim()}
+          </text>
+        ) : null}
       </box>
     );
   }
@@ -88,13 +159,7 @@ function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand,
     const label = started && ended ? thoughtFor(ended - started) : lastLine(text);
     return <text fg="gray">{clip(`⋯ ${label}`, Math.max(4, width))}</text>;
   }
-  return (
-    <box style={{ flexDirection: 'column', width, flexShrink: 0 }}>
-      {String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim()).map((line, i) => (
-        <text key={`td-${i}`} fg="gray">{line.trim()}</text>
-      ))}
-    </box>
-  );
+  return <DecodedReasoning text={text} width={width} />;
 }
 
 /** One prose block. Live it shows its tail inside the same bounded body; once

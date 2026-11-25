@@ -12,6 +12,8 @@ import {
 /* How often the run's own glyphs change. Every tick is a full-screen repaint
  * (see the effect's comment), so this is a cost knob, not a taste knob. */
 const SPINNER_MS = 300;
+/** How long a detected loop stays named on the row. */
+const LOOP_HOLD_MS = 9000;
 
 const FRAMES = ['❄', '✦', '✧', '✶', '✧', '✦'];const SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
 const GRADIENT = [51, 87, 117, 153, 117, 87];
@@ -48,6 +50,7 @@ export default function CrushStatus({
   queued = 0,
   progressAt = 0,
   trend = 'steady',
+  loopAt = 0,
 }) {
   const [frame, setFrame] = useState(0);
   // One commit here repaints the WHOLE screen: OpenTUI lays the frame out as a
@@ -95,6 +98,9 @@ export default function CrushStatus({
   // Phrase rotation is timed, not frame-counted: one phrase every PHRASE_MS no
   // matter what the paint interval is set to.
   const phraseIndex = Math.floor(now / PHRASE_MS);
+  // A loop the server proved is "stuck" with evidence: show it while it is true
+  // (HakTerm's own loop line) instead of waiting out the silence clock.
+  const looping = Number(loopAt) > 0 && now - Number(loopAt) < LOOP_HOLD_MS;
   const phrase = phraseFor({
     phase: normalizedPhase,
     tool: tool && (tool.name || tool.tool_name) ? tool : null,
@@ -102,6 +108,7 @@ export default function CrushStatus({
     index: phraseIndex,
     resumed,
     stalledMs,
+    loop: looping,
   });
 
   // The heat reading is the meter's measured trend plus this stall clock — the
@@ -129,7 +136,7 @@ export default function CrushStatus({
         {/* Warm/cool, from the measured trend and the stall clock. */}
         <span fg={tint}>{heatWord(heat)}</span>
         {' · '}
-        <span fg={phrase.kind === 'stuck' ? '#f85149' : phrase.kind === 'tool' ? '#3fb950' : '#a5b4c3'}>
+        <span fg={phrase.kind === 'stuck' || phrase.kind === 'loop' ? '#f85149' : phrase.kind === 'tool' ? '#3fb950' : '#a5b4c3'}>
           {shown}
         </span>
         {' '}

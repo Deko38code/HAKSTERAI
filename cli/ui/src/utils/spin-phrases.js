@@ -104,6 +104,8 @@ export const STUCK_PHRASES = {
 export const NUDGE_PHRASE = 'Nudge · checking progress and continuing the active task';
 export const RESUME_PHRASE = 'Back on task · continuing the checklist';
 export const ON_FIRE_PHRASE = 'On fire · difficulty increased, pushing harder';
+/** A detected loop is stuck-ness the server already proved — say it at once. */
+export const LOOP_PHRASE = 'Loop detected — stop repeating and change the approach';
 
 /** True when `from` is reasoning after doing: the run has just resumed. */
 export function isResume(from, to) {
@@ -208,12 +210,13 @@ export function phraseAt(list, index) {
 /**
  * The phrase the row should print right now, and why.
  *
- * Priority: a resuming run says so → a tool in flight names itself → a stalled
- * run says what to do about it → the phase's own warming/cooling phrases rotate.
+ * Priority: a proven loop → a resuming run → a tool in flight → a stalled run →
+ * the phase's own warming/cooling phrases rotating.
  */
-export function phraseFor({ phase, tool, activity = '', index = 0, resumed = false, stalledMs = 0 } = {}) {
+export function phraseFor({ phase, tool, activity = '', index = 0, resumed = false, stalledMs = 0, loop = false } = {}) {
   const normalized = String(phase || 'DEFAULT').toUpperCase();
   const info = PHASE_PHRASES[normalized] ? normalized : 'DEFAULT';
+  if (loop) return { text: LOOP_PHRASE, kind: 'loop' };
   if (resumed) return { text: RESUME_PHRASE, kind: 'resume' };
   const name = tool && (tool.name || tool.tool_name) ? String(tool.name || tool.tool_name) : '';
   if (name) {

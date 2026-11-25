@@ -25,6 +25,7 @@ import {
   PHASE_PHRASES,
   STUCK_MS,
   RESUME_PHRASE,
+  LOOP_PHRASE,
   heatColor,
   heatOf,
   heatWord,
@@ -98,6 +99,18 @@ test('stuck says stop thinking and use a tool, at HakTerm\'s 12 s', () => {
   }
   // Before the threshold it is still the phase's own phrase.
   assert.equal(phraseFor({ phase: 'THINK', stalledMs: STUCK_MS - 1 }).kind, 'phase');
+});
+
+test('a proven loop is named before everything else', () => {
+  assert.match(LOOP_PHRASE, /stop repeating/i);
+  assert.equal(phraseFor({ phase: 'ACT', loop: true, tool: { name: 'exec_shell', args: {} } }).kind, 'loop');
+  const row = read('cli/ui/src/components/CrushStatus.jsx');
+  assert.match(row, /loopAt = 0/, 'the row takes the loop clock');
+  assert.match(row, /loop: looping/, 'and hands it to the phrase picker');
+  const app = read('cli/ui/src/App.jsx');
+  assert.match(app, /loopAt=\{agent\.loopAt \|\| 0\}/, 'App passes it');
+  const hook = read('cli/ui/src/hooks/useAgentStream.js');
+  assert.match(hook, /setLoopAt\(Date\.now\(\)\)/, 'a detected loop is stamped');
 });
 
 test('precedence: resumed → tool → stuck → phase, and rotation is by index', () => {
