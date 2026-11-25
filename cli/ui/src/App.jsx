@@ -460,7 +460,9 @@ export default function App({ version = '0.1.0' }) {
   // by provider (no model string is invented for it), so it needs its own name.
   const modelText = model ? displayModel(model) : (provider === 'codex-cli' ? 'Codex (Pro)' : provider || 'auto');
   const ctxMax = catalog.contextMaxFor(model || PRIMARY_MODEL) || 1;
-  const ctxUsed = Number((status && (status.tokens || status.contextUsed)) || 0);
+  // Prefer the measured conversation size (the last call's prompt, from the
+  // stream — see useAgentStream), then whatever the TUI status reports.
+  const ctxUsed = Number(agent.contextUsed || (status && (status.tokens || status.contextUsed)) || 0);
   const meters = agent.meters || null;
   // The run's live output for the sidebar: the newest tool call and the tail of
   // whatever it produced (or the answer being streamed). Derived from the same
@@ -562,6 +564,10 @@ export default function App({ version = '0.1.0' }) {
     // cannot stand behind (§10).
     tokensKnown: !!(agent.tokens && agent.tokens.reported),
     ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((ctxUsed / ctxMax) * 100))) : null,
+    // The two raw numbers behind that share, so the sidebar can print the
+    // reading itself (`12.4k / 200k · 6%`) instead of a bare percent.
+    ctxUsed: ctxUsed > 0 ? ctxUsed : null,
+    ctxMax,
   };
   const peers = peersFromMcp(mcp);
   const services = serviceStates(scan);
@@ -1586,13 +1592,17 @@ export default function App({ version = '0.1.0' }) {
   // full line — the state and the guard count stay visible everywhere.
   const statusBoxShown = view === 'chat';
   const ctxK = Math.round(ctxMax / 1000);
-  const ctxPart = model ? `ctx ${ctxK}K` : null;
+  // `ctx <window>` used to ride this header line, but it only ever named the
+  // window size and it competed with the ◈ memory bar for the right edge
+  // (owner, 2026-11-26: "we have ctx up top of panels … move it to the right
+  // side panel … move top one for space for our mem bar"). The reading lives in
+  // the sidebar's ◔ Usage panel now, measured against the window, so nothing is
+  // lost and the bar keeps the corner to itself.
   const headerDetailVariants = statusBoxShown
     ? // `tui <version>` lives on the status box's top line here, not twice.
-      [[view, ctxPart].filter(Boolean).join(' · '), view]
+      [[view].filter(Boolean).join(' · ')]
     : [
-      ['tui ' + version, view, ctxPart].filter(Boolean).join(' · '),
-      [view, ctxPart].filter(Boolean).join(' · '),
+      ['tui ' + version, view].filter(Boolean).join(' · '),
       view,
     ];
   const headerInner = panelW - 2;
@@ -1704,7 +1714,6 @@ export default function App({ version = '0.1.0' }) {
   const meterPtsArrowFg = arrowFg(meterPtsDelta);
   const meterCpu = host && host.cpuPct != null ? `${host.cpuPct}%` : '\u2014';
   const meterRam = host && host.memPct != null ? `${host.memPct}%` : '\u2014';
-  const meterCtxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
   const heatFg = (v) => (v == null ? 'gray' : v > 85 ? 'red' : v > 60 ? 'yellow' : 'green');
   const meterFg = {
     smart: barColor('smart', meterScore),
@@ -1780,10 +1789,6 @@ export default function App({ version = '0.1.0' }) {
     ...(barParts ? [...barParts, { t: ' ', fg: 'gray' }] : []),
     { t: text, fg },
   ];
-  const ctxMeterPart = {
-    t: `  ctx ${meterCtxPct}%`,
-    fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green',
-  };
   const smartPart = [
     { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
     { t: `${meterScore}% `, fg: 'white', bold: true },
@@ -1793,29 +1798,17 @@ export default function App({ version = '0.1.0' }) {
     { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
     { t: meterPtsArrow, fg: meterPtsArrowFg },
   ];
-  // Richest first. The bars outlive the ctx reading and are the last thing
-  // dropped before the bare numbers, because they were the request; a terminal
-  // too narrow for even that still shows both percentages.
+  // Richest first. The bars are the last thing dropped before the bare numbers,
+  // because they were the request; a terminal too narrow for even that still
+  // shows both percentages. The `ctx <N>%` reading that used to sit between the
+  // points and cpu moved to the sidebar's \u25d4 Usage panel (owner, 2026-11-26), so
+  // the top line is shorter and the update badge keeps its place beside cpu/ram.
   const baseMeterVariants = [
     mkMeter([
       ...smartPart,
       ...ptsPart,
-      ctxMeterPart,
       ...hostReading('cpu', cpuBarParts, meterCpu, meterFg.cpu),
       ...hostReading('ram', ramBarParts, meterRam, meterFg.ram),
-    ]),
-    mkMeter([
-      ...smartPart,
-      ...ptsPart,
-      ...hostReading('cpu', cpuBarParts, meterCpu, meterFg.cpu),
-      ...hostReading('ram', ramBarParts, meterRam, meterFg.ram),
-    ]),
-    mkMeter([
-      ...smartPart,
-      ...ptsPart,
-      ctxMeterPart,
-      ...hostReading('cpu', null, meterCpu, meterFg.cpu),
-      ...hostReading('ram', null, meterRam, meterFg.ram),
     ]),
     mkMeter([
       ...smartPart,

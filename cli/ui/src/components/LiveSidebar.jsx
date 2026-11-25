@@ -414,7 +414,16 @@ export default function LiveSidebar({
           <Row
             width={inner}
             k="ctx"
-            v={usage && usage.ctxPct != null ? `${usage.ctxPct}%` : '—'}
+            // The measured conversation size against the window, not a bare
+            // share: this row read "—" every turn because nothing ever filled
+            // it (owner, 2026-11-26: the ctx under tokens "dosnt work"). Both
+            // figures come from the prompt count the last call reported, so the
+            // percent can be checked by hand. Narrow panels keep the percent.
+            v={usage && usage.ctxPct != null
+              ? (compact || !usage.ctxUsed
+                ? `${usage.ctxPct}%`
+                : `${fmtTok(usage.ctxUsed)} / ${fmtTok(usage.ctxMax)} · ${usage.ctxPct}%`)
+              : '—'}
             color={Number(usage && usage.ctxPct) > 85 ? 'red' : Number(usage && usage.ctxPct) > 60 ? 'yellow' : 'green'}
           />
         </Panel>

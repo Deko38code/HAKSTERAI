@@ -2659,7 +2659,7 @@ function LiveSidebar({
         {
           width: inner,
           k: "ctx",
-          v: usage && usage.ctxPct != null ? `${usage.ctxPct}%` : "\u2014",
+          v: usage && usage.ctxPct != null ? compact || !usage.ctxUsed ? `${usage.ctxPct}%` : `${fmtTok(usage.ctxUsed)} / ${fmtTok(usage.ctxMax)} \xB7 ${usage.ctxPct}%` : "\u2014",
           color: Number(usage && usage.ctxPct) > 85 ? "red" : Number(usage && usage.ctxPct) > 60 ? "yellow" : "green"
         }
       )
@@ -5772,6 +5772,7 @@ function useAgentStream({
   const [loopAt, setLoopAt] = useState13(0);
   const [requests, setRequests] = useState13(0);
   const [tokens, setTokens] = useState13({ in: 0, out: 0, reported: false });
+  const [contextUsed, setContextUsed] = useState13(0);
   const requestsRef = useRef9(0);
   const pushActivity = useCallback3((kind, text) => {
     const line = { kind: String(kind || "sys"), text: String(text == null ? "" : text), ts: Date.now() };
@@ -6197,6 +6198,9 @@ function useAgentStream({
           }
           case "compact": {
             const text2 = String(evt.message || "conversation compacted").trim();
+            if (Number.isFinite(Number(evt.tokensAfter)) && Number(evt.tokensAfter) > 0) {
+              setContextUsed(Number(evt.tokensAfter));
+            }
             pushActivity("sys", text2);
             append({ id: nextId("sys"), role: "system", tone: "notice", text: text2 });
             break;
@@ -6239,6 +6243,7 @@ function useAgentStream({
                 out: t.out + (Number.isFinite(outTok) ? outTok : 0),
                 reported: true
               }));
+              if (Number.isFinite(inTok) && inTok > 0) setContextUsed(inTok);
               pushActivity("done", `turn done \xB7 ${fmtTok2(inTok)} in / ${fmtTok2(outTok)} out`);
             } else {
               pushActivity("done", "turn done");
@@ -6491,6 +6496,7 @@ function useAgentStream({
     setActivity([]);
     setRequests(0);
     setTokens({ in: 0, out: 0, reported: false });
+    setContextUsed(0);
     setLearned({ added: 0, skills: 0, events: 0 });
     learnedRef.current = { added: 0, skills: 0, events: 0 };
     setLastRecap(null);
@@ -6516,6 +6522,7 @@ function useAgentStream({
     loopAt,
     requests,
     tokens,
+    contextUsed,
     pendingConfirm,
     answerConfirm,
     send,
@@ -7504,7 +7511,7 @@ function App({ version = "0.1.0" }) {
   };
   const modelText = model ? (0, import_ladder2.displayModel)(model) : provider === "codex-cli" ? "Codex (Pro)" : provider || "auto";
   const ctxMax = import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
-  const ctxUsed = Number(status && (status.tokens || status.contextUsed) || 0);
+  const ctxUsed = Number(agent.contextUsed || status && (status.tokens || status.contextUsed) || 0);
   const meters = agent.meters || null;
   const lastAssistant = React31.useMemo(() => {
     for (let i = agent.messages.length - 1; i >= 0; i--) {
@@ -7551,7 +7558,11 @@ function App({ version = "0.1.0" }) {
     // loop does not). Until one does, the panel says "—" rather than a zero it
     // cannot stand behind (§10).
     tokensKnown: !!(agent.tokens && agent.tokens.reported),
-    ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round(ctxUsed / ctxMax * 100))) : null
+    ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round(ctxUsed / ctxMax * 100))) : null,
+    // The two raw numbers behind that share, so the sidebar can print the
+    // reading itself (`12.4k / 200k · 6%`) instead of a bare percent.
+    ctxUsed: ctxUsed > 0 ? ctxUsed : null,
+    ctxMax
   };
   const peers = peersFromMcp(mcp);
   const services = serviceStates(scan);
@@ -8415,13 +8426,11 @@ function App({ version = "0.1.0" }) {
   const headerState = statusErr ? "OFFLINE" : status ? "ONLINE" : "connecting\u2026";
   const statusBoxShown = view === "chat";
   const ctxK = Math.round(ctxMax / 1e3);
-  const ctxPart = model ? `ctx ${ctxK}K` : null;
   const headerDetailVariants = statusBoxShown ? (
     // `tui <version>` lives on the status box's top line here, not twice.
-    [[view, ctxPart].filter(Boolean).join(" \xB7 "), view]
+    [[view].filter(Boolean).join(" \xB7 ")]
   ) : [
-    ["tui " + version, view, ctxPart].filter(Boolean).join(" \xB7 "),
-    [view, ctxPart].filter(Boolean).join(" \xB7 "),
+    ["tui " + version, view].filter(Boolean).join(" \xB7 "),
     view
   ];
   const headerInner = panelW - 2;
@@ -8491,7 +8500,6 @@ function App({ version = "0.1.0" }) {
   const meterPtsArrowFg = arrowColor(meterPtsDelta);
   const meterCpu = host && host.cpuPct != null ? `${host.cpuPct}%` : "\u2014";
   const meterRam = host && host.memPct != null ? `${host.memPct}%` : "\u2014";
-  const meterCtxPct = ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctxUsed) || 0) / ctxMax * 100))) : 0;
   const heatFg = (v) => v == null ? "gray" : v > 85 ? "red" : v > 60 ? "yellow" : "green";
   const meterFg = {
     smart: barColor("smart", meterScore),
@@ -8531,10 +8539,6 @@ function App({ version = "0.1.0" }) {
     ...barParts ? [...barParts, { t: " ", fg: "gray" }] : [],
     { t: text, fg }
   ];
-  const ctxMeterPart = {
-    t: `  ctx ${meterCtxPct}%`,
-    fg: meterCtxPct > 85 ? "red" : meterCtxPct > 60 ? "yellow" : "green"
-  };
   const smartPart = [
     { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
     { t: `${meterScore}% `, fg: "white", bold: true },
@@ -8548,22 +8552,8 @@ function App({ version = "0.1.0" }) {
     mkMeter([
       ...smartPart,
       ...ptsPart,
-      ctxMeterPart,
       ...hostReading("cpu", cpuBarParts, meterCpu, meterFg.cpu),
       ...hostReading("ram", ramBarParts, meterRam, meterFg.ram)
-    ]),
-    mkMeter([
-      ...smartPart,
-      ...ptsPart,
-      ...hostReading("cpu", cpuBarParts, meterCpu, meterFg.cpu),
-      ...hostReading("ram", ramBarParts, meterRam, meterFg.ram)
-    ]),
-    mkMeter([
-      ...smartPart,
-      ...ptsPart,
-      ctxMeterPart,
-      ...hostReading("cpu", null, meterCpu, meterFg.cpu),
-      ...hostReading("ram", null, meterRam, meterFg.ram)
     ]),
     mkMeter([
       ...smartPart,

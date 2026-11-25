@@ -200,6 +200,12 @@ export function useAgentStream({
   const [loopAt, setLoopAt] = useState(0);
   const [requests, setRequests] = useState(0);
   const [tokens, setTokens] = useState({ in: 0, out: 0, reported: false });
+  // How full the model's context window is, measured — never guessed (owner,
+  // 2026-11-26: the sidebar's `ctx` row "doesn't work"). It is the prompt size
+  // of the most recent call: the `done` event's own inputTokens, or, after the
+  // server compacts mid-run, the compact event's tokensAfter. Nothing else in
+  // the wire reports it, so with no turn yet this stays 0 and the row says "—".
+  const [contextUsed, setContextUsed] = useState(0);
   const requestsRef = useRef(0);
   const pushActivity = useCallback((kind, text) => {
     const line = { kind: String(kind || 'sys'), text: String(text == null ? '' : text), ts: Date.now() };
@@ -807,6 +813,11 @@ export function useAgentStream({
             // from the event's own counts — never a guessed percentage, and
             // nothing in the output panels changes shape (§10, §38).
             const text = String(evt.message || 'conversation compacted').trim();
+            // After a compact the conversation is the summary, not what was
+            // there before — the event's own tokensAfter is the new size.
+            if (Number.isFinite(Number(evt.tokensAfter)) && Number(evt.tokensAfter) > 0) {
+              setContextUsed(Number(evt.tokensAfter));
+            }
             pushActivity('sys', text);
             append({ id: nextId('sys'), role: 'system', tone: 'notice', text });
             break;
@@ -862,6 +873,10 @@ export function useAgentStream({
                 out: t.out + (Number.isFinite(outTok) ? outTok : 0),
                 reported: true,
               }));
+              // The prompt of this call IS the conversation the model just read,
+              // so it is the context-window reading (session totals above are
+              // sums across turns and cannot answer that question).
+              if (Number.isFinite(inTok) && inTok > 0) setContextUsed(inTok);
               pushActivity('done', `turn done · ${fmtTok(inTok)} in / ${fmtTok(outTok)} out`);
             } else {
               pushActivity('done', 'turn done');
@@ -1205,6 +1220,7 @@ export function useAgentStream({
     setActivity([]);
     setRequests(0);
     setTokens({ in: 0, out: 0, reported: false });
+    setContextUsed(0);
     setLearned({ added: 0, skills: 0, events: 0 });
     learnedRef.current = { added: 0, skills: 0, events: 0 };
     setLastRecap(null);
@@ -1237,6 +1253,7 @@ export function useAgentStream({
     loopAt,
     requests,
     tokens,
+    contextUsed,
     pendingConfirm,
     answerConfirm,
     send,
