@@ -6587,6 +6587,30 @@ function countWebCallsInMessages(messages) {
   return n;
 }
 
+// src/utils/bar.js
+var EIGHTHS = ["", "\u258F", "\u258E", "\u258D", "\u258C", "\u258B", "\u258A", "\u2589"];
+var FULL = "\u2588";
+var TRACK = "\u254C";
+function richBar(pct, width = 5, fg = "green", trackFg = "gray") {
+  const v = pct == null ? null : Number(pct);
+  if (v == null || !Number.isFinite(v)) return null;
+  const w = Math.max(2, Math.round(Number(width) || 5));
+  const cells = Math.max(0, Math.min(100, v)) / 100 * w;
+  const full = Math.min(w, Math.floor(cells));
+  const rem = cells - full;
+  const eighth = rem > 0 ? Math.round(rem * 8) : 0;
+  let filled = full;
+  let headCell = "";
+  if (eighth >= 8) filled = Math.min(w, full + 1);
+  else if (eighth > 0) headCell = EIGHTHS[eighth];
+  const empty = Math.max(0, w - filled - (headCell ? 1 : 0));
+  const parts = [];
+  if (filled) parts.push({ t: FULL.repeat(filled), fg });
+  if (headCell) parts.push({ t: headCell, fg });
+  if (empty) parts.push({ t: TRACK.repeat(empty), fg: trackFg });
+  return parts;
+}
+
 // src/App.jsx
 var import_prefs3 = __toESM(require_prefs());
 var import_input_history = __toESM(require_input_history());
@@ -7724,11 +7748,10 @@ function App({ version = "0.1.0" }) {
   const memPct = !memory ? null : memBanks.length ? Math.max(0, Math.min(100, Math.round(memFullest / BANK_CAP * 100))) : 0;
   const memFg = memPct == null || memPct === 0 ? "gray" : memPct >= 90 ? "#f85149" : memPct >= 70 ? "#d29922" : "#3fb950";
   const MEMBAR_W = 5;
-  const memFilled = memPct == null ? 0 : Math.round(memPct / 100 * MEMBAR_W);
-  const memParts = memPct == null ? null : [
+  const memBar = richBar(memPct, MEMBAR_W, memFg);
+  const memParts = memPct == null || !memBar ? null : [
     { t: "\u25C8 ", fg: memFg, bold: true },
-    { t: "\u2588".repeat(memFilled), fg: memFg },
-    { t: "\u2591".repeat(MEMBAR_W - memFilled), fg: "gray" },
+    ...memBar,
     { t: ` ${memPct}%`, fg: memPct >= 90 ? "red" : memPct === 0 ? "gray" : "white", bold: memPct > 0 },
     ...memTotal != null ? [{ t: ` ${memTotal}`, fg: "gray" }] : []
   ];
@@ -7785,41 +7808,59 @@ function App({ version = "0.1.0" }) {
     const parts = meter.parts.length ? [...meter.parts, { t: `  ${badge.text}`, fg: badge.fg, bold: true }] : [{ t: badge.text, fg: badge.fg, bold: true }];
     return { text: parts.map((x) => x.t).join(""), parts };
   };
+  const HOST_BAR_W = 5;
+  const cpuBarParts = richBar(host && host.cpuPct, HOST_BAR_W, meterFg.cpu);
+  const ramBarParts = richBar(host && host.memPct, HOST_BAR_W, meterFg.ram);
+  const hostReading = (label, barParts, text, fg, lead = "  ") => [
+    { t: `${lead}${label} `, fg: "gray" },
+    ...barParts ? [...barParts, { t: " ", fg: "gray" }] : [],
+    { t: text, fg }
+  ];
+  const ctxMeterPart = {
+    t: `  ctx ${meterCtxPct}%`,
+    fg: meterCtxPct > 85 ? "red" : meterCtxPct > 60 ? "yellow" : "green"
+  };
+  const smartPart = [
+    { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
+    { t: `${meterScore}% `, fg: "white", bold: true },
+    { t: meterArrowCh, fg: meterArrowFg }
+  ];
+  const ptsPart = [
+    { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+    { t: meterPtsArrow, fg: meterPtsArrowFg }
+  ];
   const baseMeterVariants = [
     mkMeter([
-      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
-      { t: `${meterScore}% `, fg: "white", bold: true },
-      { t: meterArrowCh, fg: meterArrowFg },
-      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? "red" : meterCtxPct > 60 ? "yellow" : "green" },
-      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: `  ram ${meterRam}`, fg: meterFg.ram }
+      ...smartPart,
+      ...ptsPart,
+      ctxMeterPart,
+      ...hostReading("cpu", cpuBarParts, meterCpu, meterFg.cpu),
+      ...hostReading("ram", ramBarParts, meterRam, meterFg.ram)
     ]),
     mkMeter([
-      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
-      { t: `${meterScore}% `, fg: "white", bold: true },
-      { t: meterArrowCh, fg: meterArrowFg },
-      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? "red" : meterCtxPct > 60 ? "yellow" : "green" },
-      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: `  ram ${meterRam}`, fg: meterFg.ram }
+      ...smartPart,
+      ...ptsPart,
+      ...hostReading("cpu", cpuBarParts, meterCpu, meterFg.cpu),
+      ...hostReading("ram", ramBarParts, meterRam, meterFg.ram)
     ]),
     mkMeter([
-      { t: "\u{1F9E0} ", fg: meterFg.smart, bold: true },
-      { t: `${meterScore}% `, fg: "white", bold: true },
-      { t: meterArrowCh, fg: meterArrowFg },
-      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: `  ram ${meterRam}`, fg: meterFg.ram }
+      ...smartPart,
+      ...ptsPart,
+      ctxMeterPart,
+      ...hostReading("cpu", null, meterCpu, meterFg.cpu),
+      ...hostReading("ram", null, meterRam, meterFg.ram)
+    ]),
+    mkMeter([
+      ...smartPart,
+      ...ptsPart,
+      ...hostReading("cpu", null, meterCpu, meterFg.cpu),
+      ...hostReading("ram", null, meterRam, meterFg.ram)
     ]),
     mkMeter([
       { t: `\u2726 ${meterPts}p`, fg: meterFg.pts },
       { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: ` cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: ` ram ${meterRam}`, fg: meterFg.ram }
+      ...hostReading("cpu", null, meterCpu, meterFg.cpu, " "),
+      ...hostReading("ram", null, meterRam, meterFg.ram, " ")
     ])
   ];
   const headerMeterVariants = [];

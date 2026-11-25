@@ -555,6 +555,23 @@ export async function run({ adsPort }) {
   bigMode = false;
   await settle(50);
 
+  // ── 6b. An 80-column terminal: the meter ladder must give way, not wrap ──
+  // The header meters are the richest thing on the top line, so at 80 columns
+  // the bars and then the ctx reading are dropped in turn. What must never
+  // happen is the row wrapping onto the panels or the cpu/ram numbers leaving
+  // the line entirely.
+  const narrow = await createTestRenderer({ width: 80, height: 24 });
+  const narrowRoot = createRoot(narrow.renderer);
+  flushSync(() => narrowRoot.render(React.createElement(App, { version: 'smoke' })));
+  await narrow.flush();
+  await settle(600);
+  const narrowFrame = narrow.captureCharFrame();
+  const narrowHeader = narrowFrame.split('\n')[0] || '';
+  const narrowMeterRow = narrowFrame.split('\n').slice(0, 3).join('\n');
+  narrowRoot.unmount();
+  narrow.renderer.destroy();
+  await settle(50);
+
   const c0 = confirmCalls[0] || {};
   const c1 = confirmCalls[1] || {};
   const cPassword = confirmCalls[2] || {};
@@ -593,6 +610,18 @@ export async function run({ adsPort }) {
     // this asserts the real ad service filled the rail, not one exact line.
     ['live ad rail fills from the real ad service', /haksterAi — your own/.test(idleFrame)],
     ['composer shows the placeholder', /describe a task/.test(idleFrame)],
+
+    // ── the cpu / ram bars on the top line (owner, 2026-11-25) ──
+    // Five cells of filled block plus dashed track, then the exact percentage.
+    ['cpu carries its bar beside the %', /cpu [^\s]{5} \d{1,3}%/.test(idleFrame)],
+    ['ram carries its bar beside the %', /ram [^\s]{5} \d{1,3}%/.test(idleFrame)],
+    ['the meter bars stay on the header row', idleFrame.split('\n')[0].includes('cpu') && idleFrame.split('\n')[0].includes('ram')],
+    ['the header row never overflows the terminal', [...(idleFrame.split('\n')[0] || '')].length <= 120],
+    ['at 80 columns the header still fits its width', [...narrowHeader].length <= 80, `${[...narrowHeader].length} cells`],
+    [
+      'at 80 columns the cpu and ram readings are still on the top rows',
+      /cpu \d{1,3}%/.test(narrowMeterRow) && /ram \d{1,3}%/.test(narrowMeterRow),
+    ],
 
     // ── the autonomy dial that took the focus tag's slot ──
     [

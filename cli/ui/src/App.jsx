@@ -43,6 +43,7 @@ import useCliUpdate from './hooks/useCliUpdate.js';
 import useScriptRunner from './hooks/useScriptRunner.js';
 import { peersFromMcp } from './utils/squad.js';
 import { countWebCallsInMessages } from './utils/web-usage.js';
+import { richBar } from './utils/bar.js';
 import cliPrefs from '../../src/prefs.js';
 import { appendInputHistory, loadInputHistory } from '../../src/input-history.js';
 import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel, meterArrow as arrowFor, arrowColor as arrowFg } from '../../smartness.mjs';
@@ -1551,11 +1552,12 @@ export default function App({ version = '0.1.0' }) {
     ? 'gray'
     : memPct >= 90 ? '#f85149' : memPct >= 70 ? '#d29922' : '#3fb950';
   const MEMBAR_W = 5;
-  const memFilled = memPct == null ? 0 : Math.round((memPct / 100) * MEMBAR_W);
-  const memParts = memPct == null ? null : [
+  const memBar = richBar(memPct, MEMBAR_W, memFg);
+  // The same bar as the cpu/ram readings (owner, 2026-11-25: "some nice bars
+  // that look rich not generic"), in the same place — the right edge of this row.
+  const memParts = memPct == null || !memBar ? null : [
     { t: '◈ ', fg: memFg, bold: true },
-    { t: '█'.repeat(memFilled), fg: memFg },
-    { t: '░'.repeat(MEMBAR_W - memFilled), fg: 'gray' },
+    ...memBar,
     { t: ` ${memPct}%`, fg: memPct >= 90 ? 'red' : memPct === 0 ? 'gray' : 'white', bold: memPct > 0 },
     ...(memTotal != null ? [{ t: ` ${memTotal}`, fg: 'gray' }] : []),
   ];
@@ -1654,41 +1656,70 @@ export default function App({ version = '0.1.0' }) {
       : [{ t: badge.text, fg: badge.fg, bold: true }];
     return { text: parts.map((x) => x.t).join(''), parts };
   };
+  // \u25c8 Mini bars beside the cpu and ram readings, drawn the same way as the \u25c8
+  // memory-bank bar at the right edge of this row (owner, 2026-11-25: "with cpu
+  // and ram can you add bars that go with the % next to them up top with other 1
+  // on right side the cpu ram ones on left and the mem 1 on right where it is").
+  // The cpu/ram pair stays in the left cluster; the memory bar does not move.
+  // Fill is the reading itself, so the bar and the number beside it can never
+  // disagree; an unmeasured host draws no bar at all rather than an empty one,
+  // which would read as 0 %.
+  const HOST_BAR_W = 5;
+  const cpuBarParts = richBar(host && host.cpuPct, HOST_BAR_W, meterFg.cpu);
+  const ramBarParts = richBar(host && host.memPct, HOST_BAR_W, meterFg.ram);
+  const hostReading = (label, barParts, text, fg, lead = '  ') => [
+    { t: `${lead}${label} `, fg: 'gray' },
+    ...(barParts ? [...barParts, { t: ' ', fg: 'gray' }] : []),
+    { t: text, fg },
+  ];
+  const ctxMeterPart = {
+    t: `  ctx ${meterCtxPct}%`,
+    fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green',
+  };
+  const smartPart = [
+    { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
+    { t: `${meterScore}% `, fg: 'white', bold: true },
+    { t: meterArrowCh, fg: meterArrowFg },
+  ];
+  const ptsPart = [
+    { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
+    { t: meterPtsArrow, fg: meterPtsArrowFg },
+  ];
+  // Richest first. The bars outlive the ctx reading and are the last thing
+  // dropped before the bare numbers, because they were the request; a terminal
+  // too narrow for even that still shows both percentages.
   const baseMeterVariants = [
     mkMeter([
-      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
-      { t: `${meterScore}% `, fg: 'white', bold: true },
-      { t: meterArrowCh, fg: meterArrowFg },
-      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green' },
-      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: `  ram ${meterRam}`, fg: meterFg.ram },
+      ...smartPart,
+      ...ptsPart,
+      ctxMeterPart,
+      ...hostReading('cpu', cpuBarParts, meterCpu, meterFg.cpu),
+      ...hostReading('ram', ramBarParts, meterRam, meterFg.ram),
     ]),
     mkMeter([
-      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
-      { t: `${meterScore}% `, fg: 'white', bold: true },
-      { t: meterArrowCh, fg: meterArrowFg },
-      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: `  ctx ${meterCtxPct}%`, fg: meterCtxPct > 85 ? 'red' : meterCtxPct > 60 ? 'yellow' : 'green' },
-      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: `  ram ${meterRam}`, fg: meterFg.ram },
+      ...smartPart,
+      ...ptsPart,
+      ...hostReading('cpu', cpuBarParts, meterCpu, meterFg.cpu),
+      ...hostReading('ram', ramBarParts, meterRam, meterFg.ram),
     ]),
     mkMeter([
-      { t: '\ud83e\udde0 ', fg: meterFg.smart, bold: true },
-      { t: `${meterScore}% `, fg: 'white', bold: true },
-      { t: meterArrowCh, fg: meterArrowFg },
-      { t: `  \u2726 ${meterPts}p`, fg: meterFg.pts },
-      { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: `  cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: `  ram ${meterRam}`, fg: meterFg.ram },
+      ...smartPart,
+      ...ptsPart,
+      ctxMeterPart,
+      ...hostReading('cpu', null, meterCpu, meterFg.cpu),
+      ...hostReading('ram', null, meterRam, meterFg.ram),
+    ]),
+    mkMeter([
+      ...smartPart,
+      ...ptsPart,
+      ...hostReading('cpu', null, meterCpu, meterFg.cpu),
+      ...hostReading('ram', null, meterRam, meterFg.ram),
     ]),
     mkMeter([
       { t: `\u2726 ${meterPts}p`, fg: meterFg.pts },
       { t: meterPtsArrow, fg: meterPtsArrowFg },
-      { t: ` cpu ${meterCpu}`, fg: meterFg.cpu },
-      { t: ` ram ${meterRam}`, fg: meterFg.ram },
+      ...hostReading('cpu', null, meterCpu, meterFg.cpu, ' '),
+      ...hostReading('ram', null, meterRam, meterFg.ram, ' '),
     ]),
   ];
   // Richest meter × longest badge first; a badge-only form closes the list so a
