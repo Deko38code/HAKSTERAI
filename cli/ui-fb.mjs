@@ -5773,6 +5773,7 @@ function useAgentStream({
   const [requests, setRequests] = useState13(0);
   const [tokens, setTokens] = useState13({ in: 0, out: 0, reported: false });
   const [contextUsed, setContextUsed] = useState13(0);
+  const [contextWindow, setContextWindow] = useState13(0);
   const requestsRef = useRef9(0);
   const pushActivity = useCallback3((kind, text) => {
     const line = { kind: String(kind || "sys"), text: String(text == null ? "" : text), ts: Date.now() };
@@ -6237,13 +6238,17 @@ function useAgentStream({
             attemptCtxRef.current.terminal = true;
             const inTok = Number(evt.inputTokens);
             const outTok = Number(evt.outputTokens);
+            const ctxTok = Number(evt.contextTokens);
+            const ctxWin = Number(evt.contextWindow);
+            if (Number.isFinite(ctxWin) && ctxWin > 0) setContextWindow(ctxWin);
+            if (Number.isFinite(ctxTok) && ctxTok > 0) setContextUsed(ctxTok);
+            else if (Number.isFinite(inTok) && inTok > 0) setContextUsed(inTok);
             if (Number.isFinite(inTok) || Number.isFinite(outTok)) {
               setTokens((t) => ({
                 in: t.in + (Number.isFinite(inTok) ? inTok : 0),
                 out: t.out + (Number.isFinite(outTok) ? outTok : 0),
                 reported: true
               }));
-              if (Number.isFinite(inTok) && inTok > 0) setContextUsed(inTok);
               pushActivity("done", `turn done \xB7 ${fmtTok2(inTok)} in / ${fmtTok2(outTok)} out`);
             } else {
               pushActivity("done", "turn done");
@@ -6497,6 +6502,7 @@ function useAgentStream({
     setRequests(0);
     setTokens({ in: 0, out: 0, reported: false });
     setContextUsed(0);
+    setContextWindow(0);
     setLearned({ added: 0, skills: 0, events: 0 });
     learnedRef.current = { added: 0, skills: 0, events: 0 };
     setLastRecap(null);
@@ -6523,6 +6529,7 @@ function useAgentStream({
     requests,
     tokens,
     contextUsed,
+    contextWindow,
     pendingConfirm,
     answerConfirm,
     send,
@@ -7510,7 +7517,7 @@ function App({ version = "0.1.0" }) {
     return i < 0 ? 0 : i;
   };
   const modelText = model ? (0, import_ladder2.displayModel)(model) : provider === "codex-cli" ? "Codex (Pro)" : provider || "auto";
-  const ctxMax = import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
+  const ctxMax = Number(agent.contextWindow) > 0 ? Number(agent.contextWindow) : import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
   const ctxUsed = Number(agent.contextUsed || status && (status.tokens || status.contextUsed) || 0);
   const meters = agent.meters || null;
   const lastAssistant = React31.useMemo(() => {

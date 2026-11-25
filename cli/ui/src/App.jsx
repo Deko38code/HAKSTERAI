@@ -459,7 +459,12 @@ export default function App({ version = '0.1.0' }) {
   // What the header and the status bar call the current model. Codex is picked
   // by provider (no model string is invented for it), so it needs its own name.
   const modelText = model ? displayModel(model) : (provider === 'codex-cli' ? 'Codex (Pro)' : provider || 'auto');
-  const ctxMax = catalog.contextMaxFor(model || PRIMARY_MODEL) || 1;
+  // The window the reading is measured against: what the answering lane said it
+  // compacts at (the claude-cli lane reports 200000), else the model catalog's.
+  // Reporting only — no model, route or config is read or changed (§22).
+  const ctxMax = Number(agent.contextWindow) > 0
+    ? Number(agent.contextWindow)
+    : (catalog.contextMaxFor(model || PRIMARY_MODEL) || 1);
   // Prefer the measured conversation size (the last call's prompt, from the
   // stream — see useAgentStream), then whatever the TUI status reports.
   const ctxUsed = Number(agent.contextUsed || (status && (status.tokens || status.contextUsed)) || 0);

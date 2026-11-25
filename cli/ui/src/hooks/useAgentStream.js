@@ -206,6 +206,11 @@ export function useAgentStream({
   // server compacts mid-run, the compact event's tokensAfter. Nothing else in
   // the wire reports it, so with no turn yet this stays 0 and the row says "—".
   const [contextUsed, setContextUsed] = useState(0);
+  // The window `contextUsed` is measured against, when the answering lane says
+  // what it compacts at (the claude-cli lane sends 200000 — its own
+  // CLAUDE_CODE_AUTO_COMPACT_WINDOW). 0 = unknown, so the caller falls back to
+  // the model catalog's window rather than inventing one.
+  const [contextWindow, setContextWindow] = useState(0);
   const requestsRef = useRef(0);
   const pushActivity = useCallback((kind, text) => {
     const line = { kind: String(kind || 'sys'), text: String(text == null ? '' : text), ts: Date.now() };
@@ -867,16 +872,23 @@ export function useAgentStream({
             // is, so the session totals are a sum of exactly these reports.
             const inTok = Number(evt.inputTokens);
             const outTok = Number(evt.outputTokens);
+            // The prompt of this call IS the conversation the model just read,
+            // so it is the context-window reading (session totals below are
+            // sums across turns and cannot answer that question). The
+            // claude-cli lane sends `contextTokens` for exactly this — its
+            // `inputTokens` is the turn's sum and would climb past the window —
+            // and `contextWindow` is the window it is measured against.
+            const ctxTok = Number(evt.contextTokens);
+            const ctxWin = Number(evt.contextWindow);
+            if (Number.isFinite(ctxWin) && ctxWin > 0) setContextWindow(ctxWin);
+            if (Number.isFinite(ctxTok) && ctxTok > 0) setContextUsed(ctxTok);
+            else if (Number.isFinite(inTok) && inTok > 0) setContextUsed(inTok);
             if (Number.isFinite(inTok) || Number.isFinite(outTok)) {
               setTokens((t) => ({
                 in: t.in + (Number.isFinite(inTok) ? inTok : 0),
                 out: t.out + (Number.isFinite(outTok) ? outTok : 0),
                 reported: true,
               }));
-              // The prompt of this call IS the conversation the model just read,
-              // so it is the context-window reading (session totals above are
-              // sums across turns and cannot answer that question).
-              if (Number.isFinite(inTok) && inTok > 0) setContextUsed(inTok);
               pushActivity('done', `turn done · ${fmtTok(inTok)} in / ${fmtTok(outTok)} out`);
             } else {
               pushActivity('done', 'turn done');
@@ -1221,6 +1233,7 @@ export function useAgentStream({
     setRequests(0);
     setTokens({ in: 0, out: 0, reported: false });
     setContextUsed(0);
+    setContextWindow(0);
     setLearned({ added: 0, skills: 0, events: 0 });
     learnedRef.current = { added: 0, skills: 0, events: 0 };
     setLastRecap(null);
@@ -1254,6 +1267,7 @@ export function useAgentStream({
     requests,
     tokens,
     contextUsed,
+    contextWindow,
     pendingConfirm,
     answerConfirm,
     send,

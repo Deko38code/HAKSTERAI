@@ -5462,6 +5462,12 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
     // on the same conversation with what was already completed spelled out,
     // so the update lands inside THIS run and nothing is repeated.
     const CLAUDE_CLI_MAX_STEERS = 4;
+    // The window the spawned CLI compacts at — the same 200000 `claudeCliEnv()`
+    // hands it as CLAUDE_CODE_AUTO_COMPACT_WINDOW (§39.1). Reported to the TUI
+    // so the sidebar's ctx percent means "how full before it summarises", not a
+    // share of the 1M max context that never moves. Reporting only: this is the
+    // same literal, not a second source of config (§22.4).
+    const CLAUDE_CLI_CONTEXT_WINDOW = 200000;
     async function runClaudeCliAgent(continuationNote) {
       const { spawn } = require('child_process');
       const transcript = messages
@@ -5643,6 +5649,15 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         let realModel = null;   // the actual model claude-cli reports back (e.g. "claude-sonnet-5")
         let costUsd = 0;
         let usage = null;
+        // The prompt size of the most recent model call in this turn — the
+        // conversation the model actually just read. `usage.input_tokens` on
+        // an assistant message is that call's own prompt (plus whatever it read
+        // from cache), so the last one is the live context reading the TUI's
+        // sidebar prints. It is NOT the turn total: that is what `totalIn`
+        // below accumulates, and a sum of every round cannot answer "how full
+        // is the window" (owner, 2026-11-26: the sidebar ctx counter "dosent
+        // work" — before this, the only figure sent was that sum).
+        let lastPromptTokens = 0;
         let stdoutBuf = '';
         let stderrBuf = '';
         let settled = false;
@@ -5702,6 +5717,15 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
               textThisMsg = false;
               thinkingThisMsg = false;
               if (evt.message.model) realModel = evt.message.model;
+              {
+                const u = evt.message.usage;
+                if (u) {
+                  const prompt = (Number(u.input_tokens) || 0)
+                    + (Number(u.cache_read_input_tokens) || 0)
+                    + (Number(u.cache_creation_input_tokens) || 0);
+                  if (prompt > 0) lastPromptTokens = prompt;
+                }
+              }
               for (const block of evt.message.content) {
                 if (block.type === 'text' && block.text) {
                   if (!hadText) writeDelta(block.text);
@@ -5756,7 +5780,7 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
           // A turn stopped to take a steer is not a failure: the loop below
           // restarts it with the update applied.
           else if (code !== 0 && !finalText && !steeredText) reject(new Error(stderrBuf.slice(0, 500) || `claude exited with code ${code}`));
-          else resolve({ finalText, toolCount, realModel, costUsd, usage, steered: steeredText });
+          else resolve({ finalText, toolCount, realModel, costUsd, usage, steered: steeredText, promptTokens: lastPromptTokens });
         });
       });
     }
@@ -5767,6 +5791,9 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
       let totalToolCalls = result.toolCount || 0;
       let totalIn = result.usage?.input_tokens || 0;
       let totalOut = result.usage?.output_tokens || 0;
+      // The current context reading survives a steer restart: the newest round
+      // reports the conversation it just read, which only grows.
+      let contextTokens = result.promptTokens || 0;
       const progress = [];
       // A steer taken mid-run restarts the turn on the same conversation with
       // the update in front of it and what was already done spelled out, so the
@@ -5790,6 +5817,7 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         totalToolCalls += result.toolCount || 0;
         totalIn += result.usage?.input_tokens || 0;
         totalOut += result.usage?.output_tokens || 0;
+        if (result.promptTokens > 0) contextTokens = result.promptTokens;
       }
       // Real identity of what answered — the model the CLI reported back, not
       // the alias that was requested. Cost is recorded as 0: the CLI's own
@@ -5803,6 +5831,12 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         toolCalls: totalToolCalls,
         inputTokens: totalIn,
         outputTokens: totalOut,
+        // What the sidebar's ctx row reads (owner, 2026-11-26: it "says ctx but
+        // counter dosent work"): the last call's prompt and the window it is
+        // measured against. `inputTokens` above is the turn's sum and would
+        // climb past the window on a long turn, so it is never used for this.
+        contextTokens,
+        contextWindow: CLAUDE_CLI_CONTEXT_WINDOW,
         cost: 0,
         ...(steers ? { steers } : {}),
       })}\n\n`);
