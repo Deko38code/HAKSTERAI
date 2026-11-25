@@ -495,7 +495,10 @@ export default function App({ version = '0.1.0' }) {
     ? findImageSource([lastTool && lastTool.result != null ? String(lastTool.result) : '', String(lastAssistant.text || '')])
     : null), [lastAssistant, lastTool]);
   // This machine's own vitals — cpu, ram, swap, disk, load — sampled in-process.
-  const host = useHostStats(5000);
+  // One tick a second, smoothed and change-gated in the hook (owner, 2026-11-25:
+  // "make sure the cpu ram meters run smoothly in cli with nice refresh rate but
+  // not make lagg"), so the meters glide without re-rendering on idle ticks.
+  const host = useHostStats(1000);
   // ◈ Memory: the same banks autolearn writes and the next run recalls,
   // counted from disk every 10 s (see useMemoryBank — counts only, no text).
   const memory = useMemoryBank(10000);

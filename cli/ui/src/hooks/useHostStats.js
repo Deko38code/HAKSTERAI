@@ -17,6 +17,19 @@ import fs from 'node:fs';
  *
  * If a read fails the field is null and the caller shows '—'; nothing is
  * guessed, and a missing sample never throws into the render path.
+ *
+ * Owner (2026-11-25): "make sure the cpu ram meters run smoothly in cli with
+ * nice refresh rate but not make lagg". Three things make that work:
+ *
+ *   1. A tick is a handful of tiny reads — /proc/stat every tick, /proc/meminfo
+ *      a fifth as often, statfs('/') a tenth — so 1 Hz costs microseconds, not
+ *      a render's worth of work.
+ *   2. cpu% is an exponential moving average of the raw delta, so the number
+ *      glides instead of stepping: ~half of each new sample lands per tick.
+ *   3. State is published only when a value a meter actually shows changes.
+ *      An idle box repaints nothing, which is what keeps a faster refresh from
+ *      turning into lag (the transcript is memoised, so a host tick only
+ *      re-renders the header when it truly has something new).
  */
 const readText = (p) => {
   try {
@@ -58,50 +71,98 @@ function disk() {
   }
 }
 
-export default function useHostStats(intervalMs = 5000) {
+// What a meter can actually show. If none of these moved, the sample is not
+// worth a re-render.
+const shown = (s) => [
+  s.cpuPct,
+  s.memPct,
+  s.swapPct,
+  s.diskPct,
+  s.load1,
+  s.memUsedGb,
+  s.swapUsedMb,
+  s.diskFreeGb,
+  Math.floor((s.uptimeS || 0) / 60),
+].join('|');
+
+export default function useHostStats(intervalMs = 1000) {
   const [stats, setStats] = useState(null);
-  const prevRef = useRef(null);
+  const prevRef = useRef(null);     // previous /proc/stat counters
+  const smoothRef = useRef(null);   // cpu% after smoothing
+  const memRef = useRef(null);      // last meminfo read
+  const diskRef = useRef(null);     // last statfs read
+  const pubRef = useRef('');        // what is on screen right now
+  const tickRef = useRef(0);
 
   useEffect(() => {
     const cores = Math.max(1, (os.cpus() || []).length);
+
     const sample = () => {
+      const tick = (tickRef.current += 1);
+
       const now = cpuTimes();
-      let cpuPct = null;
+      let cpuRaw = null;
       const prev = prevRef.current;
       if (now && prev && now.total > prev.total) {
         const dt = now.total - prev.total;
         const idleDelta = now.idle - prev.idle;
-        cpuPct = Math.max(0, Math.min(100, Math.round((1 - idleDelta / dt) * 100)));
+        cpuRaw = Math.max(0, Math.min(100, (1 - idleDelta / dt) * 100));
       }
       if (now) prevRef.current = now;
+      // Glide: half the new sample per tick. Only the published integer is
+      // rounded, so a one-core blip does not flash a red 100%.
+      if (cpuRaw != null) {
+        smoothRef.current = smoothRef.current == null
+          ? cpuRaw
+          : smoothRef.current * 0.55 + cpuRaw * 0.45;
+      }
+      const cpuPct = smoothRef.current == null ? null : Math.round(smoothRef.current);
 
-      const mi = meminfo();
+      // The bigger reads happen less often; between them the last value holds.
+      if (tick === 1 || tick % 5 === 0) memRef.current = meminfo();
+      if (tick === 1 || tick % 10 === 0) diskRef.current = disk();
+
+      const mi = memRef.current || {};
       const memTotal = mi.MemTotal || os.totalmem();
       const memAvail = mi.MemAvailable != null ? mi.MemAvailable : os.freemem();
       const swapTotal = mi.SwapTotal || 0;
       const swapFree = mi.SwapFree || 0;
-      const d = disk();
+      const d = diskRef.current;
 
-      setStats({
+      const next = {
         cores,
         cpuPct,
         load1: Math.round(((os.loadavg() || [0])[0] || 0) * 100) / 100,
         memPct: memTotal ? Math.max(0, Math.min(100, Math.round((1 - memAvail / memTotal) * 100))) : null,
-        memUsedGb: memTotal ? (memTotal - memAvail) / 1e9 : null,
+        memUsedGb: memTotal ? Math.round(((memTotal - memAvail) / 1e9) * 10) / 10 : null,
         memTotalGb: memTotal ? memTotal / 1e9 : null,
         swapPct: swapTotal ? Math.max(0, Math.min(100, Math.round((1 - swapFree / swapTotal) * 100))) : null,
         swapUsedMb: swapTotal ? Math.round((swapTotal - swapFree) / 1e6) : null,
         swapTotalMb: swapTotal ? Math.round(swapTotal / 1e6) : null,
         diskPct: d ? d.pct : null,
-        diskFreeGb: d ? d.free / 1e9 : null,
+        diskFreeGb: d ? Math.round((d.free / 1e9) * 10) / 10 : null,
         diskTotalGb: d ? d.total / 1e9 : null,
         uptimeS: Math.round(os.uptime()),
-      });
+      };
+
+      const key = shown(next);
+      if (key === pubRef.current) return; // nothing on screen moved
+      pubRef.current = key;
+      setStats(next);
     };
 
-    sample();                        // priming read
-    const warm = setTimeout(sample, 800); // second read: the first cpu delta
+    sample();                                // priming read
+    // Second read inside the first tick: without a previous counter there is
+    // no cpu delta, so the meter would sit on '—' until the next full second.
+    const warm = setTimeout(sample, Math.min(600, Math.max(200, Math.round(intervalMs / 4))));
     const t = setInterval(sample, intervalMs);
+    // Timer housekeeping must never hold the process open by itself.
+    try {
+      if (typeof warm.unref === 'function') warm.unref();
+      if (typeof t.unref === 'function') t.unref();
+    } catch {
+      /* ignore */
+    }
     return () => {
       clearTimeout(warm);
       clearInterval(t);

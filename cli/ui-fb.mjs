@@ -2658,10 +2658,10 @@ function sparkline(series, width) {
     const key = d.toISOString().slice(0, 10);
     days.push({ key, calls: byDay.get(key) || 0 });
   }
-  const shown = days.slice(Math.max(0, days.length - Math.max(4, width)));
-  const max = shown.reduce((m, d) => Math.max(m, d.calls), 0);
-  const text = shown.map((d) => max === 0 ? BLOCKS[0] : BLOCKS[Math.min(BLOCKS.length - 1, Math.round(d.calls / max * (BLOCKS.length - 1)))]).join("");
-  return { text, max, shown };
+  const shown2 = days.slice(Math.max(0, days.length - Math.max(4, width)));
+  const max = shown2.reduce((m, d) => Math.max(m, d.calls), 0);
+  const text = shown2.map((d) => max === 0 ? BLOCKS[0] : BLOCKS[Math.min(BLOCKS.length - 1, Math.round(d.calls / max * (BLOCKS.length - 1)))]).join("");
+  return { text, max, shown: shown2 };
 }
 var Row2 = ({ children, w }) => /* @__PURE__ */ jsx9("box", { style: { width: w, flexShrink: 0 }, children });
 function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15, account = "" }) {
@@ -3267,9 +3267,9 @@ function CatalogPopout({
   const bodyRows = Math.max(3, h - 5);
   const selRow = selectable[Math.min(selected, selectable.length - 1)] ?? 0;
   const start2 = Math.max(0, Math.min(selRow - Math.floor(bodyRows / 2), Math.max(0, rows.length - bodyRows)));
-  const shown = rows.slice(start2, start2 + bodyRows);
+  const shown2 = rows.slice(start2, start2 + bodyRows);
   const hiddenAbove = start2;
-  const hiddenBelow = Math.max(0, rows.length - start2 - shown.length);
+  const hiddenBelow = Math.max(0, rows.length - start2 - shown2.length);
   const gutterOn = overflows(rows.length, bodyRows);
   const bodyW = Math.max(8, inner - (gutterOn ? 1 : 0));
   const compact = bodyW < 40;
@@ -3283,7 +3283,7 @@ function CatalogPopout({
       /* @__PURE__ */ jsx13("text", { fg: "white", children: clip2(query, inner - 2) })
     ] }),
     /* @__PURE__ */ jsxs13("box", { style: { width: inner, flexDirection: "column" }, children: [
-      shown.length === 0 ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: clip2("no match \u2014 backspace to widen, esc to close", inner) }) : shown.map((row, i) => {
+      shown2.length === 0 ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: clip2("no match \u2014 backspace to widen, esc to close", inner) }) : shown2.map((row, i) => {
         const abs = start2 + i;
         const gutter = gutterOn ? gutterChar(i, bodyRows, rows.length, start2) : null;
         if (row.kind === "header") {
@@ -3303,7 +3303,7 @@ function CatalogPopout({
           gutter ? /* @__PURE__ */ jsx13("text", { fg: "gray", children: gutter }) : null
         ] }, `${row.kind}:${row.label}`);
       }),
-      Array.from({ length: Math.max(0, bodyRows - Math.max(1, shown.length)) }, (_, i) => /* @__PURE__ */ jsx13("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx13("text", { children: " " }) }, `pad:${i}`))
+      Array.from({ length: Math.max(0, bodyRows - Math.max(1, shown2.length)) }, (_, i) => /* @__PURE__ */ jsx13("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx13("text", { children: " " }) }, `pad:${i}`))
     ] }),
     /* @__PURE__ */ jsx13("box", { style: { width: inner, flexDirection: "row" }, children: /* @__PURE__ */ jsx13("text", { fg: "gray", children: clip2(filter || "type to filter \xB7 a model row switches this session \xB7 esc closes", inner) }) })
   ] });
@@ -3451,16 +3451,16 @@ function McpView({
   const listRows = Math.max(1, Math.min(servers.length, Math.ceil(body / 2)));
   const sel = Math.max(0, Math.min(selected, Math.max(0, servers.length - 1)));
   const start2 = Math.max(0, Math.min(sel - Math.floor(listRows / 2), Math.max(0, servers.length - listRows)));
-  const shown = servers.slice(start2, start2 + listRows);
+  const shown2 = servers.slice(start2, start2 + listRows);
   const active = servers[sel];
   const toolRows = Math.max(0, body - listRows - 1);
   const toolLines = active ? wrap(Array.isArray(active.tools) && active.tools.length ? active.tools : ["(no tools listed)"], inner - 2) : [];
   return /* @__PURE__ */ jsxs15("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "blue", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
       /* @__PURE__ */ jsx16("text", { fg: "blue", attributes: TextAttributes11.BOLD, children: "\u25CE MCP servers" }),
-      /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4(`${live}/${servers.length} live \xB7 ${tools} tools${servers.length > listRows ? ` \xB7 ${start2}\u2191 ${Math.max(0, servers.length - start2 - shown.length)}\u2193` : ""}`, inner - 14) })
+      /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4(`${live}/${servers.length} live \xB7 ${tools} tools${servers.length > listRows ? ` \xB7 ${start2}\u2191 ${Math.max(0, servers.length - start2 - shown2.length)}\u2193` : ""}`, inner - 14) })
     ] }),
-    /* @__PURE__ */ jsx16("box", { style: { width: inner, flexDirection: "column" }, children: shown.length === 0 ? /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4("no servers reported \u2014 is the server reachable?", inner) }) : shown.map((s, i) => {
+    /* @__PURE__ */ jsx16("box", { style: { width: inner, flexDirection: "column" }, children: shown2.length === 0 ? /* @__PURE__ */ jsx16("text", { fg: "gray", children: clip4("no servers reported \u2014 is the server reachable?", inner) }) : shown2.map((s, i) => {
       const abs = start2 + i;
       const isSel = abs === sel;
       const up = s.initialized || (Number(s.toolCount) || 0) > 0;
@@ -4067,22 +4067,22 @@ function ServicesPanel({
     const inner = Math.max(8, w - 4);
     const head = `Services ${up}/${list.length} online  `;
     const room = Math.max(0, inner - head.length);
-    const shown = [];
+    const shown2 = [];
     let used = 0;
     for (const s of list) {
       const text = `\u25CF :${s.port}  `;
       if (used + text.length > room) break;
-      shown.push({ ...s, text });
+      shown2.push({ ...s, text });
       used += text.length;
     }
-    const hiddenSvc = list.length - shown.length;
+    const hiddenSvc = list.length - shown2.length;
     const leftover = Math.max(0, inner - head.length - used);
     const tails = !scanOk ? ["scan unavailable", "scan \u2026", "\u2026"] : hiddenSvc > 0 ? [`+${hiddenSvc}  +${others.length} ports`, `+${hiddenSvc}  +${others.length}`, `+${hiddenSvc + others.length}`] : others.length ? [`+${others.length} other ports`, `+${others.length} ports`, `+${others.length}`] : [];
     const tail = tails.find((t) => t.length <= leftover) || "";
     return /* @__PURE__ */ jsx19("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: /* @__PURE__ */ jsxs18("text", { children: [
       /* @__PURE__ */ jsx19("span", { fg: "cyan", attributes: TextAttributes14.BOLD, children: "Services " }),
       /* @__PURE__ */ jsx19("span", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: `${up}/${list.length} online  ` }),
-      shown.map((s) => /* @__PURE__ */ jsx19("span", { fg: s.up ? "green" : "red", children: s.text }, s.port)),
+      shown2.map((s) => /* @__PURE__ */ jsx19("span", { fg: s.up ? "green" : "red", children: s.text }, s.port)),
       /* @__PURE__ */ jsx19("span", { fg: scanOk ? "gray" : "yellow", children: tail })
     ] }) });
   }
@@ -4093,8 +4093,8 @@ function ServicesPanel({
     color: s.up ? "green" : "red"
   }));
   if (showAll) {
-    const shown = others.slice(0, 15);
-    for (const p of shown) {
+    const shown2 = others.slice(0, 15);
+    for (const p of shown2) {
       cells.push({
         key: `x${p.port}`,
         label: `:${p.port}`,
@@ -4102,11 +4102,11 @@ function ServicesPanel({
         color: "green"
       });
     }
-    if (others.length > shown.length) {
+    if (others.length > shown2.length) {
       cells.push({
         key: "more",
         label: "other",
-        value: `+${others.length - shown.length} ports`,
+        value: `+${others.length - shown2.length} ports`,
         color: "cyan"
       });
     }
@@ -4211,8 +4211,8 @@ function gridShape(width, n) {
 function statusServicesRows(width, count, dense = true, showMeters = true) {
   const n = Math.max(1, Number(count) || 1);
   const { perRow, capacity } = gridShape(width, n);
-  const shown = Math.min(n, capacity);
-  const rows = Math.max(1, Math.min(2, Math.ceil(shown / perRow)));
+  const shown2 = Math.min(n, capacity);
+  const rows = Math.max(1, Math.min(2, Math.ceil(shown2 / perRow)));
   return 3 + (showMeters ? 1 : 0) + rows * (dense ? 1 : 2);
 }
 function StatusServicesPanel({
@@ -4260,9 +4260,9 @@ function StatusServicesPanel({
     color: s.up ? "green" : "red"
   }));
   const { perRow, capacity } = gridShape(w, cells.length);
-  const shown = cells.length > capacity ? cells.slice(0, capacity - 1) : cells;
-  const hidden = cells.length - shown.length;
-  const items = hidden > 0 ? [...shown, { key: "__more", label: "more", value: `+${hidden}`, color: "cyan" }] : shown;
+  const shown2 = cells.length > capacity ? cells.slice(0, capacity - 1) : cells;
+  const hidden = cells.length - shown2.length;
+  const items = hidden > 0 ? [...shown2, { key: "__more", label: "more", value: `+${hidden}`, color: "cyan" }] : shown2;
   const rows = [];
   for (let i = 0; i < items.length; i += perRow) rows.push(items.slice(i, i + perRow));
   return /* @__PURE__ */ jsxs20("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
@@ -4330,14 +4330,14 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
   const barW = Math.max(20, Number(width) || 80);
   const avail = Math.max(8, barW - 2 - leftText.length - hintText.length - 2);
   const joinedLen = (list) => list.reduce((n, one, i) => n + one.text.length + (i ? 3 : 0), 0);
-  const shown = segs.slice();
-  while (shown.length > 1 && joinedLen(shown) > avail) shown.pop();
-  if (shown.length === 1 && shown[0].text.length > avail) {
-    shown[0] = { ...shown[0], text: `${shown[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
+  const shown2 = segs.slice();
+  while (shown2.length > 1 && joinedLen(shown2) > avail) shown2.pop();
+  if (shown2.length === 1 && shown2[0].text.length > avail) {
+    shown2[0] = { ...shown2[0], text: `${shown2[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
   }
   return /* @__PURE__ */ jsxs21("box", { style: { width: barW, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1, overflow: "hidden", flexShrink: 0 }, children: [
     /* @__PURE__ */ jsx22("text", { fg: "gray", children: `${leftText}${hintText}` }),
-    /* @__PURE__ */ jsx22("text", { children: shown.map((seg, i) => /* @__PURE__ */ jsx22("span", { fg: seg.color, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) })
+    /* @__PURE__ */ jsx22("text", { children: shown2.map((seg, i) => /* @__PURE__ */ jsx22("span", { fg: seg.color, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) })
   ] });
 }
 
@@ -4456,12 +4456,12 @@ function Recap({
   const barW = Math.max(12, Number(width) || 80);
   const avail = Math.max(8, barW - 2);
   const joinedLen = (list) => list.reduce((n, one, i) => n + one.text.length + (i ? 3 : 0), 0);
-  const shown = segs.slice();
-  while (shown.length > 1 && joinedLen(shown) > avail) shown.pop();
-  if (shown.length === 1 && shown[0].text.length > avail) {
-    shown[0] = { ...shown[0], text: `${shown[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
+  const shown2 = segs.slice();
+  while (shown2.length > 1 && joinedLen(shown2) > avail) shown2.pop();
+  if (shown2.length === 1 && shown2[0].text.length > avail) {
+    shown2[0] = { ...shown2[0], text: `${shown2[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
   }
-  return /* @__PURE__ */ jsx24("box", { style: { width: barW, flexDirection: "row", paddingLeft: 1, overflow: "hidden", flexShrink: 0 }, children: /* @__PURE__ */ jsx24("text", { children: shown.map((seg, i) => /* @__PURE__ */ jsx24("span", { fg: seg.fg, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) }) });
+  return /* @__PURE__ */ jsx24("box", { style: { width: barW, flexDirection: "row", paddingLeft: 1, overflow: "hidden", flexShrink: 0 }, children: /* @__PURE__ */ jsx24("text", { children: shown2.map((seg, i) => /* @__PURE__ */ jsx24("span", { fg: seg.fg, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) }) });
 }
 
 // src/components/DebugView.jsx
@@ -4739,10 +4739,10 @@ function ToolRow({ tool, width, compact = false, outputLabel = "\u25B6 Output" }
   const dur = pending ? fmtDur2(Date.now() - (Number(tool.t0) || Date.now())) : tool.ms != null ? fmtDur2(tool.ms) : "";
   const nameW = name.length + 2;
   const argW = Math.max(4, width - nameW - (args ? dur.length + 3 : 0));
-  const shown = pending ? null : String(tool.result).replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "").split("\n");
+  const shown2 = pending ? null : String(tool.result).replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "").split("\n");
   const limit = compact ? 1 : RESULT_LINES;
-  const lines = shown ? shown.slice(0, limit) : [];
-  const hidden = shown ? Math.max(0, shown.length - lines.length) : 0;
+  const lines = shown2 ? shown2.slice(0, limit) : [];
+  const hidden = shown2 ? Math.max(0, shown2.length - lines.length) : 0;
   return /* @__PURE__ */ jsxs25("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs25("text", { children: [
       /* @__PURE__ */ jsxs25("span", { fg: colour, children: [
@@ -5841,46 +5841,78 @@ function disk() {
     return null;
   }
 }
-function useHostStats(intervalMs = 5e3) {
+var shown = (s) => [
+  s.cpuPct,
+  s.memPct,
+  s.swapPct,
+  s.diskPct,
+  s.load1,
+  s.memUsedGb,
+  s.swapUsedMb,
+  s.diskFreeGb,
+  Math.floor((s.uptimeS || 0) / 60)
+].join("|");
+function useHostStats(intervalMs = 1e3) {
   const [stats, setStats] = useState13(null);
   const prevRef = useRef9(null);
+  const smoothRef = useRef9(null);
+  const memRef = useRef9(null);
+  const diskRef = useRef9(null);
+  const pubRef = useRef9("");
+  const tickRef = useRef9(0);
   useEffect13(() => {
     const cores = Math.max(1, (os4.cpus() || []).length);
     const sample = () => {
+      const tick = tickRef.current += 1;
       const now = cpuTimes();
-      let cpuPct = null;
+      let cpuRaw = null;
       const prev = prevRef.current;
       if (now && prev && now.total > prev.total) {
         const dt = now.total - prev.total;
         const idleDelta = now.idle - prev.idle;
-        cpuPct = Math.max(0, Math.min(100, Math.round((1 - idleDelta / dt) * 100)));
+        cpuRaw = Math.max(0, Math.min(100, (1 - idleDelta / dt) * 100));
       }
       if (now) prevRef.current = now;
-      const mi = meminfo();
+      if (cpuRaw != null) {
+        smoothRef.current = smoothRef.current == null ? cpuRaw : smoothRef.current * 0.55 + cpuRaw * 0.45;
+      }
+      const cpuPct = smoothRef.current == null ? null : Math.round(smoothRef.current);
+      if (tick === 1 || tick % 5 === 0) memRef.current = meminfo();
+      if (tick === 1 || tick % 10 === 0) diskRef.current = disk();
+      const mi = memRef.current || {};
       const memTotal = mi.MemTotal || os4.totalmem();
       const memAvail = mi.MemAvailable != null ? mi.MemAvailable : os4.freemem();
       const swapTotal = mi.SwapTotal || 0;
       const swapFree = mi.SwapFree || 0;
-      const d = disk();
-      setStats({
+      const d = diskRef.current;
+      const next = {
         cores,
         cpuPct,
         load1: Math.round(((os4.loadavg() || [0])[0] || 0) * 100) / 100,
         memPct: memTotal ? Math.max(0, Math.min(100, Math.round((1 - memAvail / memTotal) * 100))) : null,
-        memUsedGb: memTotal ? (memTotal - memAvail) / 1e9 : null,
+        memUsedGb: memTotal ? Math.round((memTotal - memAvail) / 1e9 * 10) / 10 : null,
         memTotalGb: memTotal ? memTotal / 1e9 : null,
         swapPct: swapTotal ? Math.max(0, Math.min(100, Math.round((1 - swapFree / swapTotal) * 100))) : null,
         swapUsedMb: swapTotal ? Math.round((swapTotal - swapFree) / 1e6) : null,
         swapTotalMb: swapTotal ? Math.round(swapTotal / 1e6) : null,
         diskPct: d ? d.pct : null,
-        diskFreeGb: d ? d.free / 1e9 : null,
+        diskFreeGb: d ? Math.round(d.free / 1e9 * 10) / 10 : null,
         diskTotalGb: d ? d.total / 1e9 : null,
         uptimeS: Math.round(os4.uptime())
-      });
+      };
+      const key = shown(next);
+      if (key === pubRef.current) return;
+      pubRef.current = key;
+      setStats(next);
     };
     sample();
-    const warm = setTimeout(sample, 800);
+    const warm = setTimeout(sample, Math.min(600, Math.max(200, Math.round(intervalMs / 4))));
     const t = setInterval(sample, intervalMs);
+    try {
+      if (typeof warm.unref === "function") warm.unref();
+      if (typeof t.unref === "function") t.unref();
+    } catch {
+    }
     return () => {
       clearTimeout(warm);
       clearInterval(t);
@@ -6648,7 +6680,7 @@ function App({ version = "0.1.0" }) {
     return text.length ? text : result;
   }, [lastAssistant, lastTool]);
   const liveImage = React29.useMemo(() => lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null, [lastAssistant, lastTool]);
-  const host = useHostStats(5e3);
+  const host = useHostStats(1e3);
   const memory = useMemoryBank(1e4);
   const update = useCliUpdate(void 0, version);
   const runner = useScriptRunner_default();
@@ -6747,8 +6779,8 @@ function App({ version = "0.1.0" }) {
     } else if (key === "provider") setProvider(String(value) || import_ladder2.PRIMARY_PROVIDER);
     else if (key === "usageRefresh") setUsageRefresh(Number(value) || 0);
     setPrefsTick((t) => t + 1);
-    const shown = typeof value === "boolean" ? value ? "on" : "off" : value === "" ? "(default)" : value;
-    showNotice(`\u2699 ${key} \u2192 ${shown}${key === "opaqueBackdrop" || key === "intro" ? " \u2014 applies on the next launch" : ""}`);
+    const shown2 = typeof value === "boolean" ? value ? "on" : "off" : value === "" ? "(default)" : value;
+    showNotice(`\u2699 ${key} \u2192 ${shown2}${key === "opaqueBackdrop" || key === "intro" ? " \u2014 applies on the next launch" : ""}`);
   }, [showNotice]);
   const changeSetting = useCallback6((key) => {
     const row = settingsRows.find((r) => r.key === key);
