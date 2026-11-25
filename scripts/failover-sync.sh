@@ -31,9 +31,12 @@
 #   STATE_FILE       default /tmp/hakster-failover-sync.state
 set -eu
 
-# Cron runs with a minimal PATH and no profile; name the one we depend on.
+# Cron runs with a minimal PATH and no profile, and with $HOME as the working
+# directory — so both the PATH and the repo root are named, never assumed.
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
+REPO_DIR="${REPO_DIR:-/home/ghost/haksterAi}"
+cd "$REPO_DIR" || { echo "cannot enter $REPO_DIR"; exit 1; }
 
 STANDBY_SSH="${STANDBY_SSH:-mint}"
 STANDBY_URL="${STANDBY_URL:-http://10.0.0.210:3581}"
@@ -91,7 +94,19 @@ WANT=$(sha256sum "$TMP/hakster.db" | cut -d' ' -f1)
 say "snapshot made ($(du -h "$TMP/hakster.db" | cut -f1) sha256 ${WANT%%????????????????????????????????????????})"
 
 # ── 3. which slot is live, and which one is idle ───────────────────────────
-ACTIVE_PORT=$(ctl active 2>/dev/null || true)
+# The switch needs the standby's router to be the blue-green one. Until it is,
+# hold: starting a second slot that nothing routes to would only confuse the
+# picture, and swapping the live tree's database under it would be worse.
+STANDBY_ROUTER=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+  'curl -s -m 4 http://127.0.0.1:3579/router/status' 2>/dev/null || true)
+case "$STANDBY_ROUTER" in
+  *'"peers"'*) : ;;
+  *) say "held: the standby's router is not the blue-green one yet (cutover pending)"
+     exit 0 ;;
+esac
+
+ACTIVE_PORT=$(printf '%s' "$STANDBY_ROUTER" |
+  sed -n 's/.*"activePeerUrl": *"http:\/\/[^:"]*:\([0-9]*\)".*/\1/p')
 if [ -z "$ACTIVE_PORT" ]; then
   # No router answer: fall back to whichever slot is actually listening.
   for p in "$SLOT_A_PORT" "$SLOT_B_PORT"; do
