@@ -7141,7 +7141,18 @@ var useScriptRunner_default = useScriptRunner;
 
 // src/utils/web-usage.js
 var WEB_TOOLS = /* @__PURE__ */ new Set([
-  // the CLI's own research tools (cli/tools.js)
+  // The CLI's own research tools. All three spellings count, because all three
+  // really run: the short XML names (`<tool name="web">`, `<tool name="fetch">`),
+  // the `hak_*` aliases, and the JSON tool-definition names sent on the
+  // claude-cli lane. Only the last pair was matched before, so a session that
+  // searched the web through the CLI itself counted 0 (owner, 2026-11-25:
+  // "our web tool counter in cli aint registering count").
+  "web",
+  "fetch",
+  "hak_web",
+  "hak_fetch",
+  "search_web",
+  "fetch_url",
   "web_search",
   "websearch",
   "web_fetch",
@@ -7155,7 +7166,18 @@ var WEB_TOOLS = /* @__PURE__ */ new Set([
   "firecrawl_extract",
   // Hakster scraper service
   "hakster_scrape",
-  "hakster_scrape_status"
+  "hakster_scrape_status",
+  // Stealth / bypass fetchers — each one pulls a real page over the network.
+  "stealth_navigate",
+  "cloudscraper_fetch",
+  "get_page_content",
+  "squad_browser_bridge"
+]);
+var BROWSER_LOCAL_ONLY = /* @__PURE__ */ new Set([
+  "browser_close",
+  "browser_resize",
+  "browser_tabs",
+  "browser_console_messages"
 ]);
 function bareToolName(name) {
   const raw = String(name == null ? "" : name).trim().toLowerCase();
@@ -7167,6 +7189,7 @@ function isWebTool(name) {
   const bare = bareToolName(name);
   if (!bare) return false;
   if (WEB_TOOLS.has(bare)) return true;
+  if (/^browser_/.test(bare)) return !BROWSER_LOCAL_ONLY.has(bare);
   return /^(?:firecrawl|web)_(?:search|fetch|scrape|crawl|map|extract)$/.test(bare) || /^(?:scrape|crawl)_/.test(bare);
 }
 function countWebCalls(tools) {

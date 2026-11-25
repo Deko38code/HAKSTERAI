@@ -14,7 +14,18 @@
 
 /** Bare tool names that mean "this call went to the web". */
 const WEB_TOOLS = new Set([
-  // the CLI's own research tools (cli/tools.js)
+  // The CLI's own research tools. All three spellings count, because all three
+  // really run: the short XML names (`<tool name="web">`, `<tool name="fetch">`),
+  // the `hak_*` aliases, and the JSON tool-definition names sent on the
+  // claude-cli lane. Only the last pair was matched before, so a session that
+  // searched the web through the CLI itself counted 0 (owner, 2026-11-25:
+  // "our web tool counter in cli aint registering count").
+  'web',
+  'fetch',
+  'hak_web',
+  'hak_fetch',
+  'search_web',
+  'fetch_url',
   'web_search',
   'websearch',
   'web_fetch',
@@ -29,6 +40,20 @@ const WEB_TOOLS = new Set([
   // Hakster scraper service
   'hakster_scrape',
   'hakster_scrape_status',
+  // Stealth / bypass fetchers — each one pulls a real page over the network.
+  'stealth_navigate',
+  'cloudscraper_fetch',
+  'get_page_content',
+  'squad_browser_bridge',
+]);
+
+/** Browser-automation verbs that never touch the network. Everything else a
+ *  browser tool does is driving a live page, which is web usage. */
+const BROWSER_LOCAL_ONLY = new Set([
+  'browser_close',
+  'browser_resize',
+  'browser_tabs',
+  'browser_console_messages',
 ]);
 
 /** The tool's bare name: `mcp__hakster__hakster_scrape` → `hakster_scrape`. */
@@ -39,11 +64,16 @@ export function bareToolName(name) {
   return parts[parts.length - 1] || raw;
 }
 
-/** True when a tool call is a web search / fetch / scrape / crawl. */
+/** True when a tool call is a web search / fetch / scrape / crawl / browse. */
 export function isWebTool(name) {
   const bare = bareToolName(name);
   if (!bare) return false;
   if (WEB_TOOLS.has(bare)) return true;
+  // Browser automation (Playwright, the hakster bridge) counts as web usage —
+  // it loads and drives real pages (owner, 2026-11-25: "playwright is a web
+  // tool right"). The local lifecycle verbs above are the only exceptions,
+  // because they never leave the machine.
+  if (/^browser_/.test(bare)) return !BROWSER_LOCAL_ONLY.has(bare);
   // A renamed or namespaced variant of a crawl/scrape still counts: the verb is
   // what makes it web usage, not the exact prefix it was registered under.
   return /^(?:firecrawl|web)_(?:search|fetch|scrape|crawl|map|extract)$/.test(bare)

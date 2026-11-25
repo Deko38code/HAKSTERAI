@@ -1,9 +1,10 @@
 /* Tests for the ◔ Usage panel's web-call counter.
  *
  * The panel row is only as honest as this count, so the name matching is pinned
- * here: the CLI's bare names, the MCP `mcp__server__tool` form, renamed scrape/
- * crawl variants, and the tools that must NOT count (browser automation, plain
- * shell, file reads).
+ * here: the CLI's bare names in every spelling it emits (`web`, `hak_web`,
+ * `search_web`), the MCP `mcp__server__tool` form, browser automation, renamed
+ * scrape/crawl variants, and the tools that must NOT count (plain shell, file
+ * reads, and the browser's local lifecycle verbs).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,6 +39,39 @@ test('the CLI and MCP web tools count', () => {
   }
 });
 
+test("the CLI's own spellings count, not just the JSON names", () => {
+  // These are the names the CLI really emits — the short XML parser names, the
+  // hak_* aliases and the JSON tool definitions. A session that searched the web
+  // through the CLI counted 0 while only web_search/web_fetch were matched
+  // (owner, 2026-11-25: "our web tool counter in cli aint registering count").
+  for (const name of ['web', 'fetch', 'hak_web', 'hak_fetch', 'search_web', 'fetch_url']) {
+    assert.equal(isWebTool(name), true, `${name} should count as web usage`);
+  }
+});
+
+test('browser automation counts as web usage', () => {
+  // Owner, 2026-11-25: "playwright is a web tool right" — driving a real page is
+  // web usage, and the count must register it.
+  for (const name of [
+    'browser_navigate',
+    'browser_snapshot',
+    'browser_click',
+    'browser_type',
+    'browser_take_screenshot',
+    'mcp__playwright__browser_navigate',
+    'mcp__hakster__browser_navigate',
+    'stealth_navigate',
+    'cloudscraper_fetch',
+    'get_page_content',
+  ]) {
+    assert.equal(isWebTool(name), true, `${name} should count as web usage`);
+  }
+  // …but the local lifecycle verbs never leave the machine, so they must not.
+  for (const name of ['browser_close', 'browser_resize', 'browser_tabs', 'browser_console_messages']) {
+    assert.equal(isWebTool(name), false, `${name} must not count as web usage`);
+  }
+});
+
 test('non-web tools never count', () => {
   for (const name of [
     'bash',
@@ -45,8 +79,10 @@ test('non-web tools never count', () => {
     'write_file',
     'glob_search',
     'search_files',
-    'mcp__playwright__browser_navigate',
-    'browser_click',
+    'run_command',
+    'run',
+    'read',
+    'search',
     'update_todo',
     '',
     null,
