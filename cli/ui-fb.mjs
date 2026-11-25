@@ -423,7 +423,7 @@ var require_kitty_graphics = __commonJS({
   "../src/kitty-graphics.js"(exports, module) {
     "use strict";
     var fs11 = __require("fs");
-    var path9 = __require("path");
+    var path8 = __require("path");
     var CHUNK_BYTES = 4096;
     var LOGO_ID = 18507;
     function isSupported3(env = process.env, out = process.stdout) {
@@ -450,13 +450,32 @@ var require_kitty_graphics = __commonJS({
     }
     function logoPath(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
-      return path9.join(root2, "assets", "haksterai-logo.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path8.join(__dirname, "..");
+      return path8.join(root2, "assets", "haksterai-logo.png");
     }
     function heroPath2(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
-      return path9.join(root2, "assets", "haksterai-hero.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path8.join(__dirname, "..");
+      return path8.join(root2, "assets", "haksterai-hero.png");
+    }
+    function backdropPath(explicit) {
+      if (explicit) return explicit;
+      const root2 = process.env.HAKSTER_CLI_DIR || path8.join(__dirname, "..");
+      return path8.join(root2, "assets", "haksterai-backdrop.png");
+    }
+    function splashPath2({ checkout = false, exists = null } = {}) {
+      const has = typeof exists === "function" ? exists : (f) => {
+        try {
+          return fs11.existsSync(f);
+        } catch {
+          return false;
+        }
+      };
+      try {
+        if (!checkout && has(backdropPath())) return backdropPath();
+      } catch {
+      }
+      return heroPath2();
     }
     function placeImage3({ file, cols = 24, rows = 12, id = LOGO_ID, zIndex = -1, write = (s) => process.stdout.write(s) } = {}) {
       let data;
@@ -501,6 +520,8 @@ var require_kitty_graphics = __commonJS({
       pngSize: pngSize2,
       logoPath,
       heroPath: heroPath2,
+      backdropPath,
+      splashPath: splashPath2,
       placeImage: placeImage3,
       deleteImage: deleteImage3,
       deleteAll,
@@ -517,9 +538,9 @@ var require_live_image = __commonJS({
     "use strict";
     var fs11 = __require("fs");
     var os6 = __require("os");
-    var path9 = __require("path");
+    var path8 = __require("path");
     var crypto = __require("crypto");
-    var CACHE_DIR = path9.join(os6.homedir(), ".hakster", "cache", "live");
+    var CACHE_DIR = path8.join(os6.homedir(), ".hakster", "cache", "live");
     var MAX_BYTES = 12 * 1024 * 1024;
     var FETCH_TIMEOUT_MS = 12e3;
     var EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
@@ -555,14 +576,14 @@ var require_live_image = __commonJS({
         const url = text.match(/https?:\/\/[^\s"'<>()\]]+/gi) || [];
         for (const u of url) {
           const ext = urlExt(u);
-          if (ext) return { kind: "url", ref: u.replace(/[.,;]+$/, ""), name: path9.basename(new URL(u.replace(/[.,;]+$/, "")).pathname) || `image.${ext}` };
+          if (ext) return { kind: "url", ref: u.replace(/[.,;]+$/, ""), name: path8.basename(new URL(u.replace(/[.,;]+$/, "")).pathname) || `image.${ext}` };
         }
         const paths = text.match(/(?:file:\/\/)?\/[^\s"'<>()\]]+\.(?:png|jpe?g|webp|gif|bmp)\b/gi) || [];
         for (const p of paths) {
           const file = p.replace(/^file:\/\//, "");
           try {
             if (fs11.existsSync(file) && fs11.statSync(file).size <= MAX_BYTES) {
-              return { kind: "file", ref: file, name: path9.basename(file) };
+              return { kind: "file", ref: file, name: path8.basename(file) };
             }
           } catch {
           }
@@ -571,7 +592,7 @@ var require_live_image = __commonJS({
       return null;
     }
     function cacheFile(ext) {
-      return path9.join(CACHE_DIR, `${crypto.createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex").slice(0, 24)}.${ext}`);
+      return path8.join(CACHE_DIR, `${crypto.createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex").slice(0, 24)}.${ext}`);
     }
     function writeCache(buffer, ext) {
       if (!fs11.existsSync(CACHE_DIR)) fs11.mkdirSync(CACHE_DIR, { recursive: true, mode: 448 });
@@ -633,16 +654,392 @@ var require_live_image = __commonJS({
   }
 });
 
+// ../src/updater.js
+var require_updater = __commonJS({
+  "../src/updater.js"(exports, module) {
+    "use strict";
+    var fs11 = __require("fs");
+    var os6 = __require("os");
+    var path8 = __require("path");
+    var crypto = __require("crypto");
+    var { spawn: spawn2 } = __require("child_process");
+    var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path8.join(__dirname, "..") : "");
+    function cliDirOf2(explicit) {
+      return path8.resolve(String(explicit || DEFAULT_CLI_DIR || process.cwd()));
+    }
+    var UPDATES_DIR = path8.join(os6.homedir(), ".hakster", "updates");
+    var STAGED_DIR = path8.join(UPDATES_DIR, "staged");
+    var TARBALL = path8.join(UPDATES_DIR, "latest.tar.gz");
+    var PENDING_FILE = path8.join(UPDATES_DIR, "pending.json");
+    var MAX_TARBALL = 32 * 1024 * 1024;
+    function readJson(file, fallback) {
+      try {
+        return JSON.parse(fs11.readFileSync(file, "utf8"));
+      } catch {
+        return fallback;
+      }
+    }
+    function writeJson(file, value) {
+      fs11.mkdirSync(path8.dirname(file), { recursive: true, mode: 448 });
+      const tmp = `${file}.tmp-${process.pid}`;
+      fs11.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
+`, { mode: 384 });
+      fs11.renameSync(tmp, file);
+    }
+    function sha256File(file) {
+      try {
+        return crypto.createHash("sha256").update(fs11.readFileSync(file)).digest("hex");
+      } catch {
+        return "";
+      }
+    }
+    function stampOf(dir) {
+      const stamp = readJson(path8.join(dir, ".build-stamp.json"), null);
+      if (!stamp) return null;
+      const commits = parseInt(stamp.commits, 10);
+      if (!Number.isFinite(commits) || commits <= 0) return null;
+      return { commit: String(stamp.commit || ""), commits };
+    }
+    function runningInfo(explicitDir) {
+      const dir = cliDirOf2(explicitDir);
+      const pkg = readJson(path8.join(dir, "package.json"), {});
+      const stamp = stampOf(dir);
+      return {
+        version: String(pkg.version || "0.0.0"),
+        bundleSha: sha256File(path8.join(dir, "ui-fb.mjs")),
+        commit: stamp ? stamp.commit : "",
+        commits: stamp ? stamp.commits : null,
+        dir
+      };
+    }
+    function isSourceCheckout3(explicitDir) {
+      return fs11.existsSync(path8.join(cliDirOf2(explicitDir), "..", ".git"));
+    }
+    function serverUrl() {
+      const cfg = readJson(path8.join(os6.homedir(), ".hakster", "config.json"), {});
+      return String(cfg.server || process.env.HAKSTER_SERVER || "").replace(/\/+$/, "");
+    }
+    function cmpVersion(a, b) {
+      const pa = String(a || "").split(/[.+-]/).map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n));
+      const pb = String(b || "").split(/[.+-]/).map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n));
+      const len = Math.max(pa.length, pb.length);
+      for (let i = 0; i < len; i += 1) {
+        const x = pa[i] || 0;
+        const y = pb[i] || 0;
+        if (x !== y) return x > y ? 1 : -1;
+      }
+      return 0;
+    }
+    async function fetchJson(url, timeoutMs) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          signal: ctl.signal,
+          headers: { accept: "application/json", "x-hakster-client": "cli" }
+        });
+        const type = String(res.headers.get("content-type") || "");
+        if (!res.ok || !type.includes("json")) return null;
+        const body = await res.json();
+        return body && typeof body === "object" ? body : null;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    async function downloadTarball(url, timeoutMs) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { signal: ctl.signal, headers: { accept: "application/gzip", "x-hakster-client": "cli" } });
+        if (!res.ok) return { ok: false, reason: `http ${res.status}` };
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (!buf.length) return { ok: false, reason: "empty package" };
+        if (buf.length > MAX_TARBALL) return { ok: false, reason: "package too large" };
+        fs11.mkdirSync(UPDATES_DIR, { recursive: true, mode: 448 });
+        fs11.writeFileSync(TARBALL, buf, { mode: 384 });
+        return { ok: true, bytes: buf.length };
+      } catch (e) {
+        return { ok: false, reason: e && e.name === "AbortError" ? "timeout" : String(e && e.message || e) };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    function extractStaged() {
+      fs11.mkdirSync(STAGED_DIR, { recursive: true, mode: 448 });
+      return new Promise((resolve) => {
+        const tar = spawn2("tar", ["-xzf", TARBALL, "-C", STAGED_DIR], { stdio: "ignore" });
+        tar.on("error", (e) => resolve({ ok: false, reason: String(e.message || e) }));
+        tar.on("close", (code) => resolve(code === 0 ? { ok: true } : { ok: false, reason: `tar exited ${code}` }));
+      });
+    }
+    function stagedInfo() {
+      const pkg = readJson(path8.join(STAGED_DIR, "cli", "package.json"), {});
+      return {
+        version: String(pkg.version || ""),
+        bundleSha: sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")),
+        deps: JSON.stringify(pkg && pkg.dependencies || {})
+      };
+    }
+    function sameDeps(installedDeps, stagedDeps) {
+      const norm = (obj) => {
+        const out = {};
+        for (const key of Object.keys(obj || {}).sort()) out[key] = String(obj[key]);
+        return JSON.stringify(out);
+      };
+      return norm(JSON.parse(installedDeps || "{}")) === norm(JSON.parse(stagedDeps || "{}"));
+    }
+    async function checkForUpdate2(opts = {}) {
+      const timeoutMs = Number(opts.timeoutMs) || 8e3;
+      const running = runningInfo(opts.cliDir);
+      const origin = opts.server || serverUrl();
+      if (!origin) return { status: "unknown", reason: "no server configured", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      const latest = await fetchJson(`${origin}/cli/latest.json`, timeoutMs).catch(() => null);
+      if (latest && latest.version) {
+        const version = String(latest.version);
+        const bundleSha = String(latest.bundleSha256 || "");
+        const upToDate2 = cmpVersion(version, running.version) === 0 && (!bundleSha || bundleSha === running.bundleSha);
+        if (upToDate2) {
+          const pending2 = readJson(PENDING_FILE, null);
+          if (pending2 && !pending2.appliedAt && pending2.state !== "current") {
+            writeJson(PENDING_FILE, { ...pending2, verifiedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current", blocked: null });
+          }
+          return { status: "current", version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+        }
+      }
+      const dl = await downloadTarball(`${origin}/cli/pkg.tar.gz`, timeoutMs);
+      if (!dl.ok) return { status: "error", reason: dl.reason, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      const ex = await extractStaged();
+      if (!ex.ok) return { status: "error", reason: ex.reason, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      const staged = stagedInfo();
+      if (!staged.version || !staged.bundleSha) {
+        return { status: "error", reason: "staged package unreadable", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      }
+      const stagedStamp = stampOf(path8.join(STAGED_DIR, "cli"));
+      const latestCommit = stagedStamp && stagedStamp.commit || (latest && latest.commit ? String(latest.commit) : "");
+      const latestCommits = stagedStamp && stagedStamp.commits || (latest && Number.isFinite(parseInt(latest.commits, 10)) ? parseInt(latest.commits, 10) : null);
+      const behind = Number.isFinite(running.commits) && Number.isFinite(latestCommits) && latestCommits > running.commits ? latestCommits - running.commits : 0;
+      const upToDate = cmpVersion(staged.version, running.version) === 0 && staged.bundleSha === running.bundleSha;
+      if (upToDate) {
+        const pending2 = readJson(PENDING_FILE, null);
+        if (pending2 && pending2.version === staged.version && pending2.bundleSha === staged.bundleSha && !pending2.appliedAt) {
+          writeJson(PENDING_FILE, { ...pending2, verifiedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current", blocked: null });
+        }
+        return { status: "current", version: staged.version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      }
+      const cmp = cmpVersion(staged.version, running.version);
+      const isNewer = cmp > 0 || cmp === 0 && staged.bundleSha !== running.bundleSha;
+      if (!isNewer) {
+        const prev = readJson(PENDING_FILE, null);
+        if (!(prev && prev.appliedAt)) {
+          writeJson(PENDING_FILE, {
+            version: staged.version,
+            bundleSha: staged.bundleSha,
+            checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            state: "current",
+            runningVersion: running.version
+          });
+        }
+        return { status: "current", version: running.version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      }
+      const blocked = isSourceCheckout3(opts.cliDir) ? "source-checkout" : null;
+      const pending = {
+        version: staged.version,
+        bundleSha: staged.bundleSha,
+        stagedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        verifiedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        runningVersion: running.version,
+        latestCommit,
+        latestCommits,
+        behind,
+        source: origin,
+        dir: path8.join(STAGED_DIR, "cli"),
+        state: blocked ? "blocked" : "staged",
+        blocked
+      };
+      writeJson(PENDING_FILE, pending);
+      return { status: blocked ? "blocked" : "staged", reason: blocked || void 0, ...pending, checkedAt: pending.stagedAt, running };
+    }
+    function sameBuild(pending, running) {
+      if (!pending || !running) return false;
+      if (String(pending.version || "") !== String(running.version || "")) return false;
+      return !pending.bundleSha || pending.bundleSha === running.bundleSha;
+    }
+    function pendingInfo2(explicitDir) {
+      const pending = readJson(PENDING_FILE, null);
+      if (!pending || !pending.version) return null;
+      const ok = !!pending.bundleSha && sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
+      const running = runningInfo(explicitDir);
+      return {
+        ...pending,
+        verified: ok,
+        isCurrent: sameBuild(pending, running),
+        superseded: cmpVersion(pending.version, running.version) < 0,
+        runningVersion: running.version
+      };
+    }
+    var APPLIED_NOTICE_MS = 24 * 60 * 60 * 1e3;
+    function appliedNotice2(explicitDir, maxAgeMs) {
+      const pending = readJson(PENDING_FILE, null);
+      if (!pending || !pending.appliedAt || !pending.appliedOver) return null;
+      const at = Date.parse(pending.appliedAt);
+      if (!Number.isFinite(at)) return null;
+      if (Date.now() - at > (Number(maxAgeMs) || APPLIED_NOTICE_MS)) return null;
+      if (!sameBuild(pending, runningInfo(explicitDir))) return null;
+      return {
+        version: String(pending.version || ""),
+        from: String(pending.appliedOver || ""),
+        appliedAt: pending.appliedAt,
+        backupDir: pending.backupDir || ""
+      };
+    }
+    function applyPending2(explicitDir) {
+      const pending = pendingInfo2();
+      if (!pending) return null;
+      const target = cliDirOf2(explicitDir);
+      if (pending.appliedAt) return { applied: false, reason: "already applied", version: pending.version };
+      if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
+      if (pending.superseded) {
+        writeJson(PENDING_FILE, { ...pending, state: "superseded", supersededAt: (/* @__PURE__ */ new Date()).toISOString() });
+        return { applied: false, reason: `superseded by the running v${runningInfo(target).version}`, version: pending.version };
+      }
+      if (isSourceCheckout3(target)) return { applied: false, reason: "source-checkout", version: pending.version };
+      const running = runningInfo(target);
+      if (sameBuild(pending, running)) {
+        writeJson(PENDING_FILE, { ...pending, matchedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current" });
+        return { applied: false, reason: "current", version: pending.version };
+      }
+      const installedDeps = readJson(path8.join(target, "package.json"), {}).dependencies || {};
+      const staged = stagedInfo();
+      if (!sameDeps(JSON.stringify(installedDeps), staged.deps)) {
+        return { applied: false, reason: "dependencies changed \u2014 run npm install for the new version", version: pending.version };
+      }
+      const backupDir = path8.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
+      const stagedCli = path8.join(STAGED_DIR, "cli");
+      try {
+        fs11.cpSync(stagedCli, backupDir, {
+          recursive: true,
+          filter: (src) => !src.includes(`${path8.sep}node_modules`) && !src.includes(`${path8.sep}.git`)
+        });
+        fs11.cpSync(stagedCli, target, {
+          recursive: true,
+          force: true,
+          filter: (src) => !src.includes(`${path8.sep}node_modules`) && !src.includes(`${path8.sep}.git`)
+        });
+      } catch (e) {
+        return { applied: false, reason: `copy failed: ${e && e.message || e}`, version: pending.version, backupDir };
+      }
+      writeJson(PENDING_FILE, {
+        ...pending,
+        appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        state: "applied",
+        appliedFrom: pending.version,
+        appliedOver: running.version,
+        backupDir
+      });
+      return { applied: true, version: pending.version, from: running.version, backupDir };
+    }
+    async function promptStagedUpdate(opts = {}) {
+      const pending = pendingInfo2();
+      if (!pending || !pending.version) return { action: "none" };
+      if (pending.appliedAt) return { action: "none", pending };
+      const running = runningInfo(opts.cliDir);
+      if (sameBuild(pending, running)) {
+        return { action: "current", pending, running };
+      }
+      if (pending.superseded) return { action: "none", pending, running };
+      if (isSourceCheckout3(opts.cliDir)) return { action: "blocked", pending, running };
+      if (String(process.env.HAKSTER_UPDATE_PROMPT || "").toLowerCase() !== "ask") {
+        return { action: "auto", pending, running };
+      }
+      const stdin = process.stdin;
+      const stdout = process.stdout;
+      const tty = !!(stdin && stdin.isTTY && stdout && stdout.isTTY);
+      if (!tty || process.env.HAKSTER_NO_UPDATE_PROMPT) {
+        return { action: "auto", pending, running };
+      }
+      const mark = (state) => {
+        try {
+          writeJson(PENDING_FILE, { ...pending, deferredAt: state === "wait" ? (/* @__PURE__ */ new Date()).toISOString() : pending.deferredAt || null, promptState: state });
+        } catch {
+        }
+      };
+      stdout.write(`
+\u2B06 CLI v${pending.version} is ready \u2014 this session is on v${running.version}.
+`);
+      stdout.write("  [i] Install now  \xB7 this session runs the new CLI\n");
+      stdout.write("  [w] Wait until next one  \xB7 keep the current version for now\n");
+      stdout.write("Choice [i/w]: ");
+      const answer = await readChoice(opts.timeoutMs || 2e4);
+      stdout.write("\n");
+      const k = String(answer || "").trim().toLowerCase();
+      if (k === "i" || k === "y" || k === "1" || k === "\r" || k === "\n") {
+        mark("install");
+        return { action: "install", pending, running };
+      }
+      mark("wait");
+      return { action: "wait", pending, running };
+    }
+    function readChoice(timeoutMs) {
+      return new Promise((resolve) => {
+        const stdin = process.stdin;
+        let done = false;
+        const finish = (value) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          try {
+            stdin.removeListener("data", onData);
+          } catch {
+          }
+          try {
+            stdin.setRawMode(false);
+          } catch {
+          }
+          try {
+            stdin.pause();
+          } catch {
+          }
+          resolve(value);
+        };
+        const onData = (buf) => {
+          const text = buf.toString("utf8");
+          if (text === "\r" || text === "\n") finish("\r");
+          else finish(text);
+        };
+        const timer = setTimeout(() => finish(""), Math.max(1e3, Number(timeoutMs) || 2e4));
+        try {
+          stdin.setRawMode(true);
+        } catch {
+        }
+        stdin.resume();
+        stdin.on("data", onData);
+      });
+    }
+    module.exports = {
+      checkForUpdate: checkForUpdate2,
+      applyPending: applyPending2,
+      appliedNotice: appliedNotice2,
+      pendingInfo: pendingInfo2,
+      promptStagedUpdate,
+      runningInfo,
+      isSourceCheckout: isSourceCheckout3,
+      cliDirOf: cliDirOf2,
+      UPDATES_DIR,
+      PENDING_FILE
+    };
+  }
+});
+
 // ../src/prefs.js
 var require_prefs = __commonJS({
   "../src/prefs.js"(exports, module) {
     "use strict";
     var fs11 = __require("fs");
     var os6 = __require("os");
-    var path9 = __require("path");
-    var PREFS_DIR = path9.join(os6.homedir(), ".hakster");
-    var PREFS_FILE = path9.join(PREFS_DIR, "cli-prefs.json");
-    var LEGACY_FILE = path9.join(PREFS_DIR, "tui-prefs.json");
+    var path8 = __require("path");
+    var PREFS_DIR = path8.join(os6.homedir(), ".hakster");
+    var PREFS_FILE = path8.join(PREFS_DIR, "cli-prefs.json");
+    var LEGACY_FILE = path8.join(PREFS_DIR, "tui-prefs.json");
     var DEFAULTS = {
       model: "",
       // '' = the pinned primary model (§22)
@@ -832,392 +1229,16 @@ var require_ladder = __commonJS({
   }
 });
 
-// ../src/updater.js
-var require_updater = __commonJS({
-  "../src/updater.js"(exports, module) {
-    "use strict";
-    var fs11 = __require("fs");
-    var os6 = __require("os");
-    var path9 = __require("path");
-    var crypto = __require("crypto");
-    var { spawn: spawn2 } = __require("child_process");
-    var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path9.join(__dirname, "..") : "");
-    function cliDirOf2(explicit) {
-      return path9.resolve(String(explicit || DEFAULT_CLI_DIR || process.cwd()));
-    }
-    var UPDATES_DIR = path9.join(os6.homedir(), ".hakster", "updates");
-    var STAGED_DIR = path9.join(UPDATES_DIR, "staged");
-    var TARBALL = path9.join(UPDATES_DIR, "latest.tar.gz");
-    var PENDING_FILE = path9.join(UPDATES_DIR, "pending.json");
-    var MAX_TARBALL = 32 * 1024 * 1024;
-    function readJson(file, fallback) {
-      try {
-        return JSON.parse(fs11.readFileSync(file, "utf8"));
-      } catch {
-        return fallback;
-      }
-    }
-    function writeJson(file, value) {
-      fs11.mkdirSync(path9.dirname(file), { recursive: true, mode: 448 });
-      const tmp = `${file}.tmp-${process.pid}`;
-      fs11.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
-`, { mode: 384 });
-      fs11.renameSync(tmp, file);
-    }
-    function sha256File(file) {
-      try {
-        return crypto.createHash("sha256").update(fs11.readFileSync(file)).digest("hex");
-      } catch {
-        return "";
-      }
-    }
-    function stampOf(dir) {
-      const stamp = readJson(path9.join(dir, ".build-stamp.json"), null);
-      if (!stamp) return null;
-      const commits = parseInt(stamp.commits, 10);
-      if (!Number.isFinite(commits) || commits <= 0) return null;
-      return { commit: String(stamp.commit || ""), commits };
-    }
-    function runningInfo(explicitDir) {
-      const dir = cliDirOf2(explicitDir);
-      const pkg = readJson(path9.join(dir, "package.json"), {});
-      const stamp = stampOf(dir);
-      return {
-        version: String(pkg.version || "0.0.0"),
-        bundleSha: sha256File(path9.join(dir, "ui-fb.mjs")),
-        commit: stamp ? stamp.commit : "",
-        commits: stamp ? stamp.commits : null,
-        dir
-      };
-    }
-    function isSourceCheckout2(explicitDir) {
-      return fs11.existsSync(path9.join(cliDirOf2(explicitDir), "..", ".git"));
-    }
-    function serverUrl() {
-      const cfg = readJson(path9.join(os6.homedir(), ".hakster", "config.json"), {});
-      return String(cfg.server || process.env.HAKSTER_SERVER || "").replace(/\/+$/, "");
-    }
-    function cmpVersion(a, b) {
-      const pa = String(a || "").split(/[.+-]/).map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n));
-      const pb = String(b || "").split(/[.+-]/).map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n));
-      const len = Math.max(pa.length, pb.length);
-      for (let i = 0; i < len; i += 1) {
-        const x = pa[i] || 0;
-        const y = pb[i] || 0;
-        if (x !== y) return x > y ? 1 : -1;
-      }
-      return 0;
-    }
-    async function fetchJson(url, timeoutMs) {
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), timeoutMs);
-      try {
-        const res = await fetch(url, {
-          signal: ctl.signal,
-          headers: { accept: "application/json", "x-hakster-client": "cli" }
-        });
-        const type = String(res.headers.get("content-type") || "");
-        if (!res.ok || !type.includes("json")) return null;
-        const body = await res.json();
-        return body && typeof body === "object" ? body : null;
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    async function downloadTarball(url, timeoutMs) {
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), timeoutMs);
-      try {
-        const res = await fetch(url, { signal: ctl.signal, headers: { accept: "application/gzip", "x-hakster-client": "cli" } });
-        if (!res.ok) return { ok: false, reason: `http ${res.status}` };
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (!buf.length) return { ok: false, reason: "empty package" };
-        if (buf.length > MAX_TARBALL) return { ok: false, reason: "package too large" };
-        fs11.mkdirSync(UPDATES_DIR, { recursive: true, mode: 448 });
-        fs11.writeFileSync(TARBALL, buf, { mode: 384 });
-        return { ok: true, bytes: buf.length };
-      } catch (e) {
-        return { ok: false, reason: e && e.name === "AbortError" ? "timeout" : String(e && e.message || e) };
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    function extractStaged() {
-      fs11.mkdirSync(STAGED_DIR, { recursive: true, mode: 448 });
-      return new Promise((resolve) => {
-        const tar = spawn2("tar", ["-xzf", TARBALL, "-C", STAGED_DIR], { stdio: "ignore" });
-        tar.on("error", (e) => resolve({ ok: false, reason: String(e.message || e) }));
-        tar.on("close", (code) => resolve(code === 0 ? { ok: true } : { ok: false, reason: `tar exited ${code}` }));
-      });
-    }
-    function stagedInfo() {
-      const pkg = readJson(path9.join(STAGED_DIR, "cli", "package.json"), {});
-      return {
-        version: String(pkg.version || ""),
-        bundleSha: sha256File(path9.join(STAGED_DIR, "cli", "ui-fb.mjs")),
-        deps: JSON.stringify(pkg && pkg.dependencies || {})
-      };
-    }
-    function sameDeps(installedDeps, stagedDeps) {
-      const norm = (obj) => {
-        const out = {};
-        for (const key of Object.keys(obj || {}).sort()) out[key] = String(obj[key]);
-        return JSON.stringify(out);
-      };
-      return norm(JSON.parse(installedDeps || "{}")) === norm(JSON.parse(stagedDeps || "{}"));
-    }
-    async function checkForUpdate2(opts = {}) {
-      const timeoutMs = Number(opts.timeoutMs) || 8e3;
-      const running = runningInfo(opts.cliDir);
-      const origin = opts.server || serverUrl();
-      if (!origin) return { status: "unknown", reason: "no server configured", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
-      const latest = await fetchJson(`${origin}/cli/latest.json`, timeoutMs).catch(() => null);
-      if (latest && latest.version) {
-        const version = String(latest.version);
-        const bundleSha = String(latest.bundleSha256 || "");
-        const upToDate2 = cmpVersion(version, running.version) === 0 && (!bundleSha || bundleSha === running.bundleSha);
-        if (upToDate2) {
-          const pending2 = readJson(PENDING_FILE, null);
-          if (pending2 && !pending2.appliedAt && pending2.state !== "current") {
-            writeJson(PENDING_FILE, { ...pending2, verifiedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current", blocked: null });
-          }
-          return { status: "current", version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
-        }
-      }
-      const dl = await downloadTarball(`${origin}/cli/pkg.tar.gz`, timeoutMs);
-      if (!dl.ok) return { status: "error", reason: dl.reason, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
-      const ex = await extractStaged();
-      if (!ex.ok) return { status: "error", reason: ex.reason, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
-      const staged = stagedInfo();
-      if (!staged.version || !staged.bundleSha) {
-        return { status: "error", reason: "staged package unreadable", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
-      }
-      const stagedStamp = stampOf(path9.join(STAGED_DIR, "cli"));
-      const latestCommit = stagedStamp && stagedStamp.commit || (latest && latest.commit ? String(latest.commit) : "");
-      const latestCommits = stagedStamp && stagedStamp.commits || (latest && Number.isFinite(parseInt(latest.commits, 10)) ? parseInt(latest.commits, 10) : null);
-      const behind = Number.isFinite(running.commits) && Number.isFinite(latestCommits) && latestCommits > running.commits ? latestCommits - running.commits : 0;
-      const upToDate = cmpVersion(staged.version, running.version) === 0 && staged.bundleSha === running.bundleSha;
-      if (upToDate) {
-        const pending2 = readJson(PENDING_FILE, null);
-        if (pending2 && pending2.version === staged.version && pending2.bundleSha === staged.bundleSha && !pending2.appliedAt) {
-          writeJson(PENDING_FILE, { ...pending2, verifiedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current", blocked: null });
-        }
-        return { status: "current", version: staged.version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
-      }
-      const cmp = cmpVersion(staged.version, running.version);
-      const isNewer = cmp > 0 || cmp === 0 && staged.bundleSha !== running.bundleSha;
-      if (!isNewer) {
-        const prev = readJson(PENDING_FILE, null);
-        if (!(prev && prev.appliedAt)) {
-          writeJson(PENDING_FILE, {
-            version: staged.version,
-            bundleSha: staged.bundleSha,
-            checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            state: "current",
-            runningVersion: running.version
-          });
-        }
-        return { status: "current", version: running.version, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
-      }
-      const blocked = isSourceCheckout2(opts.cliDir) ? "source-checkout" : null;
-      const pending = {
-        version: staged.version,
-        bundleSha: staged.bundleSha,
-        stagedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        verifiedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        runningVersion: running.version,
-        latestCommit,
-        latestCommits,
-        behind,
-        source: origin,
-        dir: path9.join(STAGED_DIR, "cli"),
-        state: blocked ? "blocked" : "staged",
-        blocked
-      };
-      writeJson(PENDING_FILE, pending);
-      return { status: blocked ? "blocked" : "staged", reason: blocked || void 0, ...pending, checkedAt: pending.stagedAt, running };
-    }
-    function sameBuild(pending, running) {
-      if (!pending || !running) return false;
-      if (String(pending.version || "") !== String(running.version || "")) return false;
-      return !pending.bundleSha || pending.bundleSha === running.bundleSha;
-    }
-    function pendingInfo2(explicitDir) {
-      const pending = readJson(PENDING_FILE, null);
-      if (!pending || !pending.version) return null;
-      const ok = !!pending.bundleSha && sha256File(path9.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
-      const running = runningInfo(explicitDir);
-      return {
-        ...pending,
-        verified: ok,
-        isCurrent: sameBuild(pending, running),
-        superseded: cmpVersion(pending.version, running.version) < 0,
-        runningVersion: running.version
-      };
-    }
-    var APPLIED_NOTICE_MS = 24 * 60 * 60 * 1e3;
-    function appliedNotice2(explicitDir, maxAgeMs) {
-      const pending = readJson(PENDING_FILE, null);
-      if (!pending || !pending.appliedAt || !pending.appliedOver) return null;
-      const at = Date.parse(pending.appliedAt);
-      if (!Number.isFinite(at)) return null;
-      if (Date.now() - at > (Number(maxAgeMs) || APPLIED_NOTICE_MS)) return null;
-      if (!sameBuild(pending, runningInfo(explicitDir))) return null;
-      return {
-        version: String(pending.version || ""),
-        from: String(pending.appliedOver || ""),
-        appliedAt: pending.appliedAt,
-        backupDir: pending.backupDir || ""
-      };
-    }
-    function applyPending2(explicitDir) {
-      const pending = pendingInfo2();
-      if (!pending) return null;
-      const target = cliDirOf2(explicitDir);
-      if (pending.appliedAt) return { applied: false, reason: "already applied", version: pending.version };
-      if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
-      if (pending.superseded) {
-        writeJson(PENDING_FILE, { ...pending, state: "superseded", supersededAt: (/* @__PURE__ */ new Date()).toISOString() });
-        return { applied: false, reason: `superseded by the running v${runningInfo(target).version}`, version: pending.version };
-      }
-      if (isSourceCheckout2(target)) return { applied: false, reason: "source-checkout", version: pending.version };
-      const running = runningInfo(target);
-      if (sameBuild(pending, running)) {
-        writeJson(PENDING_FILE, { ...pending, matchedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current" });
-        return { applied: false, reason: "current", version: pending.version };
-      }
-      const installedDeps = readJson(path9.join(target, "package.json"), {}).dependencies || {};
-      const staged = stagedInfo();
-      if (!sameDeps(JSON.stringify(installedDeps), staged.deps)) {
-        return { applied: false, reason: "dependencies changed \u2014 run npm install for the new version", version: pending.version };
-      }
-      const backupDir = path9.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
-      const stagedCli = path9.join(STAGED_DIR, "cli");
-      try {
-        fs11.cpSync(stagedCli, backupDir, {
-          recursive: true,
-          filter: (src) => !src.includes(`${path9.sep}node_modules`) && !src.includes(`${path9.sep}.git`)
-        });
-        fs11.cpSync(stagedCli, target, {
-          recursive: true,
-          force: true,
-          filter: (src) => !src.includes(`${path9.sep}node_modules`) && !src.includes(`${path9.sep}.git`)
-        });
-      } catch (e) {
-        return { applied: false, reason: `copy failed: ${e && e.message || e}`, version: pending.version, backupDir };
-      }
-      writeJson(PENDING_FILE, {
-        ...pending,
-        appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        state: "applied",
-        appliedFrom: pending.version,
-        appliedOver: running.version,
-        backupDir
-      });
-      return { applied: true, version: pending.version, from: running.version, backupDir };
-    }
-    async function promptStagedUpdate(opts = {}) {
-      const pending = pendingInfo2();
-      if (!pending || !pending.version) return { action: "none" };
-      if (pending.appliedAt) return { action: "none", pending };
-      const running = runningInfo(opts.cliDir);
-      if (sameBuild(pending, running)) {
-        return { action: "current", pending, running };
-      }
-      if (pending.superseded) return { action: "none", pending, running };
-      if (isSourceCheckout2(opts.cliDir)) return { action: "blocked", pending, running };
-      if (String(process.env.HAKSTER_UPDATE_PROMPT || "").toLowerCase() !== "ask") {
-        return { action: "auto", pending, running };
-      }
-      const stdin = process.stdin;
-      const stdout = process.stdout;
-      const tty = !!(stdin && stdin.isTTY && stdout && stdout.isTTY);
-      if (!tty || process.env.HAKSTER_NO_UPDATE_PROMPT) {
-        return { action: "auto", pending, running };
-      }
-      const mark = (state) => {
-        try {
-          writeJson(PENDING_FILE, { ...pending, deferredAt: state === "wait" ? (/* @__PURE__ */ new Date()).toISOString() : pending.deferredAt || null, promptState: state });
-        } catch {
-        }
-      };
-      stdout.write(`
-\u2B06 CLI v${pending.version} is ready \u2014 this session is on v${running.version}.
-`);
-      stdout.write("  [i] Install now  \xB7 this session runs the new CLI\n");
-      stdout.write("  [w] Wait until next one  \xB7 keep the current version for now\n");
-      stdout.write("Choice [i/w]: ");
-      const answer = await readChoice(opts.timeoutMs || 2e4);
-      stdout.write("\n");
-      const k = String(answer || "").trim().toLowerCase();
-      if (k === "i" || k === "y" || k === "1" || k === "\r" || k === "\n") {
-        mark("install");
-        return { action: "install", pending, running };
-      }
-      mark("wait");
-      return { action: "wait", pending, running };
-    }
-    function readChoice(timeoutMs) {
-      return new Promise((resolve) => {
-        const stdin = process.stdin;
-        let done = false;
-        const finish = (value) => {
-          if (done) return;
-          done = true;
-          clearTimeout(timer);
-          try {
-            stdin.removeListener("data", onData);
-          } catch {
-          }
-          try {
-            stdin.setRawMode(false);
-          } catch {
-          }
-          try {
-            stdin.pause();
-          } catch {
-          }
-          resolve(value);
-        };
-        const onData = (buf) => {
-          const text = buf.toString("utf8");
-          if (text === "\r" || text === "\n") finish("\r");
-          else finish(text);
-        };
-        const timer = setTimeout(() => finish(""), Math.max(1e3, Number(timeoutMs) || 2e4));
-        try {
-          stdin.setRawMode(true);
-        } catch {
-        }
-        stdin.resume();
-        stdin.on("data", onData);
-      });
-    }
-    module.exports = {
-      checkForUpdate: checkForUpdate2,
-      applyPending: applyPending2,
-      appliedNotice: appliedNotice2,
-      pendingInfo: pendingInfo2,
-      promptStagedUpdate,
-      runningInfo,
-      isSourceCheckout: isSourceCheckout2,
-      cliDirOf: cliDirOf2,
-      UPDATES_DIR,
-      PENDING_FILE
-    };
-  }
-});
-
 // ../src/input-history.js
 var require_input_history = __commonJS({
   "../src/input-history.js"(exports, module) {
     var fs11 = __require("fs");
     var os6 = __require("os");
-    var path9 = __require("path");
+    var path8 = __require("path");
     var MAX_KEEP = 500;
     var MAX_RECALL = 200;
     function historyPath() {
-      return path9.join(process.env.HAKSTER_HOME || path9.join(os6.homedir(), ".hakster"), "history");
+      return path8.join(process.env.HAKSTER_HOME || path8.join(os6.homedir(), ".hakster"), "history");
     }
     var TERMINAL_JUNK = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\x1b|rgb:|VTE\(|[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋]|;\d+\$y|\[\?/;
     var BOX_ONLY = /^[\s│┃|]+|[\s│┃|]+$/;
@@ -1325,7 +1346,7 @@ var require_input_history = __commonJS({
       const value = String(line).replace(/\r/g, "").trim();
       try {
         const file = historyPath();
-        const dir = path9.dirname(file);
+        const dir = path8.dirname(file);
         if (!fs11.existsSync(dir)) fs11.mkdirSync(dir, { recursive: true });
         const existing = sanitizeLines(
           fs11.existsSync(file) ? fs11.readFileSync(file, "utf8").split("\n") : []
@@ -1533,7 +1554,7 @@ import { createRoot } from "@opentui/react";
 // src/App.jsx
 import React31, { useCallback as useCallback6, useEffect as useEffect19, useRef as useRef15, useState as useState19 } from "react";
 import fs10 from "node:fs";
-import path8 from "node:path";
+import path7 from "node:path";
 import { useKeyboard as useKeyboard8, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes23 } from "@opentui/core";
 
@@ -3181,10 +3202,10 @@ function MonitorFeed({
 }
 
 // src/components/DecodeSplash.jsx
-var import_kitty_graphics2 = __toESM(require_kitty_graphics());
 import React13, { useEffect as useEffect8, useRef as useRef6, useState as useState9 } from "react";
 import fs4 from "node:fs";
-import path3 from "node:path";
+var import_kitty_graphics2 = __toESM(require_kitty_graphics());
+var import_updater = __toESM(require_updater());
 import { TextAttributes as TextAttributes9 } from "@opentui/core";
 import { useRenderer as useRenderer2 } from "@opentui/react";
 
@@ -3377,24 +3398,34 @@ function MatrixRain({ width, height, frame }) {
   }
   return /* @__PURE__ */ jsx13("box", { style: { position: "absolute", left: 0, top: 0, width: w, height: h, flexDirection: "column", overflow: "hidden" }, children: rows });
 }
-var ART_FILE = "haksterai-hero.art.json";
-var _heroArt;
-function loadHeroArt() {
-  if (_heroArt !== void 0) return _heroArt;
+var _artCache = /* @__PURE__ */ new Map();
+function loadHeroArt(imageFile) {
+  const png = imageFile || (0, import_kitty_graphics2.heroPath)();
+  if (_artCache.has(png)) return _artCache.get(png);
+  let art = null;
   try {
-    const file = path3.join(path3.dirname((0, import_kitty_graphics2.heroPath)()), ART_FILE);
+    const file = png.replace(/\.png$/i, ".art.json");
     const json = JSON.parse(fs4.readFileSync(file, "utf8"));
     const px = Buffer.from(String(json.rgbBase64 || ""), "base64");
-    _heroArt = px.length === json.width * json.height * 3 ? { width: json.width, height: json.height, px } : null;
+    art = px.length === json.width * json.height * 3 ? { width: json.width, height: json.height, px } : null;
   } catch {
-    _heroArt = null;
+    art = null;
   }
-  return _heroArt;
+  _artCache.set(png, art);
+  return art;
+}
+function splashImage() {
+  let checkout = true;
+  try {
+    checkout = (0, import_updater.isSourceCheckout)();
+  } catch {
+  }
+  return (0, import_kitty_graphics2.splashPath)({ checkout });
 }
 var hex2 = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
 var rgbHex = (r, g, b) => `#${hex2(r)}${hex2(g)}${hex2(b)}`;
-function HeroBackdrop({ cols, rows, frame, left = 0, top = 0 }) {
-  const art = loadHeroArt();
+function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = "" }) {
+  const art = loadHeroArt(imageFile || void 0);
   if (!art || cols < 8 || rows < 4) return null;
   const stepX = art.width / cols;
   const stepY = art.height / (rows * 2);
@@ -3441,8 +3472,8 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0 }) {
   }
   return /* @__PURE__ */ jsx13("box", { style: { position: "absolute", left, top, width: cols, height: rows, flexDirection: "column", overflow: "hidden" }, children: out });
 }
-function artSize(width, height, reservedRows) {
-  const art = loadHeroArt();
+function artSize(width, height, reservedRows, imageFile = "") {
+  const art = loadHeroArt(imageFile || void 0);
   if (!art) return { cols: 0, rows: 0 };
   const maxRows = Math.min(art.height / 2, height - reservedRows);
   const maxCols = Math.min(art.width, width - 2);
@@ -3471,14 +3502,15 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
   const reveal = Math.min(longest, Math.floor(frame * revealStep));
   const done = frame >= settleAt;
   const imageAllowed = Boolean(graphics) && (0, import_kitty_graphics2.isSupported)(process.env, process.stdout);
+  const imageFile = splashImage();
   let heroAsset = false;
   try {
-    heroAsset = imageAllowed && fs4.existsSync((0, import_kitty_graphics2.heroPath)());
+    heroAsset = imageAllowed && fs4.existsSync(imageFile);
   } catch {
     heroAsset = false;
   }
   const [heroFailed, setHeroFailed] = useState9(false);
-  const artFit = !imageAllowed || heroFailed ? artSize(width, height, lines.length + 3) : { cols: 0, rows: 0 };
+  const artFit = !imageAllowed || heroFailed ? artSize(width, height, lines.length + 3, imageFile) : { cols: 0, rows: 0 };
   const showArt = artFit.cols >= 24 && artFit.rows >= 8;
   const showWordmark = !showArt && (!heroAsset || heroFailed);
   useEffect8(() => {
@@ -3530,7 +3562,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
         row = Math.max(1, Math.floor((height - heroRows) / 2) + 1);
         col = Math.max(1, Math.floor((width - heroCols) / 2) + 1);
         (0, import_kitty_graphics2.moveCursor)(row, col);
-        placed = (0, import_kitty_graphics2.placeImage)({ file: (0, import_kitty_graphics2.heroPath)(), cols: heroCols, rows: heroRows });
+        placed = (0, import_kitty_graphics2.placeImage)({ file: imageFile, cols: heroCols, rows: heroRows });
         if (!placed) setHeroFailed(true);
       });
       if (placed && renderer2 && typeof renderer2.on === "function") {
@@ -3552,7 +3584,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
       }
       if (placed) withPausedRenderer(() => (0, import_kitty_graphics2.deleteImage)(placed.id));
     };
-  }, [graphics, renderer2, width, height, lines.length]);
+  }, [graphics, renderer2, width, height, lines.length, imageFile]);
   return /* @__PURE__ */ jsxs13(
     "box",
     {
@@ -3572,6 +3604,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
             cols: artFit.cols,
             rows: artFit.rows,
             frame,
+            imageFile,
             left: Math.max(0, Math.floor((width - artFit.cols) / 2)),
             top: Math.max(0, Math.floor((height - artFit.rows) / 2))
           }
@@ -3896,13 +3929,13 @@ import { TextAttributes as TextAttributes14 } from "@opentui/core";
 
 // src/utils/scripts.js
 import fs5 from "node:fs";
-import path4 from "node:path";
+import path3 from "node:path";
 import { fileURLToPath } from "node:url";
 var SCRIPT_EXT = /* @__PURE__ */ new Set([".sh", ".bash", ".cjs", ".mjs", ".js", ".py"]);
 function projectRoots() {
   let cliDir;
   try {
-    cliDir = path4.dirname(fileURLToPath(import.meta.url));
+    cliDir = path3.dirname(fileURLToPath(import.meta.url));
   } catch {
     cliDir = process.cwd();
   }
@@ -3910,13 +3943,13 @@ function projectRoots() {
   let dir = cliDir;
   for (let i = 0; i < 5; i += 1) {
     candidates.push(dir);
-    dir = path4.dirname(dir);
+    dir = path3.dirname(dir);
   }
-  const repo = candidates.find((d) => fs5.existsSync(path4.join(d, "package.json")) && fs5.existsSync(path4.join(d, "cli"))) || candidates.find((d) => fs5.existsSync(path4.join(d, "package.json"))) || process.cwd();
-  return { repo, cli: path4.join(repo, "cli") };
+  const repo = candidates.find((d) => fs5.existsSync(path3.join(d, "package.json")) && fs5.existsSync(path3.join(d, "cli"))) || candidates.find((d) => fs5.existsSync(path3.join(d, "package.json"))) || process.cwd();
+  return { repo, cli: path3.join(repo, "cli") };
 }
 var interpreterFor = (file) => {
-  const ext = path4.extname(file).toLowerCase();
+  const ext = path3.extname(file).toLowerCase();
   if (ext === ".sh" || ext === ".bash") return "bash";
   if (ext === ".py") return "python3";
   return "node";
@@ -3930,15 +3963,15 @@ function discoverScripts() {
     seen.add(entry.id);
     out.push(entry);
   };
-  for (const [dir, tag] of [[path4.join(repo, "scripts"), "repo"], [path4.join(cli, "scripts"), "cli"]]) {
+  for (const [dir, tag] of [[path3.join(repo, "scripts"), "repo"], [path3.join(cli, "scripts"), "cli"]]) {
     let names = [];
     try {
-      names = fs5.readdirSync(dir).filter((n) => SCRIPT_EXT.has(path4.extname(n).toLowerCase())).sort();
+      names = fs5.readdirSync(dir).filter((n) => SCRIPT_EXT.has(path3.extname(n).toLowerCase())).sort();
     } catch {
       continue;
     }
     for (const name of names) {
-      const abs = path4.join(dir, name);
+      const abs = path3.join(dir, name);
       try {
         if (!fs5.statSync(abs).isFile()) continue;
       } catch {
@@ -3955,14 +3988,14 @@ function discoverScripts() {
     }
   }
   try {
-    const pkg = JSON.parse(fs5.readFileSync(path4.join(repo, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs5.readFileSync(path3.join(repo, "package.json"), "utf8"));
     for (const [name, cmd] of Object.entries(pkg.scripts || {})) {
       if (name === "postinstall" || name === "astro") continue;
       add({
         id: `npm/${name}`,
         label: `npm run ${name}`,
         tag: "npm",
-        path: path4.join(repo, "package.json"),
+        path: path3.join(repo, "package.json"),
         run: ["npm", "run", name],
         cwd: repo
       });
@@ -4227,10 +4260,10 @@ import { TextAttributes as TextAttributes16 } from "@opentui/core";
 // ../smartness.mjs
 import fs6 from "node:fs";
 import os3 from "node:os";
-import path5 from "node:path";
+import path4 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { execFile } from "node:child_process";
-var CLI_DIR = path5.dirname(fileURLToPath2(import.meta.url));
+var CLI_DIR = path4.dirname(fileURLToPath2(import.meta.url));
 var EXPECTED_SERVICES = [
   { port: 3579, name: "haksterAi", proto: "http" },
   { port: 8081, name: "cinevault", proto: "http" },
@@ -4242,7 +4275,7 @@ var DEFAULT_SCORE = 98;
 var HEALTH_WINDOW_MS = 9e4;
 function anchorScore() {
   try {
-    const file = path5.join(os3.homedir(), ".hakster", "perf_history.json");
+    const file = path4.join(os3.homedir(), ".hakster", "perf_history.json");
     const rows = JSON.parse(fs6.readFileSync(file, "utf8"));
     const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
     const n = Number(last && (last.smartnessEnd ?? last.smartnessPeak));
@@ -4252,7 +4285,7 @@ function anchorScore() {
     return DEFAULT_SCORE;
   }
 }
-function anchorPoints(file = path5.join(os3.homedir(), ".hakster", "perf_history.json")) {
+function anchorPoints(file = path4.join(os3.homedir(), ".hakster", "perf_history.json")) {
   try {
     const rows = JSON.parse(fs6.readFileSync(file, "utf8"));
     const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
@@ -4449,12 +4482,12 @@ var IMPORTANT_FILES = [
   "HAKSTERAI-PHANTOM-MERGED.md",
   ".env"
 ];
-function fileGuard(root2 = path5.resolve(CLI_DIR, "..")) {
+function fileGuard(root2 = path4.resolve(CLI_DIR, "..")) {
   const present = [];
   const missing = [];
   for (const rel of IMPORTANT_FILES) {
     try {
-      if (fs6.existsSync(path5.join(root2, rel))) present.push(rel);
+      if (fs6.existsSync(path4.join(root2, rel))) present.push(rel);
       else missing.push(rel);
     } catch {
       missing.push(rel);
@@ -6920,8 +6953,8 @@ function useDebugStats({ enabled = false, api = "http://localhost:3579", refresh
 import { useEffect as useEffect16, useState as useState16 } from "react";
 import fs8 from "node:fs";
 import os5 from "node:os";
-import path6 from "node:path";
-var BANK_DIR = path6.join(os5.homedir(), ".hakster", "memories", "banks");
+import path5 from "node:path";
+var BANK_DIR = path5.join(os5.homedir(), ".hakster", "memories", "banks");
 function readMemoryBanks(dir = BANK_DIR) {
   let files;
   try {
@@ -6936,7 +6969,7 @@ function readMemoryBanks(dir = BANK_DIR) {
   for (const file of files) {
     let entries;
     try {
-      entries = JSON.parse(fs8.readFileSync(path6.join(dir, file), "utf8"));
+      entries = JSON.parse(fs8.readFileSync(path5.join(dir, file), "utf8"));
     } catch {
       continue;
     }
@@ -6976,15 +7009,15 @@ function useMemoryBank(intervalMs = 1e4) {
 }
 
 // src/hooks/useCliUpdate.js
-var import_updater = __toESM(require_updater());
+var import_updater2 = __toESM(require_updater());
 var import_prefs2 = __toESM(require_prefs());
 import { useEffect as useEffect17, useRef as useRef13, useState as useState17 } from "react";
 import fs9 from "node:fs";
-import path7 from "node:path";
+import path6 from "node:path";
 function readStartup() {
   try {
-    const applied = (0, import_updater.appliedNotice)();
-    const pending = (0, import_updater.pendingInfo)();
+    const applied = (0, import_updater2.appliedNotice)();
+    const pending = (0, import_updater2.pendingInfo)();
     if (applied) {
       return { applied, status: { status: "applied", version: applied.version, from: applied.from, checkedAt: applied.appliedAt } };
     }
@@ -7021,9 +7054,9 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
   const diskNewer = () => {
     try {
       if (!sessionVersion) return null;
-      if ((0, import_updater.isSourceCheckout)()) return null;
+      if ((0, import_updater2.isSourceCheckout)()) return null;
       const diskVersion = String(
-        JSON.parse(fs9.readFileSync(path7.join((0, import_updater.cliDirOf)(), "package.json"), "utf8")).version || ""
+        JSON.parse(fs9.readFileSync(path6.join((0, import_updater2.cliDirOf)(), "package.json"), "utf8")).version || ""
       );
       if (!diskVersion || diskVersion === sessionVersion) return null;
       const pa = diskVersion.split(".").map((n) => parseInt(n, 10) || 0);
@@ -7065,12 +7098,12 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
         (prev) => prev.status === "staged" || prev.status === "blocked" || prev.status === "applied" || prev.status === "installed" ? prev : { ...prev, status: "checking" }
       );
       try {
-        const res = await (0, import_updater.checkForUpdate)();
+        const res = await (0, import_updater2.checkForUpdate)();
         if (!alive) return;
         let installedNow = null;
         if (res.status === "staged" && !applied) {
           try {
-            const a = (0, import_updater.applyPending)();
+            const a = (0, import_updater2.applyPending)();
             if (a && a.applied) installedNow = a;
             else if (a && a.reason && /dependenc/i.test(String(a.reason))) {
               installedNow = { needsInstall: true };
@@ -7374,8 +7407,8 @@ function writePrefs(patch) {
   }
 }
 var CRUSH_CONFIG_PATHS = [
-  path8.join(process.env.HOME || "/home/ghost", ".crush.json"),
-  path8.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
+  path7.join(process.env.HOME || "/home/ghost", ".crush.json"),
+  path7.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
 ];
 function readCrushModels() {
   for (const p of CRUSH_CONFIG_PATHS) {
@@ -7404,8 +7437,8 @@ var toolArgLine = (args) => {
 function readImageAttachment(file) {
   const raw = String(file || "").trim();
   if (!raw) throw new Error("no file given");
-  const abs = path8.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ""));
-  const mime = IMAGE_MIME[path8.extname(abs).toLowerCase()];
+  const abs = path7.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ""));
+  const mime = IMAGE_MIME[path7.extname(abs).toLowerCase()];
   if (!mime) throw new Error("not an image (png, jpg, webp, gif, bmp)");
   const st = fs10.statSync(abs);
   if (!st.isFile()) throw new Error("not a file");
@@ -7415,7 +7448,7 @@ function readImageAttachment(file) {
   const buf = fs10.readFileSync(abs);
   return {
     path: abs,
-    name: path8.basename(abs),
+    name: path7.basename(abs),
     bytes: buf.length,
     dataUrl: `data:${mime};base64,${buf.toString("base64")}`
   };

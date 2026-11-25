@@ -62,6 +62,37 @@ function heroPath(explicit) {
   return path.join(root, 'assets', 'haksterai-hero.png');
 }
 
+/** The owner's hacker-theme backdrop (the same PNG his Guake drop-down paints
+ *  behind the TUI). Owner, 2026-11-26: "i want that as my background in cli
+ *  when users install our ... use that one dont change my startup" — an
+ *  installed copy starts on this one; a source checkout keeps the hero. */
+function backdropPath(explicit) {
+  if (explicit) return explicit;
+  const root = process.env.HAKSTER_CLI_DIR || path.join(__dirname, '..');
+  return path.join(root, 'assets', 'haksterai-backdrop.png');
+}
+
+/** Which picture a start screen paints.
+ *
+ *  Owner, 2026-11-26: "i want that as my background in cli when users install
+ *  our to the hacker theme image on startup use that one dont change my
+ *  startup". An installed copy starts on the hacker-theme backdrop (the PNG
+ *  the Guake profile paints behind the TUI); a source checkout — the owner's
+ *  own dev tree (§8) — keeps the startup it has always had. A missing backdrop
+ *  falls back to the hero, so the start screen always has artwork.
+ */
+function splashPath({ checkout = false, exists = null } = {}) {
+  const has = typeof exists === 'function'
+    ? exists
+    : (f) => { try { return fs.existsSync(f); } catch { return false; } };
+  try {
+    if (!checkout && has(backdropPath())) return backdropPath();
+  } catch {
+    /* an unreadable asset dir keeps the hero */
+  }
+  return heroPath();
+}
+
 /**
  * Transmit + place an image at the cursor's current cell.
  * `cols`/`rows` are terminal cells; the terminal scales the image to fit.
@@ -125,6 +156,8 @@ module.exports = {
   pngSize,
   logoPath,
   heroPath,
+  backdropPath,
+  splashPath,
   placeImage,
   deleteImage,
   deleteAll,

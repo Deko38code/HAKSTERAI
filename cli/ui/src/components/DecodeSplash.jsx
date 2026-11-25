@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { TextAttributes } from '@opentui/core';
 import { useRenderer } from '@opentui/react';
-import { deleteImage, deletePlacement, heroPath, isSupported, moveCursor, placeById, placeImage } from '../../../src/kitty-graphics.js';
+import { deleteImage, deletePlacement, heroPath, isSupported, moveCursor, placeById, placeImage, splashPath } from '../../../src/kitty-graphics.js';
+import { isSourceCheckout } from '../../../src/updater.js';
 import { HERO_WORDMARK, HERO_W, HERO_GREEN } from './HeroLogo.jsx';
 import { scScramble } from '../utils/crush-scrambler.js';
 
@@ -111,28 +112,51 @@ function MatrixRain({ width, height, frame }) {
  * is composited into the same cells — one row of spans per text row, so the
  * animation never costs a second full-screen pass.
  */
-const ART_FILE = 'haksterai-hero.art.json';
-let _heroArt;
-function loadHeroArt() {
-  if (_heroArt !== undefined) return _heroArt;
+const _artCache = new Map();
+function loadHeroArt(imageFile) {
+  const png = imageFile || heroPath();
+  if (_artCache.has(png)) return _artCache.get(png);
+  let art = null;
   try {
-    const file = path.join(path.dirname(heroPath()), ART_FILE);
+    // `haksterai-hero.png` → `haksterai-hero.art.json`; the backdrop has its
+    // own grid generated from the same picture the Guake profile paints.
+    const file = png.replace(/\.png$/i, '.art.json');
     const json = JSON.parse(fs.readFileSync(file, 'utf8'));
     const px = Buffer.from(String(json.rgbBase64 || ''), 'base64');
-    _heroArt = px.length === json.width * json.height * 3
+    art = px.length === json.width * json.height * 3
       ? { width: json.width, height: json.height, px }
       : null;
   } catch {
-    _heroArt = null;
+    art = null;
   }
-  return _heroArt;
+  _artCache.set(png, art);
+  return art;
+}
+
+/** The start screen's own picture.
+ *
+ *  Owner, 2026-11-26: "i want that as my background in cli when users install
+ *  our to the hacker theme image on startup use that one dont change my
+ *  startup". An installed copy starts on the hacker-theme backdrop — the same
+ *  PNG his Guake drop-down paints behind the TUI — while a source checkout
+ *  (his own dev tree, §8) keeps exactly the startup it has always had. The
+ *  shipped hero remains the fallback when the backdrop is absent.
+ */
+function splashImage() {
+  let checkout = true; // an install we cannot read keeps the hero, not a guess
+  try {
+    checkout = isSourceCheckout();
+  } catch {
+    /* an unknown install keeps the hero */
+  }
+  return splashPath({ checkout });
 }
 
 const hex2 = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
 const rgbHex = (r, g, b) => `#${hex2(r)}${hex2(g)}${hex2(b)}`;
 
-function HeroBackdrop({ cols, rows, frame, left = 0, top = 0 }) {
-  const art = loadHeroArt();
+function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = '' }) {
+  const art = loadHeroArt(imageFile || undefined);
   if (!art || cols < 8 || rows < 4) return null;
   const stepX = art.width / cols;
   const stepY = art.height / (rows * 2);
@@ -188,8 +212,8 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0 }) {
 
 /** Fit the art inside a box while keeping the picture's own 4:3 shape; one
  *  cell is one pixel wide and two pixels tall. */
-function artSize(width, height, reservedRows) {
-  const art = loadHeroArt();
+function artSize(width, height, reservedRows, imageFile = '') {
+  const art = loadHeroArt(imageFile || undefined);
   if (!art) return { cols: 0, rows: 0 };
   const maxRows = Math.min(art.height / 2, height - reservedRows);
   const maxCols = Math.min(art.width, width - 2);
@@ -233,13 +257,16 @@ export default function DecodeSplash({ width = 80, height = 24, lines = [], onDo
   // part of that is false the block wordmark takes its place, so a start
   // screen always carries the logo (owner, 2026-11-23).
   const imageAllowed = Boolean(graphics) && isSupported(process.env, process.stdout);
+  // The picture this start screen paints: the hacker-theme backdrop on an
+  // installed copy, the hero on a source checkout (see splashImage above).
+  const imageFile = splashImage();
   let heroAsset = false;
-  try { heroAsset = imageAllowed && fs.existsSync(heroPath()); } catch { heroAsset = false; }
+  try { heroAsset = imageAllowed && fs.existsSync(imageFile); } catch { heroAsset = false; }
   const [heroFailed, setHeroFailed] = useState(false);
   // No Kitty image here (or it failed to place): draw the actual artwork as
   // half-block cells. Only when even that cannot fit do we fall back to the
   // block wordmark — the start screen always carries the logo.
-  const artFit = !imageAllowed || heroFailed ? artSize(width, height, lines.length + 3) : { cols: 0, rows: 0 };
+  const artFit = !imageAllowed || heroFailed ? artSize(width, height, lines.length + 3, imageFile) : { cols: 0, rows: 0 };
   const showArt = artFit.cols >= 24 && artFit.rows >= 8;
   const showWordmark = !showArt && (!heroAsset || heroFailed);
 
@@ -309,7 +336,7 @@ export default function DecodeSplash({ width = 80, height = 24, lines = [], onDo
         row = Math.max(1, Math.floor((height - heroRows) / 2) + 1);
         col = Math.max(1, Math.floor((width - heroCols) / 2) + 1);
         moveCursor(row, col);
-        placed = placeImage({ file: heroPath(), cols: heroCols, rows: heroRows });
+        placed = placeImage({ file: imageFile, cols: heroCols, rows: heroRows });
         // A missing/unreadable asset returns null and paints nothing; the block
         // wordmark then takes over on the next render.
         if (!placed) setHeroFailed(true);
@@ -334,7 +361,7 @@ export default function DecodeSplash({ width = 80, height = 24, lines = [], onDo
       }
       if (placed) withPausedRenderer(() => deleteImage(placed.id));
     };
-  }, [graphics, renderer, width, height, lines.length]);
+  }, [graphics, renderer, width, height, lines.length, imageFile]);
 
   return (
     <box
@@ -355,6 +382,7 @@ export default function DecodeSplash({ width = 80, height = 24, lines = [], onDo
           cols={artFit.cols}
           rows={artFit.rows}
           frame={frame}
+          imageFile={imageFile}
           left={Math.max(0, Math.floor((width - artFit.cols) / 2))}
           top={Math.max(0, Math.floor((height - artFit.rows) / 2))}
         />
