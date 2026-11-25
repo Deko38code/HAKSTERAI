@@ -68,10 +68,29 @@ src.backup(dst); dst.close(); src.close()
 WANT=$(sha256sum "$TMP/hakster.db" | cut -d' ' -f1)
 say "snapshot made ($(du -h "$TMP/hakster.db" | cut -f1) sha256 ${WANT%%????????????????????????????????????????})"
 
-# ── 3. stop the standby, swap the file in, start it again ──────────────────
+# ── 2b. keep the standby's *code* identical, not just its data ─────────────
+# The router serves half the static traffic from the standby, and ad landing
+# pages are static. A stale build there would show an old site to real ad
+# clicks, so the deployable tree is synced with every data sync.
 REMOTE_DIR=$(ssh -o BatchMode=yes "$STANDBY_SSH" \
   'ls -1d ~/haksterAi-failover-* 2>/dev/null | sort | tail -n 1')
 [ -n "$REMOTE_DIR" ] || { say "failed: no standby directory on $STANDBY_SSH"; exit 1; }
+if [ "${SKIP_CODE:-0}" != "1" ]; then
+  rsync -a --safe-links \
+    --exclude='node_modules' --exclude='.git' --exclude='*.bak*' --exclude='*.db' --exclude='*.db-*' \
+    --exclude='.env*' --exclude='*.key' --exclude='*.pem' --exclude='*.p12' \
+    --exclude='google-oauth-client.json' --exclude='archives' --exclude='backups' --exclude='data' \
+    -e "ssh -o BatchMode=yes" \
+    /home/ghost/haksterAi/cli /home/ghost/haksterAi/server /home/ghost/haksterAi/dist \
+    /home/ghost/haksterAi/scripts /home/ghost/haksterAi/public /home/ghost/haksterAi/package.json \
+    "$STANDBY_SSH:$REMOTE_DIR/" \
+    && say "code synced to the standby (dist, server, cli, scripts)" \
+    || { say "warning: code sync did not complete - standby keeps its previous build"; }
+else
+  say "code sync skipped (SKIP_CODE=1)"
+fi
+
+# ── 3. stop the standby, swap the file in, start it again ──────────────────
 say "standby: $STANDBY_SSH:$REMOTE_DIR (port $STANDBY_PORT)"
 
 ssh -n -o BatchMode=yes "$STANDBY_SSH" "
