@@ -13,6 +13,11 @@
 #   Bun      — what our TUI runs on; installed when the machine has none.
 #              Without it the CLI still runs on its built-in Ink UI.
 #
+# Before any of that, one read-only pass prints what this machine already has —
+# node, bun, Claude Code and an older CLI (owner, 2026-11-26: check what a machine
+# is missing before installing, so every install is fast) — so the install only
+# brings the gaps and nothing is fetched twice.
+#
 # Run it:  irm __ORIGIN__/install.ps1 | iex
 # Requires Windows 10 1803+ for the built-in tar.exe (used to unpack the CLI).
 #
@@ -42,7 +47,6 @@
   New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
   Say "HaksterAI CLI - from $Origin"
 
-  # ── Node.js ─────────────────────────────────────────────────────────────
   function Get-NodeMajor {
     try {
       $v = (& node -p 'process.versions.node' 2>$null)
@@ -51,6 +55,58 @@
     } catch { return 0 }
   }
 
+  # ── what this machine already has ───────────────────────────────────────
+  # Owner, 2026-11-26: check what a machine is missing before installing, so every
+  # install is fast. One read-only pass before anything is fetched, so the steps
+  # below bring only the parts that are missing. Nothing here is downloaded,
+  # started or changed; every line is a lookup.
+  Say ''
+  Say 'What this machine already has - only the missing parts are installed:'
+  if (Get-Command node -ErrorAction SilentlyContinue) {
+    $nodeVer = ''
+    try { $nodeVer = (& node --version 2>$null) } catch { }
+    if ((Get-NodeMajor) -ge 20 -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+      Say ("  OK node " + $nodeVer + " - used as it is")
+    } else {
+      Say ("  X  node " + $nodeVer + " is older than 20 - a Node 20+ runtime comes with this install")
+    }
+  } else {
+    Say '  X  node - a Node 20+ runtime comes with this install (one time, about 32 MB)'
+  }
+  if (Get-Command bun -ErrorAction SilentlyContinue) {
+    Say '  OK bun on PATH - our TUI runs on it'
+  } elseif (Test-Path (Join-Path $Runtime 'bun\node_modules\bun\bin\bun.exe')) {
+    Say "  OK bun in $Runtime\bun - our TUI runs on it"
+  } else {
+    Say '  X  bun - installed below; without it the CLI uses its built-in Ink UI'
+  }
+  # Same rule as cli/src/claude-code-provision.js: the user's own copy on PATH
+  # always wins, then our private prefix under ~/.hakster/claude-code.
+  $claudeFound = ''
+  $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+  if ($claudeCmd) { $claudeFound = [string]$claudeCmd.Source }
+  if (-not $claudeFound) {
+    foreach ($c in @(
+        (Join-Path $HOME '.hakster\claude-code\node_modules\.bin\claude.cmd'),
+        (Join-Path $HOME '.hakster\claude-code\node_modules\.bin\claude.exe'),
+        (Join-Path $HOME '.hakster\claude-code\node_modules\@anthropic-ai\claude-code\bin\claude.exe'))) {
+      if (Test-Path $c) { $claudeFound = $c; break }
+    }
+  }
+  if ($claudeFound) {
+    Say "  OK claude code at $claudeFound - your own copy is used, never moved"
+  } else {
+    Say "  -  claude code - not installed; 'hakster claude' sets it up once, on a paid plan"
+    Say '     (nothing is downloaded now: free plans never pay for ~400 MB they cannot use)'
+  }
+  if (Get-Command hakster -ErrorAction SilentlyContinue) {
+    Say '  -  hakster CLI - already on PATH; this install puts the published package in place of it'
+  } else {
+    Say '  X  hakster CLI - installed below'
+  }
+  Say ''
+
+  # ── Node.js ─────────────────────────────────────────────────────────────
   $nodeOk = $false
   if (Get-Command node -ErrorAction SilentlyContinue) {
     if ((Get-Command npm -ErrorAction SilentlyContinue) -and (Get-NodeMajor) -ge 20) { $nodeOk = $true }

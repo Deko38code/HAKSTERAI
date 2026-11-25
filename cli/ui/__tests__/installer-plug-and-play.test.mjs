@@ -122,26 +122,68 @@ test('neither installer touches the user\'s own Claude Code config', () => {
   }
 });
 
-test('the installer applies our Guake look when Guake is already there', () => {
-  // Owner, 2026-11-26: "i want it to come with our install the png" and
-  // "yes it should add". The package carries the profile and the backdrop; the
-  // installer applies the look through `hakster quake --setup` (Guake's own
-  // import, previous profile backed up first) when the machine has Guake.
+test('the installer checks what the machine already has — only the gaps are fetched', () => {
+  // Owner, 2026-11-26: "on install our cli checks for missing guake node claude
+  // code etc for fast instal". Each installer prints one read-only pass before
+  // anything is downloaded, so the install only brings what is missing.
   const src = readFileSync(path.join(repoRoot, 'install.sh'), 'utf8');
-  const block = src.slice(src.indexOf('The look comes with the install'));
-  const apply = block.slice(0, block.indexOf('say "Next:'));
+  const start = src.indexOf('── what this machine already has');
+  const check = src.slice(start, src.indexOf('BOOTSTRAPPED=no'));
+  assert.ok(start > 0, 'the check block exists');
+  assert.ok(start < src.indexOf('nodejs.org/dist'), 'it runs before any download');
+  for (const part of ['node', 'bun', 'guake', 'claude code', 'hakster CLI']) {
+    assert.ok(check.includes(part), `the report covers ${part}`);
+  }
+  assert.match(src, /^usable_claude\(\) \{/m, 'Claude Code detection has its own lookup');
+  assert.match(src, /-gt 4096/, 'the package\'s ~500-byte stub is not counted as a real binary');
+  assert.match(check, /\.hakster\/claude-code/, 'our private prefix is checked, like claude-code-provision.js');
+  assert.match(check, /hakster claude/, 'a missing Claude Code points at the command that sets it up');
+  assert.match(check, /paid plan/, 'and never promises a free download');
+  // The pass is lookups only: it fetches, installs and starts nothing.
+  assert.doesNotMatch(check, /fetch |npm install|curl |wget |HAKSTER_BIN/, 'the check is read-only');
+  // Same pass on Windows, and no Guake there (Linux terminal only).
+  const ps = readFileSync(path.join(repoRoot, 'install.ps1'), 'utf8');
+  const psStart = ps.indexOf('── what this machine already has');
+  const psCheck = ps.slice(psStart, ps.indexOf('# ── Node.js'));
+  assert.ok(psStart > 0, 'the Windows installer checks too');
+  for (const part of ['node', 'bun', 'claude code', 'hakster CLI']) assert.ok(ps.includes(part));
+  assert.match(psCheck, /\$HOME '\.hakster\\claude-code/, 'the same private prefix is checked on Windows');
+  assert.match(psCheck, /hakster claude/, 'and the same provisioning command is offered');
+  assert.doesNotMatch(psCheck, /guake/i, 'Windows has no Guake to check');
+});
 
-  assert.match(apply, /elif command -v guake >\/dev\/null 2>&1; then/, 'only when Guake is already installed');
-  assert.match(apply, /"\$HAKSTER_BIN" quake --setup/, 'the shipped CLI applies it, not the installer');
-  assert.match(apply, /Guake look applied/, 'a real apply is claimed only when it reports one');
-  assert.match(apply, /hakster quake --setup --repair/, 'a failure is reported with the way to fix it');
-  assert.match(apply, /HAKSTER_NO_QUAKE/, 'an operator can opt out');
+test('the full install brings Guake, painted — without guessing a password', () => {
+  // Owner, 2026-11-26: "make sure guake come with the full install painted and
+  // all". The package carries the profile and the backdrop; the installer
+  // installs Guake where it can run and then applies our look through
+  // `hakster quake --setup` (Guake's own import, previous profile backed up).
+  const src = readFileSync(path.join(repoRoot, 'install.sh'), 'utf8');
+  const install = src.slice(src.indexOf('The full install brings the drop-down'), src.indexOf('# The look comes with the install'));
+  const look = src.slice(src.indexOf('# The look comes with the install'), src.indexOf('say "Next:'));
 
-  // It never installs Guake and never elevates: no sudo, no package manager.
-  const commands = apply.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
-  assert.doesNotMatch(commands, /sudo/, 'no elevation in the installer');
-  assert.doesNotMatch(commands, /apt-get|apt install|pacman|dnf|zypper|apk add/, 'Guake is never installed here');
-  assert.match(commands, /2>&1/, 'the apply output is captured, not dumped into the install log');
+  // Where it can run, and only when it is missing.
+  assert.match(install, /\[ "\$\(uname -s\)" = Linux \]/, 'Linux only');
+  assert.match(install, /DISPLAY:-/, 'a graphical session is required');
+  assert.match(install, /! command -v guake >\/dev\/null 2>&1/, 'never reinstalls a Guake that is there');
+  // The package manager is chosen from the distribution, not assumed.
+  for (const hint of ['apt-get install -y guake', 'pacman -S --noconfirm guake', 'dnf install -y guake', 'zypper', 'apk add guake']) {
+    assert.ok(install.includes(hint), `has a real command for ${hint}`);
+  }
+  // A password is never captured: no -S, no piped echo into sudo.
+  assert.doesNotMatch(install, /sudo -S/, 'never feeds sudo a password');
+  assert.doesNotMatch(install, /echo .*\|\s*sudo/, 'never pipes a password into sudo');
+  // The prompt only appears when a human is watching, and "n" is honoured.
+  assert.match(install, /\[ -t 1 \] && \[ -c \/dev\/tty \]/, 'prompts only on a real terminal');
+  assert.match(install, /n\|N\|no\|NO\) GUAKE_SKIPPED=yes/, 'a declined install is skipped, not retried');
+  assert.match(install, /Guake: skipped/, 'and it says so');
+  assert.match(install, /Guake: not installed — 'sudo/, 'no terminal prints the exact command instead');
+
+  // The look is applied by the shipped CLI, and a failure tells you the fix.
+  assert.match(look, /elif command -v guake >\/dev\/null 2>&1; then/);
+  assert.match(look, /"\$HAKSTER_BIN" quake --setup/);
+  assert.match(look, /Guake look applied/, 'a real apply is claimed only when it reports one');
+  assert.match(look, /hakster quake --setup --repair/, 'a failure is reported with the way to fix it');
+  assert.match(look, /HAKSTER_NO_QUAKE/, 'an operator can opt out');
 
   // Windows has no Guake: the look is not mentioned there at all.
   const ps = readFileSync(path.join(repoRoot, 'install.ps1'), 'utf8');

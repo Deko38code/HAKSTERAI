@@ -14,6 +14,12 @@
 #   the CLI     — installed with npm as before (global, then ~/.local if the
 #                 global prefix needs permissions we do not have).
 #
+# Before any of that, one read-only pass prints what this machine already has —
+# node, bun, Guake, Claude Code and an older CLI (owner, 2026-11-26: "on install
+# our cli checks for missing guake node claude code etc for fast instal"). It
+# downloads, starts and changes nothing; it only says what will be brought and
+# what is already in use, so the install spends its time on the gaps.
+#
 # Claude Code is NOT downloaded here: `hakster claude` sets it up on first use,
 # on paid plans only, so free plans never pay for 400 MB they cannot use.
 #
@@ -69,6 +75,63 @@ platform_tag() { # -> "<tag> <ext>"  (xz|gz)
 }
 
 say "HaksterAI CLI — from $ORIGIN"
+
+# ── what this machine already has ────────────────────────────────────────
+# Owner, 2026-11-26: "on install our cli checks for missing guake node claude
+# code etc for fast instal". One read-only pass before anything is fetched: the
+# steps below then bring only the parts that are missing. Every line here is a
+# lookup (PATH, a file, a version) — nothing is downloaded, started or changed.
+usable_claude() { # -> the path of a Claude Code binary that is the real one
+  # Same rule as cli/src/claude-code-provision.js: before its native binary
+  # lands, the package's placeholder is a ~500-byte instructions stub, so size
+  # is the test. The user's own copy on PATH always wins. Nothing is executed.
+  for p in "$(command -v claude 2>/dev/null || true)" \
+           "$HOME/.hakster/claude-code/node_modules/.bin/claude" \
+           "$HOME/.hakster/claude-code/node_modules/@anthropic-ai/claude-code/bin/claude"; do
+    if [ -n "$p" ] && [ -f "$p" ]; then
+      size=$(wc -c < "$p" 2>/dev/null | tr -d '[:space:]' || echo 0)
+      if [ "${size:-0}" -gt 4096 ] 2>/dev/null; then printf '%s' "$p"; return 0; fi
+    fi
+  done
+  return 1
+}
+
+say ""
+say "What this machine already has — only the missing parts are installed:"
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 \
+   && [ "$(node_major)" -ge 20 ] 2>/dev/null; then
+  say "  ✓ node $(node -v 2>/dev/null) · npm $(npm -v 2>/dev/null) — used as it is"
+elif command -v node >/dev/null 2>&1; then
+  say "  ✗ node $(node -v 2>/dev/null) is older than 20 — a Node 20+ runtime comes with this install"
+else
+  say "  ✗ node — a Node 20+ runtime comes with this install (~31 MB, one time)"
+fi
+if command -v bun >/dev/null 2>&1; then
+  say "  ✓ bun on PATH — our TUI runs on it"
+elif [ -x "$RUNTIME/bun/node_modules/.bin/bun" ]; then
+  say "  ✓ bun in $RUNTIME/bun — our TUI runs on it"
+else
+  say "  ✗ bun — installed below (~90 MB, one time); without it the CLI uses its built-in Ink UI"
+fi
+if command -v guake >/dev/null 2>&1; then
+  say "  ✓ guake — our drop-down look is applied below"
+elif [ "$(uname -s)" = Linux ]; then
+  say "  ✗ guake — installed below when this machine has a graphical session"
+else
+  say "  · guake — a Linux terminal only; nothing to do on $(uname -s 2>/dev/null || echo this system)"
+fi
+if CLAUDE_FOUND=$(usable_claude); then
+  say "  ✓ claude code at $CLAUDE_FOUND — your own copy is used, never moved"
+else
+  say "  · claude code — not installed; 'hakster claude' sets it up once, on a paid plan"
+  say "    (nothing is downloaded now: free plans never pay for ~400 MB they cannot use)"
+fi
+if command -v hakster >/dev/null 2>&1; then
+  say "  · hakster CLI — already on PATH; this install puts the published package in place of it"
+else
+  say "  ✗ hakster CLI — installed below"
+fi
+say ""
 
 BOOTSTRAPPED=no
 if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 \
@@ -267,13 +330,61 @@ if [ "$CHECKOUT" = yes ]; then
 else
   say "  updates: automatic — 'hakster update' checks now; a newer build applies at the next start"
 fi
+# The full install brings the drop-down (owner, 2026-11-26: "make sure guake
+# come with the full install painted and all"). Guake is installed only where it
+# can actually run — Linux with a graphical session — only when the machine has
+# none, and through its own package manager, announced before it happens. A
+# password is never stored or guessed: sudo asks for it on your own terminal,
+# and only when a human is watching this output. With no terminal, or when you
+# answer no, the exact command is printed and the install continues.
+GUAKE_HINT=''
+GUAKE_DONE=no
+GUAKE_SKIPPED=no
+if [ "$(uname -s)" = Linux ] && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; } \
+   && ! command -v guake >/dev/null 2>&1; then
+  OS_ID=''
+  if [ -r /etc/os-release ]; then
+    OS_ID=$(. /etc/os-release 2>/dev/null; printf '%s %s' "${ID:-}" "${ID_LIKE:-}")
+  fi
+  case "$OS_ID" in
+    *arch*|*manjaro*) GUAKE_HINT='pacman -S --noconfirm guake' ;;
+    *fedora*|*rhel*|*centos*) GUAKE_HINT='dnf install -y guake' ;;
+    *suse*) GUAKE_HINT='zypper --non-interactive install guake' ;;
+    *alpine*) GUAKE_HINT='apk add guake' ;;
+    *) GUAKE_HINT='apt-get install -y guake' ;;
+  esac
+  if [ "$(id -u)" = 0 ]; then
+    say "  Guake: installing it — $GUAKE_HINT"
+    if $GUAKE_HINT >/dev/null 2>&1; then GUAKE_DONE=yes; fi
+  elif [ -t 1 ] && [ -c /dev/tty ] && sudo -n true 2>/dev/null; then
+    say "  Guake: installing it — sudo $GUAKE_HINT"
+    if sudo $GUAKE_HINT >/dev/null 2>&1; then GUAKE_DONE=yes; fi
+  elif [ -t 1 ] && [ -c /dev/tty ]; then
+    printf 'Install Guake — our drop-down look? [Y/n] ' >/dev/tty 2>/dev/null || GUAKE_SKIPPED=yes
+    if [ "$GUAKE_SKIPPED" = no ]; then
+      answer=''
+      read -r answer < /dev/tty 2>/dev/null || answer=''
+      case "$answer" in
+        n|N|no|NO) GUAKE_SKIPPED=yes ;;
+        *)
+          say "  Guake: installing it — sudo $GUAKE_HINT"
+          if sudo $GUAKE_HINT >/dev/null 2>&1; then GUAKE_DONE=yes; fi
+          ;;
+      esac
+    fi
+  fi
+  if [ "$GUAKE_SKIPPED" = yes ]; then
+    say "  Guake: skipped — 'sudo $GUAKE_HINT' installs it whenever you want the drop-down"
+  elif [ "$GUAKE_DONE" != yes ] && ! command -v guake >/dev/null 2>&1; then
+    say "  Guake: not installed — 'sudo $GUAKE_HINT' installs it"
+  fi
+fi
 # The look comes with the install (owner, 2026-11-26: "i want it to come with our
-# install the png"; "yes it should add"). assets/guake-hakster.conf and
-# assets/haksterai-backdrop.png ship inside the package; when the machine already
-# has Guake, our profile is applied through Guake's own preference import with
-# the previous profile backed up first — never by writing Guake's files. Guake is
-# never installed here and no sudo is ever run: a machine without it is only told
-# the one command. Anything that goes wrong is reported and the install stands.
+# install the png"; "yes it should add"; "painted and all"). assets/guake-hakster.conf
+# and assets/haksterai-backdrop.png ship inside the package; our profile is applied
+# through Guake's own preference import with the previous profile backed up first —
+# never by writing Guake's files. Anything that goes wrong is reported and the
+# install stands.
 if [ "${HAKSTER_NO_QUAKE:-0}" = 1 ]; then
   say "  Guake: look not applied (HAKSTER_NO_QUAKE=1)"
 elif command -v guake >/dev/null 2>&1; then
