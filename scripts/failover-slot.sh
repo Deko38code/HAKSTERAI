@@ -56,7 +56,63 @@ case "${1:-}" in
       rm -f hakster.db.new
       exit 1
     fi
-    if [ -f hakster.db ]; then cp -p hakster.db hakster.db.prev; fi
+    # A checksum only proves the copy arrived intact - not that the database it
+    # came from is healthy. On 2026-11-26 a corrupt source was installed into both
+    # slots because this check did not exist. Anything that does not read back
+    # clean is refused here and the previous copy is kept (§41, §13).
+    if command -v python3 >/dev/null 2>&1; then
+      if ! python3 -I -c "
+import sqlite3,sys
+try:
+    c=sqlite3.connect('file:hakster.db.new?mode=ro',uri=True)
+    r=c.execute('PRAGMA integrity_check').fetchone()[0]
+    c.execute('select count(*) from sqlite_master').fetchone()
+    c.close()
+except Exception as e:
+    sys.stderr.write(str(e)); sys.exit(1)
+if r!='ok':
+    sys.stderr.write(r[:200]); sys.exit(1)
+"; then
+        say "install: snapshot is not a healthy database - keeping the old copy"
+        rm -f hakster.db.new
+        exit 1
+      fi
+    elif command -v sqlite3 >/dev/null 2>&1; then
+      if [ "$(sqlite3 hakster.db.new 'PRAGMA integrity_check' 2>&1 | head -1)" != "ok" ]; then
+        say "install: snapshot is not a healthy database - keeping the old copy"
+        rm -f hakster.db.new
+        exit 1
+      fi
+    else
+      say "install: WARNING no python3/sqlite3 here to verify the snapshot - installing unverified"
+    fi
+    # The outgoing database is folded into a single file before it is kept as
+    # .prev, and its -wal/-shm are then removed, so the incoming file can never be
+    # opened through the previous database's wal-index. That stale-index swap is
+    # what reported "malformed database schema" on 2026-11-26, and replaying an old
+    # WAL into a fresh image is the same class of damage that hit the primary. A
+    # slot that is still running refuses the swap instead (§41, §4, §13, §45).
+    if [ -f hakster.db ]; then
+      # A slot that is still running holds its own database open: swapping the file
+      # under it leaves it writing to an inode nothing serves, and deleting its WAL
+      # is what corrupted the primary on 2026-11-26. Refuse instead (§41, §45).
+      open_now=$(ls -l /proc/[0-9]*/fd/* 2>/dev/null | grep -c -- "$PWD/hakster.db\$" || true)
+      if [ "${open_now:-0}" -gt 0 ]; then
+        say "install: the slot's database is open by a running process - refusing to swap it"
+        rm -f hakster.db.new hakster.db.new-shm hakster.db.new-wal
+        exit 1
+      fi
+      if command -v python3 >/dev/null 2>&1; then
+        python3 -I -c "
+import sqlite3
+c=sqlite3.connect('file:hakster.db',uri=True)
+c.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+c.close()
+" >/dev/null 2>&1 || true
+      fi
+      cp -p hakster.db hakster.db.prev
+    fi
+    rm -f hakster.db.new-shm hakster.db.new-wal hakster.db-shm hakster.db-wal
     mv hakster.db.new hakster.db
     chmod 600 hakster.db
     say "install: installed ${got%%????????????????????????????????????????}"
