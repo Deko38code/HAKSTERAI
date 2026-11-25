@@ -189,6 +189,14 @@
    },
    "tier": 2,
    "initTimeoutMs": 120000
+  },
+  "email": {
+   "command": "node",
+   "args": [
+    "/home/ghost/haksterAi/server/src/agent/email-mcp-server.cjs"
+   ],
+   "env": {},
+   "tier": 2
   }
  }
 }

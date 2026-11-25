@@ -5610,6 +5610,8 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
       const MCP_CORE = new Set(['filesystem', 'phantom', 'hakster', 'sqlite', 'memory', 'sequential-thinking']);
       // Words in the operator's own message that earn a heavy server a start.
       const MCP_ALIASES = {
+        // Email is asked for in plain words far more often than by server name.
+        email: /\bemail\b|\be-mail\b|\bmail\b|\binbox\b|\bgmail\b|\bthunderbird\b|\bunread\b/i,
         nmap: /\bnmap\b|\bscan(ned|ning)?\b|\bport scan\b/i,
         playwright: /\bplaywright\b|\bbrowser\b|\bscreenshot\b|\bpage\b/i,
         serena: /\bserena\b|\bred?name\b|\bsymbol\b|\brefactor\b/i,
