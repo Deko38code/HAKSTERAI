@@ -113,7 +113,9 @@ test('the spawned CLI runs this session’s own config, value for value', () => 
   // Values stated as literals in the env block…
   const pinned = {
     CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1048576',
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1048576',
+    // The compact window is the owner's session value (200000), not the max
+    // context figure — see §39 and cli/ui/__tests__/auto-compact.test.mjs.
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
     CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
     CLAUDE_CODE_AUTO_MODE_SERVER: '0',
     CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: '1',

@@ -209,6 +209,21 @@ export function useAgentStream({
   const meterRef = useRef(null);
   if (!meterRef.current) meterRef.current = createMeter();
   const [meters, setMeters] = useState(() => meterRef.current.snapshot());
+  // What this session has actually learned, from the server's own consolidation
+  // events. The idle recap and the session summary both read these totals, so
+  // "learned N" is a counted number, never an impression (owner, 2026-11-25).
+  const [learned, setLearned] = useState({ added: 0, skills: 0, events: 0 });
+  const learnedRef = useRef({ added: 0, skills: 0, events: 0 });
+  // The recap of the last finished run, shown on the idle row and addressable
+  // by its `#id` (owner, 2026-11-25). Null until a run has finished.
+  const [lastRecap, setLastRecap] = useState(null);
+  // The distinct failures of the run in flight, short and capped. They are
+  // posted with the session summary so the mistakes become autolearn `error`
+  // memories instead of scrolling away with the transcript.
+  const failuresRef = useRef([]);
+  // Where the session's learned totals stood when this run started, so the
+  // recap can say what THIS run learned rather than the whole session's count.
+  const learnedAtStartRef = useRef({ added: 0, skills: 0, events: 0 });
   // tool_call_id → the call that produced a later result, so a result is
   // scored against its own name/args even when several tools run in parallel.
   const toolMetaRef = useRef(new Map());
@@ -224,6 +239,16 @@ export function useAgentStream({
       syncMeters();
     } catch {
       /* metering must never break the run */
+    }
+    if (!ok) {
+      // Keep the failure, not the whole transcript: the tool and the first
+      // line of what went wrong is what a later turn can act on.
+      const tool = String(name || 'tool');
+      const error = text.replace(/\s+/g, ' ').slice(0, 180);
+      const list = failuresRef.current;
+      if (list.length < 6 && !list.some((f) => f.tool === tool && f.error === error)) {
+        list.push({ tool, error });
+      }
     }
     // The caller logs the call as a win or a loss; the test lives in one place.
     return ok;
@@ -493,6 +518,13 @@ export function useAgentStream({
       // smartness and points carry over, exactly as the old CLI's did.
       try { meterRef.current.resetTask(); syncMeters(); } catch { /* metering is best-effort */ }
       toolMetaRef.current.clear();
+      failuresRef.current = [];
+      learnedAtStartRef.current = { ...learnedRef.current };
+      // This run's recap id. It is written under every memory entry the run
+      // posts, so the `#id` on the idle recap is a real pointer into the
+      // banks — not a label (owner, 2026-11-25: "each recap will have id # to
+      // go stright to for issues in mem").
+      const recapId = `#${Date.now().toString(36).slice(-6)}`;
 
       // ── The ladder ──────────────────────────────────────────────────────
       // Cheap DeepSeek first, Codex next, the server's own waterfall last
@@ -727,6 +759,52 @@ export function useAgentStream({
               text: evt.message || 'nudging the model to use tools…',
             });
             break;
+
+          case 'memory_recall': {
+            // The run started from what it already knows: the server scored the
+            // task against its memories and put the matches in the prompt ahead
+            // of the machine context (owner, 2026-11-25: "make him when starting
+            // task cycle threw his memorys 1st for the task to get done faster").
+            // Shown with the server's own counts — an empty recall sends nothing.
+            const text = String(evt.message || `recalled ${evt.count || 0} memories`).trim();
+            pushActivity('sys', text);
+            append({ id: nextId('sys'), role: 'system', tone: 'notice', text });
+            break;
+          }
+
+          case 'learn': {
+            // The server consolidated raw memories into the banks this session
+            // learns from. The 🧠/✦ autolearn meter moves on that real event
+            // (+2, bounded by the same score rules as a tool outcome), and the
+            // activity feed carries the counts the server reported — never an
+            // invented number (owner, 2026-11-25).
+            try { meterRef.current.bump(2); syncMeters(); } catch { /* metering is best-effort */ }
+            try {
+              const next = {
+                added: learnedRef.current.added + Math.max(0, Number(evt.added) || 0),
+                skills: learnedRef.current.skills + Math.max(0, Number(evt.skills) || 0),
+                events: learnedRef.current.events + 1,
+              };
+              learnedRef.current = next;
+              setLearned(next);
+            } catch { /* the counters must never break the stream */ }
+            const text = String(evt.message || `learned ${evt.added || 0} memories`).trim();
+            pushActivity('ok', text);
+            append({ id: nextId('sys'), role: 'system', tone: 'notice', text });
+            break;
+          }
+
+          case 'compact': {
+            // The server compacted the conversation this run is working on
+            // (owner, 2026-11-25: "add compacting conversation while doing it").
+            // Shown as one line in the activity feed and one notice turn, both
+            // from the event's own counts — never a guessed percentage, and
+            // nothing in the output panels changes shape (§10, §38).
+            const text = String(evt.message || 'conversation compacted').trim();
+            pushActivity('sys', text);
+            append({ id: nextId('sys'), role: 'system', tone: 'notice', text });
+            break;
+          }
 
           case 'max_turns':
             append({
@@ -1024,6 +1102,41 @@ export function useAgentStream({
         setStatusBoth('connecting');
       }
 
+      // ── Recap → memory ──────────────────────────────────────────────────
+      // One summary per finished run, under the id the recap row shows: the
+      // mistakes it hit and what it learned. The server writes it into the
+      // autolearn pipeline (failures as `error`, the run as a `lesson`), so the
+      // next session recalls it and the same mistake is not made twice. The
+      // post is fire-and-forget — the TUI goes idle immediately — and every
+      // number in it is the meter's own count, never an estimate (§10).
+      try {
+        const snap = meterRef.current.snapshot();
+        const start = learnedAtStartRef.current || { added: 0, skills: 0, events: 0 };
+        const recap = {
+          id: recapId,
+          at: Date.now(),
+          tools: snap.rounds,
+          ok: snap.successes,
+          fail: snap.failures,
+          points: snap.points,
+          learned: Math.max(0, learnedRef.current.added - start.added),
+          learnedSkills: Math.max(0, learnedRef.current.skills - start.skills),
+          failures: failuresRef.current.slice(0, 5),
+        };
+        setLastRecap(recap);
+        if (snap.rounds > 0) {
+          fetch(`${api}/api/agent/session-summary`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}),
+            },
+            body: JSON.stringify({ ...recap, task: prompt, sessionId, cwd }),
+            keepalive: true,
+          }).catch(() => { /* memory capture is best-effort; the row still shows the run */ });
+        }
+      } catch { /* the recap must never fail a finished run */ }
+
       abortRef.current = null;
       activeRunIdRef.current = null;
       // Once the stream is over there is nothing left to answer: a pending
@@ -1078,6 +1191,10 @@ export function useAgentStream({
     setActivity([]);
     setRequests(0);
     setTokens({ in: 0, out: 0, reported: false });
+    setLearned({ added: 0, skills: 0, events: 0 });
+    learnedRef.current = { added: 0, skills: 0, events: 0 };
+    setLastRecap(null);
+    failuresRef.current = [];
     requestsRef.current = 0;
     startedAtRef.current = null;
   }, [abort, setPending]);
@@ -1097,6 +1214,8 @@ export function useAgentStream({
     elapsedMs,
     busy,
     meters,
+    learned,
+    lastRecap,
     activity,
     requests,
     tokens,

@@ -21,6 +21,7 @@ export const MENU_ITEMS = [
   { cmd: '/monitor', label: 'Live monitor', detail: 'full-screen feed + output · shift+↑/↓ scroll' },
   { cmd: '/scripts', label: 'Live scripts', detail: 'run ours live · OMP snapshot compares the source' },
   { cmd: '/squad', label: 'Sub-agents', detail: 'the peer agents the server reports · enter delegates' },
+  { cmd: '/recap', label: 'Recap', detail: '/recap #id · read a run back out of memory' },
   { cmd: '/status', label: 'Status', detail: 'server, phase, tokens' },
   { cmd: '/usage', label: 'Usage', detail: 'per-user · daily & weekly graphs · r refresh · [ ] rate' },
   { cmd: '/debug', label: 'Debugger', detail: 'render times · event-loop lag · tools · server build' },

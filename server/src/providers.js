@@ -934,7 +934,14 @@ function claudeCliEnv() {
     ANTHROPIC_DEFAULT_HAIKU_MODEL: CLAUDE_CLI_MODEL,
     CLAUDE_CODE_SUBAGENT_MODEL: CLAUDE_CLI_MODEL,
     CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1048576',
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1048576',
+    // Auto-compact window, taken from the owner's own running session
+    // (`env | grep CLAUDE_CODE_AUTO_COMPACT_WINDOW` → 200000). It was pinned at
+    // 1048576 here, which is the max-context figure, not the compact window —
+    // so the spawned CLI never auto-compacted where the owner's own CLI does
+    // (owner, 2026-11-25: "make sure the cli auto compact is set like this cli
+    // is in this session"). A label-free number: it moves when compaction
+    // starts, not which model answers (§22 unchanged).
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
     // The rest of this session's own CLI config, mirrored exactly so the
     // spawned CLI does no startup work it does not need (owner, 2026-11-25:
     // "make sure his model has our config from this cli for speed"; "make it

@@ -3404,6 +3404,7 @@ var MENU_ITEMS = [
   { cmd: "/monitor", label: "Live monitor", detail: "full-screen feed + output \xB7 shift+\u2191/\u2193 scroll" },
   { cmd: "/scripts", label: "Live scripts", detail: "run ours live \xB7 OMP snapshot compares the source" },
   { cmd: "/squad", label: "Sub-agents", detail: "the peer agents the server reports \xB7 enter delegates" },
+  { cmd: "/recap", label: "Recap", detail: "/recap #id \xB7 read a run back out of memory" },
   { cmd: "/status", label: "Status", detail: "server, phase, tokens" },
   { cmd: "/usage", label: "Usage", detail: "per-user \xB7 daily & weekly graphs \xB7 r refresh \xB7 [ ] rate" },
   { cmd: "/debug", label: "Debugger", detail: "render times \xB7 event-loop lag \xB7 tools \xB7 server build" },
@@ -4023,6 +4024,7 @@ var EXPECTED_SERVICES = [
   { port: 5555, name: "miniforge", proto: "http" }
 ];
 var DEFAULT_SCORE = 98;
+var HEALTH_WINDOW_MS = 9e4;
 function anchorScore() {
   try {
     const file = path5.join(os3.homedir(), ".hakster", "perf_history.json");
@@ -4033,6 +4035,16 @@ function anchorScore() {
     return Math.max(50, Math.min(100, Math.round(n)));
   } catch {
     return DEFAULT_SCORE;
+  }
+}
+function anchorPoints(file = path5.join(os3.homedir(), ".hakster", "perf_history.json")) {
+  try {
+    const rows = JSON.parse(fs6.readFileSync(file, "utf8"));
+    const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
+    const n = Number(last && last.points);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  } catch {
+    return 0;
   }
 }
 function scoreToolCall(name, args, ok, out) {
@@ -4064,8 +4076,9 @@ function scoreToolCall(name, args, ok, out) {
   return Math.max(-12, Math.min(10, d));
 }
 function createMeter() {
+  const seed = anchorScore();
   const meter = {
-    score: anchorScore(),
+    score: seed,
     delta: 0,
     // The last movement of the point total, BEFORE the score's 0–100 clamp is
     // applied. `delta` is the score's change and pins at 0 once the score sits
@@ -4074,11 +4087,17 @@ function createMeter() {
     // autolearn points have the up down when points go up or down"). The
     // autolearn arrow reads this, the smartness arrow keeps reading `delta`.
     pointsDelta: 0,
-    points: 0,
+    // Cumulative, like the old CLI: resume from the last session's total so the
+    // ✦ autolearn meter reflects what has already been learned, not a zero.
+    points: Math.max(seed, anchorPoints()),
     rounds: 0,
     successes: 0,
     failures: 0,
-    peak: 0
+    peak: 0,
+    // Recent actions for the health ratio: one row per metered tool call, with
+    // whether it worked and what it moved. Pruned on read, so it can never grow
+    // past a few hundred entries even in a very long session.
+    recent: []
   };
   meter.peak = meter.score;
   const apply = (d) => {
@@ -4094,13 +4113,30 @@ function createMeter() {
   meter.tool = (name, args, ok, out) => {
     if (ok) meter.successes++;
     else meter.failures++;
-    return apply(scoreToolCall(name, args, ok, out));
+    meter.rounds += 1;
+    const d = scoreToolCall(name, args, ok, out);
+    const delta = apply(d);
+    meter.recent.push({ at: Date.now(), ok: !!ok, d });
+    if (meter.recent.length > 400) meter.recent.splice(0, meter.recent.length - 400);
+    return delta;
   };
   meter.bump = (d) => apply(d);
   meter.resetTask = () => {
     meter.rounds = 0;
     meter.delta = 0;
     meter.pointsDelta = 0;
+  };
+  meter.health = () => {
+    const now = Date.now();
+    const win = meter.recent.filter((e) => now - e.at <= HEALTH_WINDOW_MS);
+    if (!win.length) return { pct: meter.score, trend: "steady", samples: 0 };
+    const good = win.filter((e) => e.ok).length;
+    const sum = win.reduce((n, e) => n + (Number(e.d) || 0), 0);
+    return {
+      pct: Math.max(0, Math.min(100, Math.round(good / win.length * 100))),
+      trend: sum > 0 ? "smarter" : sum < 0 ? "slipping" : "steady",
+      samples: win.length
+    };
   };
   meter.snapshot = () => ({
     score: meter.score,
@@ -4110,7 +4146,8 @@ function createMeter() {
     rounds: meter.rounds,
     successes: meter.successes,
     failures: meter.failures,
-    peak: meter.peak
+    peak: meter.peak,
+    health: meter.health()
   });
   return meter;
 }
@@ -4595,6 +4632,10 @@ function fmtElapsed(ms) {
 var plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
 function Recap({
   width,
+  recapId = "",
+  points = 0,
+  learned = 0,
+  learnedSkills = 0,
   turns = 0,
   tools = 0,
   ok = 0,
@@ -4619,6 +4660,16 @@ function Recap({
   const segs = [
     { key: "label", fg: failed ? "red" : "#3fb950", text: failed ? "\u25A3 recap \xB7 run failed" : "\u25A3 recap" }
   ];
+  const rid = String(recapId || "").trim();
+  if (rid) segs.push({ key: "id", fg: "#58a6ff", text: rid });
+  const lrn = Math.max(0, Number(learned) || 0);
+  if (lrn > 0) {
+    const from = bad > 0 ? plural(bad, "error") : `${good} ok`;
+    const skills = Math.max(0, Number(learnedSkills) || 0);
+    segs.push({ key: "learned", fg: "#3fb950", text: `learned ${lrn} from ${from}${skills ? ` \xB7 ${skills} skill${skills === 1 ? "" : "s"}` : ""}` });
+  }
+  const pts = Math.max(0, Math.round(Number(points) || 0));
+  if (pts > 0) segs.push({ key: "points", fg: barColor("points", pts), text: `\u2726 ${pts}p` });
   if (t > 0) segs.push({ key: "turns", fg: "gray", text: plural(t, "turn") });
   if (tc > 0) {
     const tail = bad > 0 ? ` (${good} ok \xB7 ${bad} fail)` : good > 0 ? ` (${good} ok)` : "";
@@ -5257,6 +5308,11 @@ function useAgentStream({
   const meterRef = useRef7(null);
   if (!meterRef.current) meterRef.current = createMeter();
   const [meters, setMeters] = useState13(() => meterRef.current.snapshot());
+  const [learned, setLearned] = useState13({ added: 0, skills: 0, events: 0 });
+  const learnedRef = useRef7({ added: 0, skills: 0, events: 0 });
+  const [lastRecap, setLastRecap] = useState13(null);
+  const failuresRef = useRef7([]);
+  const learnedAtStartRef = useRef7({ added: 0, skills: 0, events: 0 });
   const toolMetaRef = useRef7(/* @__PURE__ */ new Map());
   const lastToolRef = useRef7(null);
   const syncMeters = useCallback3(() => setMeters(meterRef.current.snapshot()), []);
@@ -5267,6 +5323,14 @@ function useAgentStream({
       meterRef.current.tool(name || "tool", args || {}, ok, text);
       syncMeters();
     } catch {
+    }
+    if (!ok) {
+      const tool = String(name || "tool");
+      const error2 = text.replace(/\s+/g, " ").slice(0, 180);
+      const list = failuresRef.current;
+      if (list.length < 6 && !list.some((f) => f.tool === tool && f.error === error2)) {
+        list.push({ tool, error: error2 });
+      }
     }
     return ok;
   }, [syncMeters]);
@@ -5451,6 +5515,9 @@ function useAgentStream({
       } catch {
       }
       toolMetaRef.current.clear();
+      failuresRef.current = [];
+      learnedAtStartRef.current = { ...learnedRef.current };
+      const recapId = `#${Date.now().toString(36).slice(-6)}`;
       let attempts = (0, import_ladder.attemptsFor)(model, provider);
       if (attempts.length && provider && attempts[0].provider !== provider) {
         const chosen = attempts.find((a) => a.provider === provider) || { ...attempts[0], provider };
@@ -5633,6 +5700,39 @@ function useAgentStream({
               text: evt.message || "nudging the model to use tools\u2026"
             });
             break;
+          case "memory_recall": {
+            const text2 = String(evt.message || `recalled ${evt.count || 0} memories`).trim();
+            pushActivity("sys", text2);
+            append({ id: nextId("sys"), role: "system", tone: "notice", text: text2 });
+            break;
+          }
+          case "learn": {
+            try {
+              meterRef.current.bump(2);
+              syncMeters();
+            } catch {
+            }
+            try {
+              const next = {
+                added: learnedRef.current.added + Math.max(0, Number(evt.added) || 0),
+                skills: learnedRef.current.skills + Math.max(0, Number(evt.skills) || 0),
+                events: learnedRef.current.events + 1
+              };
+              learnedRef.current = next;
+              setLearned(next);
+            } catch {
+            }
+            const text2 = String(evt.message || `learned ${evt.added || 0} memories`).trim();
+            pushActivity("ok", text2);
+            append({ id: nextId("sys"), role: "system", tone: "notice", text: text2 });
+            break;
+          }
+          case "compact": {
+            const text2 = String(evt.message || "conversation compacted").trim();
+            pushActivity("sys", text2);
+            append({ id: nextId("sys"), role: "system", tone: "notice", text: text2 });
+            break;
+          }
           case "max_turns":
             append({
               id: nextId("sys"),
@@ -5851,6 +5951,35 @@ function useAgentStream({
         setError(null);
         setStatusBoth("connecting");
       }
+      try {
+        const snap = meterRef.current.snapshot();
+        const start2 = learnedAtStartRef.current || { added: 0, skills: 0, events: 0 };
+        const recap = {
+          id: recapId,
+          at: Date.now(),
+          tools: snap.rounds,
+          ok: snap.successes,
+          fail: snap.failures,
+          points: snap.points,
+          learned: Math.max(0, learnedRef.current.added - start2.added),
+          learnedSkills: Math.max(0, learnedRef.current.skills - start2.skills),
+          failures: failuresRef.current.slice(0, 5)
+        };
+        setLastRecap(recap);
+        if (snap.rounds > 0) {
+          fetch(`${api}/api/agent/session-summary`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {}
+            },
+            body: JSON.stringify({ ...recap, task: prompt, sessionId, cwd }),
+            keepalive: true
+          }).catch(() => {
+          });
+        }
+      } catch {
+      }
       abortRef.current = null;
       activeRunIdRef.current = null;
       setPending(null);
@@ -5891,6 +6020,10 @@ function useAgentStream({
     setActivity([]);
     setRequests(0);
     setTokens({ in: 0, out: 0, reported: false });
+    setLearned({ added: 0, skills: 0, events: 0 });
+    learnedRef.current = { added: 0, skills: 0, events: 0 };
+    setLastRecap(null);
+    failuresRef.current = [];
     requestsRef.current = 0;
     startedAtRef.current = null;
   }, [abort, setPending]);
@@ -5903,6 +6036,8 @@ function useAgentStream({
     elapsedMs,
     busy,
     meters,
+    learned,
+    lastRecap,
     activity,
     requests,
     tokens,
@@ -7177,8 +7312,47 @@ function App({ version = "0.1.0" }) {
         showNotice("transcript cleared \xB7 steer queue emptied");
         return;
       case "/help":
-        showNotice("keys: tab focus \xB7 shift+tab auto mode \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /clear /quit");
+        showNotice("keys: tab focus \xB7 shift+tab auto mode \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /recap /clear /quit");
         return;
+      case "/recap": {
+        const want = String(arg || "").trim().toLowerCase().replace(/^#?/, "#");
+        const last = agent.lastRecap;
+        if (!arg) {
+          showNotice(last && last.id ? `\u25A3 recap ${last.id} \xB7 ${last.tools} tools (${last.ok} ok \xB7 ${last.fail} err) \xB7 \u2726 ${last.points}p \u2014 /recap ${last.id} reads it from memory` : "\u25A3 recap \u2014 no finished run yet \xB7 /recap #id reads any run from memory");
+          return;
+        }
+        if (!/^#[a-z0-9]{3,16}$/.test(want)) {
+          showNotice("\u25A3 recap \u2014 the id looks like #a3f9k2");
+          return;
+        }
+        (async () => {
+          try {
+            const res = await fetch(`${API}/api/agent/recap/${encodeURIComponent(want.slice(1))}`, {
+              headers: { ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data || data.ok !== true) throw new Error(data && data.error || `lookup failed (${res.status})`);
+            if (!data.found) {
+              showNotice(`\u25A3 recap ${want} \u2014 nothing in memory under that id`);
+              return;
+            }
+            const lines = [`\u25A3 recap ${want}${data.line ? "" : " \u2014 from the banks"}`];
+            if (data.line) lines.push(`  ${data.line}`);
+            for (const f of (data.raw || []).filter((m) => m.type === "error").slice(0, 5)) {
+              lines.push(`  \u2717 ${String(f.observation || "").slice(0, 160)}`);
+            }
+            const lessons = (data.raw || []).filter((m) => m.type !== "error");
+            for (const l of lessons.slice(0, 2)) lines.push(`  \xB7 ${String(l.observation || "").slice(0, 160)}`);
+            for (const b of (data.banked || []).filter((x) => x.type !== "error").slice(0, 2)) {
+              lines.push(`  ${b.section}: ${String(b.observation || "").slice(0, 160)}`);
+            }
+            agent.note(lines.join("\n"), "notice");
+          } catch (e) {
+            showNotice(`\u25A3 recap ${want} \u2014 ${e && e.message || "lookup failed"}`);
+          }
+        })();
+        return;
+      }
       case "/quit":
       case "/exit":
         agent.abort();
@@ -7749,16 +7923,42 @@ function App({ version = "0.1.0" }) {
   const memFg = memPct == null || memPct === 0 ? "gray" : memPct >= 90 ? "#f85149" : memPct >= 70 ? "#d29922" : "#3fb950";
   const MEMBAR_W = 5;
   const memBar = richBar(memPct, MEMBAR_W, memFg);
+  const health = meters && meters.health || { pct: meterScore, trend: "steady", samples: 0 };
+  const healthPct = Math.max(0, Math.min(100, Math.round(Number(health.pct) || 0)));
+  const healthFg = healthPct >= 80 ? "#3fb950" : healthPct >= 60 ? "#d29922" : "#f85149";
+  const healthGlyph = health.trend === "smarter" ? "\u25B2" : health.trend === "slipping" ? "\u25BC" : "\u25C6";
+  const healthWord = health.trend === "smarter" ? "smarter" : health.trend === "slipping" ? "slipping" : "steady";
   const memParts = memPct == null || !memBar ? null : [
     { t: "\u25C8 ", fg: memFg, bold: true },
     ...memBar,
     { t: ` ${memPct}%`, fg: memPct >= 90 ? "red" : memPct === 0 ? "gray" : "white", bold: memPct > 0 },
-    ...memTotal != null ? [{ t: ` ${memTotal}`, fg: "gray" }] : []
+    ...memTotal != null ? [{ t: ` ${memTotal}`, fg: "gray" }] : [],
+    { t: "  \u2665 ", fg: healthFg, bold: true },
+    { t: `${healthPct}%`, fg: healthFg, bold: true },
+    { t: ` ${healthGlyph} ${healthWord}`, fg: healthFg }
+  ];
+  const memPartsVariants = !memParts ? [null] : [
+    memParts,
+    [
+      { t: "\u25C8 ", fg: memFg, bold: true },
+      ...memBar,
+      { t: ` ${memPct}%`, fg: memPct >= 90 ? "red" : memPct === 0 ? "gray" : "white", bold: memPct > 0 },
+      ...memTotal != null ? [{ t: ` ${memTotal}`, fg: "gray" }] : [],
+      { t: ` \u2665${healthPct}%`, fg: healthFg, bold: true },
+      { t: healthGlyph, fg: healthFg }
+    ],
+    [
+      { t: "\u25C8 ", fg: memFg, bold: true },
+      ...memBar,
+      { t: ` ${memPct}%`, fg: memPct >= 90 ? "red" : memPct === 0 ? "gray" : "white", bold: memPct > 0 },
+      { t: healthGlyph, fg: healthFg, bold: true }
+    ]
   ];
   const headerRightSets = [];
-  if (memParts) {
+  for (const memo of memPartsVariants) {
+    if (!memo) continue;
     for (const detail of headerDetailVariants) {
-      const parts = [...memParts];
+      const parts = [...memo];
       if (detail) parts.push({ t: `  ${detail}`, fg: "gray" });
       headerRightSets.push({ parts, text: parts.map((p) => p.t).join("") });
     }
@@ -8433,6 +8633,10 @@ function App({ version = "0.1.0" }) {
             Recap,
             {
               width: mainW,
+              recapId: agent.lastRecap?.id || "",
+              points: agent.meters?.points || 0,
+              learned: agent.learned?.added || 0,
+              learnedSkills: agent.learned?.skills || 0,
               turns: usage.turns,
               tools: usage.tools,
               ok: usage.ok,

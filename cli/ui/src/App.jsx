@@ -892,8 +892,48 @@ export default function App({ version = '0.1.0' }) {
         showNotice('transcript cleared · steer queue emptied');
         return;
       case '/help':
-        showNotice('keys: tab focus · shift+tab auto mode · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /clear /quit');
+        showNotice('keys: tab focus · shift+tab auto mode · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /recap /clear /quit');
         return;
+      case '/recap': {
+        // The idle recap row carries an id (`#a3f9k2`) because every run's
+        // mistakes and lessons are written under it (owner, 2026-11-25: "each
+        // recap will have id # to go stright to for issues in mem"). Bare
+        // `/recap` reports the last id; `/recap #id` reads that run back out of
+        // memory: the summary line, its mistakes and any banked lessons.
+        const want = String(arg || '').trim().toLowerCase().replace(/^#?/, '#');
+        const last = agent.lastRecap;
+        if (!arg) {
+          showNotice(last && last.id
+            ? `▣ recap ${last.id} · ${last.tools} tools (${last.ok} ok · ${last.fail} err) · ✦ ${last.points}p — /recap ${last.id} reads it from memory`
+            : '▣ recap — no finished run yet · /recap #id reads any run from memory');
+          return;
+        }
+        if (!/^#[a-z0-9]{3,16}$/.test(want)) { showNotice('▣ recap — the id looks like #a3f9k2'); return; }
+        (async () => {
+          try {
+            const res = await fetch(`${API}/api/agent/recap/${encodeURIComponent(want.slice(1))}`, {
+              headers: { ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) },
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data || data.ok !== true) throw new Error((data && data.error) || `lookup failed (${res.status})`);
+            if (!data.found) { showNotice(`▣ recap ${want} — nothing in memory under that id`); return; }
+            const lines = [`▣ recap ${want}${data.line ? '' : ' — from the banks'}`];
+            if (data.line) lines.push(`  ${data.line}`);
+            for (const f of (data.raw || []).filter((m) => m.type === 'error').slice(0, 5)) {
+              lines.push(`  ✗ ${String(f.observation || '').slice(0, 160)}`);
+            }
+            const lessons = (data.raw || []).filter((m) => m.type !== 'error');
+            for (const l of lessons.slice(0, 2)) lines.push(`  · ${String(l.observation || '').slice(0, 160)}`);
+            for (const b of (data.banked || []).filter((x) => x.type !== 'error').slice(0, 2)) {
+              lines.push(`  ${b.section}: ${String(b.observation || '').slice(0, 160)}`);
+            }
+            agent.note(lines.join('\n'), 'notice');
+          } catch (e) {
+            showNotice(`▣ recap ${want} — ${(e && e.message) || 'lookup failed'}`);
+          }
+        })();
+        return;
+      }
       case '/quit':
       case '/exit':
         agent.abort();
@@ -1553,6 +1593,18 @@ export default function App({ version = '0.1.0' }) {
     : memPct >= 90 ? '#f85149' : memPct >= 70 ? '#d29922' : '#3fb950';
   const MEMBAR_W = 5;
   const memBar = richBar(memPct, MEMBAR_W, memFg);
+  // Health ratio beside the ◈ memory bar (owner, 2026-11-25: "the mem bar up top
+  // in right tui add heath ratio green red for bad good slipping getting smarter
+  // by the sec"). It is the share of the last 90 s of metered tool calls that
+  // worked — green good, amber shaky, red bad — with the trend that window's own
+  // movement points at: ▲ smarter, ▼ slipping, ◆ steady. Measured from real
+  // events in smartness.mjs; with nothing recent it reads the smartness score and
+  // says steady rather than inventing a direction.
+  const health = (meters && meters.health) || { pct: meterScore, trend: 'steady', samples: 0 };
+  const healthPct = Math.max(0, Math.min(100, Math.round(Number(health.pct) || 0)));
+  const healthFg = healthPct >= 80 ? '#3fb950' : healthPct >= 60 ? '#d29922' : '#f85149';
+  const healthGlyph = health.trend === 'smarter' ? '▲' : health.trend === 'slipping' ? '▼' : '◆';
+  const healthWord = health.trend === 'smarter' ? 'smarter' : health.trend === 'slipping' ? 'slipping' : 'steady';
   // The same bar as the cpu/ram readings (owner, 2026-11-25: "some nice bars
   // that look rich not generic"), in the same place — the right edge of this row.
   const memParts = memPct == null || !memBar ? null : [
@@ -1560,6 +1612,28 @@ export default function App({ version = '0.1.0' }) {
     ...memBar,
     { t: ` ${memPct}%`, fg: memPct >= 90 ? 'red' : memPct === 0 ? 'gray' : 'white', bold: memPct > 0 },
     ...(memTotal != null ? [{ t: ` ${memTotal}`, fg: 'gray' }] : []),
+    { t: '  ♥ ', fg: healthFg, bold: true },
+    { t: `${healthPct}%`, fg: healthFg, bold: true },
+    { t: ` ${healthGlyph} ${healthWord}`, fg: healthFg },
+  ];
+  // Same reading, shorter forms for a narrow row: the word goes first, then the
+  // percentage, then the heart — the bar itself is what the owner pinned there.
+  const memPartsVariants = !memParts ? [null] : [
+    memParts,
+    [
+      { t: '◈ ', fg: memFg, bold: true },
+      ...memBar,
+      { t: ` ${memPct}%`, fg: memPct >= 90 ? 'red' : memPct === 0 ? 'gray' : 'white', bold: memPct > 0 },
+      ...(memTotal != null ? [{ t: ` ${memTotal}`, fg: 'gray' }] : []),
+      { t: ` ♥${healthPct}%`, fg: healthFg, bold: true },
+      { t: healthGlyph, fg: healthFg },
+    ],
+    [
+      { t: '◈ ', fg: memFg, bold: true },
+      ...memBar,
+      { t: ` ${memPct}%`, fg: memPct >= 90 ? 'red' : memPct === 0 ? 'gray' : 'white', bold: memPct > 0 },
+      { t: healthGlyph, fg: healthFg, bold: true },
+    ],
   ];
   // Right side of the header, richest first: the ◈ memory bar leads (the owner
   // asked to see it at the top right), then the view/ctx detail fills what room
@@ -1567,9 +1641,10 @@ export default function App({ version = '0.1.0' }) {
   // memory readout outlives the detail on a narrow terminal instead of being
   // the first thing dropped.
   const headerRightSets = [];
-  if (memParts) {
+  for (const memo of memPartsVariants) {
+    if (!memo) continue;
     for (const detail of headerDetailVariants) {
-      const parts = [...memParts];
+      const parts = [...memo];
       if (detail) parts.push({ t: `  ${detail}`, fg: 'gray' });
       headerRightSets.push({ parts, text: parts.map((p) => p.t).join('') });
     }
@@ -2511,6 +2586,10 @@ export default function App({ version = '0.1.0' }) {
               <box style={{ flexShrink: 0 }}>
                 <Recap
                   width={mainW}
+                  recapId={agent.lastRecap?.id || ''}
+                  points={agent.meters?.points || 0}
+                  learned={agent.learned?.added || 0}
+                  learnedSkills={agent.learned?.skills || 0}
                   turns={usage.turns}
                   tools={usage.tools}
                   ok={usage.ok}

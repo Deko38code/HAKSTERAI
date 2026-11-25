@@ -436,7 +436,7 @@ the server for a static deploy.
 ## Junkalot rulebook index — mapped
 
 Junkalot's index of the MASTERGUARD rules is `/home/ghost694/junkalot/RULEBOOK-INDEX.md` (on Parrot's
-master copy): every section of `/home/ghost/CLAUDE.md` (§1–§38) with what it means on that project and where
+master copy): every section of `/home/ghost/CLAUDE.md` (§1–§39) with what it means on that project and where
 this file mirrors it. It is a read-only pointer — HaksterAI never writes a rule, a rate, a key or usage into
 that project (§16) — and it is not a second rulebook: CLAUDE.md wins on any difference.
 
@@ -552,3 +552,72 @@ Config, And He Hears You While He Works"**. Four things it makes binding here:
 Behavioural canary: `cd cli && npm run selfcheck` (add `--live` for one real tool round) — it fails when a
 tool round stops completing, which is the exact failure that broke tool calling on 2026-11-25. §38 is
 HaksterAI-only; nothing in it writes into Junkalot, PhantomIDE or any other project (§16).
+
+---
+
+## Section 39 Added — The CLI Auto-Compacts Like This Session (2026-11-25)
+
+_Added: 2026-11-25, owner-directed ("make sure the cli auto compact is set like this cli is in this session
+and make it to where each time the version changes it gets updated also add rule"; "and add compacting
+conversation while doing it"; "never break my output panels or change config"). Backup before the edit:
+`AGENTS.md.bak-20261125T071500Z (43,009 B, size-verified)`; master-rulebook backup
+`CLAUDE.md.bak-20261125T071500Z (65,611 B, size-verified)`. Nothing above this line was rewritten,
+reordered or removed — one pointer parenthetical was advanced from §1–§38 to §1–§39, exactly as the
+§35–§38 entries did._
+
+`/home/ghost/CLAUDE.md` is now **§1–§39**. §39 is **"The CLI Auto-Compacts Like This Session, And A Version
+Change Reaches Every Surface"**. What it makes binding here:
+
+1. **The compact window is the owner's own session value.** `claudeCliEnv()` in `server/src/providers.js`
+   and in `server/src/agent/index.js` both carry `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` and
+   `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1048576`, as literals in code (§22.4). 200000 is the compact window;
+   1048576 is max context — they were both 1048576 here, so the spawned CLI never compacted at the same
+   point as his. Pinned by `cli/ui/__tests__/auto-compact.test.mjs` and `self-config-lock.test.mjs`.
+2. **The run compacts its conversation while it works.** `/api/agent/run` summarises the older turns into
+   one model-written `📦 SESSION SUMMARY` once the history passes 60 % of the input budget (pre-flight and
+   mid-run), once per run, 15 s bound, truncation as the fallback. Old history is dropped in whole turns
+   only, so a `tool_calls` message never loses its `tool` results. The `compact` event carries its own
+   counts and the TUI shows it as one activity line and one notice turn — no guessed percentage, no
+   output-panel layout change (§10, §38).
+3. **One version source, every surface.** `cli/package.json` → `/cli/latest.json` (computed per request:
+   version, bundle SHA-256, build time) → the site's `#hero-cli-version` badge, which renders it at build
+   time and refreshes from that endpoint on load, every 60 s while visible and on `visibilitychange`. A
+   version bump updates the CLI, the endpoint and an open tab with no second edit (§28).
+4. **Nothing moves for money and nothing else is touched.** No model, provider, route, rate, plan or
+   allowance changes, and the output panels keep their layout (§19.3, §22.4, §26). HaksterAI-only (§16).
+
+---
+
+`Section 40 Added — The Recap Is Addressable, And Every Run Starts From Memory (2026-11-25)`
+
+_Appended 2026-11-25 at the owner's direction ("when he recaps on idle make it say what he learned from
+and points and logg to his mem so he gets smarter and smarter from mistakes"; "each recap will have id # to
+go stright to for issues in mem"; "make him when starting task cycle threw his memorys 1st for the task to
+get done faster if previous mem are present"; "the mem bar up top in right tui add heath ratio green red for
+bad good slipping getting smarter by the sec"). Nothing above this line was rewritten, reordered or
+removed. Backups: `AGENTS.md.bak-20261125T153000Z (45,602 B, size-verified)`; master-rulebook
+`CLAUDE.md.bak-20261125T153000Z (68,401 B, size-verified)`._
+
+`/home/ghost/CLAUDE.md` is **§1–§40**. §40 is **"The Recap Is Addressable, And Every Run Starts From
+Memory"**. What it makes binding here:
+
+1. **The idle recap says what was learned, from what, and the points.** `learned N from M errors` (or
+   `from M ok`), the ✦ point total, and the outcome — counted from the meter and the server's own
+   consolidation events (`cli/ui/src/components/Recap.jsx`, `useAgentStream.js`).
+2. **Every recap has an id, and that id points into memory.** A per-run `#a3f9k2` is shown on the recap
+   row, written into every memory entry the run files (tag + text) plus a keyed record, and readable with
+   `/recap [#id]` → `GET /api/agent/recap/<id>`. `/recap` alone reports the last id
+   (`cli/ui/src/App.jsx` case `/recap`, `MenuPalette.jsx`).
+3. **Mistakes become errors, the run becomes a lesson.** `POST /api/agent/session-summary` files up to
+   five distinct failures as `error` memories and the run as a `lesson` (`pattern` when clean); a run with
+   no tool calls writes nothing (`server/src/agent/autolearn.js` `buildRecapMemories`/`recordRecap`).
+4. **Memory first.** Before the first model call the task text is scored against raw entries, the banks
+   and the keyed notes; up to four mistakes and four lessons are placed above the machine context with a
+   do-not-repeat instruction, and the recall is announced on the stream with its own counts
+   (`buildMemoryFirstBlock` in `server/src/index.js`, `memory_recall` event).
+5. **The memory-bar health ratio is measured.** Share of the last 90 s of metered tool calls that worked
+   (green ≥ 80 %, amber ≥ 60 %, red below) plus ▲ smarter / ▼ slipping / ◆ steady from that window's own
+   movement; empty window reads the score and says steady (`meter.health()` in `cli/smartness.mjs`,
+   header ◈ bar in `cli/ui/src/App.jsx`).
+6. **HaksterAI only.** Nothing here writes into Junkalot, PhantomIDE or another project (§16, §38.8).
+   Pinned by `cli/ui/__tests__/recap-memory.test.mjs` and `meter.test.mjs`.

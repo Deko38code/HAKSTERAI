@@ -31,6 +31,13 @@ export const EXPECTED_SERVICES = [
 
 const DEFAULT_SCORE = 98;
 
+// How far back the header's ◈ memory-bar health ratio looks. It is a window of
+// real metered actions, not a timer: the ratio moves because work happened, and
+// it falls back to the smartness score once the window is empty (owner,
+// 2026-11-25: "the mem bar up top in right tui add heath ratio green red for bad
+// good slipping getting smarter by the sec").
+const HEALTH_WINDOW_MS = 90000;
+
 // recentSmartnessAnchor() from the old CLI: the most recent session's end/peak
 // score, floored at 50. Missing/unreadable history falls back to the default.
 export function anchorScore() {
@@ -43,6 +50,24 @@ export function anchorScore() {
     return Math.max(50, Math.min(100, Math.round(n)));
   } catch {
     return DEFAULT_SCORE;
+  }
+}
+
+// Last session's autolearn point total. The old CLI resumed the meter from
+// here (server/src/agent/index.js: `_sessionPerf.points = Math.max(_smartScore,
+// lastPts)`) so points are cumulative across launches; the TUI used to start at
+// 0, which made the ✦ autolearn figure look reset every time — learning that had
+// already happened read as lost (owner, 2026-11-25: "make sure autolearn meter
+// with brain emoji is working with learning etc"). `file` is injectable so a
+// test can read a fixture instead of the operator's real history.
+export function anchorPoints(file = path.join(os.homedir(), '.hakster', 'perf_history.json')) {
+  try {
+    const rows = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
+    const n = Number(last && last.points);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -80,8 +105,9 @@ export function scoreToolCall(name, args, ok, out) {
 }
 
 export function createMeter() {
+  const seed = anchorScore();
   const meter = {
-    score: anchorScore(),
+    score: seed,
     delta: 0,
     // The last movement of the point total, BEFORE the score's 0–100 clamp is
     // applied. `delta` is the score's change and pins at 0 once the score sits
@@ -90,11 +116,17 @@ export function createMeter() {
     // autolearn points have the up down when points go up or down"). The
     // autolearn arrow reads this, the smartness arrow keeps reading `delta`.
     pointsDelta: 0,
-    points: 0,
+    // Cumulative, like the old CLI: resume from the last session's total so the
+    // ✦ autolearn meter reflects what has already been learned, not a zero.
+    points: Math.max(seed, anchorPoints()),
     rounds: 0,
     successes: 0,
     failures: 0,
     peak: 0,
+    // Recent actions for the health ratio: one row per metered tool call, with
+    // whether it worked and what it moved. Pruned on read, so it can never grow
+    // past a few hundred entries even in a very long session.
+    recent: [],
   };
   meter.peak = meter.score;
   const apply = (d) => {
@@ -111,11 +143,31 @@ export function createMeter() {
   // server uses to tag a result as an error.
   meter.tool = (name, args, ok, out) => {
     if (ok) meter.successes++; else meter.failures++;
-    return apply(scoreToolCall(name, args, ok, out));
+    meter.rounds += 1; // one metered action — the snapshot's `rounds` is a real count
+    const d = scoreToolCall(name, args, ok, out);
+    const delta = apply(d);
+    meter.recent.push({ at: Date.now(), ok: !!ok, d });
+    if (meter.recent.length > 400) meter.recent.splice(0, meter.recent.length - 400);
+    return delta;
   };
   // A named event (loop detected, turn finished, …) worth the same kind of delta.
   meter.bump = (d) => apply(d);
   meter.resetTask = () => { meter.rounds = 0; meter.delta = 0; meter.pointsDelta = 0; };
+  // The header health readout, measured: the share of recent actions that
+  // worked, and where the last window's movement points. With no recent actions
+  // it reports the smartness score and a steady trend — never an invented one.
+  meter.health = () => {
+    const now = Date.now();
+    const win = meter.recent.filter((e) => now - e.at <= HEALTH_WINDOW_MS);
+    if (!win.length) return { pct: meter.score, trend: 'steady', samples: 0 };
+    const good = win.filter((e) => e.ok).length;
+    const sum = win.reduce((n, e) => n + (Number(e.d) || 0), 0);
+    return {
+      pct: Math.max(0, Math.min(100, Math.round((good / win.length) * 100))),
+      trend: sum > 0 ? 'smarter' : sum < 0 ? 'slipping' : 'steady',
+      samples: win.length,
+    };
+  };
   meter.snapshot = () => ({
     score: meter.score,
     delta: meter.delta,
@@ -125,6 +177,7 @@ export function createMeter() {
     successes: meter.successes,
     failures: meter.failures,
     peak: meter.peak,
+    health: meter.health(),
   });
   return meter;
 }

@@ -7776,6 +7776,12 @@ function claudeCliEnv() {
     HOME: '/home/ghost',
     USER: 'ghost',
     PATH: `/home/ghost/.local/bin:${process.env.PATH || ''}`,
+    // This lane spawns the same `claude` the TUI's server lane does, so it must
+    // compact where the owner's own session does: 200000 is the value read from
+    // that running session (owner, 2026-11-25: "make sure the cli auto compact
+    // is set like this cli is in this session"). Max context is unchanged.
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1048576',
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
   };
 }
 

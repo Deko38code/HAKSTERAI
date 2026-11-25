@@ -4194,6 +4194,73 @@ app.post('/api/agent/memory', (req, res) => {
   }
 });
 
+// ── Session recap → memory ────────────────────────────────────────────────
+// Owner, 2026-11-25: "when he recaps on idle make it say what he learned from
+// and points and logg to his mem so he gets smarter and smarter from mistakes"
+// and "each recap will have id # to go stright to for issues in mem".
+//
+// The TUI posts one summary when a run finishes. Its recap id (`#a3f9k2`) is
+// written into every entry (tag + text) and into one keyed record, so a lookup
+// by that id lands on exactly this run's mistakes and lessons. A run with no
+// tool calls writes nothing — there is nothing to learn from, and inventing an
+// entry would only dilute the banks (§10: counts, not claims).
+app.post('/api/agent/session-summary', (req, res) => {
+  try {
+    const body = req.body || {};
+    const tools = Math.max(0, Math.round(Number(body.tools) || 0));
+    if (!tools) {
+      const id = String(body.recapId || body.id || '').trim();
+      return res.json({ ok: true, recapId: /^#[a-z0-9]{3,16}$/i.test(id) ? id.toLowerCase() : null, written: 0, entries: 0, reason: 'no tool calls — nothing to learn from' });
+    }
+    const cwd = String(body.cwd || process.cwd());
+    const result = autolearn.recordRecap(body, cwd);
+    try {
+      saveMemory({
+        category: 'recap',
+        key: `recap${result.id}`,
+        value: result.line,
+        source: 'agent-recap',
+        sessionId: body.sessionId || null,
+        confidence: 1.0,
+        expiresAt: null,
+      });
+    } catch (_e) { /* the raw memories are already written; the keyed pointer is a convenience */ }
+    res.status(201).json({ ok: true, recapId: result.id, written: result.written, entries: result.entries, line: result.line });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// `GET /api/agent/recap/<id>` — everything the memory holds for one recap:
+// the keyed line, the raw entries carrying that id as a tag, and the banks'
+// filed copies. Read-only; it never consolidates or rewrites anything.
+app.get('/api/agent/recap/:id', (req, res) => {
+  try {
+    const id = `#${String(req.params.id || '').replace(/^#/, '').toLowerCase()}`;
+    if (!/^#[a-z0-9]{3,16}$/.test(id)) return res.status(400).json({ ok: false, error: 'recap id looks like #a3f9k2' });
+    const keyed = (() => { try { return getMemory(`recap${id}`); } catch { return null; } })();
+    const raw = autolearn.readRawMemories().filter((m) => Array.isArray(m && m.tags) && m.tags.includes(id));
+    const banked = [];
+    for (const section of autolearn.MEMORY_SECTIONS) {
+      let entries = [];
+      try { entries = autolearn.readBank(null, section) || []; } catch { entries = []; }
+      for (const e of entries) {
+        if (Array.isArray(e && e.tags) && e.tags.includes(id)) banked.push({ section, observation: e.observation, type: e.type, tags: e.tags });
+      }
+    }
+    res.json({
+      ok: true,
+      recapId: id,
+      line: keyed ? keyed.value : null,
+      raw: raw.map((m) => ({ type: m.type, observation: m.observation, tags: m.tags, timestamp: m.timestamp })),
+      banked,
+      found: !!keyed || raw.length > 0 || banked.length > 0,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.put('/api/memory/:key', (req, res) => {
   try {
     const existing = getMemory(req.params.key);
@@ -4776,6 +4843,77 @@ app.delete('/api/agent/allowlist/:id', requireOwner, (req, res) => {
   }
   res.json({ deleted: true });
 });
+
+// ── MEMORY FIRST ──────────────────────────────────────────────────────────
+// Owner, 2026-11-25: "make him when starting task cycle threw his memorys 1st
+// for the task to get done faster if previous mem are present".
+//
+// Before the run's first model call, the task text is scored against what the
+// memory already holds — the raw entries earlier runs filed, the consolidated
+// banks (including the recap lessons and the `✗ mistake` entries), and the
+// keyed notes — and the best matches are put ABOVE the machine context in the
+// system prompt. A run therefore starts from what it already knows instead of
+// rediscovering it, and the recap pipeline from a previous run is what makes
+// the next one faster.
+//
+// It is a read: nothing is written here, and the result carries its own counts
+// so the caller can say "recalled N" only when something really matched.
+function scoreMemoryText(text, terms) {
+  const t = String(text || '').toLowerCase();
+  let s = 0;
+  for (const w of terms) if (w && t.includes(w)) s += 1;
+  return s;
+}
+
+function buildMemoryFirstBlock(task, opts = {}) {
+  const terms = String(task || '')
+    .toLowerCase()
+    .split(/[^a-z0-9_./#-]+/)
+    .filter((w) => w.length > 3)
+    .slice(0, 16);
+  if (!terms.length) return { text: '', count: 0, lessons: 0, mistakes: 0 };
+  const seen = new Set();
+  const scored = [];
+  const push = (observation, type, source) => {
+    const obs = String(observation || '').replace(/\s+/g, ' ').trim();
+    if (obs.length < 12) return;
+    const key = obs.slice(0, 120).toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const s = scoreMemoryText(obs, terms);
+    if (s <= 0) return;
+    scored.push({ obs, type: String(type || ''), source, s });
+  };
+  try {
+    for (const m of autolearn.readRawMemories(2)) push(m.observation, m.type, 'run');
+  } catch { /* no raw file yet */ }
+  try {
+    for (const section of autolearn.MEMORY_SECTIONS) {
+      let entries = [];
+      try { entries = autolearn.readBank(null, section) || []; } catch { entries = []; }
+      for (const e of entries) push(e.observation, e.type, section);
+    }
+  } catch { /* no banks yet */ }
+  try {
+    for (const m of (searchMemories(task, { limit: 6 }) || [])) push(m.value || m.key, m.category, 'note');
+  } catch { /* keyed store is optional */ }
+
+  // Mistakes first (they are what a repeat costs), then the strongest matches.
+  scored.sort((a, b) => b.s - a.s);
+  const mistakes = scored.filter((x) => x.type === 'error').slice(0, Math.max(0, opts.maxMistakes ?? 4));
+  const lessons = scored.filter((x) => x.type !== 'error').slice(0, Math.max(0, opts.maxLessons ?? 4));
+  const top = [...mistakes, ...lessons];
+  if (!top.length) return { text: '', count: 0, lessons: 0, mistakes: 0 };
+  const lines = top.map((x) => `- ${x.type === 'error' ? '✗ mistake' : '· lesson'}: ${x.obs.slice(0, 220)}`);
+  const text = [
+    '=== MEMORY FIRST (recalled for this task — use these before redoing the work) ===',
+    ...lines,
+    mistakes.length ? 'The ✗ entries are mistakes already made. Do not repeat them; apply the fix noted.' : '',
+    'If one of these already answers part of the task, build on it instead of rediscovering it.',
+    '=== END MEMORY FIRST ===',
+  ].filter(Boolean).join('\n');
+  return { text, count: top.length, lessons: lessons.length, mistakes: mistakes.length };
+}
 
 app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, res) => {
   const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false, maxTurns: requestedMaxTurns } = req.body;
@@ -5625,6 +5763,24 @@ ${dirListing}
   // ── Inject persistent memory context ──────────────────────────────
   const lastUserMsg = messages.filter(m => m.role === 'user').pop();
   const memoryContext = getMemoryContext(lastUserMsg?.content || '', { maxMemories: 15, maxChars: 3000 });
+  // What this task already knows, scored against the task text — placed above
+  // the machine context so the run starts from it (owner, 2026-11-25: "make him
+  // when starting task cycle threw his memorys 1st for the task to get done
+  // faster if previous mem are present").
+  const memoryFirst = buildMemoryFirstBlock(lastUserMsg?.content || '', { maxMistakes: 4, maxLessons: 4 });
+  // Say it on the stream, with the block's own counts: a run that starts from
+  // memory shows that it did, and an empty memory says nothing at all.
+  if (!customerDirective && memoryFirst.count > 0) {
+    try {
+      res.write(`data: ${JSON.stringify({
+        type: 'memory_recall',
+        count: memoryFirst.count,
+        lessons: memoryFirst.lessons,
+        mistakes: memoryFirst.mistakes,
+        message: `🧠 recalled ${memoryFirst.count} memories (${memoryFirst.mistakes} mistake${memoryFirst.mistakes === 1 ? '' : 's'}) — using them first`,
+      })}\n\n`);
+    } catch (_) { /* the run proceeds; the prompt still carries the block */ }
+  }
 
   // ── Persistent task state: never forget what we're doing across turns/sessions ──
   taskState.init({ userMessage: lastUserMsg?.content || '' });
@@ -5663,6 +5819,7 @@ ${dirListing}
   // NOTE: project inventory is already injected by buildAgentSystemPrompt(); do not duplicate it here.
   const systemContent = dynamicPrompt
     + (clientSystemContent ? '\n\n=== CLIENT DIRECTIVE ===\n' + clientSystemContent : '')
+    + (!customerDirective && memoryFirst.text ? '\n\n' + memoryFirst.text : '')
     + (customerDirective ? '' : '\n\n' + machineContext)
     + (!customerDirective && memoryContext ? '\n\n' + memoryContext : '');
 
@@ -5922,14 +6079,13 @@ ${dirListing}
       msgs = msgs.map((m, i) => i === 0 ? m : truncateMessage(m, 100));
     }
 
-    // Step 4: If STILL over budget, drop oldest messages (except system prompt)
+    // Step 4: If STILL over budget, drop oldest turns (except system prompt)
     // This is the nuclear option — we must not exceed the token limit
     totalChars = msgs.reduce((sum, m) => sum + messageChars(m), 0);
     let spliceGuard = 0;
     while (totalChars > MAX_CONTEXT_CHARS && msgs.length > 2 && spliceGuard < 200) {
-      // Drop the oldest non-system message (index 1)
-      const dropped = msgs.splice(1, 1);
-      totalChars -= messageChars(dropped[0]);
+      const dropped = dropOldestTurn(msgs);
+      for (const d of dropped) totalChars -= messageChars(d);
       spliceGuard++;
     }
     totalChars = msgs.reduce((sum, m) => sum + messageChars(m), 0);
@@ -5937,9 +6093,98 @@ ${dirListing}
     return msgs;
   }
 
-  // ── Pre-flight: enforce context ceiling on incoming history ──
+  // Remove messages[1] up to (not including) the next `user` turn. A whole turn
+  // leaves together, so an assistant `tool_calls` message is never left behind
+  // without its `tool` results — an orphaned pair makes the provider reject the
+  // next call, which used to end the run instead of compacting it.
+  function dropOldestTurn(msgs) {
+    let end = msgs.length;
+    for (let i = 2; i < msgs.length; i += 1) {
+      if (msgs[i] && msgs[i].role === 'user') { end = i; break; }
+    }
+    return msgs.splice(1, Math.max(1, end - 1));
+  }
+
+  // ── Conversation compaction while the run works ──────────────────
+  // Owner (2026-11-25): "add compacting conversation while doing it". The
+  // truncation above keeps the request under budget by cutting words out of
+  // every message; it never gives the model back the shape of what happened.
+  // This is the Claude-Code behaviour: when the older history is filling the
+  // window, the model reads it and writes one summary that replaces it.
+  //
+  // Safe by construction: the replaced span always ends at a `user` boundary,
+  // so no tool_call/tool_result pair is ever split, and the system prompt at
+  // index 0 is never touched. Bounded to one pass per run, 15 s, and any
+  // failure falls back to the truncation above — a run is never lost to it.
+  let _summaryDone = false;
+  async function summarizeOldTurns(msgs, why) {
+    if (_summaryDone) return false;
+    if (!Array.isArray(msgs) || msgs.length < 8) return false;
+    // Keep at least the last 10 messages: the live task keeps its recent steps.
+    const floor = Math.max(2, msgs.length - 10);
+    let split = -1;
+    for (let i = floor - 1; i >= 1; i -= 1) {
+      if (msgs[i] && msgs[i].role === 'user') { split = i; break; }
+    }
+    if (split < 2) return false;
+    const span = msgs.slice(1, split);
+    if (span.length < 4) return false;
+    _summaryDone = true;
+    const tokensBefore = estimateTokens(msgs);
+    try {
+      const lane = (provider && PROVIDERS[provider])
+        ? { provider, model: agentModel }
+        : (getWaterfallProvider() || {});
+      if (!lane.provider) return false;
+      const digest = span.map((m) => {
+        const text = typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content) ? m.content.map((p) => (p.text || '')).join(' ') : '';
+        return `[${m.role}] ${String(text).replace(/\s+/g, ' ').slice(0, 400)}`;
+      }).join('\n').slice(0, 24000);
+      const summaryPromise = chat({
+        provider: lane.provider,
+        model: lane.model,
+        maxTokens: 1200,
+        messages: [
+          { role: 'system', content: 'Compress this coding/ops session transcript. Output ONLY terse bullet lines (max 40) with: (1) Task goal. (2) Key files/paths touched + why. (3) Errors hit and their fixes. (4) Current blocker if any. (5) Exact next planned step.' },
+          { role: 'user', content: digest },
+        ],
+      });
+      let timer = null;
+      const timed = await Promise.race([
+        summaryPromise,
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('summary timeout')), 15000); }),
+      ]).finally(() => { if (timer) clearTimeout(timer); });
+      const text = String((timed && timed.content) || '').trim();
+      if (text.length < 40) return false;
+      msgs.splice(1, split - 1, {
+        role: 'system',
+        content: `📦 SESSION SUMMARY (older turns compacted — trust this summary, it preserves the reasoning chain):\n${text}`,
+      });
+      const tokensAfter = estimateTokens(msgs);
+      console.log(`[agent] Model-compacted ${span.length} turns → 1 session summary (${why}): ${tokensBefore} → ${tokensAfter} tokens`);
+      res.write(`data: ${JSON.stringify({
+        type: 'compact',
+        summarized: true,
+        turns: span.length,
+        tokensBefore,
+        tokensAfter,
+        message: `compacted ${span.length} earlier turns into one summary (${tokensBefore} → ${tokensAfter} tokens)`,
+      })}\n\n`);
+      return true;
+    } catch (e) {
+      console.warn(`[agent] summary compaction skipped (${why}): ${e && e.message}`);
+      return false;
+    }
+  }
+
+  // ── Pre-flight: compact, then enforce the ceiling on incoming history ──
   {
     const before = estimateTokens(agentMessages);
+    if (before > INPUT_TOKEN_BUDGET * 0.6) {
+      await summarizeOldTurns(agentMessages, 'pre-flight');
+    }
     const enforced = enforceContextCeiling(agentMessages);
     if (enforced.length < agentMessages.length || estimateTokens(enforced) < before) {
       agentMessages.length = 0;
@@ -6034,6 +6279,14 @@ ${dirListing}
       // ── Enforce context ceiling before every model call ──
       // Skip if no new messages were added since last enforcement (saves O(n) scan)
       {
+        // Compact the conversation while the run is still working: once the
+        // history passes 60 % of the budget, the older turns are summarised
+        // into one message instead of being silently word-trimmed. Bounded to
+        // one pass per run (summarizeOldTurns owns the latch), so this can
+        // never turn a long run into a series of summary calls.
+        if (estimateTokens(agentMessages) > INPUT_TOKEN_BUDGET * 0.6) {
+          await summarizeOldTurns(agentMessages, `turn ${turn}`);
+        }
         const tokensBefore = estimateTokens(agentMessages);
         const enforced = enforceContextCeiling(agentMessages);
         if (enforced.length < agentMessages.length || estimateTokens(enforced) < tokensBefore) {
@@ -6058,7 +6311,7 @@ ${dirListing}
       if (finalEstimate > INPUT_TOKEN_BUDGET) {
         console.error(`[agent] FATAL: Still ${finalEstimate} tokens after enforcement (budget: ${INPUT_TOKEN_BUDGET}). Dropping oldest messages.`);
         while (estimateTokens(agentMessages) > INPUT_TOKEN_BUDGET && agentMessages.length > 2) {
-          agentMessages.splice(1, 1); // drop oldest non-system message
+          dropOldestTurn(agentMessages); // whole turns only — never orphan a tool pair
         }
         console.log(`[agent] After emergency trim: ${estimateTokens(agentMessages)} tokens, ${agentMessages.length} msgs`);
       }
@@ -6694,25 +6947,18 @@ ${dirListing}
           // Write to BOTH the workspace dir AND the project root so the CLI
           // (which reads from /home/ghost/haksterAi/.hakster/) gets the memories.
           try {
-            const isErr = /^Error[:\n]|^❌/i.test(String(result).trim());
-            const observation = `${toolName}(${JSON.stringify(toolArgs).slice(0, 100)}) → ${String(displayResult).slice(0, 200).replace(/\n/g, ' ')}`;
-            const memEntry = {
-              id: `mem_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
-              timestamp: new Date().toISOString(),
+            // One builder for every capture path (owner, 2026-11-25: "make sure
+            // autolearn meter with brain emoji is working with learning etc").
+            // recordToolMemory writes to the workspace AND the project root the
+            // CLI reads banks from, with every field addRawMemory requires.
+            autolearn.recordToolMemory({
+              tool: toolName,
+              args: toolArgs,
+              result: displayResult,
               turn,
               phase: phaseName(currentPhase),
-              tags: [toolName, isErr ? 'error' : 'success'],
-              observation,
-              type: isErr ? 'error' : 'pattern',
-              confidence: isErr ? 0.9 : 0.6,
-            };
-            // Write to workspace dir
-            autolearn.addRawMemory(memEntry, workDir);
-            // Also write to project root (where the CLI reads from)
-            const projectRoot = '/home/ghost/haksterAi';
-            if (path.resolve(workDir) !== path.resolve(projectRoot)) {
-              autolearn.addRawMemory(memEntry, projectRoot);
-            }
+              cwd: workDir,
+            });
           } catch(_memErr) { console.error('[memory] capture failed:', _memErr.message, 'workDir:', workDir); /* don't let memory capture break the agent loop */ }
 
           if (['write_file', 'edit_file', 'patch_file', 'multi_patch'].includes(toolName) && toolArgs.path) {
@@ -6741,15 +6987,19 @@ ${dirListing}
           agentMessages.push({ role: 'tool', tool_call_id: tc.id, content: contextResult });
 
           // ── Autolearn: record raw memory from tool call ──
+          // The entries handed to addRawMemory must carry id/turn/phase/tags;
+          // this older call site built a partial one, which the validator
+          // rejected, so it wrote nothing. recordToolMemory builds the same
+          // complete entry the capture above uses (owner, 2026-11-25).
           try {
-            const _isErr = /^(error|❌)/i.test(String(result).trim());
-            autolearn.addRawMemory({
-              observation: `${toolName}(${JSON.stringify(toolArgs).slice(0, 200)}) → ${contextResult.slice(0, 200)}`,
-              type: _isErr ? 'error' : 'pattern',
-              tags: [toolName],
-              confidence: _isErr ? 0.3 : 0.8,
-              timestamp: Date.now()
-            }, workDir);
+            autolearn.recordToolMemory({
+              tool: toolName,
+              args: toolArgs,
+              result: contextResult,
+              turn,
+              phase: phaseName(currentPhase),
+              cwd: workDir,
+            });
           } catch(_amErr) { /* autolearn best-effort */ }
 
           // Tool-error loop detection
@@ -6881,22 +7131,17 @@ ${dirListing}
 
         // ── Capture raw memory for the autolearn pipeline (path 2) ──
         try {
-          const _isErr = /^Error[:\n]|^❌/i.test(String(result).trim());
-          const _observation = `${toolName}(${JSON.stringify(toolArgs).slice(0, 100)}) → ${String(displayResult).slice(0, 200).replace(/\n/g, ' ')}`;
-          const _memEntry = {
-            id: `mem_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
-            timestamp: new Date().toISOString(),
-            turn, phase: phaseName(currentPhase),
-            tags: [toolName, _isErr ? 'error' : 'success'],
-            observation: _observation,
-            type: _isErr ? 'error' : 'pattern',
-            confidence: _isErr ? 0.9 : 0.6,
-          };
-          autolearn.addRawMemory(_memEntry, workDir);
-          const _projectRoot = '/home/ghost/haksterAi';
-          if (path.resolve(workDir) !== path.resolve(_projectRoot)) {
-            autolearn.addRawMemory(_memEntry, _projectRoot);
-          }
+          // Same single builder as the other paths — this one used to hand
+          // addRawMemory an entry without turn/phase in some builds, which it
+          // rejects by contract, so the learning meter lost the capture.
+          autolearn.recordToolMemory({
+            tool: toolName,
+            args: toolArgs,
+            result: displayResult,
+            turn,
+            phase: phaseName(currentPhase),
+            cwd: workDir,
+          });
         } catch(_e2) { console.error('[memory] capture failed (path2):', _e2.message); }
 
         // If a file was written/edited, emit a file event so frontend can show a download button.
@@ -6939,14 +7184,18 @@ ${dirListing}
 
         // ── Autolearn: record raw memory from tool call (sequential path) ──
         try {
-          const _isErr = /^(error|❌)/i.test(String(result).trim());
-          autolearn.addRawMemory({
-            observation: `${toolName}(${JSON.stringify(toolArgs).slice(0, 200)}) → ${contextResult.slice(0, 200)}`,
-            type: _isErr ? 'error' : 'pattern',
-            tags: [toolName],
-            confidence: _isErr ? 0.3 : 0.8,
-            timestamp: Date.now()
-          }, workDir);
+          // This entry used to omit id/turn/phase, which addRawMemory rejects —
+          // so on this path nothing was learned and the 🧠 meter was fed only
+          // by the paths that happened to be complete (owner, 2026-11-25:
+          // "make sure autolearn meter with brain emoji is working with learning").
+          autolearn.recordToolMemory({
+            tool: toolName,
+            args: toolArgs,
+            result: displayResult,
+            turn,
+            phase: phaseName(currentPhase),
+            cwd: workDir,
+          });
         } catch(_amErr2) { /* autolearn best-effort */ }
 
         // ── Tool-error loop detection ──
@@ -7017,6 +7266,20 @@ ${dirListing}
             if (consolidationResult && consolidationResult.consolidated > 0) {
               rawMemoryCount = 0; // reset after consolidation
               lastConsolidationTurn = turn;
+              // Tell the client what was actually learned, from the result's own
+              // counts — the TUI's 🧠/✦ autolearn meter moves on this event, so
+              // it reports learning that happened rather than a decoration
+              // (owner, 2026-11-25: "make sure autolearn meter with brain emoji
+              // is working with learning etc").
+              try {
+                const skills = Number(consolidationResult.skillsExtracted) || 0;
+                res.write(`data: ${JSON.stringify({
+                  type: 'learn',
+                  added: consolidationResult.consolidated,
+                  skills,
+                  message: `learned ${consolidationResult.consolidated} memories${skills ? ` · ${skills} skill${skills === 1 ? '' : 's'}` : ''}`,
+                })}\n\n`);
+              } catch (_learnEvtErr) { /* the run must not fail over a meter event */ }
               const lessons = autolearn.loadLearnedLessons(workDir, []);
               // Inject consolidated lessons into context
               agentMessages.push({

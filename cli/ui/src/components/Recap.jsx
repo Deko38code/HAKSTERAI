@@ -1,4 +1,5 @@
 import React from 'react';
+import { barColor } from '../../../smartness.mjs';
 
 /* Recap — the run's receipt, on the row the live spinner vacates.
  *
@@ -45,6 +46,10 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
 
 export default function Recap({
   width,
+  recapId = '',
+  points = 0,
+  learned = 0,
+  learnedSkills = 0,
   turns = 0,
   tools = 0,
   ok = 0,
@@ -72,6 +77,26 @@ export default function Recap({
   const segs = [
     { key: 'label', fg: failed ? 'red' : '#3fb950', text: failed ? '▣ recap · run failed' : '▣ recap' },
   ];
+  // The recap's own id, second so it survives the fit pass (owner, 2026-11-25:
+  // "each recap will have id # to go stright to for issues in mem"). It is the
+  // same id the run's lessons and mistakes were written under, so `/recap #id`
+  // lands on exactly this run.
+  const rid = String(recapId || '').trim();
+  if (rid) segs.push({ key: 'id', fg: '#58a6ff', text: rid });
+  // What was learned and from what: the server's consolidated-memory count for
+  // the session, against the outcomes it learned from.
+  const lrn = Math.max(0, Number(learned) || 0);
+  if (lrn > 0) {
+    // "learned N from what" — the errors it hit are the source that matters, so
+    // they lead when there were any; a clean run learned from the calls that
+    // worked. The tools segment below already carries the ok/fail split, so
+    // this one never repeats the full pair.
+    const from = bad > 0 ? plural(bad, 'error') : `${good} ok`;
+    const skills = Math.max(0, Number(learnedSkills) || 0);
+    segs.push({ key: 'learned', fg: '#3fb950', text: `learned ${lrn} from ${from}${skills ? ` · ${skills} skill${skills === 1 ? '' : 's'}` : ''}` });
+  }
+  const pts = Math.max(0, Math.round(Number(points) || 0));
+  if (pts > 0) segs.push({ key: 'points', fg: barColor('points', pts), text: `✦ ${pts}p` });
   if (t > 0) segs.push({ key: 'turns', fg: 'gray', text: plural(t, 'turn') });
   if (tc > 0) {
     const tail = bad > 0 ? ` (${good} ok · ${bad} fail)` : good > 0 ? ` (${good} ok)` : '';

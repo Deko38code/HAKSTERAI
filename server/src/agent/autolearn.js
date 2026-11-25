@@ -943,9 +943,159 @@ function autoInit(cwd) {
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
+/**
+ * buildToolMemory — one complete raw-memory entry for a tool call.
+ *
+ * Owner (2026-11-25): "make sure autolearn meter with brain emoji is working
+ * with learning etc". Two of the three capture sites in server/src/index.js
+ * built an entry without `id`, `turn` or `phase` — fields addRawMemory()
+ * requires by contract — so those paths wrote nothing at all while the one
+ * complete path made the meter look fed. One builder, every required field,
+ * so a capture site cannot drift out of validity again.
+ */
+function buildToolMemory({ tool, args, result, turn = 0, phase = 'ACT' } = {}) {
+  const text = String(result == null ? '' : result);
+  const isErr = /^Error[:\n]|^❌/i.test(text.trim());
+  return {
+    id: `mem_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+    timestamp: new Date().toISOString(),
+    turn: Number(turn) || 0,
+    phase: String(phase || 'ACT'),
+    tags: [String(tool || 'tool'), isErr ? 'error' : 'success'],
+    observation: `${tool || 'tool'}(${JSON.stringify(args || {}).slice(0, 100)}) → ${text.slice(0, 200).replace(/\n/g, ' ')}`,
+    type: isErr ? 'error' : 'pattern',
+    confidence: isErr ? 0.9 : 0.6,
+  };
+}
+
+/**
+ * recordToolMemory — build the entry and write it to both storage roots: the
+ * workspace it ran in and the project root the CLI reads banks from. Returns
+ * true when at least one write was accepted, so no caller can mistake a
+ * rejection for a successful capture.
+ */
+function recordToolMemory({ tool, args, result, turn = 0, phase = 'ACT', cwd, projectRoot = '/home/ghost/haksterAi' } = {}) {
+  const entry = buildToolMemory({ tool, args, result, turn, phase });
+  let wrote = false;
+  try { if (cwd) wrote = addRawMemory(entry, cwd) || wrote; } catch { /* best-effort */ }
+  try {
+    if (projectRoot && path.resolve(cwd || '.') !== path.resolve(projectRoot)) {
+      wrote = addRawMemory(entry, projectRoot) || wrote;
+    }
+  } catch { /* best-effort */ }
+  return wrote;
+}
+
+/**
+ * buildRecapMemories — the idle recap, turned into memories (owner, 2026-11-25:
+ * "when he recaps on idle make it say what he learned from and points and logg
+ * to his mem so he gets smarter and smarter from mistakes"; "each recap will
+ * have id # to go stright to for issues in mem").
+ *
+ * One `error` entry per distinct failure the run hit, and one entry for the run
+ * itself (a `lesson` when it had failures, a `pattern` when it was clean). Every
+ * entry carries the run's recap id as a tag AND in its text, so the id printed
+ * on the idle row is a real pointer: a search or a bank read for `#a3f9k2`
+ * lands on exactly that run's mistakes. Counts come from the client's own meter
+ * snapshot — nothing is estimated here.
+ */
+function buildRecapMemories(summary = {}) {
+  const rawId = String(summary.recapId || summary.id || '').trim();
+  const id = /^#[a-z0-9]{3,16}$/i.test(rawId) ? rawId.toLowerCase() : `#${Date.now().toString(36).slice(-6)}`;
+  const task = String(summary.task || '').trim().slice(0, 300);
+  const tools = Math.max(0, Math.round(Number(summary.tools) || 0));
+  const ok = Math.max(0, Math.round(Number(summary.ok) || 0));
+  const fail = Math.max(0, Math.round(Number(summary.fail) || 0));
+  const points = Math.round(Number(summary.points) || 0);
+  const learned = Math.max(0, Math.round(Number(summary.learned) || 0));
+  const learnedSkills = Math.max(0, Math.round(Number(summary.learnedSkills) || 0));
+  const failures = (Array.isArray(summary.failures) ? summary.failures : [])
+    .map((f) => ({
+      tool: String((f && f.tool) || 'tool').slice(0, 60),
+      error: String((f && f.error) || '').replace(/\s+/g, ' ').slice(0, 180),
+    }))
+    .filter((f) => f.error)
+    .slice(0, 5);
+
+  const entries = [];
+  for (const f of failures) {
+    const err = buildToolMemory({ tool: f.tool, args: { recap: id }, result: `❌ ${f.error}`, turn: 0, phase: 'RECAP' });
+    err.id = generateId();
+    err.tags = [...new Set([...err.tags, id])];
+    err.observation = `${id} mistake — ${f.tool}: ${f.error}`;
+    entries.push(err);
+  }
+
+  const line = [
+    `Recap ${id}`,
+    task ? `task "${task}"` : '',
+    `${tools} tool call${tools === 1 ? '' : 's'} (${ok} ok · ${fail} err)`,
+    points ? `${points}p` : '',
+    learned ? `learned ${learned}${learnedSkills ? ` + ${learnedSkills} skill${learnedSkills === 1 ? '' : 's'}` : ''}` : '',
+    failures.length ? `mistakes in ${failures.map((f) => f.tool).join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+
+  entries.push({
+    id: generateId(),
+    timestamp: new Date().toISOString(),
+    turn: 0,
+    phase: 'RECAP',
+    tags: ['recap', id, fail ? 'lesson-from-errors' : 'clean-run'],
+    observation: `${line}. ${fail ? 'Check the mistakes listed before repeating this work.' : 'This approach worked — reuse it.'}`,
+    type: fail ? 'lesson' : 'pattern',
+    confidence: fail ? 0.85 : 0.75,
+  });
+
+  return { id, entries, line };
+}
+
+/**
+ * recordRecap — write those entries into the raw-memory pipeline. Returns the
+ * id, the one-line summary and how many entries were actually accepted, so the
+ * caller can report a rejected write instead of claiming a capture that did not
+ * happen.
+ */
+function recordRecap(summary = {}, cwd) {
+  const { id, entries, line } = buildRecapMemories(summary);
+  let written = 0;
+  for (const entry of entries) {
+    try { if (addRawMemory(entry, cwd)) written += 1; } catch { /* best-effort */ }
+  }
+  return { id, line, written, entries: entries.length };
+}
+
+/**
+ * readRawMemories — every raw memory still pending consolidation, and the
+ * entries consolidated out of the newest archives. The recap lookup uses this
+ * so `/recap #id` finds a run's entries whether or not consolidation has
+ * already filed them into the banks.
+ */
+function readRawMemories(limitArchives = 3) {
+  const memoriesDir = path.join(HAKSTER_DIR, 'memories');
+  const live = readJson(path.join(memoriesDir, 'raw_memories.json'), []);
+  const out = Array.isArray(live) ? live.slice() : [];
+  try {
+    const archives = fs
+      .readdirSync(memoriesDir)
+      .filter((n) => /^raw_memories_archive_\d+\.json$/.test(n))
+      .sort((a, b) => Number(b.match(/\d+/)[0]) - Number(a.match(/\d+/)[0]))
+      .slice(0, Math.max(0, limitArchives));
+    for (const name of archives) {
+      const rows = readJson(path.join(memoriesDir, name), []);
+      if (Array.isArray(rows)) out.push(...rows);
+    }
+  } catch { /* no directory / unreadable archive — the live file is enough */ }
+  return out;
+}
+
 module.exports = {
   initMemory,
   addRawMemory,
+  buildToolMemory,
+  recordToolMemory,
+  buildRecapMemories,
+  recordRecap,
+  readRawMemories,
   addMemoryToBank,
   getRawMemoryCount,
   getMemoryStats,
