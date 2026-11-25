@@ -3292,8 +3292,23 @@ if (process.argv.length <= 2) {
   process.argv.push('tui');
 }
 
+// ── hakster claude — the Claude Code CLI, on this account's plan ──────────
+// Intercepted here rather than in commander so every flag after `claude` is
+// handed to the real binary untouched, including ones we do not know about.
+// It runs with our base URL and the account key (no Anthropic sign-in) and
+// carries the user's own MCP servers across (cli/src/managed-claude.js).
+function _dispatch() {
+  const argv = process.argv.slice(2);
+  if (argv[0] === 'claude') {
+    return require('./src/managed-claude').runManagedClaude(argv.slice(1))
+      .then((code) => process.exit(typeof code === 'number' ? code : 0))
+      .catch((e) => { console.error('hakster claude:', (e && e.message) || e); process.exit(1); });
+  }
+  return program.parse();
+}
+
 // Do not dispatch a command until the paid-license check has completed.
-if (_skipLicenseGate) program.parse();
+if (_skipLicenseGate) _dispatch();
 else _haksterLicenseGate()
-  .then(() => program.parse())
+  .then(_dispatch)
   .catch((e) => { console.error('License check failed:', e.message); process.exit(1); });

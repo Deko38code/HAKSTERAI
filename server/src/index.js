@@ -4977,6 +4977,96 @@ function buildMemoryFirstBlock(task, opts = {}) {
   return { text, count: top.length, lessons: lessons.length, mistakes: mistakes.length };
 }
 
+// ── Anthropic-compatible relay for a paid account's own `claude` ────────────
+// Owner, 2026-11-25: "we need to edit the claude cli area with oauth and add our
+// to replace anthropic sign in with ours but still use mcp etc tools".
+//
+// The Claude Code CLI only speaks the Anthropic Messages API. A paid account's
+// own `claude` therefore needs a base URL that answers that shape, authenticated
+// by the account's HaksterAI key — not by an Anthropic account and not by
+// Anthropic OAuth. This forwards /v1/messages and /v1/messages/count_tokens to
+// the same local relay the server's own spawn lane uses (claudeCliEnv), so the
+// client's CLI runs on our power with the locked wire model (§22, §35).
+//
+// MCP tools are untouched: they are client-side, carried across by
+// `hakster claude` (cli/src/managed-claude.js) with --mcp-config.
+//
+// The gate is the same subscription verdict as every other CLI route (§28.5),
+// so a lapsed plan stops answering here too — with an Anthropic-shaped error
+// the CLI can read.
+const CLAUDE_RELAY_URL = String(process.env.HAKSTER_CLAUDE_RELAY || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+const CLAUDE_RELAY_MODEL = 'deepseek-v4.1-flash:cloud';
+const CLAUDE_RELAY_FIELDS = ['messages', 'system', 'tools', 'tool_choice', 'max_tokens', 'temperature', 'top_p', 'top_k', 'stop_sequences', 'stream', 'thinking'];
+function claudeRelayError(res, status, type, message, extra) {
+  return res.status(status).json({ type: 'error', error: { type, message }, ...(extra || {}) });
+}
+function claudeRelayAuth(req, res) {
+  const user = getUserByApiKey(req);
+  if (!user) {
+    claudeRelayError(res, 401, 'authentication_error', 'Sign in with your HaksterAI account: hakster login');
+    return null;
+  }
+  const ent = cliEntitlementState(user);
+  if (!ent.included) {
+    const lapsed = ent.source === 'stripe' && ent.plan && planIncludesCli(ent.plan);
+    claudeRelayError(res, 403, 'permission_error', lapsed
+      ? `Your ${ent.plan} subscription is not active (${ent.reason}). Renew at https://haksterai.com/plans/ to keep using the CLI.`
+      : 'The HaksterAI CLI is included with every plan from $20 a month.',
+    { plan: ent.plan, status: ent.status, paidUntil: ent.paidUntil });
+    return null;
+  }
+  return user;
+}
+async function claudeRelayForward(req, res, subPath) {
+  const incoming = req.body && typeof req.body === 'object' ? req.body : {};
+  const body = {};
+  for (const field of CLAUDE_RELAY_FIELDS) if (incoming[field] !== undefined) body[field] = incoming[field];
+  // The wire model is locked (§22): whatever the caller asked for, this relay
+  // serves ours. Aliases never reach Ollama.
+  body.model = CLAUDE_RELAY_MODEL;
+  if (body.max_tokens === undefined) body.max_tokens = 8192;
+
+  const headers = { 'content-type': 'application/json', authorization: 'Bearer ollama' };
+  if (req.headers['anthropic-version']) headers['anthropic-version'] = String(req.headers['anthropic-version']);
+  if (req.headers['anthropic-beta']) headers['anthropic-beta'] = String(req.headers['anthropic-beta']);
+
+  let upstream;
+  try {
+    upstream = await fetch(`${CLAUDE_RELAY_URL}/v1/messages${subPath || ''}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch (_) {
+    return claudeRelayError(res, 502, 'api_error', 'The model relay is unreachable right now.');
+  }
+
+  // count_tokens is optional for the CLI and not every relay implements it; a
+  // rough estimate keeps the CLI moving instead of failing the whole turn.
+  if (subPath && upstream.status >= 400) {
+    let size = 0;
+    try { size = JSON.stringify(body.messages || '').length + JSON.stringify(body.system || '').length; } catch (_) { size = 0; }
+    return res.status(200).json({ input_tokens: Math.max(1, Math.ceil(size / 4)) });
+  }
+
+  res.status(upstream.status);
+  res.set('Content-Type', upstream.headers.get('content-type') || 'application/json');
+  res.set('Cache-Control', 'no-store');
+  if (!upstream.body) return res.end();
+  try {
+    for await (const chunk of upstream.body) res.write(Buffer.from(chunk));
+  } catch (_) { /* client closed the stream */ }
+  return res.end();
+}
+app.post('/anthropic/v1/messages', async (req, res) => {
+  if (!claudeRelayAuth(req, res)) return;
+  await claudeRelayForward(req, res, '');
+});
+app.post('/anthropic/v1/messages/count_tokens', async (req, res) => {
+  if (!claudeRelayAuth(req, res)) return;
+  await claudeRelayForward(req, res, '/count_tokens');
+});
+
 app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, res) => {
   const { messages, sessionId, cwd, thinking: thinkingParam, approvalMode, fastMode = false, lowToken = false, maxTurns: requestedMaxTurns } = req.body;
   // Live steering: register this run's inbox so POST /api/agent/steer can land
