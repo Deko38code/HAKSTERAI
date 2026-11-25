@@ -11168,7 +11168,7 @@ async function repl() {
 
     // 📁 File integrity — important files present vs missing (%)
     const _fi = fileIntegrity();
-    const _fiBar = (() => { const bl = 20, f = Math.round(_fi.pct / 100 * bl); const c = _fi.pct >= 90 ? C.success : _fi.pct >= 60 ? C.mustard : C.error; return c + '█'.repeat(f) + C.fgSubtle + '░'.repeat(bl - f) + C.reset; })();
+    const _fiBar = (() => { const bl = 20, f = Math.round(_fi.pct / 100 * bl); const c = _fi.pct === 100 ? C.success : C.error; return c + '█'.repeat(f) + C.fgSubtle + '░'.repeat(bl - f) + C.reset; })();
     const fileRows = _fi.mode === 'install'
       ? [`${_fiBar} packaged install — project files are checked in the source tree`]
       : [`${_fiBar} ${_fi.pct}%  ${_fi.present}/${_fi.total} important files`];

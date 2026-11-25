@@ -108,7 +108,7 @@ export default function StatusServicesPanel({
           <span fg={stateColor} attributes={TextAttributes.BOLD}>{offline ? '○ ' : online ? '● ' : '◌ '}</span>
           <span fg="cyan" attributes={TextAttributes.BOLD}>{'◆ HAKSTER-AI'}</span>
           <span fg={stateColor}>{` · ${stateTxt}`}</span>
-          {showGuardHere ? <span fg={guardBad ? 'red' : 'gray'}>{`   ${guardTxt}`}</span> : null}
+          {showGuardHere ? <span fg={guardBad ? 'red' : 'green'}>{`   ${guardTxt}`}</span> : null}
         </text>
         {rightText ? <text fg={allUp ? 'green' : up > 0 ? 'yellow' : 'red'}>{rightText}</text> : null}
       </box>

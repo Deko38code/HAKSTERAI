@@ -2237,7 +2237,7 @@ export default function App({ version = '0.1.0' }) {
               <text fg="cyan" attributes={TextAttributes.BOLD}>{'◆ HAKSTER-AI'}</text>
               <text fg={statusErr ? 'red' : status ? 'green' : 'yellow'}>{` · ${headerState}`}</text>
               {headerFiles ? (
-                <text fg={guard.missing && guard.missing.length ? 'red' : 'gray'}>{`   ${headerFiles}`}</text>
+                <text fg={guard.missing && guard.missing.length ? 'red' : 'green'}>{`   ${headerFiles}`}</text>
               ) : null}
             </>
           )}

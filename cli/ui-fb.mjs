@@ -4849,7 +4849,7 @@ function StatusServicesPanel({
         /* @__PURE__ */ jsx23("span", { fg: stateColor, attributes: TextAttributes18.BOLD, children: offline ? "\u25CB " : online ? "\u25CF " : "\u25CC " }),
         /* @__PURE__ */ jsx23("span", { fg: "cyan", attributes: TextAttributes18.BOLD, children: "\u25C6 HAKSTER-AI" }),
         /* @__PURE__ */ jsx23("span", { fg: stateColor, children: ` \xB7 ${stateTxt}` }),
-        showGuardHere ? /* @__PURE__ */ jsx23("span", { fg: guardBad ? "red" : "gray", children: `   ${guardTxt}` }) : null
+        showGuardHere ? /* @__PURE__ */ jsx23("span", { fg: guardBad ? "red" : "green", children: `   ${guardTxt}` }) : null
       ] }),
       rightText ? /* @__PURE__ */ jsx23("text", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: rightText }) : null
     ] }),
@@ -9175,7 +9175,7 @@ function App({ version = "0.1.0" }) {
           /* @__PURE__ */ jsx32("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes23.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
           /* @__PURE__ */ jsx32("text", { fg: "cyan", attributes: TextAttributes23.BOLD, children: "\u25C6 HAKSTER-AI" }),
           /* @__PURE__ */ jsx32("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
-          headerFiles ? /* @__PURE__ */ jsx32("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
+          headerFiles ? /* @__PURE__ */ jsx32("text", { fg: guard.missing && guard.missing.length ? "red" : "green", children: `   ${headerFiles}` }) : null
         ] }),
         headerMeter ? /* @__PURE__ */ jsxs29("text", { children: [
           statusBoxShown ? null : /* @__PURE__ */ jsx32("span", { fg: "gray", children: "   " }),
