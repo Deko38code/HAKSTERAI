@@ -1148,6 +1148,10 @@ export function useAgentStream({
         const recap = {
           id: recapId,
           at: Date.now(),
+          // What the run was: the row states it, so the recap says what it is a
+          // recap OF (owner, 2026-11-26: "make sure the recapp is working and
+          // says what the recap is"). The task as sent, not a rewritten title.
+          task: String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 200),
           tools: snap.rounds,
           ok: snap.successes,
           fail: snap.failures,

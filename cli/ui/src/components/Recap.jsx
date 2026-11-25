@@ -47,6 +47,7 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
 export default function Recap({
   width,
   recapId = '',
+  task = '',
   points = 0,
   learned = 0,
   learnedSkills = 0,
@@ -84,6 +85,14 @@ export default function Recap({
   // lands on exactly this run.
   const rid = String(recapId || '').trim();
   if (rid) segs.push({ key: 'id', fg: '#58a6ff', text: rid });
+  // What the recap IS: the run it summarises, named by its own task text
+  // (owner, 2026-11-26: "make sure the recapp is working and says what the
+  // recap is"). Taken from the prompt as sent, clipped to one segment — the
+  // fit pass drops it from the tail, so it survives longer than any count.
+  const taskText = String(task || '').replace(/\s+/g, ' ').trim();
+  if (taskText) {
+    segs.push({ key: 'task', fg: 'white', text: `"${taskText.length > 36 ? `${taskText.slice(0, 35)}…` : taskText}"` });
+  }
   // What was learned and from what: the server's consolidated-memory count for
   // the session, against the outcomes it learned from.
   const lrn = Math.max(0, Number(learned) || 0);

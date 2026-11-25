@@ -911,8 +911,14 @@ export default function App({ version = '0.1.0' }) {
         const want = String(arg || '').trim().toLowerCase().replace(/^#?/, '#');
         const last = agent.lastRecap;
         if (!arg) {
+          // Name the run as well as its id — a recap that does not say what it
+          // recapped is just a row of numbers (owner, 2026-11-26: "says what the
+          // recap is").
+          const what = last && last.task
+            ? ` "${String(last.task).length > 48 ? `${String(last.task).slice(0, 47)}…` : String(last.task)}"`
+            : '';
           showNotice(last && last.id
-            ? `▣ recap ${last.id} · ${last.tools} tools (${last.ok} ok · ${last.fail} err) · ✦ ${last.points}p — /recap ${last.id} reads it from memory`
+            ? `▣ recap ${last.id}${what} · ${last.tools} tools (${last.ok} ok · ${last.fail} err) · ✦ ${last.points}p — /recap ${last.id} reads it from memory`
             : '▣ recap — no finished run yet · /recap #id reads any run from memory');
           return;
         }
@@ -2654,6 +2660,7 @@ export default function App({ version = '0.1.0' }) {
                 <Recap
                   width={mainW}
                   recapId={agent.lastRecap?.id || ''}
+                  task={agent.lastRecap?.task || ''}
                   points={agent.meters?.points || 0}
                   learned={agent.learned?.added || 0}
                   learnedSkills={agent.learned?.skills || 0}

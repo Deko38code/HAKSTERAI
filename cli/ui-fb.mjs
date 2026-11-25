@@ -5056,6 +5056,7 @@ var plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
 function Recap({
   width,
   recapId = "",
+  task = "",
   points = 0,
   learned = 0,
   learnedSkills = 0,
@@ -5086,6 +5087,10 @@ function Recap({
   ];
   const rid = String(recapId || "").trim();
   if (rid) segs.push({ key: "id", fg: "#58a6ff", text: rid });
+  const taskText = String(task || "").replace(/\s+/g, " ").trim();
+  if (taskText) {
+    segs.push({ key: "task", fg: "white", text: `"${taskText.length > 36 ? `${taskText.slice(0, 35)}\u2026` : taskText}"` });
+  }
   const lrn = Math.max(0, Number(learned) || 0);
   if (lrn > 0) {
     const from = bad > 0 ? plural(bad, "error") : `${good} ok`;
@@ -6455,6 +6460,10 @@ function useAgentStream({
         const recap = {
           id: recapId,
           at: Date.now(),
+          // What the run was: the row states it, so the recap says what it is a
+          // recap OF (owner, 2026-11-26: "make sure the recapp is working and
+          // says what the recap is"). The task as sent, not a rewritten title.
+          task: String(prompt || "").replace(/\s+/g, " ").trim().slice(0, 200),
           tools: snap.rounds,
           ok: snap.successes,
           fail: snap.failures,
@@ -7886,7 +7895,8 @@ function App({ version = "0.1.0" }) {
         const want = String(arg || "").trim().toLowerCase().replace(/^#?/, "#");
         const last = agent.lastRecap;
         if (!arg) {
-          showNotice(last && last.id ? `\u25A3 recap ${last.id} \xB7 ${last.tools} tools (${last.ok} ok \xB7 ${last.fail} err) \xB7 \u2726 ${last.points}p \u2014 /recap ${last.id} reads it from memory` : "\u25A3 recap \u2014 no finished run yet \xB7 /recap #id reads any run from memory");
+          const what = last && last.task ? ` "${String(last.task).length > 48 ? `${String(last.task).slice(0, 47)}\u2026` : String(last.task)}"` : "";
+          showNotice(last && last.id ? `\u25A3 recap ${last.id}${what} \xB7 ${last.tools} tools (${last.ok} ok \xB7 ${last.fail} err) \xB7 \u2726 ${last.points}p \u2014 /recap ${last.id} reads it from memory` : "\u25A3 recap \u2014 no finished run yet \xB7 /recap #id reads any run from memory");
           return;
         }
         if (!/^#[a-z0-9]{3,16}$/.test(want)) {
@@ -9210,6 +9220,7 @@ function App({ version = "0.1.0" }) {
             {
               width: mainW,
               recapId: agent.lastRecap?.id || "",
+              task: agent.lastRecap?.task || "",
               points: agent.meters?.points || 0,
               learned: agent.learned?.added || 0,
               learnedSkills: agent.learned?.skills || 0,

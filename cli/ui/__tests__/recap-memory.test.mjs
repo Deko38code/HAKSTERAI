@@ -123,3 +123,25 @@ test('the run starts from memory: a MEMORY FIRST block ahead of machine context'
   assert.match(src, /if \(s <= 0\) return;/, 'only matching memories are injected');
   assert.match(src, /if \(!terms\.length\) return \{ text: ''/, 'an empty task recalls nothing');
 });
+
+test('the recap says what it is a recap of, and it is shown once the agent sits', () => {
+  // Owner, 2026-11-26: "make sure the recapp is working and says what the recap
+  // is and done after agent sits".
+  const recap = read('cli/ui/src/components/Recap.jsx');
+  assert.ok(recap.includes('task = \'\''), 'Recap takes the run task');
+  assert.ok(recap.includes("key: 'task'"), 'the task is its own segment');
+  assert.match(recap, /key: 'id'[\s\S]{0,600}key: 'task'[\s\S]{0,900}key: 'learned'/,
+    'label → id → task → learned order');
+  assert.match(recap, /taskText\.length > 36/, 'the task is clipped to one segment');
+
+  const app = read('cli/ui/src/App.jsx');
+  assert.match(app, /task=\{agent\.lastRecap\?\.task \|\| ''\}/, 'App passes the last run task');
+  // "done after agent sits": the recap row is the idle row — it appears only
+  // when no run is in flight, and the live spinner owns that same row while a
+  // run is going.
+  assert.match(app, /const showRecap = view === 'chat' && !agent\.busy/, 'the recap shows only while idle');
+  assert.match(app, /showCrushStatus = view === 'chat' && agent\.busy/, 'the spinner owns the row while busy');
+
+  const hook = read('cli/ui/src/hooks/useAgentStream.js');
+  assert.match(hook, /task: String\(prompt \|\| ''\)/, 'the hook records the run task on the recap');
+});

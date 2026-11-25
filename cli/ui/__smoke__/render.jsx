@@ -608,6 +608,12 @@ export async function run({ adsPort }) {
   menuSetup.renderer.destroy();
   await settle(50);
 
+  // The idle recap row (owner, 2026-11-26: "make sure the recapp is working and
+  // says what the recap is and done after agent sits"). After the plain turn
+  // the run is over, so the row the spinner occupied must now state the run: a
+  // `▣ recap` label, its id, and the task it summarises.
+  const recapRow = chatFrame.split('\n').find((l) => l.includes('▣ recap')) || '';
+
   const checks = [
     // ── baseline chrome ──
     ['header renders', /haksterAi/.test(idleFrame)],
@@ -626,7 +632,12 @@ export async function run({ adsPort }) {
     ['at 80 columns the header still fits its width', [...narrowHeader].length <= 80, `${[...narrowHeader].length} cells`],
     [
       'at 80 columns the cpu and ram readings are still on the top rows',
-      /cpu \d{1,3}%/.test(narrowMeterRow) && /ram \d{1,3}%/.test(narrowMeterRow),
+      // Either form satisfies it — the reading is what must stay on the top
+      // rows; whether the five-cell bar fits beside it depends on how wide the
+      // live percentage happens to be that second (31% vs 5%), which made the
+      // old bar-less regex pass or fail run to run without the layout changing.
+      /cpu (?:\S{5} )?\d{1,3}%/.test(narrowMeterRow) && /ram (?:\S{5} )?\d{1,3}%/.test(narrowMeterRow),
+      narrowMeterRow.split('\n').map((l) => l.trimEnd()).filter(Boolean).join(' ⏎ ').slice(0, 200),
     ],
 
     // ── the autonomy dial that took the focus tag's slot ──
@@ -653,6 +664,11 @@ export async function run({ adsPort }) {
     ['ctrl+t reopens a folded thought in the decoder box', /\+-{8,}-\+/.test(expandedBoxFrame)],
     ['the reopened thought decodes back to its own words', /Reasoning/.test(expandedFrame) && /Checking the bundle sizes first/.test(expandedFrame)],
     ['todo panel reflects the checklist tool', /1\/2 completed/.test(chatFrame)],
+    // ── the recap, once the agent sits ──
+    ['the idle recap row is drawn once the run ends', recapRow.length > 0, recapRow.slice(0, 80)],
+    ['the recap carries its run id', /▣ recap · #[a-z0-9]{4,}/.test(recapRow), recapRow.slice(0, 80)],
+    ['the recap says what it is a recap of', /"fix the bug"/.test(recapRow), recapRow.slice(0, 80)],
+    ['the recap counts the run', /\d+ tool/.test(recapRow) && /\d+ turn/.test(recapRow), recapRow.slice(0, 80)],
     // Anchored to the keystroke: the dashboard panel titles must appear in the
     // frame captured right after the `d` keypress.
     ['tab then d reaches the dashboard view', /Session/.test(dashFrame) && /Agent/.test(dashFrame) && /Context/.test(dashFrame)],

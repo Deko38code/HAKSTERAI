@@ -135,3 +135,10 @@ test('the endpoint reports the commit, and the badge renders the count', () => {
   assert.ok(app.includes('installs on restart'), 'staged wording stays staged');
   assert.ok(app.includes('✔ Update installed · Restart to update'), 'installed wording unchanged');
 });
+
+test('hakster update prints the same count as the header', () => {
+  const src = fs.readFileSync(path.join(here, '..', '..', 'index.js'), 'utf8');
+  assert.match(src, /const behind = Number\(res\.behind\) > 0/, 'the command reads the updater\'s figure');
+  assert.match(src, /v\$\{res\.version\}\$\{behind\} downloaded and verified/, 'the staged line carries it');
+  assert.match(src, /v\$\{res\.version\}\$\{behind\} downloaded and verified[\s\S]{0,300}source checkout/, 'the checkout line carries it');
+});
