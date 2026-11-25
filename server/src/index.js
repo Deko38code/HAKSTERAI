@@ -968,11 +968,61 @@ function planIncludesCli(planId) {
   const plan = PRICING_CATALOG.find((p) => p.id === String(planId || '').toLowerCase());
   return !!(plan && (plan.prices || []).some(planPriceHasCli));
 }
+// One answer for "may this account run the CLI", used by the request guard, the
+// CLI install page and the owner's key console. The verified subscription row —
+// the one the Stripe webhook maintains — decides first; the plan label is only a
+// fallback for an account with no subscription row at all (a manual comp).
+// Owner, 2026-11-25: "when or if their subscription lapses then they wont be
+// able to use our services". A lapsed 'pro' therefore loses the CLI even while
+// users.plan still reads 'pro', and a lapsed client's key stops answering.
+function cliEntitlementState(user) {
+  if (!user) {
+    return { included: false, paid: false, plan: 'free', status: 'none', source: 'none', paidUntil: null, reason: 'no account' };
+  }
+  try {
+    if (isOwnerUser(user)) {
+      return { included: true, paid: true, plan: user.plan || 'owner', status: 'owner', source: 'owner', paidUntil: null, reason: 'owner account' };
+    }
+  } catch (_) { /* owner helper may load later */ }
+  if (String(user.role || '').toLowerCase() === 'admin') {
+    return { included: true, paid: true, plan: user.plan || 'admin', status: 'owner', source: 'owner', paidUntil: null, reason: 'admin account' };
+  }
+  const catalogPlan = planIncludesCli(user.plan);
+  let state = null;
+  try { state = accessGuard.paidState(user.id); } catch (_) { state = null; }
+  if (state && state.source === 'stripe') {
+    // A real subscription row exists, so it alone answers yes or no. An active
+    // row with no recorded period end is treated as live rather than cut off on
+    // a missing field; anything with a past end is a lapse.
+    const liveWithoutEnd = state.status === 'active' && !state.paidUntil;
+    const paid = !!state.paid || liveWithoutEnd;
+    return {
+      included: paid && catalogPlan,
+      paid,
+      plan: state.plan || user.plan || 'free',
+      status: state.status || null,
+      source: 'stripe',
+      paidUntil: state.paidUntil || null,
+      cancelling: !!state.cancelling,
+      reason: state.reason,
+    };
+  }
+  // No subscription on record: manual/comped accounts keep working on the plan
+  // label exactly as they did before this check existed.
+  return {
+    included: catalogPlan,
+    paid: catalogPlan,
+    plan: user.plan || 'free',
+    status: state ? (state.status || null) : null,
+    source: 'users.plan',
+    paidUntil: null,
+    reason: catalogPlan
+      ? `plan ${user.plan} (no subscription on record)`
+      : `plan ${user.plan || 'free'} does not include the CLI`,
+  };
+}
 function userIncludesCli(user) {
-  if (!user) return false;
-  try { if (isOwnerUser(user)) return true; } catch (_) { /* owner helper may load later */ }
-  if (String(user.role || '').toLowerCase() === 'admin') return true;
-  return planIncludesCli(user.plan);
+  return cliEntitlementState(user).included;
 }
 // Only requests that say they are the CLI are checked here. The web app talks to
 // the same endpoint without this header, so its signed-in behaviour is unchanged.
@@ -981,11 +1031,21 @@ function requireCliEntitlement(req, res, next) {
   if (!isCli) return next();
   const user = req.user || getUserByApiKey(req);
   if (!user) return next();
-  if (userIncludesCli(user)) return next();
+  const ent = cliEntitlementState(user);
+  if (ent.included) return next();
+  // The subscription row is the authority, so the refusal says which one it is:
+  // a lapsed client is told the plan ran out, not sold an upgrade they already
+  // bought. Never echoes another client's data — only this account's own state.
+  const lapsed = ent.source === 'stripe' && ent.plan && planIncludesCli(ent.plan);
   return res.status(403).json({
-    error: 'The HaksterAI CLI and API are included with every plan from $20 a month. Upgrade to Pro, a Team plan or Enterprise to use the CLI.',
+    error: lapsed
+      ? `Your ${ent.plan} subscription is not active (${ent.reason}). Renew at https://haksterai.com/plans/ to use the CLI.`
+      : 'The HaksterAI CLI and API are included with every plan from $20 a month. Upgrade to Pro, a Team plan or Enterprise to use the CLI.',
     upgrade: '/plans/',
-    plan: user.plan || 'free',
+    plan: ent.plan || user.plan || 'free',
+    reason: ent.reason,
+    status: ent.status || null,
+    paidUntil: ent.paidUntil || null,
   });
 }
 
@@ -10210,6 +10270,166 @@ app.post('/api/admin/licenses/deactivate', requireOwner, (req, res) => {
   }
 });
 
+// ── CLI key console (owner-only) ─────────────────────────────────────
+// Owner, 2026-11-25: "users who pay get issued api keys from our admin that
+// lets us know they're good to use cli ... when or if their subscription
+// lapses then they wont be able to use our services". The key IS the account
+// credential (users.api_key, the same one the magic-link/device sign-in
+// issues), so issuing is create-or-rotate on that one field — no second key
+// store to drift. Entitlement shown here is the verified subscription state
+// from cliEntitlementState(), never the plan label alone. A full key is
+// returned once, to the owner, and is never written to a log.
+function maskCliKey(key) {
+  const s = String(key || '');
+  if (!s) return '';
+  return s.length <= 10 ? '••••' : `${s.slice(0, 6)}…${s.slice(-4)}`;
+}
+function findCliAccount(db, { userId, email }) {
+  if (userId) return db.prepare('SELECT * FROM users WHERE id = ?').get(String(userId)) || null;
+  if (email) return db.prepare('SELECT * FROM users WHERE lower(email) = lower(?)').get(String(email)) || null;
+  return null;
+}
+function auditCliKeyAction(db, { userId, action, oldKey, newKey, reason, performedBy }) {
+  try {
+    db.prepare(`INSERT INTO api_key_audit (user_id, action, old_key, new_key, reason, performed_by)
+                VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(userId, action, oldKey || null, newKey || null, String(reason || '').slice(0, 200), String(performedBy || 'owner').slice(0, 120));
+  } catch (e) {
+    console.error('[cli-keys] audit failed:', e.message);
+  }
+}
+
+app.get('/api/admin/cli-keys', requireOwner, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  try {
+    const db = getDb();
+    const rows = db.prepare(`SELECT id, username, email, role, plan, status, api_key, created_at, updated_at, last_login_at
+                             FROM users ORDER BY created_at DESC LIMIT 500`).all();
+    const accounts = rows.map((u) => {
+      const e = cliEntitlementState(u);
+      return {
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        role: u.role,
+        plan: u.plan,
+        accountStatus: u.status,
+        planAllowsCli: planIncludesCli(u.plan),
+        cliIncluded: e.included,
+        entitlement: { plan: e.plan, status: e.status, source: e.source, paidUntil: e.paidUntil, reason: e.reason },
+        keyMasked: maskCliKey(u.api_key),
+        hasKey: !!u.api_key,
+        lastLoginAt: u.last_login_at || null,
+        createdAt: u.created_at || null,
+      };
+    });
+    const summary = {
+      total: accounts.length,
+      included: accounts.filter((a) => a.cliIncluded).length,
+      lapsed: accounts.filter((a) => a.planAllowsCli && !a.cliIncluded).length,
+      suspended: accounts.filter((a) => a.accountStatus !== 'active').length,
+    };
+    res.json({ accounts, summary, minPriceCents: CLI_MIN_PRICE_CENTS });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/cli-keys/issue', requireOwner, (req, res) => {
+  try {
+    const db = getDb();
+    const { userId, email, rotate } = req.body || {};
+    const user = findCliAccount(db, { userId, email });
+    if (!user) return res.status(404).json({ error: 'No account for that email or id' });
+    const oldKey = user.api_key;
+    let key = oldKey;
+    let action = 'create';
+    if (!oldKey || rotate) {
+      key = 'hkai_' + crypto.randomBytes(24).toString('hex');
+      db.prepare('UPDATE users SET api_key = ?, updated_at = unixepoch() WHERE id = ?').run(key, user.id);
+      // A rotated key must invalidate the old one immediately: rotating the
+      // single users.api_key field does that, and a client who already
+      // installed the old key sees 401 on its next call.
+      action = rotate && oldKey ? 'rotate' : 'create';
+    }
+    auditCliKeyAction(db, {
+      userId: user.id,
+      action,
+      oldKey: action === 'rotate' ? oldKey : null,
+      newKey: key,
+      reason: action === 'rotate' ? 'owner rotated the CLI key' : 'owner issued the CLI key',
+      performedBy: (req.user && req.user.email) || 'owner',
+    });
+    const e = cliEntitlementState({ ...user, api_key: key });
+    res.json({
+      ok: true,
+      key,
+      action,
+      showOnce: true,
+      account: { id: user.id, email: user.email, username: user.username, plan: user.plan, status: user.status },
+      cliIncluded: e.included,
+      entitlement: { plan: e.plan, status: e.status, source: e.source, paidUntil: e.paidUntil, reason: e.reason },
+      install: {
+        server: 'https://haksterai.com',
+        exportLine: `export HAKSTER_API_KEY=${key}`,
+        whoami: 'hakster whoami',
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/cli-keys/revoke', requireOwner, (req, res) => {
+  try {
+    const db = getDb();
+    const { userId, email, reason } = req.body || {};
+    const user = findCliAccount(db, { userId, email });
+    if (!user) return res.status(404).json({ error: 'No account for that email or id' });
+    // Revoking kills the key and suspends the account in one write, so the CLI,
+    // the web app and every API route stop at the same moment.
+    const deadKey = 'hkai_revoked_' + crypto.randomBytes(12).toString('hex');
+    db.prepare("UPDATE users SET api_key = ?, status = 'suspended', updated_at = unixepoch() WHERE id = ?").run(deadKey, user.id);
+    auditCliKeyAction(db, {
+      userId: user.id,
+      action: 'revoke',
+      oldKey: user.api_key,
+      reason: reason || 'owner revoked CLI access',
+      performedBy: (req.user && req.user.email) || 'owner',
+    });
+    res.json({ ok: true, account: { id: user.id, email: user.email }, status: 'suspended' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/cli-keys/restore', requireOwner, (req, res) => {
+  try {
+    const db = getDb();
+    const { userId, email } = req.body || {};
+    const user = findCliAccount(db, { userId, email });
+    if (!user) return res.status(404).json({ error: 'No account for that email or id' });
+    // Restore reactivates the account and mints a fresh key, because the
+    // revoked key is gone for good. Entitlement is still whatever the
+    // subscription says — restoring access does not grant a paid plan.
+    const key = 'hkai_' + crypto.randomBytes(24).toString('hex');
+    db.prepare("UPDATE users SET api_key = ?, status = 'active', updated_at = unixepoch() WHERE id = ?").run(key, user.id);
+    auditCliKeyAction(db, {
+      userId: user.id,
+      action: 'reactivate',
+      oldKey: user.api_key,
+      newKey: key,
+      reason: 'owner restored CLI access',
+      performedBy: (req.user && req.user.email) || 'owner',
+    });
+    const e = cliEntitlementState({ ...user, api_key: key, status: 'active' });
+    res.json({ ok: true, key, cliIncluded: e.included, entitlement: { plan: e.plan, status: e.status, reason: e.reason } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Stripe Subscription Status ── check current user's subscription ─────
 app.get('/api/stripe/status', (req, res) => {
   const stripe = getStripe();
@@ -10651,13 +10871,23 @@ app.get('/api/auth/me', (req, res) => {
       tokenBalance: user.token_balance || 0,
     },
     // The CLI's own answer: is this account allowed to run the CLI, and where
-    // is the line? Same derivation the request guard uses (PRICING_CATALOG),
-    // so `hakster whoami` can never disagree with the 403 the API sends.
-    cli: {
-      included: userIncludesCli(user),
-      minPriceCents: CLI_MIN_PRICE_CENTS,
-      upgrade: '/plans/',
-    },
+    // is the line? Same derivation the request guard uses — verified
+    // subscription first, plan label only with no subscription row — so
+    // `hakster whoami` can never disagree with the 403 the API sends. The
+    // verified fields are what let a lapsed account see that it ran out.
+    cli: (() => {
+      const e = cliEntitlementState(user);
+      return {
+        included: e.included,
+        minPriceCents: CLI_MIN_PRICE_CENTS,
+        upgrade: '/plans/',
+        plan: e.plan,
+        status: e.status,
+        source: e.source,
+        paidUntil: e.paidUntil,
+        reason: e.reason,
+      };
+    })(),
   });
 });
 

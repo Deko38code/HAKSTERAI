@@ -100,6 +100,32 @@ import Layout from '../../layouts/Layout.astro';
         <p id="risk-error" class="mt-3 hidden text-xs text-[#ef4444]"></p>
       </section>
 
+      <section id="cli-keys" class="mb-6 rounded-xl border border-[#1e1e2e] bg-[#111118] p-4 sm:p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-lg font-semibold">CLI keys &amp; entitlement</h2>
+            <p class="mt-1 text-xs text-[#64748b]">Every account's CLI access, decided by its live subscription — a lapsed plan stops working without anyone touching it. Issue, rotate or revoke the key the CLI signs in with; the full key is shown once.</p>
+          </div>
+          <button id="cli-refresh" class="rounded-lg border border-[#7c3aed]/30 bg-[#7c3aed]/20 px-3 py-2 text-xs font-medium text-[#c4b5fd]">↻ Refresh</button>
+        </div>
+        <div id="cli-summary" class="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div class="text-xs text-[#64748b]">Loading CLI accounts…</div></div>
+        <div id="cli-issued" class="mb-4 hidden rounded-lg border border-[#00ff88]/30 bg-[#00ff88]/5 p-3 text-xs">
+          <div class="mb-1 font-semibold text-[#00ff88]">New key — copy it now, it is shown once</div>
+          <code id="cli-issued-key" class="block break-all rounded bg-[#0a0a0f] px-2 py-1 font-mono text-[#e2e8f0]"></code>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button id="cli-copy" class="rounded border border-[#00ff88]/30 px-2 py-1 text-[#00ff88]">Copy key</button>
+            <span id="cli-issued-note" class="text-[#94a3b8]"></span>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[860px] text-left text-xs">
+            <thead class="text-[10px] uppercase text-[#64748b]"><tr><th class="px-3 py-2">Account</th><th class="px-3 py-2">Plan</th><th class="px-3 py-2">Subscription</th><th class="px-3 py-2">CLI</th><th class="px-3 py-2">Key</th><th class="px-3 py-2">Actions</th></tr></thead>
+            <tbody id="cli-body" class="divide-y divide-[#1e1e2e]"><tr><td colspan="6" class="px-3 py-5 text-center text-[#64748b]">Loading CLI accounts…</td></tr></tbody>
+          </table>
+        </div>
+        <p id="cli-error" class="mt-3 hidden text-xs text-[#ef4444]"></p>
+      </section>
+
       <div class="bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-sm text-left">
@@ -428,6 +454,82 @@ import Layout from '../../layouts/Layout.astro';
     });
     document.getElementById('risk-refresh')?.addEventListener('click', loadRisk);
 
+    // ── CLI keys & entitlement ────────────────────────────────────────
+    // The key here is the account's own users.api_key — the same credential the
+    // magic-link/device sign-in hands the CLI. Entitlement is the server's
+    // verified subscription answer, never a guess made in the browser.
+    let cliAccounts = [];
+    function fmtEpoch(sec) { if (!sec) return '—'; try { return new Date(Number(sec) * 1000).toLocaleDateString(); } catch { return '—'; } }
+    function renderCliKeys(data) {
+      const s = data.summary || {};
+      document.getElementById('cli-summary').innerHTML = [
+        ['Accounts', s.total ?? 0], ['CLI included', s.included ?? 0], ['Lapsed', s.lapsed ?? 0], ['Suspended', s.suspended ?? 0]
+      ].map(([k, v]) => `<div class="rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-3 py-2"><div class="text-[10px] uppercase text-[#64748b]">${k}</div><div class="text-lg font-bold">${v}</div></div>`).join('');
+      cliAccounts = data.accounts || [];
+      const body = document.getElementById('cli-body');
+      if (!cliAccounts.length) { body.innerHTML = '<tr><td colspan="6" class="px-3 py-5 text-center text-[#64748b]">No accounts yet.</td></tr>'; return; }
+      body.innerHTML = cliAccounts.map(a => {
+        const badge = a.cliIncluded
+          ? '<span class="rounded border border-[#00ff88]/40 bg-[#00ff88]/10 px-2 py-0.5 text-[#00ff88]">included</span>'
+          : (a.planAllowsCli ? '<span class="rounded border border-[#fb7185]/40 bg-[#fb7185]/10 px-2 py-0.5 text-[#fb7185]">lapsed</span>' : '<span class="rounded border border-[#64748b]/40 px-2 py-0.5 text-[#94a3b8]">no CLI</span>');
+        const sub = a.entitlement || {};
+        const subTxt = sub.source === 'stripe'
+          ? `${escapeHtml(sub.status || '')}${sub.paidUntil ? ' · until ' + fmtEpoch(sub.paidUntil) : ''}`
+          : escapeHtml(sub.source || 'users.plan');
+        const actions = a.accountStatus !== 'active'
+          ? `<button data-cli-act="restore" data-cli-id="${escapeHtml(a.id)}" class="rounded border border-[#00ff88]/30 px-2 py-1 text-[#00ff88]">Restore</button>`
+          : `<button data-cli-act="issue" data-cli-id="${escapeHtml(a.id)}" class="rounded border border-[#7c3aed]/30 px-2 py-1 text-[#c4b5fd]">Issue key</button>
+             <button data-cli-act="rotate" data-cli-id="${escapeHtml(a.id)}" class="rounded border border-[#fbbf24]/30 px-2 py-1 text-[#fbbf24]">Rotate</button>
+             <button data-cli-act="revoke" data-cli-id="${escapeHtml(a.id)}" class="rounded border border-[#fb7185]/30 px-2 py-1 text-[#fb7185]">Revoke</button>`;
+        return `<tr class="align-top hover:bg-[#1e1e2e]/40">
+          <td class="px-3 py-3"><div class="font-medium">${escapeHtml(a.username || '')}</div><div class="text-[#64748b]">${escapeHtml(a.email || '')}</div></td>
+          <td class="px-3 py-3">${escapeHtml(a.plan || '')}<div class="text-[#64748b]">${escapeHtml(a.accountStatus || '')}</div></td>
+          <td class="px-3 py-3 text-[#94a3b8]">${subTxt}<div class="text-[#64748b]">${escapeHtml(sub.reason || '')}</div></td>
+          <td class="px-3 py-3">${badge}</td>
+          <td class="px-3 py-3 font-mono text-[#94a3b8]">${escapeHtml(a.keyMasked || '—')}</td>
+          <td class="px-3 py-3"><div class="flex flex-wrap gap-1">${actions}</div></td>
+        </tr>`;
+      }).join('');
+    }
+    async function loadCliKeys() {
+      const error = document.getElementById('cli-error');
+      error.classList.add('hidden');
+      try {
+        const res = await fetch(`${API}/api/admin/cli-keys`, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) throw new Error(`CLI keys unavailable (${res.status})`);
+        renderCliKeys(await res.json());
+      } catch (err) { error.textContent = err.message || 'Could not load CLI accounts.'; error.classList.remove('hidden'); }
+    }
+    function showIssuedKey(key, note) {
+      document.getElementById('cli-issued-key').textContent = key || '';
+      document.getElementById('cli-issued-note').textContent = note || '';
+      document.getElementById('cli-issued').classList.remove('hidden');
+    }
+    document.getElementById('cli-copy')?.addEventListener('click', async () => {
+      const text = document.getElementById('cli-issued-key').textContent || '';
+      try { await navigator.clipboard.writeText(text); document.getElementById('cli-issued-note').textContent = 'Copied.'; }
+      catch { document.getElementById('cli-issued-note').textContent = 'Select and copy manually.'; }
+    });
+    document.getElementById('cli-body')?.addEventListener('click', async event => {
+      const button = event.target.closest('[data-cli-act]');
+      if (!button) return;
+      const act = button.dataset.cliAct;
+      const id = button.dataset.cliId;
+      const account = cliAccounts.find(a => String(a.id) === String(id));
+      if (act === 'revoke' && !window.confirm(`Revoke CLI access for ${account?.email || 'this account'}? Its key stops working immediately.`)) return;
+      if (act === 'rotate' && !window.confirm(`Rotate the CLI key for ${account?.email || 'this account'}? The installed key stops working.`)) return;
+      button.disabled = true;
+      try {
+        const body = act === 'issue' ? { userId: id, rotate: false } : act === 'rotate' ? { userId: id, rotate: true } : { userId: id };
+        const res = await fetch(`${API}/api/admin/cli-keys/${act}`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.error || 'Action failed');
+        if (result.key) showIssuedKey(result.key, result.cliIncluded ? 'CLI included — ready to use.' : 'Saved, but this account’s subscription does not include the CLI.');
+        await loadCliKeys();
+      } catch (err) { window.alert(err.message || 'Could not update the key.'); button.disabled = false; }
+    });
+    document.getElementById('cli-refresh')?.addEventListener('click', loadCliKeys);
+
     async function load() {
       try {
         const headers = authHeaders();
@@ -436,6 +538,7 @@ import Layout from '../../layouts/Layout.astro';
           fetch(`${API}/api/access-logs?limit=1000`, { headers })
         ]);
         loadRisk();
+        loadCliKeys();
 
         if (!usersRes.ok || !logsRes.ok) {
           document.getElementById('users-body').innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-[#ef4444]">Admin sign-in required.</td></tr>`;

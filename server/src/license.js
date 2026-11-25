@@ -172,17 +172,33 @@ async function checkLicense(allowTrial = true) {
 
     if (status === 200 && data && data.user) {
       const { plan, status: acctStatus, email } = data.user;
-      // The owner's own account (is_owner from /api/auth/me, the email-based
-      // owner check) is entitled to every surface regardless of the plan
-      // label, at the owner's direction ("add to my owner account for free
-      // access always"). Client accounts are unaffected: they still need an
-      // active pro/enterprise plan, so no client is ever granted a free ride.
-      const paid = acctStatus === 'active'
-        && (plan === 'pro' || plan === 'enterprise' || data.user.is_owner === true);
-      writeCache({ apiKey, paid, plan, email, validatedAt: Date.now() });
+      const cli = data.cli || null;
+      // The server is the authority. Since 2026-11-25 `/api/auth/me` answers
+      // `cli.included` from the verified subscription row (a lapsed 'pro' reads
+      // false), so the CLI simply repeats that verdict. The older plan-label
+      // rule stays only as a fallback for an older server that does not send
+      // the field — and the owner's own account is always entitled.
+      const serverSays = cli && typeof cli.included === 'boolean' ? cli.included : null;
+      const paid = acctStatus === 'active' && (serverSays !== null
+        ? (serverSays === true || data.user.is_owner === true)
+        : (plan === 'pro' || plan === 'enterprise' || data.user.is_owner === true));
+      const paidUntil = (cli && cli.paidUntil) || null;
+      const lapseReason = (cli && cli.reason) || null;
+      writeCache({ apiKey, paid, plan, email, paidUntil, reason: lapseReason, validatedAt: Date.now() });
 
       if (paid) {
         return { valid: true, message: `✅ Signed in — ${plan} plan.`, plan, email };
+      }
+      // A lapsed paid account is told what happened, not sold an upgrade it
+      // already bought. Server-side gates still refuse the API call, so this is
+      // the local pre-flight message only (§40 truthfulness).
+      if (plan && plan !== 'free' && lapseReason) {
+        return {
+          valid: false,
+          message: `❌ Your ${plan} subscription is not active — ${lapseReason}.\n   Renew at https://haksterai.com/plans/ then run: hakster init`,
+          plan,
+          email,
+        };
       }
       return trialGate(allowTrial, `Signed in as ${email} (${plan} plan).`);
     }
