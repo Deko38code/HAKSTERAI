@@ -25,9 +25,61 @@ const { spawn } = require('child_process');
 // lives. Called directly (cli/index.js, cli/tui-entry.mjs) the caller passes
 // __dirname-derived paths; the TUI bundle passes HAKSTER_CLI_DIR, because a
 // bundled module's __dirname is the bundle's directory, not cli/src.
+//
+// Whichever path a session is started by, the directory must be the one that
+// holds THIS CLI's package.json — the version it reports is what every update
+// answer is compared against. A launch path that resolved to a directory with
+// no package.json made the running build read as 0.0.0, so every published
+// version looked like an update and the header told the owner to "pull to
+// update" on a tree that was already current (2026-11-26). So each candidate is
+// checked for a real version before it is used, and a version that still cannot
+// be read is reported as unknown — never compared (§10, §44.3).
 const DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === 'string' ? path.join(__dirname, '..') : '');
+function hasPkgVersion(dir) {
+  const pkg = readJson(path.join(String(dir), 'package.json'), null);
+  return !!(pkg && pkg.version);
+}
 function cliDirOf(explicit) {
-  return path.resolve(String(explicit || DEFAULT_CLI_DIR || process.cwd()));
+  const candidates = [];
+  const add = (dir) => {
+    if (!dir) return;
+    try {
+      const abs = path.resolve(String(dir));
+      if (!candidates.includes(abs)) candidates.push(abs);
+    } catch {
+      /* an unusable candidate is simply skipped */
+    }
+  };
+  // A caller that names a directory holding a package.json means it — that is
+  // the callers' own install (tests do the same). It is not silently replaced.
+  if (explicit) {
+    try {
+      const named = path.resolve(String(explicit));
+      if (fs.existsSync(path.join(named, 'package.json'))) return named;
+    } catch {
+      /* fall through to the candidates */
+    }
+  }
+  add(explicit);
+  add(process.env.HAKSTER_CLI_DIR);
+  try { if (typeof __dirname === 'string' && __dirname) add(path.join(__dirname, '..')); } catch { /* ESM bundle */ }
+  try {
+    if (process.argv[1]) {
+      const entry = path.dirname(path.resolve(process.argv[1]));
+      add(entry);
+      if (path.basename(entry) === 'src') add(path.dirname(entry));
+    }
+  } catch {
+    /* no argv: fall through to the configured directory */
+  }
+  add(process.cwd());
+  for (const dir of candidates) if (hasPkgVersion(dir)) return dir;
+  return candidates[0] || path.resolve(process.cwd());
+}
+/** A version this CLI can actually be compared against. */
+function versionKnown(version) {
+  const v = String(version || '');
+  return !!v && v !== '0.0.0';
 }
 const UPDATES_DIR = path.join(os.homedir(), '.hakster', 'updates');
 const STAGED_DIR = path.join(UPDATES_DIR, 'staged');
@@ -180,6 +232,14 @@ async function checkForUpdate(opts = {}) {
   const running = runningInfo(opts.cliDir);
   const origin = opts.server || serverUrl();
   if (!origin) return { status: 'unknown', reason: 'no server configured', checkedAt: new Date().toISOString(), running };
+  // Without this CLI's own version there is nothing truthful to compare: every
+  // published release would read as "newer than 0.0.0" and stage itself. That is
+  // how the Dell's header came to say "v0.3.68 · pull to update" on a tree that
+  // was already v0.3.68 (owner, 2026-11-26). Report unknown, stage nothing and
+  // leave the record alone (§10, §13, §44.3).
+  if (!versionKnown(running.version)) {
+    return { status: 'unknown', reason: 'cannot read this install’s package.json', checkedAt: new Date().toISOString(), running };
+  }
 
   // 1. Cheap path: an endpoint that reports the published version without a
   // download. It is absent until the server next restarts, so a null answer
@@ -293,12 +353,17 @@ function pendingInfo(explicitDir) {
   // A stage from an OLDER version is not an update: it is the leftover record of
   // a check taken before this install was upgraded. Reporting it as staged would
   // announce a downgrade and offer to install one on the next start.
+  // A record taken from an unreadable install (runningVersion 0.0.0) describes
+  // no update at all — it is the same 0.0.0 mistake as checkForUpdate's, and the
+  // startup screens must not paint a badge from it (§10, §44.3).
+  const runningKnown = versionKnown(running.version);
   return {
     ...pending,
     verified: ok,
     isCurrent: sameBuild(pending, running),
-    superseded: cmpVersion(pending.version, running.version) < 0,
+    superseded: runningKnown && cmpVersion(pending.version, running.version) < 0,
     runningVersion: running.version,
+    unknown: !runningKnown,
   };
 }
 
@@ -334,9 +399,15 @@ function appliedNotice(explicitDir, maxAgeMs) {
  * staged package changes dependencies the update is left for `npm install`.
  */
 function applyPending(explicitDir) {
-  const pending = pendingInfo();
+  // The record is judged against the same directory it would be copied into:
+  // "is this stage newer than the install?" is a question about that install.
+  const pending = pendingInfo(explicitDir);
   if (!pending) return null;
   const target = cliDirOf(explicitDir);
+  // Copying files needs to know what it is upgrading. With no readable version
+  // the "target" could be any directory this process happened to be started
+  // from, so nothing is written (§2.1, §8).
+  if (pending.unknown) return { applied: false, reason: 'cannot read this install’s package.json', version: pending.version };
   if (pending.appliedAt) return { applied: false, reason: 'already applied', version: pending.version };
   if (!pending.verified) return { applied: false, reason: 'staged package failed verification', version: pending.version };
   if (pending.superseded) {

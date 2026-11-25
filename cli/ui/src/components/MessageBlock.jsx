@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { TextAttributes } from '@opentui/core';
 import { clip } from './LiveSidebar.jsx';
+import { fmtDur } from '../utils/duration.js';
 import {
   SC_TICK_MS,
   nextScrambleNonce,
@@ -35,7 +36,10 @@ const RESULT_LINES = 3;
 
 const ROLE_STYLE = {
   user: { border: 'cyan', label: 'you' },
-  assistant: { border: 'gray', label: 'hakster' },
+  // Owner, 2026-11-26: "add on hakster output card to HAKSTER-AI AND HIS TIME HE
+  // TOOK TO RESPOND ON CARD". The card names him HAKSTER-AI and states the
+  // turn's own measured duration beside it (see the header row below).
+  assistant: { border: 'gray', label: 'HAKSTER-AI' },
   system: { border: 'yellow', label: 'system' },
 };
 
@@ -222,10 +226,8 @@ function flattenArgs(args) {
  *  smartness.mjs scores with, so the card and the meter agree. */
 const isErrorResult = (result) => /^Error[:\n]|^❌/i.test(String(result == null ? '' : result).trim());
 
-function fmtDur(ms) {
-  const n = Math.max(0, Math.round(Number(ms) || 0));
-  return n < 1000 ? `${n}ms` : `${(n / 1000).toFixed(1)}s`;
-}
+/* fmtDur now lives in utils/duration.js so the transcript card and the
+ * ▶ Result card above the composer print a duration the same way. */
 
 /** One shared ticker per pending card — idle turns cost zero renders. */
 function useSpinnerFrame(active) {
@@ -321,9 +323,19 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   return (
     <box style={{ width, flexShrink: 0, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: border, paddingLeft: 1, paddingRight: 1 }}>
       {/* Auto-compact drops the label row: the border colour still says whose
-          turn it is (cyan = you, gray = hakster, yellow = system). */}
+          turn it is (cyan = you, gray = HAKSTER-AI, yellow = system).
+          The answer card also carries the turn's own duration — stamped once by
+          useAgentStream when the ladder finishes, so it is a measurement, never
+          a guess. A turn that never produced a card has no time to show, and a
+          live turn shows none (the spinner row above already carries the ticking
+          elapsed) (§10). */}
       {compact ? null : (
-        <text fg={border} attributes={TextAttributes.BOLD}>{roleStyle.label}</text>
+        <box style={{ width: inner, flexDirection: 'row', overflow: 'hidden', flexShrink: 0 }}>
+          <text fg={border} attributes={TextAttributes.BOLD}>{roleStyle.label}</text>
+          {message.role === 'assistant' && message.ms != null ? (
+            <text fg="gray">{` · ${fmtDur(message.ms)}`}</text>
+          ) : null}
+        </box>
       )}
       {message.images ? (
         <text fg="gray">{`⊸ ${message.imageName || `${message.images} image`}`}</text>

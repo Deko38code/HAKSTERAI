@@ -75,7 +75,9 @@ test('the password can be set from inside the TUI, hidden', () => {
 
 test('the hero mark is shared, not copied, and carries the name', () => {
   const hero = read('src', 'components', 'HeroLogo.jsx');
-  assert.match(hero, /export const HERO_NAME = 'HAKSTERAI';/);
+  // Renamed 2026-11-26 at the owner's direction ("WHERE IT SAYS HAKSTER CHANGE
+  // TO HAKSTER-AI"); the wordmark is now HAKSTER-AI, so this pins that name.
+  assert.match(hero, /export const HERO_NAME = 'HAKSTER-AI';/);
   assert.match(read('src', 'components', 'DecodeSplash.jsx'), /from '\.\/HeroLogo\.jsx'/, 'the splash stopped importing the shared wordmark');
   assert.match(read('src', 'components', 'CatalogPopout.jsx'), /<HeroLogo width=\{inner\} \/>/, 'the /menu popout does not draw the hero logo');
   assert.match(approvalSource, /<HeroLogo width=\{inner\}/, 'the approval window does not draw the hero logo');

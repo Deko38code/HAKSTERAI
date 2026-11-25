@@ -31,6 +31,11 @@ function readStartup() {
       return { applied, status: { status: 'applied', version: applied.version, from: applied.from, checkedAt: applied.appliedAt } };
     }
     if (pending && pending.version) {
+      // A record taken when this install's own version could not be read
+      // describes no update — it was written as "newer than 0.0.0". Painting a
+      // badge from it is how the Dell's header claimed "pull to update" on an
+      // already-current tree (owner, 2026-11-26). Say nothing instead (§10).
+      if (pending.unknown) return { applied: null, status: { status: 'idle' } };
       // A leftover record from a version already behind this install is not a
       // pending update: it would announce a downgrade in the header and offer to
       // install one on the next start.
@@ -60,10 +65,32 @@ function readStartup() {
   return { applied: null, status: { status: 'idle' } };
 }
 
-export default function useCliUpdate(intervalMs = 30 * 60 * 1000, sessionVersion = '') {
+/* How often to check, from `updateCheckMinutes` (default 15). Owner, 2026-11-26:
+ * "lets make the update check faster then 30 min" → 15. The check is a single
+ * small GET of /cli/latest.json while the install is current, so the interval is
+ * cheap to shorten; an explicit argument still wins, and anything unreadable
+ * falls back to the default rather than to no check at all. Clamped to 1–240
+ * minutes so a typo cannot poll the door every second or stop checks entirely. */
+const DEFAULT_CHECK_MINUTES = Number(prefs.load().updateCheckMinutes) || 15;
+function resolveIntervalMs(explicitMs) {
+  const given = Number(explicitMs);
+  if (Number.isFinite(given) && given > 0) return given;
+  let mins = Number(prefs.load().updateCheckMinutes);
+  if (!Number.isFinite(mins) || mins <= 0) mins = DEFAULT_CHECK_MINUTES;
+  mins = Math.min(240, Math.max(1, mins));
+  // A small per-session jitter keeps many CLIs from firing in lockstep.
+  const jitter = Math.round((Math.random() - 0.5) * 20000);
+  return mins * 60 * 1000 + jitter;
+}
+
+export default function useCliUpdate(intervalMs = null, sessionVersion = '') {
   // Read the install/update facts exactly once — they describe this launch.
   const startup = useRef(null);
   if (startup.current === null) startup.current = readStartup();
+  // Fixed for the life of the session, jitter included, so a re-render never
+  // resets the timer and two sessions never fire in lockstep.
+  const tickMs = useRef(0);
+  if (!tickMs.current) tickMs.current = resolveIntervalMs(intervalMs);
   const applied = startup.current.applied;
 
   const [state, setState] = useState(startup.current.status);
@@ -204,7 +231,7 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000, sessionVersion
       }
     };
     tick();
-    const id = setInterval(tick, intervalMs);
+    const id = setInterval(tick, tickMs.current);
     try {
       if (typeof id.unref === 'function') id.unref();
     } catch {

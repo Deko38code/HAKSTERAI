@@ -22,7 +22,7 @@ const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // Same list and ports as the old CLI's ONLINE PORTS panel.
 export const EXPECTED_SERVICES = [
-  { port: 3579, name: 'haksterAi', proto: 'http' },
+  { port: 3579, name: 'HAKSTER-AI', proto: 'http' },
   { port: 8081, name: 'cinevault', proto: 'http' },
   { port: 4000, name: 'phantom', proto: 'http' },
   { port: 8082, name: 'claude-proxy', proto: 'http' },

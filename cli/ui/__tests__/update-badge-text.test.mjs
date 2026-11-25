@@ -10,6 +10,12 @@
  *   3. the narrower forms keep the same instruction ("Restart to update"),
  *      and the "installs on restart" wording stays with the *staged* state,
  *      which is a different fact.
+ *
+ * Amended 2026-11-26 at the owner's direction ("we need it to say the version
+ * up top when its installed where update avalible would be"): the header's
+ * widest form and the transcript line now name the installed version. The exact
+ * §43.2 string is kept as the version-less fallback, so the wording rule still
+ * holds — only the notice gained its version.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,11 +29,14 @@ const app = fs.readFileSync(path.join(cliRoot, 'ui/src/App.jsx'), 'utf8');
 const INSTALLED = '✔ Update installed · Restart to update';
 
 test('the installed-update wording is the owner\'s, verbatim', () => {
-  // Once as the top-line badge, once as the transcript line for the same state.
-  assert.ok(app.includes(`showNotice('${INSTALLED}');`), 'the transcript line says it');
+  // The transcript line states the version (owner, 2026-11-26) while keeping
+  // the pinned instruction; the badge keeps the exact §43.2 string as its
+  // version-less fallback.
+  assert.ok(app.includes('showNotice(`✔ Update v${update.version} installed · Restart to update`)'),
+    'the transcript line names the version and keeps the instruction');
   assert.ok(app.includes(`'${INSTALLED}',`), 'the badge says it');
   const codeOnly = app.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  assert.equal(codeOnly.split(INSTALLED).length - 1, 2, 'and nowhere else in code');
+  assert.equal(codeOnly.split(INSTALLED).length - 1, 1, 'the exact string appears once in code (the fallback)');
 });
 
 test('the check is a mono glyph, not a colour emoji', () => {

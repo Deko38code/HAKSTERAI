@@ -26,6 +26,13 @@ const DEFAULTS = {
   ads: true, // the TUI's ad rail
   monitorFollow: true, // the monitor view follows the newest line
   updateCheck: true, // background CLI update check
+  // Minutes between update checks. Owner, 2026-11-26: "lets make the update
+  // check faster then 30 min" → 15. A check is one small GET of
+  // /cli/latest.json while the install is current, so a quarter hour costs
+  // nothing and a release reaches a running session well inside the old half
+  // hour. Clamped 1–240 in useCliUpdate, so a one-minute check is just this key
+  // set to 1; a CLI preference, never the model config (§22).
+  updateCheckMinutes: 15,
   opaqueBackdrop: false, // false = transparent over the terminal's wallpaper
   intro: true, // the five-line decode splash on start
   graphics: true, // real logo image in kitty / Ghostty / WezTerm (no-op elsewhere)
@@ -48,6 +55,7 @@ const META = {
   ads: { label: 'Ad rail', detail: 'the sponsor line under the chat column' },
   monitorFollow: { label: 'Monitor follow', detail: 'the live monitor follows the newest line' },
   updateCheck: { label: 'Update check', detail: 'background CLI update check on start' },
+  updateCheckMinutes: { label: 'Check every', detail: 'minutes between update checks (1–240)' },
   opaqueBackdrop: { label: 'Opaque backdrop', detail: 'solid background over the terminal wallpaper' },
   intro: { label: 'Intro splash', detail: 'the five-line decode screen on start' },
   graphics: { label: 'Kitty graphics', detail: 'real logo image in kitty / Ghostty / WezTerm' },

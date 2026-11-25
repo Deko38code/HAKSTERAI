@@ -1182,12 +1182,22 @@ export function useAgentStream({
         }
       } catch { /* the recap must never fail a finished run */ }
 
+      // How long the turn took, stamped on its own card (owner, 2026-11-26:
+      // "add on hakster output card to HAKSTER-AI AND HIS TIME HE TOOK TO
+      // RESPOND ON CARD"). One measurement taken when the ladder finishes —
+      // success, failure and cancel all arrive here — written onto the turn's
+      // own message so the card can state it. `patch` no-ops when the card was
+      // dropped (a failed turn that never spoke), so nothing is invented and no
+      // orphan time floats in the transcript (§10).
+      const turnMs = startedAtRef.current ? Math.max(0, Date.now() - startedAtRef.current) : 0;
+      if (turnMs) patch(assistantId, (m) => ({ ...m, ms: turnMs, finishedAt: Date.now() }));
+
       abortRef.current = null;
       activeRunIdRef.current = null;
       // Once the stream is over there is nothing left to answer: a pending
       // approval whose socket has closed can no longer be reported anywhere.
       setPending(null);
-      setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
+      setElapsedMs(turnMs);
     },
     [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, pushActivity, sessionId, setPending, setStatusBoth, system],
   );

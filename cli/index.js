@@ -578,7 +578,7 @@ const program = new Command();
 
 program
   .name('hakster')
-  .description('haksterAi CLI — manage files, sessions, and agent interactions from the terminal')
+  .description('HAKSTER-AI CLI — manage files, sessions, and agent interactions from the terminal')
   .version(pkg.version);
 
 // ── update: check now, download and stage; the next launch applies it ──────
@@ -1059,7 +1059,7 @@ program
     // or quick sessions. The one-line header still prints command hints.
     const noSplash = process.env.HAKSTER_NO_SPLASH === '1' || process.env.NO_SPLASH === '1';
     if (noSplash) {
-      console.log(`${C.green}  👻 HAKSTERAI AGENT${C.reset}  ${C.gray}·${C.reset}  ${C.gray}autonomous mode${C.reset}`);
+      console.log(`${C.green}  👻 HAKSTER-AI AGENT${C.reset}  ${C.gray}·${C.reset}  ${C.gray}autonomous mode${C.reset}`);
       console.log(`${C.gray}  Commands: /menu /help /tools /models /clear /exit${C.reset}\n`);
     } else {
       try {
@@ -1068,7 +1068,7 @@ program
       } catch {
         // Fallback to simple banner if ui fails
         console.log();
-        console.log(`${C.green}  👻 HAKSTERAI AGENT${C.reset}  ${C.gray}·${C.reset}  ${C.gray}autonomous mode${C.reset}`);
+        console.log(`${C.green}  👻 HAKSTER-AI AGENT${C.reset}  ${C.gray}·${C.reset}  ${C.gray}autonomous mode${C.reset}`);
         console.log(`${C.gray}  Commands: /menu /help /tools /models /clear /exit${C.reset}`);
         console.log();
       }
@@ -2450,7 +2450,7 @@ program
 // ── init ────────────────────────────────────────────────────────────────
 program
   .command('init')
-  .description('Initialize haksterAi CLI — set server URL and API key')
+  .description('Initialize HAKSTER-AI CLI — set server URL and API key')
   .option('-s, --server <url>', 'Server URL (e.g. http://your-server:3579)')
   .option('-k, --key <key>', 'API key for authentication')
   .action(async (opts) => {
@@ -2460,7 +2460,7 @@ program
     const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
 
     console.log(`${C.cyan}╔══════════════════════════════════════╗${C.reset}`);
-    console.log(`${C.cyan}║${C.reset}  ${C.green}👻 HAKSTERAI CLI SETUP${C.reset}        ${C.cyan}║${C.reset}`);
+    console.log(`${C.cyan}║${C.reset}  ${C.green}👻 HAKSTER-AI CLI SETUP${C.reset}       ${C.cyan}║${C.reset}`);
     console.log(`${C.cyan}╚══════════════════════════════════════╝${C.reset}`);
     console.log();
 
@@ -2593,7 +2593,7 @@ program
     const { execFile } = require('child_process');
 
     const SERVICES = [
-      { host: '127.0.0.1',   port: 3579,  name: 'haksterAi server',      path: '/api/health' },
+      { host: '127.0.0.1',   port: 3579,  name: 'HAKSTER-AI server',      path: '/api/health' },
       { host: '127.0.0.1',   port: 4000,  name: 'phantom core',          path: '/' },
       { host: '127.0.0.1',   port: 8082,  name: 'claude-code-proxy',     path: '/' },
       { host: '127.0.0.1',   port: 5555,  name: 'miniforge',             path: '/' },
@@ -2604,8 +2604,8 @@ program
       { host: '10.0.0.251',  port: 4199,  name: 'free-lanes (Parrot)',   path: '/health' },
       { host: '10.0.0.251',  port: 4000,  name: 'phantom (Parrot)',      path: '/' },
       { host: '10.0.0.251',  port: 5555,  name: 'miniforge (Parrot)',    path: '/' },
-      { host: '10.0.0.131',  port: 3579,  name: 'haksterAi (Dell)',      path: '/api/health' },
-      { host: '10.0.0.210',  port: 3579,  name: 'haksterAi (mint)',      path: '/api/health' },
+      { host: '10.0.0.131',  port: 3579,  name: 'HAKSTER-AI (Dell)',      path: '/api/health' },
+      { host: '10.0.0.210',  port: 3579,  name: 'HAKSTER-AI (mint)',      path: '/api/health' },
     ];
 
     const probeTcp = (host, port, timeoutMs = 1200) => new Promise((resolve) => {
@@ -2646,7 +2646,7 @@ program
     }
 
     // Local listeners, labelled where we know the port.
-    const labels = { 3579: 'haksterAi', 4000: 'phantom', 4199: 'free-lanes', 5006: 'junkalot',
+    const labels = { 3579: 'HAKSTER-AI', 4000: 'phantom', 4199: 'free-lanes', 5006: 'junkalot',
       5555: 'miniforge', 5556: 'miniforge-dev', 8081: 'cinevault', 8082: 'claude-code-proxy',
       11434: 'ollama', 5432: 'postgres', 3001: 'app 3001', 3002: 'app 3002', 8888: 'app 8888',
       9999: 'app 9999', 9050: 'tor-socks', 80: 'http', 22: 'ssh', 53: 'dns' };

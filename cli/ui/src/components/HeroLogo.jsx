@@ -14,7 +14,7 @@ import { TextAttributes } from '@opentui/core';
  * popout and the approval gate can never drift into three different logos.
  *
  * Width honesty: the wordmark is exactly HERO_W cells wide. A panel narrower
- * than that draws the one-line `◆ HAKSTERAI` name instead of clipping block
+ * than that draws the one-line `◆ HAKSTER-AI` name instead of clipping block
  * letters into noise. `heroRowCount(width)` lets a caller budget the rows
  * before it builds its layout.
  */
@@ -26,10 +26,15 @@ export const HERO_FONT = {
   T: ['█████', '  █  ', '  █  ', '  █  ', '  █  '],
   E: ['█████', '█    ', '████ ', '█    ', '█████'],
   R: ['████ ', '█   █', '████ ', '█  █ ', '█   █'],
+  // Added 2026-11-26 with the rename to HAKSTER-AI (owner: "WHERE IT SAYS
+  // HAKSTER CHANGE TO HAKSTER-AI"). Both glyphs are five cells wide like every
+  // other letter, so the wordmark still builds row-for-row from the table.
+  I: [' ███ ', '  █  ', '  █  ', '  █  ', ' ███ '],
+  '-': ['     ', '     ', '█████', '     ', '     '],
 };
 
-export const HERO_WORD = 'HAKSTER';
-export const HERO_NAME = 'HAKSTERAI';
+export const HERO_WORD = 'HAKSTER-AI';
+export const HERO_NAME = 'HAKSTER-AI';
 export const HERO_GREEN = '#00ff41';
 
 // Built from the glyph table so every row is exactly the same width — a

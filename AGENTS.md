@@ -539,8 +539,13 @@ Config, And He Hears You While He Works"**. Four things it makes binding here:
    back and queued, never dropped.
 3. **The 10-second bar.** An interactive turn answers in ~10 s or less: the `claude-cli` lane starts the MCP
    core plus any server the operator's own message names (measured 11.1–11.6 s with all, 5.1–6.4 s with the
-   core), a full-auto run keeps the whole toolkit, and a change that moves latency is measured before and
-   after. A build on disk newer than the running session shows `⬆ vX installed · restart CLI to see changes`
+   core), and a change that moves latency is measured before and after. **Amended 2026-11-26 at the owner's
+   direction ("check his response time was almost 20sec this time on dell" → "go"): the full-auto exemption
+   is removed** — the approval dial no longer widens the tool set; a chat turn starts the six-server core
+   plus any server the message names, and only "all tools" loads everything (measured that day on the Dell:
+   core 3.54 s vs all 20 servers 8.81 s). The lean set is derived from `mcp.json` into a temp file; no model,
+   route, provider, rate or plan moves (§19.3, §22.4, §26). A build on disk newer than the running session
+   shows `⬆ vX installed · restart CLI to see changes`
    at the right of the cpu/ram meters, once in the transcript too.
 4. **His model is this session's config, value for value.** `claudeCliEnv()` mirrors the owner's own Claude
    Code session — relay `http://127.0.0.1:11434`, `deepseek-v4.1-flash:cloud` behind every Claude-style

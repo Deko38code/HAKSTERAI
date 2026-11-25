@@ -76,7 +76,7 @@ const PAGE_SCROLLBAR = {
   },
 };
 const SYSTEM = process.env.HAKSTER_TUI_SYSTEM
-  || 'You are haksterAi running inside a terminal dashboard. Answer briefly and use tools when they are needed.';
+  || 'You are HAKSTER-AI running inside a terminal dashboard. Answer briefly and use tools when they are needed.';
 
 /* Image attachments.
  *
@@ -634,7 +634,9 @@ export default function App({ version = '0.1.0' }) {
       const key = `installed:${update.version}`;
       if (updateAnnounced.current === key) return;
       updateAnnounced.current = key;
-      showNotice('✔ Update installed · Restart to update');
+      // Name the version here too, so the transcript says which build landed
+      // (owner, 2026-11-26: "say the version up top when its installed").
+      showNotice(`✔ Update v${update.version} installed · Restart to update`);
       return;
     }
     if (update.status !== 'staged' && update.status !== 'blocked') return;
@@ -1615,7 +1617,7 @@ export default function App({ version = '0.1.0' }) {
   const headerInner = panelW - 2;
   const guardTxt = guard ? `${guard.present}/${guard.total} files` : '';
   const headerLeftLen = (withFiles) =>
-    `● ◆ haksterAi · ${headerState}`.length + (withFiles && guardTxt ? `   ${guardTxt}`.length : 0);
+    `● ◆ HAKSTER-AI · ${headerState}`.length + (withFiles && guardTxt ? `   ${guardTxt}`.length : 0);
   const showGuard = !statusBoxShown && !!guardTxt && headerLeftLen(true) + 8 <= headerInner;
   const headerFiles = showGuard ? guardTxt : '';
   const headerLeftText = statusBoxShown ? 0 : headerLeftLen(showGuard);
@@ -1769,6 +1771,13 @@ export default function App({ version = '0.1.0' }) {
     ? [null]
     : (updateInstalled
       ? [
+          // Same line as an available update would take, and the same shape as
+          // it: "⬆ update vX · …" becomes "✔ update vX installed · …" (owner,
+          // 2026-11-26: "we need it to say the version up top when its installed
+          // where update available would be"). The wider form states the version
+          // it installed; the narrower ones keep the pinned §43.2 wording so a
+          // narrow header still says what happened.
+          `✔ update${updateVer} installed · Restart to update`,
           '✔ Update installed · Restart to update',
           '✔ installed · Restart to update',
           '✔ Restart to update',
@@ -2165,7 +2174,7 @@ export default function App({ version = '0.1.0' }) {
         graphics={prefsRef.current.graphics !== false}
         lines={[
           // Lime green on the hacker-desk hero, per the owner's 2026-11-23 note.
-          { text: '◆ haksterAi', color: '#00ff41', bold: true },
+          { text: '◆ HAKSTER-AI', color: '#00ff41', bold: true },
           { text: `CLI v${version} · ${updateLine.text}`, color: updateLine.color || 'gray', bold: !!updateLine.bold },
           { text: `model ${modelText}`, color: '#a3e635' },
           {
@@ -2191,7 +2200,7 @@ export default function App({ version = '0.1.0' }) {
           {statusBoxShown ? null : (
             <>
               <text fg={status ? (statusErr ? 'red' : 'green') : 'yellow'} attributes={TextAttributes.BOLD}>{statusErr ? '○ ' : status ? '● ' : '◌ '}</text>
-              <text fg="cyan" attributes={TextAttributes.BOLD}>{'◆ haksterAi'}</text>
+              <text fg="cyan" attributes={TextAttributes.BOLD}>{'◆ HAKSTER-AI'}</text>
               <text fg={statusErr ? 'red' : status ? 'green' : 'yellow'}>{` · ${headerState}`}</text>
               {headerFiles ? (
                 <text fg={guard.missing && guard.missing.length ? 'red' : 'gray'}>{`   ${headerFiles}`}</text>
@@ -2488,6 +2497,10 @@ export default function App({ version = '0.1.0' }) {
                   graphics={prefsRef.current.graphics !== false}
                   call={liveToolTxt}
                   busy={agent.busy}
+                  // The run clock: counts up while he works, then holds the
+                  // finished turn's total (useAgentStream stamps it), so the
+                  // card answers "how long did he take" as a measurement.
+                  ms={agent.elapsedMs}
                   phase={livePhase}
                   bindings={sideW ? null : { up: 'shift', down: 'shift', pageup: 'shift', pagedown: 'shift', home: 'shift', end: 'shift' }}
                 />

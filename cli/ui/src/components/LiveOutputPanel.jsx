@@ -3,6 +3,7 @@ import { Panel, ScrollRow, clip } from './LiveSidebar.jsx';
 import LiveImageViewer from './LiveImageViewer.jsx';
 import { overflows } from '../utils/panel-scroll.js';
 import { usePanelScroll } from '../hooks/usePanelScroll.js';
+import durSuffix from '../utils/duration.js';
 
 /* LiveOutputPanel — the run's RESULT, pinned at the bottom of the transcript
  * column so it can be read without looking away from the composer.
@@ -51,6 +52,14 @@ export default function LiveOutputPanel({
   image = null,
   graphics = true,
   phase = '',
+  // Who is answering, and how long he took. Owner, 2026-11-26: "add on hakster
+  // output card to HAKSTER-AI AND HIS TIME HE TOOK TO RESPOND ON CARD" — the
+  // card above the input bar now names HAKSTER-AI and prints the turn's own
+  // measured duration beside it (`ms` is the run clock: 0 before a turn, the
+  // finished turn's total after it — see useAgentStream's stamp). No reading,
+  // no suffix: a card with nothing measured says nothing (§10).
+  name = 'HAKSTER-AI',
+  ms = null,
 }) {
   const w = Math.max(20, Number(width) || 80);
   const inner = Math.max(1, w - 4);
@@ -83,7 +92,7 @@ export default function LiveOutputPanel({
       : busy ? '' : 'last';
 
   return (
-    <Panel width={w} title={busy ? '▶ Live' : '▶ Result'} hint={hint}>
+    <Panel width={w} title={`${busy ? '▶ Live' : '▶ Result'} · ${name}${durSuffix(ms)}`} hint={hint}>
       {callRow ? (
         <box style={{ width: inner, flexShrink: 0 }}>
           <text fg={call ? 'cyan' : 'gray'}>{clip(call || '—', inner)}</text>

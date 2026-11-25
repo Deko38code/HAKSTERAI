@@ -664,8 +664,48 @@ var require_updater = __commonJS({
     var crypto = __require("crypto");
     var { spawn: spawn2 } = __require("child_process");
     var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path8.join(__dirname, "..") : "");
+    function hasPkgVersion(dir) {
+      const pkg = readJson(path8.join(String(dir), "package.json"), null);
+      return !!(pkg && pkg.version);
+    }
     function cliDirOf2(explicit) {
-      return path8.resolve(String(explicit || DEFAULT_CLI_DIR || process.cwd()));
+      const candidates = [];
+      const add = (dir) => {
+        if (!dir) return;
+        try {
+          const abs = path8.resolve(String(dir));
+          if (!candidates.includes(abs)) candidates.push(abs);
+        } catch {
+        }
+      };
+      if (explicit) {
+        try {
+          const named = path8.resolve(String(explicit));
+          if (fs11.existsSync(path8.join(named, "package.json"))) return named;
+        } catch {
+        }
+      }
+      add(explicit);
+      add(process.env.HAKSTER_CLI_DIR);
+      try {
+        if (typeof __dirname === "string" && __dirname) add(path8.join(__dirname, ".."));
+      } catch {
+      }
+      try {
+        if (process.argv[1]) {
+          const entry = path8.dirname(path8.resolve(process.argv[1]));
+          add(entry);
+          if (path8.basename(entry) === "src") add(path8.dirname(entry));
+        }
+      } catch {
+      }
+      add(process.cwd());
+      for (const dir of candidates) if (hasPkgVersion(dir)) return dir;
+      return candidates[0] || path8.resolve(process.cwd());
+    }
+    function versionKnown(version) {
+      const v = String(version || "");
+      return !!v && v !== "0.0.0";
     }
     var UPDATES_DIR = path8.join(os6.homedir(), ".hakster", "updates");
     var STAGED_DIR = path8.join(UPDATES_DIR, "staged");
@@ -793,6 +833,9 @@ var require_updater = __commonJS({
       const running = runningInfo(opts.cliDir);
       const origin = opts.server || serverUrl();
       if (!origin) return { status: "unknown", reason: "no server configured", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      if (!versionKnown(running.version)) {
+        return { status: "unknown", reason: "cannot read this install\u2019s package.json", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
+      }
       const latest = await fetchJson(`${origin}/cli/latest.json`, timeoutMs).catch(() => null);
       if (latest && latest.version) {
         const version = String(latest.version);
@@ -869,12 +912,14 @@ var require_updater = __commonJS({
       if (!pending || !pending.version) return null;
       const ok = !!pending.bundleSha && sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
       const running = runningInfo(explicitDir);
+      const runningKnown = versionKnown(running.version);
       return {
         ...pending,
         verified: ok,
         isCurrent: sameBuild(pending, running),
-        superseded: cmpVersion(pending.version, running.version) < 0,
-        runningVersion: running.version
+        superseded: runningKnown && cmpVersion(pending.version, running.version) < 0,
+        runningVersion: running.version,
+        unknown: !runningKnown
       };
     }
     var APPLIED_NOTICE_MS = 24 * 60 * 60 * 1e3;
@@ -893,9 +938,10 @@ var require_updater = __commonJS({
       };
     }
     function applyPending2(explicitDir) {
-      const pending = pendingInfo2();
+      const pending = pendingInfo2(explicitDir);
       if (!pending) return null;
       const target = cliDirOf2(explicitDir);
+      if (pending.unknown) return { applied: false, reason: "cannot read this install\u2019s package.json", version: pending.version };
       if (pending.appliedAt) return { applied: false, reason: "already applied", version: pending.version };
       if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
       if (pending.superseded) {
@@ -1052,6 +1098,13 @@ var require_prefs = __commonJS({
       // the monitor view follows the newest line
       updateCheck: true,
       // background CLI update check
+      // Minutes between update checks. Owner, 2026-11-26: "lets make the update
+      // check faster then 30 min" → 15. A check is one small GET of
+      // /cli/latest.json while the install is current, so a quarter hour costs
+      // nothing and a release reaches a running session well inside the old half
+      // hour. Clamped 1–240 in useCliUpdate, so a one-minute check is just this key
+      // set to 1; a CLI preference, never the model config (§22).
+      updateCheckMinutes: 15,
       opaqueBackdrop: false,
       // false = transparent over the terminal's wallpaper
       intro: true,
@@ -1076,6 +1129,7 @@ var require_prefs = __commonJS({
       ads: { label: "Ad rail", detail: "the sponsor line under the chat column" },
       monitorFollow: { label: "Monitor follow", detail: "the live monitor follows the newest line" },
       updateCheck: { label: "Update check", detail: "background CLI update check on start" },
+      updateCheckMinutes: { label: "Check every", detail: "minutes between update checks (1\u2013240)" },
       opaqueBackdrop: { label: "Opaque backdrop", detail: "solid background over the terminal wallpaper" },
       intro: { label: "Intro splash", detail: "the five-line decode screen on start" },
       graphics: { label: "Kitty graphics", detail: "real logo image in kitty / Ghostty / WezTerm" },
@@ -1754,10 +1808,15 @@ var HERO_FONT = {
   S: [" \u2588\u2588\u2588\u2588", "\u2588    ", " \u2588\u2588\u2588 ", "    \u2588", "\u2588\u2588\u2588\u2588 "],
   T: ["\u2588\u2588\u2588\u2588\u2588", "  \u2588  ", "  \u2588  ", "  \u2588  ", "  \u2588  "],
   E: ["\u2588\u2588\u2588\u2588\u2588", "\u2588    ", "\u2588\u2588\u2588\u2588 ", "\u2588    ", "\u2588\u2588\u2588\u2588\u2588"],
-  R: ["\u2588\u2588\u2588\u2588 ", "\u2588   \u2588", "\u2588\u2588\u2588\u2588 ", "\u2588  \u2588 ", "\u2588   \u2588"]
+  R: ["\u2588\u2588\u2588\u2588 ", "\u2588   \u2588", "\u2588\u2588\u2588\u2588 ", "\u2588  \u2588 ", "\u2588   \u2588"],
+  // Added 2026-11-26 with the rename to HAKSTER-AI (owner: "WHERE IT SAYS
+  // HAKSTER CHANGE TO HAKSTER-AI"). Both glyphs are five cells wide like every
+  // other letter, so the wordmark still builds row-for-row from the table.
+  I: [" \u2588\u2588\u2588 ", "  \u2588  ", "  \u2588  ", "  \u2588  ", " \u2588\u2588\u2588 "],
+  "-": ["     ", "     ", "\u2588\u2588\u2588\u2588\u2588", "     ", "     "]
 };
-var HERO_WORD = "HAKSTER";
-var HERO_NAME = "HAKSTERAI";
+var HERO_WORD = "HAKSTER-AI";
+var HERO_NAME = "HAKSTER-AI";
 var HERO_GREEN = "#00ff41";
 var HERO_WORDMARK = [0, 1, 2, 3, 4].map(
   (row) => HERO_WORD.split("").map((ch) => HERO_FONT[ch][row]).join(" ")
@@ -2866,6 +2925,16 @@ function usePanelScroll({
   };
 }
 
+// src/utils/duration.js
+function fmtDur(ms) {
+  const n = Math.max(0, Math.round(Number(ms) || 0));
+  return n < 1e3 ? `${n}ms` : `${(n / 1e3).toFixed(1)}s`;
+}
+function durSuffix(ms) {
+  const n = Math.round(Number(ms) || 0);
+  return n > 0 ? ` \xB7 ${fmtDur(n)}` : "";
+}
+
 // src/components/LiveOutputPanel.jsx
 import { Fragment as Fragment4, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 function LiveOutputPanel({
@@ -2877,7 +2946,15 @@ function LiveOutputPanel({
   bindings = null,
   image = null,
   graphics = true,
-  phase = ""
+  phase = "",
+  // Who is answering, and how long he took. Owner, 2026-11-26: "add on hakster
+  // output card to HAKSTER-AI AND HIS TIME HE TOOK TO RESPOND ON CARD" — the
+  // card above the input bar now names HAKSTER-AI and prints the turn's own
+  // measured duration beside it (`ms` is the run clock: 0 before a turn, the
+  // finished turn's total after it — see useAgentStream's stamp). No reading,
+  // no suffix: a card with nothing measured says nothing (§10).
+  name = "HAKSTER-AI",
+  ms = null
 }) {
   const w = Math.max(20, Number(width) || 80);
   const inner = Math.max(1, w - 4);
@@ -2890,7 +2967,7 @@ function LiveOutputPanel({
   const bodyW = Math.max(1, inner - (gutterOn ? 1 : 0));
   const emptyHint = phase === "thinking" ? "reasoning above \u2014 the answer lands here" : phase === "running" ? "tool running\u2026" : "waiting for the first token\u2026";
   const hint = image ? `image${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : list.length ? `${state.hint("")}${call && compact ? ` \xB7 ${clip(call, Math.max(6, inner - 12))}` : ""}` : busy ? "" : "last";
-  return /* @__PURE__ */ jsxs10(Panel, { width: w, title: busy ? "\u25B6 Live" : "\u25B6 Result", hint, children: [
+  return /* @__PURE__ */ jsxs10(Panel, { width: w, title: `${busy ? "\u25B6 Live" : "\u25B6 Result"} \xB7 ${name}${durSuffix(ms)}`, hint, children: [
     callRow ? /* @__PURE__ */ jsx10("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx10("text", { fg: call ? "cyan" : "gray", children: clip(call || "\u2014", inner) }) }) : null,
     image && r >= 3 ? /* @__PURE__ */ jsx10(LiveImageViewer, { width: bodyW, height: r, source: image, graphics }) : list.length === 0 ? /* @__PURE__ */ jsxs10(Fragment4, { children: [
       /* @__PURE__ */ jsx10("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx10("text", { fg: "gray", children: busy ? clip(emptyHint, inner) : " " }) }),
@@ -4265,7 +4342,7 @@ import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { execFile } from "node:child_process";
 var CLI_DIR = path4.dirname(fileURLToPath2(import.meta.url));
 var EXPECTED_SERVICES = [
-  { port: 3579, name: "haksterAi", proto: "http" },
+  { port: 3579, name: "HAKSTER-AI", proto: "http" },
   { port: 8081, name: "cinevault", proto: "http" },
   { port: 4e3, name: "phantom", proto: "http" },
   { port: 8082, name: "claude-proxy", proto: "http" },
@@ -4704,7 +4781,7 @@ function StatusServicesPanel({
   const guardBad = !!(guard && guard.missing && guard.missing.length);
   const stateTxt = offline ? "OFFLINE" : online ? "ONLINE" : "connecting\u2026";
   const stateColor = offline ? "red" : online ? "green" : "yellow";
-  const leftBase = `${offline ? "\u25CB " : online ? "\u25CF " : "\u25CC "}\u25C6 haksterAi \xB7 ${stateTxt}`;
+  const leftBase = `${offline ? "\u25CB " : online ? "\u25CF " : "\u25CC "}\u25C6 HAKSTER-AI \xB7 ${stateTxt}`;
   const leftFull = guardTxt ? `${leftBase}   ${guardTxt}` : leftBase;
   const rightFull = `ports ${up}/${list.length}${version ? ` \xB7 tui ${version}` : ""}`;
   const candidates = [
@@ -4735,7 +4812,7 @@ function StatusServicesPanel({
     /* @__PURE__ */ jsxs22("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
       /* @__PURE__ */ jsxs22("text", { children: [
         /* @__PURE__ */ jsx23("span", { fg: stateColor, attributes: TextAttributes18.BOLD, children: offline ? "\u25CB " : online ? "\u25CF " : "\u25CC " }),
-        /* @__PURE__ */ jsx23("span", { fg: "cyan", attributes: TextAttributes18.BOLD, children: "\u25C6 haksterAi" }),
+        /* @__PURE__ */ jsx23("span", { fg: "cyan", attributes: TextAttributes18.BOLD, children: "\u25C6 HAKSTER-AI" }),
         /* @__PURE__ */ jsx23("span", { fg: stateColor, children: ` \xB7 ${stateTxt}` }),
         showGuardHere ? /* @__PURE__ */ jsx23("span", { fg: guardBad ? "red" : "gray", children: `   ${guardTxt}` }) : null
       ] }),
@@ -5184,7 +5261,7 @@ var fmtBytes = (v) => {
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   return `${Math.round(n / 1024)} KB`;
 };
-var fmtDur = (sec) => {
+var fmtDur2 = (sec) => {
   const n = Math.max(0, Math.round(Number(sec) || 0));
   if (n < 60) return `${n}s`;
   const m = Math.floor(n / 60);
@@ -5253,7 +5330,7 @@ function DebugView({
     /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "lag p95", value: fmtMs(lag && lag.p95), color: lag && lag.p95 > 40 ? "yellow" : "white" }),
     /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "lag max", value: fmtMs(lag && lag.max), color: lag && lag.max > 120 ? "red" : "white" }),
     /* @__PURE__ */ jsx27(Section, { width: w, title: "PROCESS" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "pid", value: proc ? `${proc.pid} \xB7 up ${fmtDur(proc.uptimeSec)} (page open)` : "\u2014" }),
+    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "pid", value: proc ? `${proc.pid} \xB7 up ${fmtDur2(proc.uptimeSec)} (page open)` : "\u2014" }),
     /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "rss / heap", value: proc ? `${fmtBytes(proc.rss)} \xB7 ${fmtBytes(proc.heapUsed)} of ${fmtBytes(proc.heapTotal)}` : "\u2014" }),
     /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "handles", value: proc ? proc.handles == null ? "unavailable" : fmtNum2(proc.handles) : "\u2014" }),
     /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "runtime", value: proc ? `node ${proc.node}${proc.bun ? ` \xB7 bun ${proc.bun}` : ""}` : "\u2014" }),
@@ -5355,7 +5432,10 @@ import { Fragment as Fragment10, jsx as jsx29, jsxs as jsxs27 } from "react/jsx-
 var RESULT_LINES = 3;
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
-  assistant: { border: "gray", label: "hakster" },
+  // Owner, 2026-11-26: "add on hakster output card to HAKSTER-AI AND HIS TIME HE
+  // TOOK TO RESPOND ON CARD". The card names him HAKSTER-AI and states the
+  // turn's own measured duration beside it (see the header row below).
+  assistant: { border: "gray", label: "HAKSTER-AI" },
   system: { border: "yellow", label: "system" }
 };
 var TONE_COLOR = { error: "red", warn: "yellow", notice: "cyan" };
@@ -5415,7 +5495,7 @@ function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand,
     return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
       label ? /* @__PURE__ */ jsxs27("text", { children: [
         /* @__PURE__ */ jsx29("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
-        /* @__PURE__ */ jsx29("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur2(Date.now() - started)}` : ""}` })
+        /* @__PURE__ */ jsx29("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur(Date.now() - started)}` : ""}` })
       ] }) : null,
       settled.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "gray", children: line.trim() }, `th-${i}`)),
       newest ? /* @__PURE__ */ jsx29("text", { fg: newestWave.done ? "gray" : waveColor(0, newestFrame, newestWave.progress), children: (newestWave.done ? newest : newestWave.text).trim() }) : null
@@ -5453,10 +5533,6 @@ function flattenArgs(args) {
   return String(args);
 }
 var isErrorResult = (result) => /^Error[:\n]|^❌/i.test(String(result == null ? "" : result).trim());
-function fmtDur2(ms) {
-  const n = Math.max(0, Math.round(Number(ms) || 0));
-  return n < 1e3 ? `${n}ms` : `${(n / 1e3).toFixed(1)}s`;
-}
 function useSpinnerFrame(active) {
   const [frame, setFrame] = useState11(0);
   useEffect10(() => {
@@ -5474,7 +5550,7 @@ function ToolRow({ tool, width, compact = false, outputLabel = "\u25B6 Output" }
   const colour = pending ? "yellow" : failed ? "red" : "green";
   const name = tool.name || "tool";
   const args = clip(flattenArgs(tool.args), ARGS_BUDGET);
-  const dur = pending ? fmtDur2(Date.now() - (Number(tool.t0) || Date.now())) : tool.ms != null ? fmtDur2(tool.ms) : "";
+  const dur = pending ? fmtDur(Date.now() - (Number(tool.t0) || Date.now())) : tool.ms != null ? fmtDur(tool.ms) : "";
   const nameW = name.length + 2;
   const argW = Math.max(4, width - nameW - (args ? dur.length + 3 : 0));
   const shown2 = pending ? null : String(tool.result).replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "").split("\n");
@@ -5514,7 +5590,10 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
     (r) => r && (r.text && String(r.text).trim() || r.thinking && String(r.thinking).trim() || r.steer && String(r.steer).trim() || Array.isArray(r.tools) && r.tools.length)
   );
   return /* @__PURE__ */ jsxs27("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
-    compact ? null : /* @__PURE__ */ jsx29("text", { fg: border, attributes: TextAttributes22.BOLD, children: roleStyle.label }),
+    compact ? null : /* @__PURE__ */ jsxs27("box", { style: { width: inner, flexDirection: "row", overflow: "hidden", flexShrink: 0 }, children: [
+      /* @__PURE__ */ jsx29("text", { fg: border, attributes: TextAttributes22.BOLD, children: roleStyle.label }),
+      message.role === "assistant" && message.ms != null ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: ` \xB7 ${fmtDur(message.ms)}` }) : null
+    ] }),
     message.images ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: `\u22B8 ${message.imageName || `${message.images} image`}` }) : null,
     rounds.length ? rounds.map((round, i) => {
       const tail = live && i === rounds.length - 1;
@@ -6523,10 +6602,12 @@ function useAgentStream({
         }
       } catch {
       }
+      const turnMs = startedAtRef.current ? Math.max(0, Date.now() - startedAtRef.current) : 0;
+      if (turnMs) patch(assistantId, (m) => ({ ...m, ms: turnMs, finishedAt: Date.now() }));
       abortRef.current = null;
       activeRunIdRef.current = null;
       setPending(null);
-      setElapsedMs(startedAtRef.current ? Date.now() - startedAtRef.current : 0);
+      setElapsedMs(turnMs);
     },
     [api, append, approvalMode, autoHandoff, cwd, drop, model, patch, provider, pushActivity, sessionId, setPending, setStatusBoth, system]
   );
@@ -7022,6 +7103,7 @@ function readStartup() {
       return { applied, status: { status: "applied", version: applied.version, from: applied.from, checkedAt: applied.appliedAt } };
     }
     if (pending && pending.version) {
+      if (pending.unknown) return { applied: null, status: { status: "idle" } };
       if (pending.isCurrent || pending.superseded) {
         return {
           applied: null,
@@ -7046,9 +7128,21 @@ function readStartup() {
   }
   return { applied: null, status: { status: "idle" } };
 }
-function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
+var DEFAULT_CHECK_MINUTES = Number(import_prefs2.default.load().updateCheckMinutes) || 15;
+function resolveIntervalMs(explicitMs) {
+  const given = Number(explicitMs);
+  if (Number.isFinite(given) && given > 0) return given;
+  let mins = Number(import_prefs2.default.load().updateCheckMinutes);
+  if (!Number.isFinite(mins) || mins <= 0) mins = DEFAULT_CHECK_MINUTES;
+  mins = Math.min(240, Math.max(1, mins));
+  const jitter = Math.round((Math.random() - 0.5) * 2e4);
+  return mins * 60 * 1e3 + jitter;
+}
+function useCliUpdate(intervalMs = null, sessionVersion = "") {
   const startup = useRef13(null);
   if (startup.current === null) startup.current = readStartup();
+  const tickMs = useRef13(0);
+  if (!tickMs.current) tickMs.current = resolveIntervalMs(intervalMs);
   const applied = startup.current.applied;
   const [state, setState] = useState17(startup.current.status);
   const diskNewer = () => {
@@ -7147,7 +7241,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
       }
     };
     tick();
-    const id = setInterval(tick, intervalMs);
+    const id = setInterval(tick, tickMs.current);
     try {
       if (typeof id.unref === "function") id.unref();
     } catch {
@@ -7379,7 +7473,7 @@ var PAGE_SCROLLBAR = {
     foregroundColor: "#22d3ee"
   }
 };
-var SYSTEM = process.env.HAKSTER_TUI_SYSTEM || "You are haksterAi running inside a terminal dashboard. Answer briefly and use tools when they are needed.";
+var SYSTEM = process.env.HAKSTER_TUI_SYSTEM || "You are HAKSTER-AI running inside a terminal dashboard. Answer briefly and use tools when they are needed.";
 var IMAGE_MIME = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -7696,7 +7790,7 @@ function App({ version = "0.1.0" }) {
       const key2 = `installed:${update.version}`;
       if (updateAnnounced.current === key2) return;
       updateAnnounced.current = key2;
-      showNotice("\u2714 Update installed \xB7 Restart to update");
+      showNotice(`\u2714 Update v${update.version} installed \xB7 Restart to update`);
       return;
     }
     if (update.status !== "staged" && update.status !== "blocked") return;
@@ -8537,7 +8631,7 @@ function App({ version = "0.1.0" }) {
   ];
   const headerInner = panelW - 2;
   const guardTxt = guard ? `${guard.present}/${guard.total} files` : "";
-  const headerLeftLen = (withFiles) => `\u25CF \u25C6 haksterAi \xB7 ${headerState}`.length + (withFiles && guardTxt ? `   ${guardTxt}`.length : 0);
+  const headerLeftLen = (withFiles) => `\u25CF \u25C6 HAKSTER-AI \xB7 ${headerState}`.length + (withFiles && guardTxt ? `   ${guardTxt}`.length : 0);
   const showGuard = !statusBoxShown && !!guardTxt && headerLeftLen(true) + 8 <= headerInner;
   const headerFiles = showGuard ? guardTxt : "";
   const headerLeftText = statusBoxShown ? 0 : headerLeftLen(showGuard);
@@ -8617,6 +8711,13 @@ function App({ version = "0.1.0" }) {
   const updateBehind = updatePending && Number(update && update.behind) > 0 ? Number(update.behind) : 0;
   const updateBehindText = updateBehind ? ` \xB7 ${updateBehind} commit${updateBehind === 1 ? "" : "s"} behind` : "";
   const updateBadgeVariants = !updatePending ? [null] : (updateInstalled ? [
+    // Same line as an available update would take, and the same shape as
+    // it: "⬆ update vX · …" becomes "✔ update vX installed · …" (owner,
+    // 2026-11-26: "we need it to say the version up top when its installed
+    // where update available would be"). The wider form states the version
+    // it installed; the narrower ones keep the pinned §43.2 wording so a
+    // narrow header still says what happened.
+    `\u2714 update${updateVer} installed \xB7 Restart to update`,
     "\u2714 Update installed \xB7 Restart to update",
     "\u2714 installed \xB7 Restart to update",
     "\u2714 Restart to update",
@@ -8847,7 +8948,7 @@ function App({ version = "0.1.0" }) {
         graphics: prefsRef.current.graphics !== false,
         lines: [
           // Lime green on the hacker-desk hero, per the owner's 2026-11-23 note.
-          { text: "\u25C6 haksterAi", color: "#00ff41", bold: true },
+          { text: "\u25C6 HAKSTER-AI", color: "#00ff41", bold: true },
           { text: `CLI v${version} \xB7 ${updateLine.text}`, color: updateLine.color || "gray", bold: !!updateLine.bold },
           { text: `model ${modelText}`, color: "#a3e635" },
           {
@@ -8865,7 +8966,7 @@ function App({ version = "0.1.0" }) {
       /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "row" }, children: [
         statusBoxShown ? null : /* @__PURE__ */ jsxs29(Fragment11, { children: [
           /* @__PURE__ */ jsx31("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes23.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
-          /* @__PURE__ */ jsx31("text", { fg: "cyan", attributes: TextAttributes23.BOLD, children: "\u25C6 haksterAi" }),
+          /* @__PURE__ */ jsx31("text", { fg: "cyan", attributes: TextAttributes23.BOLD, children: "\u25C6 HAKSTER-AI" }),
           /* @__PURE__ */ jsx31("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
           headerFiles ? /* @__PURE__ */ jsx31("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
         ] }),
@@ -9134,6 +9235,7 @@ function App({ version = "0.1.0" }) {
             graphics: prefsRef.current.graphics !== false,
             call: liveToolTxt,
             busy: agent.busy,
+            ms: agent.elapsedMs,
             phase: livePhase,
             bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
           }

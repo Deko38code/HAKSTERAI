@@ -69,7 +69,7 @@ export default function StatusServicesPanel({
   // wrapping it onto a second row (which would throw the row budget off). The
   // file guard outranks the version: it stays on the line as long as it fits,
   // because the owner asked for "13/13 files" to always be visible.
-  const leftBase = `${offline ? '○ ' : online ? '● ' : '◌ '}◆ haksterAi · ${stateTxt}`;
+  const leftBase = `${offline ? '○ ' : online ? '● ' : '◌ '}◆ HAKSTER-AI · ${stateTxt}`;
   const leftFull = guardTxt ? `${leftBase}   ${guardTxt}` : leftBase;
   const rightFull = `ports ${up}/${list.length}${version ? ` · tui ${version}` : ''}`;
   const candidates = [
@@ -106,7 +106,7 @@ export default function StatusServicesPanel({
       <box style={{ width: inner, flexDirection: 'row', justifyContent: 'space-between' }}>
         <text>
           <span fg={stateColor} attributes={TextAttributes.BOLD}>{offline ? '○ ' : online ? '● ' : '◌ '}</span>
-          <span fg="cyan" attributes={TextAttributes.BOLD}>{'◆ haksterAi'}</span>
+          <span fg="cyan" attributes={TextAttributes.BOLD}>{'◆ HAKSTER-AI'}</span>
           <span fg={stateColor}>{` · ${stateTxt}`}</span>
           {showGuardHere ? <span fg={guardBad ? 'red' : 'gray'}>{`   ${guardTxt}`}</span> : null}
         </text>

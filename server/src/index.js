@@ -5531,11 +5531,14 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
       // no MCP servers 3.9 s, the 6-server core 5.1–6.4 s, all 20 configured
       // servers 11.1–11.6 s — and the server's own reply measured 14.2 s,
       // because every turn pays that startup before the model is even asked.
-      // The owner's bar is "10 sec or less, not 20" (2026-11-25), so an
-      // interactive turn starts the core set plus any server its own message
-      // names, and a full-auto autonomous run keeps the whole toolkit. The
-      // lean file is derived from the same mcp.json — no server definition is
-      // copied, edited or removed from the config itself.
+      // The owner's bar is "10 sec or less, not 20" (2026-11-25), so a turn
+      // starts the core set plus any server its own message names. Until
+      // 2026-11-26 a full-auto run was exempt and kept the whole toolkit; that
+      // exemption is what put his chat back at ~20 s ("check his response time
+      // was almost 20sec this time on dell" → "go"), so scope is now decided by
+      // the message alone and "all tools" is the explicit ask. The lean file is
+      // derived from the same mcp.json — no server definition is copied, edited
+      // or removed from the config itself.
       const mcpConfigPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
       const MCP_CORE = new Set(['filesystem', 'phantom', 'hakster', 'sqlite', 'memory', 'sequential-thinking']);
       // Words in the operator's own message that earn a heavy server a start.
@@ -5558,18 +5561,23 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
       let leanMcpFile = null;
       if (fs.existsSync(mcpConfigPath)) {
         try {
-          // A full-auto run is the autonomous pentest path — it keeps every
-          // tool. Everything else is an interactive turn and gets the lean set.
-          const wantsAll = effectiveApprovalMode === 'full-auto'
-            || /\ball tools\b|\bfull toolkit\b|\bevery tool\b/i.test(String(getMessageText(claudeUserMsg?.content) || ''));
+          // 2026-11-26 (owner: "check his response time was almost 20sec this time
+          // on dell" → "go"): the approval dial no longer decides the tool scope.
+          // Full-auto is about approving calls, not about paying for a 20-server
+          // startup before the model is asked anything. A chat turn now always
+          // gets the core set plus whatever its own message names, and the whole
+          // toolkit is one phrase away ("all tools").
+          // Measured on this Dell, same prompt, 2026-11-26: 6-server core 3.54 s vs
+          // all 20 servers 8.81 s — ~5.3 s of every full-auto turn was startup.
+          const msgForScope = String(getMessageText(claudeUserMsg?.content) || '');
+          const wantsAll = /\ball tools\b|\bfull toolkit\b|\bevery tool\b|\bwhole toolkit\b/i.test(msgForScope);
           if (!wantsAll) {
             const fullCfg = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf8'));
-            const msgText = String(getMessageText(claudeUserMsg?.content) || '');
             const keep = new Set(MCP_CORE);
-            for (const [name, re] of Object.entries(MCP_ALIASES)) if (re.test(msgText)) keep.add(name);
+            for (const [name, re] of Object.entries(MCP_ALIASES)) if (re.test(msgForScope)) keep.add(name);
             for (const name of Object.keys(fullCfg.mcpServers || {})) {
               // Naming a server outright ("use nmap") also earns it a start.
-              if (new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(msgText)) keep.add(name);
+              if (new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(msgForScope)) keep.add(name);
             }
             const lean = { mcpServers: {} };
             for (const [name, def] of Object.entries(fullCfg.mcpServers || {})) if (keep.has(name)) lean.mcpServers[name] = def;
