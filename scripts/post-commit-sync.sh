@@ -38,7 +38,10 @@ THAT_BOX=$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$STANDBY_SSH" hostname 2
 # ── only a commit that changes the shipped server ──────────────────────────
 TOUCHED=$(git show --pretty=format: --name-only "$SHA" 2>/dev/null || true)
 [ -n "$TOUCHED" ] || exit 0
-RELEVANT=$(printf '%s\n' "$TOUCHED" | grep -E '^(server|cli|scripts|dist|public)/|^package\.json$' || true)
+# AGENTS.md (and its CLAUDE.md symlink) is the agent's steering, loaded by walk-up from the
+# slot's own working directory. A rule change that never reaches the standby leaves it steering
+# blind after a failover, so a rules-only commit is a shipped commit. (§41.1, §41.3)
+RELEVANT=$(printf '%s\n' "$TOUCHED" | grep -E '^(server|cli|scripts|dist|public)/|^package\.json$|^AGENTS\.md$|^CLAUDE\.md$' || true)
 [ -n "$RELEVANT" ] || exit 0
 
 say "commit $SHA touches $(printf '%s\n' "$RELEVANT" | wc -l | tr -d ' ') shipped file(s) — syncing both boxes"
