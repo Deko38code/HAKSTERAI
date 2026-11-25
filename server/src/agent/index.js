@@ -7771,18 +7771,14 @@ RULES:
 // since this REPL is sometimes launched from a root SSH session (root's
 // ~/.claude.json isn't authenticated — only ghost's is).
 function claudeCliEnv() {
-  return {
-    ...process.env,
-    HOME: '/home/ghost',
-    USER: 'ghost',
-    PATH: `/home/ghost/.local/bin:${process.env.PATH || ''}`,
-    // This lane spawns the same `claude` the TUI's server lane does, so it must
-    // compact where the owner's own session does: 200000 is the value read from
-    // that running session (owner, 2026-11-25: "make sure the cli auto compact
-    // is set like this cli is in this session"). Max context is unchanged.
-    CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1048576',
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
-  };
+  // One definition, not two. This lane used to set only HOME/PATH/context, so
+  // the spawned CLI fell back to the machine's real ~/.claude OAuth session and
+  // died with "OAuth session expired and could not be refreshed" wherever that
+  // login had lapsed (owner, 2026-11-25). providers.claudeCliEnv carries the
+  // relay route, the token, the model aliases, the context/compact values and
+  // the isolated CLAUDE_CONFIG_DIR (§22, §38.3, §39.1). Required lazily to keep
+  // module load order unchanged.
+  return require('../providers').claudeCliEnv();
 }
 
 // Scrub identity-bleeding from assistant messages so Claude never sees its own
@@ -7844,8 +7840,13 @@ function callClaudeCli(messages, tools, { onToken, modelOverride } = {}) {
     fs.writeFileSync(sysPromptFile, sysPrompt);
     args.push('--system-prompt-file', sysPromptFile);
   }
+  // Pass --model only for a wire model id ("deepseek-v4.1-flash:cloud"). A
+  // Claude-style alias is resolved by claudeCliEnv's ANTHROPIC_DEFAULT_*_MODEL
+  // to the pinned model (§22.2, §38.4). Passing the alias as --model asks the
+  // relay for a name it does not serve and the turn fails slowly — measured
+  // 2026-11-25: "selected model (claude-sonnet-5-5) ... may not exist".
   const claudeModel = modelOverride || ((MODEL && MODEL !== 'claude-cli') ? MODEL : 'sonnet');
-  args.push('--model', claudeModel);
+  if (claudeModel && String(claudeModel).includes(':')) args.push('--model', claudeModel);
 
   return new Promise((resolve, reject) => {
     // The server sometimes runs under root-owned PM2 (stale HOME=/root), but

@@ -960,7 +960,9 @@ printf '  hakster\\n'
 function planPriceHasCli(price) {
   if (!price) return false;
   if (String(price.billingCycle || '') === 'one_time') return false;
-  return Number(price.amount) > CLI_MIN_PRICE_CENTS;
+  // "from $20" includes a plan priced at exactly $20 (owner, 2026-11-25:
+  // "any paid plan ... 20 $ higher"), so the boundary is inclusive.
+  return Number(price.amount) >= CLI_MIN_PRICE_CENTS;
 }
 function planIncludesCli(planId) {
   const plan = PRICING_CATALOG.find((p) => p.id === String(planId || '').toLowerCase());
@@ -981,7 +983,7 @@ function requireCliEntitlement(req, res, next) {
   if (!user) return next();
   if (userIncludesCli(user)) return next();
   return res.status(403).json({
-    error: 'The HaksterAI CLI and API are included with every plan over $20 a month. Upgrade to Pro, a Team plan or Enterprise to use the CLI.',
+    error: 'The HaksterAI CLI and API are included with every plan from $20 a month. Upgrade to Pro, a Team plan or Enterprise to use the CLI.',
     upgrade: '/plans/',
     plan: user.plan || 'free',
   });

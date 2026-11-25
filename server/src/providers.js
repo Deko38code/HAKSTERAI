@@ -898,7 +898,41 @@ function isRefusal(text) {
 // process UID is ghost. `claude` then can't find ghost's OAuth credentials
 // (~/.claude.json) or its own binary on PATH. Force the real home/PATH so
 // the CLI always resolves against the authenticated ghost account.
-const CLAUDE_CLI_HOME = '/home/ghost';
+// Which home holds the `claude` binary: the owner's ghost home when it is this
+// box, otherwise the invoking user's own home so a paid user's install works on
+// their machine (§28). Never a single hardcoded path.
+function resolveClaudeCliHome() {
+  const os = require('os');
+  const candidates = ['/home/ghost', process.env.HOME, os.homedir()].filter(Boolean);
+  for (const home of candidates) {
+    if (require('fs').existsSync(require('path').join(home, '.local', 'bin', 'claude'))) return home;
+  }
+  return os.homedir() || '/home/ghost';
+}
+const CLAUDE_CLI_HOME = resolveClaudeCliHome();
+
+// A dedicated config dir for every CLI this server spawns. Without it the CLI
+// reads the machine's real ~/.claude login and tries to refresh that OAuth
+// session, which dies with "OAuth session expired and could not be refreshed"
+// and can log the owner's own Claude Code out when two processes refresh one
+// credential file (owner, 2026-11-25: "check oauth and make sure dosent colide
+// with claude cli for oauth"). Isolated, the relay token is the only auth this
+// process ever uses.
+function claudeCliConfigDir() {
+  const dir = require('path').join(CLAUDE_CLI_HOME, '.hakster-claude');
+  try {
+    require('fs').mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const cfg = require('path').join(dir, '.claude.json');
+    if (!require('fs').existsSync(cfg)) {
+      require('fs').writeFileSync(cfg, JSON.stringify({
+        hasCompletedOnboarding: true,
+        theme: 'dark',
+        customApiKeyResponses: { approved: [], rejected: [] },
+      }, null, 2), { mode: 0o600 });
+    }
+  } catch (_) { /* a read-only home must not break the lane; the relay token still serves */ }
+  return dir;
+}
 // The owner's Claude Code route, stated literally (CLAUDE.md §22 model lock):
 // the local Ollama relay and the DeepSeek tag this box's Claude Code session
 // runs on. Until 2026-11-24 this env was built by *stripping* ANTHROPIC_* from
@@ -921,11 +955,13 @@ function claudeCliEnv() {
   const pathValue = inheritedPath.split(':').includes(binDir)
     ? inheritedPath
     : `${binDir}:${inheritedPath}`;
-  return {
+  const env = {
     ...process.env,
     HOME: CLAUDE_CLI_HOME,
     USER: 'ghost',
     PATH: pathValue,
+    // Isolated config dir: never read or refresh the machine's real login.
+    CLAUDE_CONFIG_DIR: claudeCliConfigDir(),
     ANTHROPIC_BASE_URL: CLAUDE_CLI_BASE_URL,
     ANTHROPIC_AUTH_TOKEN: 'ollama',
     ANTHROPIC_API_KEY: '',
@@ -955,6 +991,14 @@ function claudeCliEnv() {
     DISABLE_ERROR_REPORTING: '1',
     DISABLE_FEEDBACK_COMMAND: '1',
   };
+  // An inherited OAuth token outranks both the relay token and the isolated
+  // config dir — the CLI would authenticate against the machine's real login,
+  // which is hollow on every host (measured 2026-11-25 on Dell and mint:
+  // accessToken len 0, expiresAt null), and the turn dies with "OAuth session
+  // expired and could not be refreshed". The relay token is the only
+  // credential a spawned child may use (§22, §38.4).
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  return env;
 }
 
 function claudeCliComplete({ model, messages, system }) {
@@ -992,7 +1036,10 @@ function claudeCliComplete({ model, messages, system }) {
       '--system-prompt-file', sysPromptFile,
       '--disallowedTools', 'Bash Edit Write NotebookEdit Task WebFetch',
     ];
-    if (model && model !== 'claude-cli') args.push('--model', model);
+    // Wire id only — an alias is resolved by ANTHROPIC_DEFAULT_*_MODEL in
+    // claudeCliEnv; passing it here would ask the relay for a name it does
+    // not serve and fail slowly (§38.4).
+    if (model && String(model).includes(':')) args.push('--model', model);
 
     const child = spawn('claude', args, { env: claudeCliEnv() });
     child.stdin.write(transcript);
