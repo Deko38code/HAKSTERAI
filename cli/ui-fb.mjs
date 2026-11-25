@@ -1257,9 +1257,9 @@ var require_input_history = __commonJS({
     function isTruncationOf(a, b) {
       if (a.length < 40 || b.length < 40) return false;
       const long = a.length >= b.length ? a : b;
-      const short = a.length >= b.length ? b : a;
-      if (!long.startsWith(short)) return false;
-      return short.length >= long.length * 0.35;
+      const short2 = a.length >= b.length ? b : a;
+      if (!long.startsWith(short2)) return false;
+      return short2.length >= long.length * 0.35;
     }
     var NOTICE_HEAD = /^⚠️?\s/;
     function sanitizeLines(lines) {
@@ -1511,7 +1511,7 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React31, { useCallback as useCallback6, useEffect as useEffect18, useRef as useRef13, useState as useState19 } from "react";
+import React31, { useCallback as useCallback6, useEffect as useEffect18, useRef as useRef14, useState as useState19 } from "react";
 import fs10 from "node:fs";
 import path8 from "node:path";
 import { useKeyboard as useKeyboard8, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
@@ -2099,20 +2099,20 @@ function GridPanel({ title, cols = 4, width, children, borderColor = "gray", hin
   ] });
 }
 function Cell({ label, value, w = 18, color = "white", dense = false }) {
-  const clip8 = (s, n) => {
+  const clip9 = (s, n) => {
     const t = String(s == null ? "\u2014" : s);
     return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
   };
   if (dense) {
     const lw = Math.max(3, Math.min(Math.floor(w / 2), 8));
     return /* @__PURE__ */ jsxs7("box", { style: { width: Math.max(1, w), flexDirection: "row", flexShrink: 0, marginRight: 1 }, children: [
-      /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip8(label, lw) }),
-      /* @__PURE__ */ jsx7("text", { fg: color, attributes: TextAttributes6.BOLD, children: ` ${clip8(value, Math.max(1, w - lw - 1))}` })
+      /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip9(label, lw) }),
+      /* @__PURE__ */ jsx7("text", { fg: color, attributes: TextAttributes6.BOLD, children: ` ${clip9(value, Math.max(1, w - lw - 1))}` })
     ] });
   }
   return /* @__PURE__ */ jsxs7("box", { style: { width: Math.max(1, w), flexDirection: "column", flexShrink: 0, marginRight: 1 }, children: [
-    /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip8(label, w) }),
-    /* @__PURE__ */ jsx7("text", { fg: color, attributes: TextAttributes6.BOLD, children: clip8(value, w) })
+    /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip9(label, w) }),
+    /* @__PURE__ */ jsx7("text", { fg: color, attributes: TextAttributes6.BOLD, children: clip9(value, w) })
   ] });
 }
 function Meter({ value, max = 100, w = 16, color = "green" }) {
@@ -4562,26 +4562,201 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
 }
 
 // src/components/CrushStatus.jsx
-import React25, { useEffect as useEffect8, useState as useState10 } from "react";
+import React25, { useEffect as useEffect8, useRef as useRef6, useState as useState10 } from "react";
+
+// src/utils/spin-phrases.js
+var PHRASE_MS = 1400;
+var STUCK_MS = 12e3;
+var RESUME_MS = 2200;
+var PHASE_PHRASES = {
+  THINK: [
+    "Thinking it through \u2014 heating up the idea engine",
+    "Warming up the reasoning",
+    "Cooling down and checking the details",
+    "On fire and keeping the reasoning sharp"
+  ],
+  PLAN: [
+    "Laying out a cooler-headed plan",
+    "Making sure the steps are not getting sloppy"
+  ],
+  ACT: [
+    "Calling on tools \u2014 putting the plan to work",
+    "Keeping the execution crisp",
+    "On fire and knocking out the next step"
+  ],
+  OBSERVE: [
+    "Checking whether anything is getting cold",
+    "Giving the details a second look"
+  ],
+  REFLECT: [
+    "Catching rough edges before they get sloppy",
+    "Taking a quick breath and reviewing"
+  ],
+  CONSOLIDATE: [
+    "Bringing the hot and cold bits together",
+    "Wrapping up cleanly"
+  ],
+  DEFAULT: [
+    "Heating up",
+    "Cooling off to think clearly",
+    "Keeping things crisp, not sloppy"
+  ]
+};
+var STUCK_PHRASES = {
+  THINK: [
+    "Thinking past the point \u2014 stop and call a tool",
+    "Reasoning is getting cold \u2014 take the next concrete step",
+    "Enough thinking \u2014 run a tool and read the result"
+  ],
+  PLAN: [
+    "The plan is drafted \u2014 stop planning and start the first step"
+  ],
+  ACT: [
+    "Nudge \xB7 checking progress and continuing the active task"
+  ],
+  OBSERVE: [
+    "Output is getting cold \u2014 act on what the tool returned"
+  ],
+  REFLECT: [
+    "Review is long enough \u2014 apply the fix and move on"
+  ],
+  CONSOLIDATE: [
+    "Wrapping up \u2014 state the answer already in hand"
+  ],
+  DEFAULT: [
+    "Getting cold \u2014 take the next concrete step"
+  ]
+};
+var RESUME_PHRASE = "Back on task \xB7 continuing the checklist";
+function isResume(from, to) {
+  const a = String(from || "").toUpperCase();
+  const b = String(to || "").toUpperCase();
+  return b === "THINK" && (a === "ACT" || a === "OBSERVE" || a === "REFLECT");
+}
+function short(value, max = 44) {
+  const text = String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1))}\u2026`;
+}
+function targetOf(args = {}) {
+  const a = args && typeof args === "object" ? args : {};
+  const pickList = [
+    a.cmd,
+    a.command,
+    a.script && Array.isArray(a.script) ? a.script.join(" ") : a.script,
+    a.path,
+    a.file,
+    a.file_path,
+    a.filename,
+    a.target,
+    a.pattern,
+    a.query,
+    a.q,
+    a.url,
+    a.selector,
+    a.name
+  ];
+  for (const value of pickList) {
+    const t = short(value);
+    if (t) return t;
+  }
+  return "";
+}
+var baseName = (p) => {
+  const t = String(p || "").replace(/[/\\]+$/, "");
+  const parts = t.split(/[/\\]/);
+  return parts[parts.length - 1] || t;
+};
+var TOOL_VERBS = [
+  [/^(exec_shell|run_shell|shell|bash|run_command|terminal)$/i, "Running a command"],
+  [/^(read_file|view_file|open_file|read)$/i, "Reading source"],
+  [/^(write_file|edit_file|apply_patch|patch|create_file|str_replace_editor)$/i, "Updating a file"],
+  [/^(grep_search|grep|search_files|search|codebase_search|rg)$/i, "Searching for evidence"],
+  [/^(list_dir|ls|list_files|glob)$/i, "Inspecting project files"],
+  [/^(snapshot|scrape|fetch_url|browser|playwright_\w+|web_search)$/i, "Checking a live page"]
+];
+function describeToolActivity(name, args = {}) {
+  const raw = String(name || "").trim();
+  const target = targetOf(args);
+  const label = raw.startsWith("mcp__") ? raw.split("__").slice(1).filter(Boolean).join(" \xB7 ") || "MCP tool" : raw;
+  if (!raw) return "Calling on tools";
+  for (const [re, verb] of TOOL_VERBS) {
+    if (!re.test(raw)) continue;
+    const shown2 = /^(read_file|view_file|open_file|write_file|edit_file|apply_patch|patch|create_file|str_replace_editor)$/i.test(raw) ? short(baseName(target), 32) : target;
+    return shown2 ? `${verb} \xB7 ${shown2}` : verb;
+  }
+  if (/^(update_todo|plan|todo)$/i.test(raw)) return "Updating the checklist";
+  if (raw.startsWith("mcp__")) return `Using ${label}`;
+  return target ? `Using ${raw} \xB7 ${target}` : `Using ${raw}`;
+}
+function heatOf({ trend = "steady", stalledMs = 0 } = {}) {
+  if (Number(stalledMs) >= STUCK_MS) return "cold";
+  if (trend === "smarter") return "hot";
+  if (trend === "slipping") return "cool";
+  return "warm";
+}
+function heatWord(heat) {
+  return heat === "hot" ? "hot" : heat === "cool" ? "cooling" : heat === "cold" ? "cold" : "warming";
+}
+function heatColor(heat) {
+  return heat === "hot" ? "#3fb950" : heat === "cool" ? "#d29922" : heat === "cold" ? "#f85149" : "#a5b4c3";
+}
+function phraseAt(list, index) {
+  const items = Array.isArray(list) && list.length ? list : PHASE_PHRASES.DEFAULT;
+  const i = Math.max(0, Math.floor(Number(index) || 0)) % items.length;
+  return items[i];
+}
+function phraseFor({ phase, tool, activity = "", index = 0, resumed = false, stalledMs = 0 } = {}) {
+  const normalized = String(phase || "DEFAULT").toUpperCase();
+  const info = PHASE_PHRASES[normalized] ? normalized : "DEFAULT";
+  if (resumed) return { text: RESUME_PHRASE, kind: "resume" };
+  const name = tool && (tool.name || tool.tool_name) ? String(tool.name || tool.tool_name) : "";
+  if (name) {
+    return { text: describeToolActivity(name, tool.args || tool.tool_args || {}), kind: "tool" };
+  }
+  const ready = String(activity || "").trim();
+  if (ready && ready.includes(" ")) return { text: ready, kind: "activity" };
+  if (Number(stalledMs) >= STUCK_MS) {
+    return { text: phraseAt(STUCK_PHRASES[info] || STUCK_PHRASES.DEFAULT, index), kind: "stuck" };
+  }
+  return { text: phraseAt(PHASE_PHRASES[info], index), kind: "phase" };
+}
+
+// src/components/CrushStatus.jsx
 import { jsx as jsx25, jsxs as jsxs24 } from "react/jsx-runtime";
 var SPINNER_MS = 300;
 var FRAMES = ["\u2744", "\u2726", "\u2727", "\u2736", "\u2727", "\u2726"];
 var SHIMMER = ["\u2745", "\u2744", "\u2727", "\u2744", "\u2745"];
 var GRADIENT = [51, 87, 117, 153, 117, 87];
 var PHASES = {
-  THINK: { color: "#58a6ff", emoji: "\u25C8", phrases: ["Thinking through the problem\u2026", "Reasoning carefully\u2026", "Analyzing the request\u2026", "Connecting concepts\u2026"] },
-  PLAN: { color: "#c084fc", emoji: "\u2261", phrases: ["Formulating a plan\u2026", "Mapping out steps\u2026", "Structuring the approach\u2026"] },
-  ACT: { color: "#3fb950", emoji: "\u26A1", phrases: ["Executing command\u2026", "Running tool\u2026", "Taking action\u2026"] },
-  OBSERVE: { color: "#39c5cf", emoji: "\u25C9", phrases: ["Observing output\u2026", "Reading results\u2026", "Checking response\u2026"] },
-  REFLECT: { color: "#d29922", emoji: "\u2299", phrases: ["Assessing the outcome\u2026", "Learning from this step\u2026"] },
-  CONSOLIDATE: { color: "#ffd700", emoji: "\u25A3", phrases: ["Consolidating findings\u2026", "Compiling the answer\u2026", "Putting it all together\u2026"] },
-  DEFAULT: { color: "#58a6ff", emoji: "\u25C7", phrases: ["Working on it\u2026", "Processing\u2026", "Hold tight\u2026"] }
+  THINK: { color: "#58a6ff", emoji: "\u25C8" },
+  PLAN: { color: "#c084fc", emoji: "\u2261" },
+  ACT: { color: "#3fb950", emoji: "\u26A1" },
+  OBSERVE: { color: "#39c5cf", emoji: "\u25C9" },
+  REFLECT: { color: "#d29922", emoji: "\u2299" },
+  CONSOLIDATE: { color: "#ffd700", emoji: "\u25A3" },
+  DEFAULT: { color: "#58a6ff", emoji: "\u25C7" }
 };
 function formatElapsed2(ms) {
   const seconds = Math.max(0, Math.floor(Number(ms || 0) / 1e3));
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
 }
-function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
+function clip7(text, max) {
+  const s = String(text || "");
+  if (max <= 1) return "";
+  return s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}\u2026`;
+}
+function CrushStatus({
+  width,
+  phase,
+  activity,
+  tool = null,
+  elapsedMs,
+  queued = 0,
+  progressAt = 0,
+  trend = "steady"
+}) {
   const [frame, setFrame] = useState10(0);
   useEffect8(() => {
     const timer = setInterval(() => setFrame((value) => value + 1), SPINNER_MS);
@@ -4592,9 +4767,34 @@ function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
   const color = Number(elapsedMs || 0) < 5e3 ? "#3fb950" : Number(elapsedMs || 0) < 15e3 ? "#d29922" : "#f85149";
   const grad = GRADIENT[frame % GRADIENT.length];
   const gradColor = `rgb(${grad},${Math.floor(grad * 0.7)},${Math.floor(grad * 1.2)})`;
-  const phrase = activity || info.phrases[Math.floor(frame / 20) % info.phrases.length];
+  const now = Date.now();
+  const sinceProgress = progressAt ? now - Number(progressAt) : Number(elapsedMs || 0);
+  const stalledMs = Math.max(0, sinceProgress);
+  const prevPhaseRef = useRef6(normalizedPhase);
+  const resumeUntilRef = useRef6(0);
+  useEffect8(() => {
+    const prev = prevPhaseRef.current;
+    if (prev !== normalizedPhase) {
+      if (isResume(prev, normalizedPhase)) resumeUntilRef.current = Date.now() + RESUME_MS;
+      prevPhaseRef.current = normalizedPhase;
+    }
+  }, [normalizedPhase]);
+  const resumed = Date.now() < resumeUntilRef.current;
+  const phraseIndex = Math.floor(now / PHRASE_MS);
+  const phrase = phraseFor({
+    phase: normalizedPhase,
+    tool: tool && (tool.name || tool.tool_name) ? tool : null,
+    activity,
+    index: phraseIndex,
+    resumed,
+    stalledMs
+  });
+  const heat = heatOf({ trend, stalledMs });
+  const tint = heatColor(heat);
   const shimmer = [0, 1, 2].map((offset) => SHIMMER[(frame + offset) % SHIMMER.length]).join("");
-  return /* @__PURE__ */ jsx25("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden" }, children: /* @__PURE__ */ jsxs24("text", { children: [
+  const room = Math.max(8, Number(width || 80) - 44);
+  const shown2 = clip7(phrase.text, room);
+  return /* @__PURE__ */ jsx25("box", { style: { width, flexDirection: "row", paddingLeft: 1, overflow: "hidden", flexShrink: 0 }, children: /* @__PURE__ */ jsxs24("text", { children: [
     /* @__PURE__ */ jsx25("span", { fg: gradColor, children: "\u27E6" }),
     /* @__PURE__ */ jsx25("span", { fg: color, children: FRAMES[frame % FRAMES.length] }),
     /* @__PURE__ */ jsx25("span", { fg: gradColor, children: "\u27E7" }),
@@ -4603,7 +4803,9 @@ function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
     " ",
     /* @__PURE__ */ jsx25("span", { fg: info.color, children: normalizedPhase }),
     " ",
-    /* @__PURE__ */ jsx25("span", { fg: "#a5b4c3", children: phrase }),
+    /* @__PURE__ */ jsx25("span", { fg: tint, children: heatWord(heat) }),
+    " \xB7 ",
+    /* @__PURE__ */ jsx25("span", { fg: phrase.kind === "stuck" ? "#f85149" : phrase.kind === "tool" ? "#3fb950" : "#a5b4c3", children: shown2 }),
     " ",
     /* @__PURE__ */ jsx25("span", { fg: gradColor, children: shimmer }),
     " ",
@@ -4705,7 +4907,7 @@ function Recap({
 import React27 from "react";
 import { TextAttributes as TextAttributes20 } from "@opentui/core";
 import { jsx as jsx27, jsxs as jsxs25 } from "react/jsx-runtime";
-var clip7 = (s, n) => {
+var clip8 = (s, n) => {
   const t = String(s == null ? "" : s);
   if (n <= 0) return "";
   return t.length <= n ? t : `${t.slice(0, Math.max(0, n - 1))}\u2026`;
@@ -4734,14 +4936,14 @@ var yesNo = (v) => v ? "yes" : "no";
 function Row3({ width, labelW, label, value, color = "white" }) {
   const valueW = Math.max(4, width - labelW - 4);
   return /* @__PURE__ */ jsxs25("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx27("text", { fg: "gray", children: `  ${clip7(label, labelW).padEnd(labelW)} ` }),
-    /* @__PURE__ */ jsx27("text", { fg: color, children: clip7(value, valueW) })
+    /* @__PURE__ */ jsx27("text", { fg: "gray", children: `  ${clip8(label, labelW).padEnd(labelW)} ` }),
+    /* @__PURE__ */ jsx27("text", { fg: color, children: clip8(value, valueW) })
   ] });
 }
 function Section({ width, title, hint }) {
   return /* @__PURE__ */ jsxs25("box", { style: { width, flexDirection: "row", flexShrink: 0, justifyContent: "space-between" }, children: [
     /* @__PURE__ */ jsx27("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: `\u25B8 ${title}` }),
-    hint ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip7(hint, Math.max(0, width - title.length - 8)) }) : null
+    hint ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip8(hint, Math.max(0, width - title.length - 8)) }) : null
   ] });
 }
 function slowestTools(messages, limit = 5) {
@@ -4778,9 +4980,9 @@ function DebugView({
   return /* @__PURE__ */ jsxs25("box", { style: { width: w, flexDirection: "column" }, children: [
     /* @__PURE__ */ jsxs25("box", { style: { width: w, flexDirection: "row", justifyContent: "space-between" }, children: [
       /* @__PURE__ */ jsx27("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: "\u25C7 Debugger" }),
-      /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip7(stats ? `live \xB7 ${Math.max(0, Math.round((Date.now() - stats.at) / 1e3))}s ago` : "sampling\u2026", Math.max(0, w - 12)) })
+      /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip8(stats ? `live \xB7 ${Math.max(0, Math.round((Date.now() - stats.at) / 1e3))}s ago` : "sampling\u2026", Math.max(0, w - 12)) })
     ] }),
-    /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip7('r reset counters \xB7 pgup/pgdn scroll \xB7 esc back \u2014 every figure is measured, "\u2014" means no sample yet', w - 2) }),
+    /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip8('r reset counters \xB7 pgup/pgdn scroll \xB7 esc back \u2014 every figure is measured, "\u2014" means no sample yet', w - 2) }),
     /* @__PURE__ */ jsx27(Section, { width: w, title: "RENDER", hint: render ? `${fmtNum2(render.total)} app renders` : "" }),
     /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "rate", value: render && render.perSec != null ? `${render.perSec.toFixed(1)} / s` : "\u2014", color: render && render.perSec != null && render.perSec > 8 ? "yellow" : "white" }),
     /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "last", value: fmtMs(render && render.last), color: render && render.last > 50 ? "red" : "white" }),
@@ -4815,7 +5017,7 @@ function DebugView({
         width: w,
         labelW,
         label: i === 0 ? "slowest" : "",
-        value: `${clip7(t.name, 22).padEnd(22)} ${fmtMs(t.ms).padStart(7)}  ${t.ok ? "ok" : "failed"}`,
+        value: `${clip8(t.name, 22).padEnd(22)} ${fmtMs(t.ms).padStart(7)}  ${t.ok ? "ok" : "failed"}`,
         color: t.ok ? t.ms > 1e4 ? "yellow" : "white" : "red"
       },
       `${t.name}-${i}`
@@ -4884,7 +5086,7 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
 }
 
 // src/components/Transcript.jsx
-import React30, { useEffect as useEffect10, useRef as useRef6, useState as useState12 } from "react";
+import React30, { useEffect as useEffect10, useRef as useRef7, useState as useState12 } from "react";
 import { useKeyboard as useKeyboard7 } from "@opentui/react";
 
 // src/components/MessageBlock.jsx
@@ -5092,7 +5294,7 @@ function turnWeight(message) {
 function Transcript({ messages = [], width, height, emptyHint, scrollRef, live = false, expandThinking = false, liveLabel = true, outputLabel = "\u25B6 Output" }) {
   const list = Array.isArray(messages) ? messages : [];
   const budget = Math.max(1, Number(height) || 20);
-  const boxRef = useRef6(null);
+  const boxRef = useRef7(null);
   const [follow, setFollow] = useState12(true);
   const capped = list.slice(-MAX_TURNS);
   const hidden = list.length - capped.length;
@@ -5197,7 +5399,7 @@ var MemoTranscript = React30.memo(Transcript);
 var Transcript_default = MemoTranscript;
 
 // src/hooks/useAgentStream.js
-import { useCallback as useCallback3, useEffect as useEffect11, useRef as useRef7, useState as useState13 } from "react";
+import { useCallback as useCallback3, useEffect as useEffect11, useRef as useRef8, useState as useState13 } from "react";
 var import_ladder = __toESM(require_ladder());
 var DEFAULT_API2 = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
@@ -5286,11 +5488,11 @@ function useAgentStream({
   onSteerUndelivered
 } = {}) {
   const [messages, setMessages] = useState13([]);
-  const messagesRef = useRef7([]);
+  const messagesRef = useRef8([]);
   useEffect11(() => {
     messagesRef.current = messages;
   }, [messages]);
-  const onSteerUndeliveredRef = useRef7(onSteerUndelivered);
+  const onSteerUndeliveredRef = useRef8(onSteerUndelivered);
   useEffect11(() => {
     onSteerUndeliveredRef.current = onSteerUndelivered;
   }, [onSteerUndelivered]);
@@ -5299,25 +5501,26 @@ function useAgentStream({
   const [error, setError] = useState13(null);
   const [elapsedMs, setElapsedMs] = useState13(0);
   const [activity, setActivity] = useState13([]);
+  const progressAtRef = useRef8(0);
   const [requests, setRequests] = useState13(0);
   const [tokens, setTokens] = useState13({ in: 0, out: 0, reported: false });
-  const requestsRef = useRef7(0);
+  const requestsRef = useRef8(0);
   const pushActivity = useCallback3((kind, text) => {
     const line = { kind: String(kind || "sys"), text: String(text == null ? "" : text), ts: Date.now() };
     setActivity((prev) => prev.length >= 60 ? [...prev.slice(prev.length - 59), line] : [...prev, line]);
   }, []);
   const [pendingConfirm, setPendingConfirm] = useState13(null);
-  const pendingConfirmRef = useRef7(null);
-  const meterRef = useRef7(null);
+  const pendingConfirmRef = useRef8(null);
+  const meterRef = useRef8(null);
   if (!meterRef.current) meterRef.current = createMeter();
   const [meters, setMeters] = useState13(() => meterRef.current.snapshot());
   const [learned, setLearned] = useState13({ added: 0, skills: 0, events: 0 });
-  const learnedRef = useRef7({ added: 0, skills: 0, events: 0 });
+  const learnedRef = useRef8({ added: 0, skills: 0, events: 0 });
   const [lastRecap, setLastRecap] = useState13(null);
-  const failuresRef = useRef7([]);
-  const learnedAtStartRef = useRef7({ added: 0, skills: 0, events: 0 });
-  const toolMetaRef = useRef7(/* @__PURE__ */ new Map());
-  const lastToolRef = useRef7(null);
+  const failuresRef = useRef8([]);
+  const learnedAtStartRef = useRef8({ added: 0, skills: 0, events: 0 });
+  const toolMetaRef = useRef8(/* @__PURE__ */ new Map());
+  const lastToolRef = useRef8(null);
   const syncMeters = useCallback3(() => setMeters(meterRef.current.snapshot()), []);
   const scoreTool = useCallback3((name, args, result) => {
     const text = String(result == null ? "" : result).trim();
@@ -5341,12 +5544,12 @@ function useAgentStream({
     pendingConfirmRef.current = value;
     setPendingConfirm(value);
   }, []);
-  const abortRef = useRef7(null);
-  const userAbortRef = useRef7(false);
-  const attemptCtxRef = useRef7({ produced: false, sawError: null, status: null });
-  const startedAtRef = useRef7(null);
-  const statusRef = useRef7("idle");
-  const activeRunIdRef = useRef7(null);
+  const abortRef = useRef8(null);
+  const userAbortRef = useRef8(false);
+  const attemptCtxRef = useRef8({ produced: false, sawError: null, status: null });
+  const startedAtRef = useRef8(null);
+  const statusRef = useRef8("idle");
+  const activeRunIdRef = useRef8(null);
   const setStatusBoth = useCallback3((next) => {
     statusRef.current = next;
     setStatus(next);
@@ -5512,6 +5715,7 @@ function useAgentStream({
       setStatusBoth("connecting");
       startedAtRef.current = Date.now();
       setElapsedMs(0);
+      progressAtRef.current = Date.now();
       try {
         meterRef.current.resetTask();
         syncMeters();
@@ -5539,6 +5743,7 @@ function useAgentStream({
       userAbortRef.current = false;
       const applyEvent = (evt) => {
         if (!evt || typeof evt !== "object") return;
+        progressAtRef.current = Date.now();
         switch (evt.type) {
           case "delta":
             setStatusBoth("streaming");
@@ -6032,6 +6237,7 @@ function useAgentStream({
     failuresRef.current = [];
     requestsRef.current = 0;
     startedAtRef.current = null;
+    progressAtRef.current = 0;
   }, [abort, setPending]);
   const busy = status === "connecting" || status === "reconnecting" || status === "streaming" || status === "thinking" || status === "approval";
   return {
@@ -6045,6 +6251,7 @@ function useAgentStream({
     learned,
     lastRecap,
     activity,
+    progressAtRef,
     requests,
     tokens,
     pendingConfirm,
@@ -6059,7 +6266,7 @@ function useAgentStream({
 var useAgentStream_default = useAgentStream;
 
 // src/hooks/useServerWatch.js
-import { useEffect as useEffect12, useRef as useRef8 } from "react";
+import { useEffect as useEffect12, useRef as useRef9 } from "react";
 var HEALTHY_MS = 3e3;
 var DOWN_MS = 1e3;
 var REQUEST_MS = 4e3;
@@ -6076,11 +6283,11 @@ var getJson = async (url) => {
   return r.json();
 };
 function useServerWatch({ api, busy = false, onRecovered } = {}) {
-  const busyRef = useRef8(busy);
+  const busyRef = useRef9(busy);
   useEffect12(() => {
     busyRef.current = !!busy;
   }, [busy]);
-  const onRecoveredRef = useRef8(onRecovered);
+  const onRecoveredRef = useRef9(onRecovered);
   useEffect12(() => {
     onRecoveredRef.current = onRecovered;
   }, [onRecovered]);
@@ -6127,7 +6334,7 @@ function useServerWatch({ api, busy = false, onRecovered } = {}) {
 var useServerWatch_default = useServerWatch;
 
 // src/hooks/useHostStats.js
-import { useEffect as useEffect13, useRef as useRef9, useState as useState14 } from "react";
+import { useEffect as useEffect13, useRef as useRef10, useState as useState14 } from "react";
 import os4 from "node:os";
 import fs7 from "node:fs";
 var readText = (p) => {
@@ -6178,12 +6385,12 @@ var shown = (s) => [
 ].join("|");
 function useHostStats(intervalMs = 1e3) {
   const [stats, setStats] = useState14(null);
-  const prevRef = useRef9(null);
-  const smoothRef = useRef9(null);
-  const memRef = useRef9(null);
-  const diskRef = useRef9(null);
-  const pubRef = useRef9("");
-  const tickRef = useRef9(0);
+  const prevRef = useRef10(null);
+  const smoothRef = useRef10(null);
+  const memRef = useRef10(null);
+  const diskRef = useRef10(null);
+  const pubRef = useRef10("");
+  const tickRef = useRef10(0);
   useEffect13(() => {
     const cores = Math.max(1, (os4.cpus() || []).length);
     const sample = () => {
@@ -6246,7 +6453,7 @@ function useHostStats(intervalMs = 1e3) {
 }
 
 // src/hooks/useDebugStats.js
-import { useCallback as useCallback4, useEffect as useEffect14, useRef as useRef10, useState as useState15 } from "react";
+import { useCallback as useCallback4, useEffect as useEffect14, useRef as useRef11, useState as useState15 } from "react";
 import process2 from "node:process";
 
 // src/utils/debug-metrics.js
@@ -6345,7 +6552,7 @@ function useDebugStats({ enabled = false, api = "http://localhost:3579", refresh
   const [snap, setSnap] = useState15(null);
   const [version, setVersion] = useState15(null);
   const [versionErr, setVersionErr] = useState15(null);
-  const openedAt = useRef10(Date.now());
+  const openedAt = useRef11(Date.now());
   const sample = useCallback4(() => {
     setSnap({
       at: Date.now(),
@@ -6466,7 +6673,7 @@ function useMemoryBank(intervalMs = 1e4) {
 // src/hooks/useCliUpdate.js
 var import_updater = __toESM(require_updater());
 var import_prefs2 = __toESM(require_prefs());
-import { useEffect as useEffect16, useRef as useRef11, useState as useState17 } from "react";
+import { useEffect as useEffect16, useRef as useRef12, useState as useState17 } from "react";
 import fs9 from "node:fs";
 import path7 from "node:path";
 function readStartup() {
@@ -6498,7 +6705,7 @@ function readStartup() {
   return { applied: null, status: { status: "idle" } };
 }
 function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
-  const startup = useRef11(null);
+  const startup = useRef12(null);
   if (startup.current === null) startup.current = readStartup();
   const applied = startup.current.applied;
   const [state, setState] = useState17(startup.current.status);
@@ -6580,7 +6787,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
 }
 
 // src/hooks/useScriptRunner.js
-import { useCallback as useCallback5, useEffect as useEffect17, useRef as useRef12, useState as useState18 } from "react";
+import { useCallback as useCallback5, useEffect as useEffect17, useRef as useRef13, useState as useState18 } from "react";
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
 var TIMEOUT_MS = 12e4;
@@ -6593,9 +6800,9 @@ function useScriptRunner() {
     }
   });
   const [run, setRun] = useState18({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
-  const procRef = useRef12(null);
-  const timerRef = useRef12(null);
-  const seq2 = useRef12(0);
+  const procRef = useRef13(null);
+  const timerRef = useRef13(null);
+  const seq2 = useRef13(0);
   const stop = useCallback5(() => {
     const p = procRef.current;
     if (p) {
@@ -6863,11 +7070,11 @@ function App({ version = "0.1.0" }) {
   const [draft, setDraft] = useState19("");
   const [inputHistory, setInputHistory] = useState19(() => (0, import_input_history.loadInputHistory)());
   const [histIdx, setHistIdx] = useState19(-1);
-  const draftStash = useRef13("");
+  const draftStash = useRef14("");
   const [model, setModel] = useState19(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
   const [provider, setProvider] = useState19(() => process.env.HAKSTER_PROVIDER || readPrefs().provider || "");
   const [modelIdx, setModelIdx] = useState19(0);
-  const prefsRef = useRef13(null);
+  const prefsRef = useRef14(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
   const [handoffOn, setHandoffOn] = useState19(() => prefsRef.current.autoHandoff !== false);
   const [autoMode, setAutoMode] = useState19(() => {
@@ -6899,10 +7106,10 @@ function App({ version = "0.1.0" }) {
   const [pointsHistory, setPointsHistory] = useState19([]);
   const [attachment, setAttachment] = useState19(null);
   const [steerQueue, setSteerQueue] = useState19([]);
-  const scrollRef = useRef13(null);
-  const dashRef = useRef13(null);
-  const usageRef = useRef13(null);
-  const debugRef = useRef13(null);
+  const scrollRef = useRef14(null);
+  const dashRef = useRef14(null);
+  const usageRef = useRef14(null);
+  const debugRef = useRef14(null);
   const agent = useAgentStream_default({
     // A steer the run could not deliver comes back here and joins the same
     // queue an undelivered POST uses, so it sends with the next run.
@@ -6947,7 +7154,7 @@ function App({ version = "0.1.0" }) {
     const t = setInterval(load, 3e3);
     return () => clearInterval(t);
   }, [load]);
-  const mcpRefreshRef = useRef13(null);
+  const mcpRefreshRef = useRef14(null);
   useEffect18(() => {
     let alive = true;
     const tick = async () => {
@@ -7076,7 +7283,7 @@ function App({ version = "0.1.0" }) {
       agent.note(text, updated ? "notice" : "warn");
     }
   });
-  const installedAnnounced = useRef13(false);
+  const installedAnnounced = useRef14(false);
   useEffect18(() => {
     if (installedAnnounced.current) return;
     if (!update || !update.applied || !update.applied.version) return;
@@ -7084,7 +7291,7 @@ function App({ version = "0.1.0" }) {
     const from = update.applied.from && update.applied.from !== update.applied.version ? ` (was v${update.applied.from})` : " (newer build, same version)";
     showNotice(`\u2713 CLI updated to v${update.applied.version}${from} \u2014 installed on this start`);
   }, [update, showNotice]);
-  const updateAnnounced = useRef13("");
+  const updateAnnounced = useRef14("");
   useEffect18(() => {
     if (update && update.applied) return;
     if (!update || !update.version) return;
@@ -7368,7 +7575,7 @@ function App({ version = "0.1.0" }) {
         showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
     }
   }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn, autoMode, update, version]);
-  const crushModelList = useRef13(null);
+  const crushModelList = useRef14(null);
   if (!crushModelList.current) crushModelList.current = readCrushModels();
   const catalogRows = (() => {
     const q = menuQuery.trim().toLowerCase();
@@ -7485,7 +7692,7 @@ function App({ version = "0.1.0" }) {
     },
     [agent, attachment, runCommand, showNotice, steerQueue.length]
   );
-  const steerFlushLock = useRef13(false);
+  const steerFlushLock = useRef14(false);
   useEffect18(() => {
     if (agent.busy) {
       steerFlushLock.current = false;
@@ -8627,9 +8834,11 @@ function App({ version = "0.1.0" }) {
           {
             width: mainW,
             phase: crushPhase,
-            activity: activeTool?.name || "",
+            tool: activeTool,
             elapsedMs: agent.elapsedMs,
-            queued: steerQueue.length
+            queued: steerQueue.length,
+            progressAt: agent.progressAtRef?.current || 0,
+            trend: agent.meters?.health?.trend || "steady"
           }
         ) }) : showRecap ? (
           // Idle: the same row states what the finished run did instead of

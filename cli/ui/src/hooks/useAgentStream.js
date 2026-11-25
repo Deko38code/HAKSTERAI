@@ -187,6 +187,12 @@ export function useAgentStream({
   // costs bounded memory; the counters are session totals and only reset on
   // /clear.
   const [activity, setActivity] = useState([]);
+  // When the run last delivered ANY event. The status row reads this to tell a
+  // quiet-but-working turn from a stuck one (owner, 2026-11-25: "when agent is
+  // stuck to know when to stop and use tools"): no event for 12 s swaps the
+  // phase phrase for a call-a-tool nudge. A plain ref, because every event
+  // already re-renders the app — this only has to be readable at paint.
+  const progressAtRef = useRef(0);
   const [requests, setRequests] = useState(0);
   const [tokens, setTokens] = useState({ in: 0, out: 0, reported: false });
   const requestsRef = useRef(0);
@@ -514,6 +520,9 @@ export function useAgentStream({
       setStatusBoth('connecting');
       startedAtRef.current = Date.now();
       setElapsedMs(0);
+      // The stall clock starts with the run: silence is measured from here until
+      // the first event lands.
+      progressAtRef.current = Date.now();
       // A new turn starts a new round budget for the meter; the session's
       // smartness and points carry over, exactly as the old CLI's did.
       try { meterRef.current.resetTask(); syncMeters(); } catch { /* metering is best-effort */ }
@@ -561,6 +570,7 @@ export function useAgentStream({
       /** Apply one decoded SSE payload to the transcript. */
       const applyEvent = (evt) => {
         if (!evt || typeof evt !== 'object') return;
+        progressAtRef.current = Date.now();
         switch (evt.type) {
           case 'delta':
             setStatusBoth('streaming');
@@ -1205,6 +1215,7 @@ export function useAgentStream({
     failuresRef.current = [];
     requestsRef.current = 0;
     startedAtRef.current = null;
+    progressAtRef.current = 0;
   }, [abort, setPending]);
 
   const busy =
@@ -1225,6 +1236,7 @@ export function useAgentStream({
     learned,
     lastRecap,
     activity,
+    progressAtRef,
     requests,
     tokens,
     pendingConfirm,

@@ -2574,9 +2574,15 @@ export default function App({ version = '0.1.0' }) {
                 <CrushStatus
                   width={mainW}
                   phase={crushPhase}
-                  activity={activeTool?.name || ''}
+                  tool={activeTool}
                   elapsedMs={agent.elapsedMs}
                   queued={steerQueue.length}
+                  // The run's own stall clock and the meter's measured trend:
+                  // HakTerm's hot/warming/cooling/cold wording and its
+                  // stuck-then-call-a-tool nudge read from these, so the row
+                  // describes the real run and not a timer (owner, 2026-11-25).
+                  progressAt={agent.progressAtRef?.current || 0}
+                  trend={agent.meters?.health?.trend || 'steady'}
                 />
               </box>
             ) : showRecap ? (

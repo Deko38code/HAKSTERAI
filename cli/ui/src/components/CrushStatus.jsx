@@ -1,4 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  PHRASE_MS,
+  RESUME_MS,
+  heatColor,
+  heatOf,
+  heatWord,
+  isResume,
+  phraseFor,
+} from '../utils/spin-phrases.js';
 
 /* How often the run's own glyphs change. Every tick is a full-screen repaint
  * (see the effect's comment), so this is a cost knob, not a taste knob. */
@@ -6,14 +15,16 @@ const SPINNER_MS = 300;
 
 const FRAMES = ['❄', '✦', '✧', '✶', '✧', '✦'];const SHIMMER = ['❅', '❄', '✧', '❄', '❅'];
 const GRADIENT = [51, 87, 117, 153, 117, 87];
+/* Phase identity (colour + glyph) lives here; the WORDING lives in
+ * utils/spin-phrases.js so it can be tested without a terminal. */
 const PHASES = {
-  THINK: { color: '#58a6ff', emoji: '◈', phrases: ['Thinking through the problem…', 'Reasoning carefully…', 'Analyzing the request…', 'Connecting concepts…'] },
-  PLAN: { color: '#c084fc', emoji: '≡', phrases: ['Formulating a plan…', 'Mapping out steps…', 'Structuring the approach…'] },
-  ACT: { color: '#3fb950', emoji: '⚡', phrases: ['Executing command…', 'Running tool…', 'Taking action…'] },
-  OBSERVE: { color: '#39c5cf', emoji: '◉', phrases: ['Observing output…', 'Reading results…', 'Checking response…'] },
-  REFLECT: { color: '#d29922', emoji: '⊙', phrases: ['Assessing the outcome…', 'Learning from this step…'] },
-  CONSOLIDATE: { color: '#ffd700', emoji: '▣', phrases: ['Consolidating findings…', 'Compiling the answer…', 'Putting it all together…'] },
-  DEFAULT: { color: '#58a6ff', emoji: '◇', phrases: ['Working on it…', 'Processing…', 'Hold tight…'] },
+  THINK: { color: '#58a6ff', emoji: '◈' },
+  PLAN: { color: '#c084fc', emoji: '≡' },
+  ACT: { color: '#3fb950', emoji: '⚡' },
+  OBSERVE: { color: '#39c5cf', emoji: '◉' },
+  REFLECT: { color: '#d29922', emoji: '⊙' },
+  CONSOLIDATE: { color: '#ffd700', emoji: '▣' },
+  DEFAULT: { color: '#58a6ff', emoji: '◇' },
 };
 
 function formatElapsed(ms) {
@@ -21,7 +32,23 @@ function formatElapsed(ms) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, '0')}s`;
 }
 
-export default function CrushStatus({ width, phase, activity, elapsedMs, queued = 0 }) {
+/** Keep one row on one line: the phrase gives way, never the clock or queue. */
+function clip(text, max) {
+  const s = String(text || '');
+  if (max <= 1) return '';
+  return s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`;
+}
+
+export default function CrushStatus({
+  width,
+  phase,
+  activity,
+  tool = null,
+  elapsedMs,
+  queued = 0,
+  progressAt = 0,
+  trend = 'steady',
+}) {
   const [frame, setFrame] = useState(0);
   // One commit here repaints the WHOLE screen: OpenTUI lays the frame out as a
   // unit, so this row's glyphs are priced at the transcript's size. At 80 ms a
@@ -39,11 +66,57 @@ export default function CrushStatus({ width, phase, activity, elapsedMs, queued 
   const color = Number(elapsedMs || 0) < 5000 ? '#3fb950' : Number(elapsedMs || 0) < 15000 ? '#d29922' : '#f85149';
   const grad = GRADIENT[frame % GRADIENT.length];
   const gradColor = `rgb(${grad},${Math.floor(grad * 0.7)},${Math.floor(grad * 1.2)})`;
-  const phrase = activity || info.phrases[Math.floor(frame / 20) % info.phrases.length];
+
+  // ── Stuck and resumed, from real clocks ───────────────────────────────────
+  // `progressAt` is the timestamp of the last event the run delivered (the hook
+  // updates it on every delta, phase, tool start and tool result). With no event
+  // for STUCK_MS the row stops describing the phase and says what to do next —
+  // HakTerm's own 12 s no-progress guard (owner: "when agent is stuck to know
+  // when to stop and use tools"). Before any event arrives the run's own
+  // elapsed time stands in, so the row still knows it has been quiet.
+  const now = Date.now();
+  const sinceProgress = progressAt ? now - Number(progressAt) : Number(elapsedMs || 0);
+  const stalledMs = Math.max(0, sinceProgress);
+
+  // Resuming after doing: a THINK that follows ACT/OBSERVE/REFLECT is the agent
+  // back on the task, not a fresh start (HakTerm: "Back on task · continuing the
+  // checklist"). Held for RESUME_MS, then the phase's own phrases take over.
+  const prevPhaseRef = useRef(normalizedPhase);
+  const resumeUntilRef = useRef(0);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    if (prev !== normalizedPhase) {
+      if (isResume(prev, normalizedPhase)) resumeUntilRef.current = Date.now() + RESUME_MS;
+      prevPhaseRef.current = normalizedPhase;
+    }
+  }, [normalizedPhase]);
+  const resumed = Date.now() < resumeUntilRef.current;
+
+  // Phrase rotation is timed, not frame-counted: one phrase every PHRASE_MS no
+  // matter what the paint interval is set to.
+  const phraseIndex = Math.floor(now / PHRASE_MS);
+  const phrase = phraseFor({
+    phase: normalizedPhase,
+    tool: tool && (tool.name || tool.tool_name) ? tool : null,
+    activity,
+    index: phraseIndex,
+    resumed,
+    stalledMs,
+  });
+
+  // The heat reading is the meter's measured trend plus this stall clock — the
+  // same numbers the ◈ memory bar reads, so the run row and the header agree.
+  const heat = heatOf({ trend, stalledMs });
+  const tint = heatColor(heat);
+
   const shimmer = [0, 1, 2].map((offset) => SHIMMER[(frame + offset) % SHIMMER.length]).join('');
+  // What is left for the phrase after the fixed parts of the row (spinner 3,
+  // phase label + glyph, the heat word, the shimmer, the clock, a little air).
+  const room = Math.max(8, Number(width || 80) - 44);
+  const shown = clip(phrase.text, room);
 
   return (
-    <box style={{ width, flexDirection: 'row', paddingLeft: 1, overflow: 'hidden' }}>
+    <box style={{ width, flexDirection: 'row', paddingLeft: 1, overflow: 'hidden', flexShrink: 0 }}>
       <text>
         <span fg={gradColor}>⟦</span>
         <span fg={color}>{FRAMES[frame % FRAMES.length]}</span>
@@ -53,7 +126,12 @@ export default function CrushStatus({ width, phase, activity, elapsedMs, queued 
         {' '}
         <span fg={info.color}>{normalizedPhase}</span>
         {' '}
-        <span fg="#a5b4c3">{phrase}</span>
+        {/* Warm/cool, from the measured trend and the stall clock. */}
+        <span fg={tint}>{heatWord(heat)}</span>
+        {' · '}
+        <span fg={phrase.kind === 'stuck' ? '#f85149' : phrase.kind === 'tool' ? '#3fb950' : '#a5b4c3'}>
+          {shown}
+        </span>
         {' '}
         <span fg={gradColor}>{shimmer}</span>
         {' '}
