@@ -40,6 +40,19 @@ function git(root, args) {
 
 /** { commit, commits } from the real repository, or null when there is none. */
 function fromGit(root = ROOT) {
+  // Git walks up the directory tree, so a slot dir on a machine whose home is
+  // some other repository would answer with THAT repo's history (seen on the
+  // standby 2026-11-26: 77 commits, commit a109219, for a tree of 281). The
+  // root must be its own work tree, or there is no reading here at all.
+  let top = '';
+  try {
+    top = fs.realpathSync(git(root, ['rev-parse', '--show-toplevel']) || '');
+  } catch { return null; }
+  let here = '';
+  try {
+    here = fs.realpathSync(root);
+  } catch { return null; }
+  if (!top || top !== here) return null;
   const commit = git(root, ['rev-parse', '--short', 'HEAD']);
   const count = git(root, ['rev-list', '--count', 'HEAD']);
   const commits = parseInt(count, 10);

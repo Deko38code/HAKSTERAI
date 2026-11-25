@@ -109,6 +109,19 @@ test('the stamp helper reads a stamp and refuses a bad one', () => {
   }
 });
 
+test('a directory that is merely INSIDE a repository has no reading of its own', () => {
+  // The standby slot lives under a home that may itself be a repository; git
+  // would answer with that ancestor's history (seen 2026-11-26: 77 commits for
+  // a 281-commit tree). Only a root that is its own work tree may report.
+  delete require.cache[STAMP];
+  const helpers = require(STAMP);
+  const repoRoot = path.join(here, '..', '..', '..');
+  const nested = path.join(here, '..'); // cli/ui — inside the repo, not its root
+  const own = helpers.fromGit(repoRoot);
+  assert.ok(own && own.commits > 0, 'the repository itself reports its own count');
+  assert.equal(helpers.fromGit(nested), null, 'a nested directory reports nothing');
+});
+
 test('the endpoint reports the commit, and the badge renders the count', () => {
   const route = fs.readFileSync(ROUTE, 'utf8');
   assert.ok(route.includes("cli-build-stamp.cjs"), 'the endpoint reads the build stamp');
