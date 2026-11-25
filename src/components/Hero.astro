@@ -1,5 +1,37 @@
 ---
 // Hero section with hakster bubble + scramble-decode terminal
+import fs from 'node:fs';
+import path from 'node:path';
+
+// The CLI version in "v… · always running" is read from cli/package.json at
+// build time and, once the page is open, kept in step with /cli/latest.json —
+// the same file a running CLI updates itself from. Owner, 2026-11-25: "when
+// haksters cli version changes need to update our main haksterai.com where it
+// says hakster always running with version etc". The badge had been pinned to
+// "v1.0" since before the CLI had versions at all, so it stopped being true the
+// moment 0.3.1 shipped. A missing or unreadable package.json is not an error
+// here: the badge simply says "always running" without claiming a version.
+// Resolved by walking up from the build's working directory rather than from
+// import.meta.url: Astro's frontmatter module does not carry a usable URL during
+// a build, and that silently produced an empty version on the first attempt.
+function readCliVersion() {
+  let dir = process.cwd();
+  for (let depth = 0; depth < 4; depth += 1) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'cli', 'package.json'), 'utf8'));
+      const v = String(pkg.version || '').trim();
+      if (/^\d+\.\d+\.\d+/.test(v)) return v;
+    } catch {
+      /* not here — try the parent */
+    }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return '';
+}
+const cliVersion = readCliVersion();
+const cliLabel = cliVersion ? `v${cliVersion} · always running` : 'always running';
 ---
 
 <section class="relative min-h-screen flex flex-col items-center justify-center px-6 pt-24 pb-16 overflow-hidden">
@@ -36,7 +68,7 @@
           <span class="relative inline-flex rounded-full h-2 w-2 bg-[#7c3aed]"></span>
         </span>
         <span class="text-sm font-semibold tracking-widest text-[#a855f7] uppercase">hakster</span>
-        <span class="text-xs text-[#64748b] border-l border-[#7c3aed]/30 pl-2">v1.0 · always running</span>
+        <span id="hero-cli-version" class="text-xs text-[#64748b] border-l border-[#7c3aed]/30 pl-2">{cliLabel}</span>
       </div>
 
       <!-- Heading -->
@@ -175,6 +207,38 @@ npm link</code></pre>
 </section>
 
 <script is:inline src="https://telegram.org/js/telegram-widget.js?22"></script>
+
+<script is:inline>
+  // ── The CLI version in the "hakster" badge, kept true ──────────────────
+  // The badge is rendered from cli/package.json at build time; this keeps an
+  // already-open page in step with the live package, so a CLI release shows on
+  // haksterai.com straight away instead of waiting for the next site build
+  // (owner, 2026-11-25: "when haksters cli version changes need to update our
+  // main haksterai.com where it says hakster always running with version etc").
+  // /cli/latest.json is the same no-store endpoint a running CLI checks, so the
+  // page and the installed CLI can never disagree about which version exists.
+  (function () {
+    var el = document.getElementById('hero-cli-version');
+    if (!el || typeof fetch !== 'function') return;
+    var shown = el.textContent || '';
+    function apply() {
+      fetch('/cli/latest.json', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          var v = j && j.version ? String(j.version) : '';
+          if (!/^\d+\.\d+\.\d+/.test(v)) return; // never print a guess
+          var next = 'v' + v + ' · always running';
+          if (next !== shown) { el.textContent = next; shown = next; }
+        })
+        .catch(function () {}); // offline: the build-time label stands
+    }
+    apply();
+    // A tab left open overnight should notice a release too, without polling
+    // a hidden tab.
+    setInterval(function () { if (!document.hidden) apply(); }, 60000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) apply(); });
+  })();
+</script>
 
 <script>
   // ── HAKSTER HERO — Big-Chunk Scramble & Decode Engine ────────────
