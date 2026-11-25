@@ -488,6 +488,29 @@ function initMemory(cwd) {
 // Validates, deduplicates, and appends a raw memory entry.
 // Returns boolean success.
 // ---------------------------------------------------------------------------
+/**
+ * carryRecapIds — a merged entry still has to answer for every recap id it was
+ * merged from. When a run's entry duplicates an earlier one the dedup path
+ * keeps the existing row and drops the new one, which also dropped its `#id`
+ * tag — so `/recap #id` found nothing for a run that really did run (owner,
+ * 2026-11-25: "each recap will have id # to go stright to for issues in mem").
+ * The ids are appended to the surviving entry, bounded so tags cannot grow
+ * without limit; a non-id tag is never touched.
+ */
+const RECAP_ID_TAG = /^#[a-z0-9]{3,16}$/i;
+const RECAP_IDS_KEPT = 8;
+function carryRecapIds(existing, incoming) {
+  if (!existing || !Array.isArray(existing.tags) || !incoming || !Array.isArray(incoming.tags)) return;
+  for (const tag of incoming.tags) {
+    if (RECAP_ID_TAG.test(String(tag)) && !existing.tags.includes(tag)) existing.tags.push(tag);
+  }
+  const ids = existing.tags.filter((tag) => RECAP_ID_TAG.test(String(tag)));
+  if (ids.length > RECAP_IDS_KEPT) {
+    const drop = new Set(ids.slice(0, ids.length - RECAP_IDS_KEPT));
+    existing.tags = existing.tags.filter((tag) => !drop.has(tag));
+  }
+}
+
 function addRawMemory(entry, cwd) {
   // Validate required fields
   const required = ['id', 'timestamp', 'turn', 'phase', 'tags', 'observation', 'type', 'confidence'];
@@ -526,6 +549,7 @@ function addRawMemory(entry, cwd) {
     if (tagSim > TAG_OVERLAP_THRESHOLD) {
       // Increment confidence of existing entry, skip new
       existing.confidence = Math.min(1, existing.confidence + 0.05);
+      carryRecapIds(existing, entry);
       writeJson(rawMemoriesPath, memories);
       return false; // Duplicate — merged
     }
@@ -534,6 +558,7 @@ function addRawMemory(entry, cwd) {
     const obsSim = substringSimilarity(entry.observation, existing.observation);
     if (obsSim > OBSERVATION_SIMILARITY_THRESHOLD) {
       existing.confidence = Math.min(1, existing.confidence + 0.05);
+      carryRecapIds(existing, entry);
       writeJson(rawMemoriesPath, memories);
       return false; // Duplicate — merged
     }

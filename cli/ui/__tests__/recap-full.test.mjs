@@ -17,8 +17,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..', '..', '..');
@@ -69,4 +71,47 @@ test('App grows the receipt into the panel from spare transcript rows only', () 
   // Bare /recap lists several runs with their ids.
   assert.match(app, /hist\.length > 1/, 'several runs get a readable index');
   assert.match(app, /\/recap #id reads one back out of memory/, 'the index says how to read one');
+});
+
+test('an id survives a dedup merge, so /recap #id still finds the run', () => {
+  // The dedup path keeps the existing row and drops the new one — which used to
+  // drop the new run's `#id` too, leaving the panel's handle pointing at
+  // nothing. Run the real recorder against a throwaway home so production
+  // memory is never touched.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hakster-recap-'));
+  const before = process.env.HAKSTER_HOME;
+  process.env.HAKSTER_HOME = home;
+  try {
+    const require = createRequire(import.meta.url);
+    const autolearn = require(path.join(root, 'server/src/agent/autolearn.js'));
+    const base = { task: 'dedup probe', tools: 4, ok: 4, fail: 0, points: 8, learned: 1, failures: [] };
+    const first = autolearn.recordRecap({ ...base, id: '#tst001' });
+    const second = autolearn.recordRecap({ ...base, id: '#tst002' });
+    assert.equal(first.written, 1, 'the first run writes its entry');
+    assert.equal(second.written, 0, 'an identical run merges instead of duplicating');
+    const raw = autolearn.readRawMemories();
+    const tagged = (id) => raw.filter((m) => Array.isArray(m.tags) && m.tags.includes(id)).length;
+    assert.equal(tagged('#tst001'), 1, 'the surviving entry still carries the original id');
+    assert.equal(tagged('#tst002'), 1, 'the merged run is still reachable by its own id');
+    // Bounded: many merges cannot grow the tag list without limit.
+    for (let i = 0; i < 12; i += 1) autolearn.recordRecap({ ...base, id: `#bulk${String(i).padStart(2, '0')}` });
+    const after = autolearn.readRawMemories().find((m) => Array.isArray(m.tags) && m.tags.includes('#bulk11'));
+    assert.ok(after, 'the newest merged id is kept');
+    const ids = after.tags.filter((t) => /^#[a-z0-9]{3,16}$/i.test(t));
+    assert.ok(ids.length <= 8, `ids are bounded (got ${ids.length})`);
+    assert.ok(!ids.includes('#tst001'), 'the oldest ids fall off first');
+  } finally {
+    if (before === undefined) delete process.env.HAKSTER_HOME;
+    else process.env.HAKSTER_HOME = before;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('the keyed recap pointer has a category it is allowed to use', () => {
+  // /api/agent/session-summary writes one keyed record under `recap#id`. The
+  // category was not on the allow-list, so every write threw and the endpoint's
+  // own catch swallowed it — the pointer never existed.
+  const src = read('server/src/memory.js');
+  assert.match(src, /^\s*'recap',$/m, "'recap' is a valid memory category");
+  assert.match(read('server/src/index.js'), /category: 'recap',/, 'the endpoint still asks for it');
 });

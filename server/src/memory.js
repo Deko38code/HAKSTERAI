@@ -15,6 +15,12 @@ const CATEGORIES = [
   'procedure',    // How-to steps, runbooks, sequences
   'context',      // Project context, tech stack, architecture
   'relationship', // People, machines, services, connections
+  // One keyed record per finished run, written by `/api/agent/session-summary`
+  // under `recap#a3f9k2`. The endpoint has always asked for this category; it
+  // was not on the list, so every write threw and was swallowed by the
+  // endpoint's own catch — `/recap #id` then had only the raw entries to answer
+  // from (owner, 2026-11-26: "full recap ... where our recap ids are").
+  'recap',
   'general',      // Catch-all
 ];
 
