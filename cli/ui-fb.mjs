@@ -4636,6 +4636,7 @@ function Recap({
   points = 0,
   learned = 0,
   learnedSkills = 0,
+  memWritten = 0,
   turns = 0,
   tools = 0,
   ok = 0,
@@ -4670,6 +4671,8 @@ function Recap({
   }
   const pts = Math.max(0, Math.round(Number(points) || 0));
   if (pts > 0) segs.push({ key: "points", fg: barColor("points", pts), text: `\u2726 ${pts}p` });
+  const memN = Math.max(0, Number(memWritten) || 0);
+  if (memN > 0) segs.push({ key: "mem", fg: "#58a6ff", text: `mem +${memN}` });
   if (t > 0) segs.push({ key: "turns", fg: "gray", text: plural(t, "turn") });
   if (tc > 0) {
     const tail = bad > 0 ? ` (${good} ok \xB7 ${bad} fail)` : good > 0 ? ` (${good} ok)` : "";
@@ -5975,6 +5978,9 @@ function useAgentStream({
             },
             body: JSON.stringify({ ...recap, task: prompt, sessionId, cwd }),
             keepalive: true
+          }).then((r) => r.ok ? r.json() : null).then((data) => {
+            if (!data || data.ok !== true) return;
+            setLastRecap((prev) => prev && prev.id === recapId ? { ...prev, memWritten: Number(data.written) || 0 } : prev);
           }).catch(() => {
           });
         }
@@ -8637,6 +8643,7 @@ function App({ version = "0.1.0" }) {
               points: agent.meters?.points || 0,
               learned: agent.learned?.added || 0,
               learnedSkills: agent.learned?.skills || 0,
+              memWritten: agent.lastRecap?.memWritten || 0,
               turns: usage.turns,
               tools: usage.tools,
               ok: usage.ok,

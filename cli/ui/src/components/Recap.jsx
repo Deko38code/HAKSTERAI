@@ -50,6 +50,7 @@ export default function Recap({
   points = 0,
   learned = 0,
   learnedSkills = 0,
+  memWritten = 0,
   turns = 0,
   tools = 0,
   ok = 0,
@@ -97,6 +98,10 @@ export default function Recap({
   }
   const pts = Math.max(0, Math.round(Number(points) || 0));
   if (pts > 0) segs.push({ key: 'points', fg: barColor('points', pts), text: `✦ ${pts}p` });
+  // What this run actually wrote into memory — the server's accepted-entry
+  // count, so "logged to his mem" is a fact on the row, not a promise.
+  const memN = Math.max(0, Number(memWritten) || 0);
+  if (memN > 0) segs.push({ key: 'mem', fg: '#58a6ff', text: `mem +${memN}` });
   if (t > 0) segs.push({ key: 'turns', fg: 'gray', text: plural(t, 'turn') });
   if (tc > 0) {
     const tail = bad > 0 ? ` (${good} ok · ${bad} fail)` : good > 0 ? ` (${good} ok)` : '';

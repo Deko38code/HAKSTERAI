@@ -31,7 +31,7 @@ const require = createRequire(import.meta.url);
 
 test('the recap row shows the id, what it learned from, and the points', () => {
   const src = read('cli/ui/src/components/Recap.jsx');
-  for (const prop of ['recapId', 'points', 'learned', 'learnedSkills']) {
+  for (const prop of ['recapId', 'points', 'learned', 'learnedSkills', 'memWritten']) {
     assert.ok(src.includes(prop), `Recap must take ${prop}`);
   }
   assert.ok(src.includes("key: 'id'"), 'the recap id is its own segment');
@@ -51,6 +51,7 @@ test('the hook posts one session summary per run under its recap id', () => {
   assert.ok(src.includes("fetch(`${api}/api/agent/session-summary`"), 'the summary is posted');
   assert.match(src, /if \(snap\.rounds > 0\)/, 'a run with no tool calls writes nothing');
   assert.match(src, /setLastRecap\(recap\)/, 'the row reads the last finished run');
+  assert.match(src, /memWritten: Number\(data\.written\) \|\| 0/, 'the row reports what memory actually took');
   assert.match(src, /const \[lastRecap, setLastRecap\] = useState\(null\)/);
   assert.ok(src.includes('lastRecap,') && src.includes('learned,'), 'both are exposed from the hook');
   assert.ok(src.includes("case 'memory_recall':"), 'the memory-first event is rendered');

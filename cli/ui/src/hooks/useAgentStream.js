@@ -1133,7 +1133,15 @@ export function useAgentStream({
             },
             body: JSON.stringify({ ...recap, task: prompt, sessionId, cwd }),
             keepalive: true,
-          }).catch(() => { /* memory capture is best-effort; the row still shows the run */ });
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              // Say what memory actually took, not that it was sent: the recap
+              // row gains `mem N` only from the server's accepted-entry count.
+              if (!data || data.ok !== true) return;
+              setLastRecap((prev) => (prev && prev.id === recapId ? { ...prev, memWritten: Number(data.written) || 0 } : prev));
+            })
+            .catch(() => { /* memory capture is best-effort; the row still shows the run */ });
         }
       } catch { /* the recap must never fail a finished run */ }
 

@@ -2590,6 +2590,7 @@ export default function App({ version = '0.1.0' }) {
                   points={agent.meters?.points || 0}
                   learned={agent.learned?.added || 0}
                   learnedSkills={agent.learned?.skills || 0}
+                  memWritten={agent.lastRecap?.memWritten || 0}
                   turns={usage.turns}
                   tools={usage.tools}
                   ok={usage.ok}
