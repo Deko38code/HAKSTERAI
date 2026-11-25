@@ -661,8 +661,16 @@ var require_prefs = __commonJS({
       // the five-line decode splash on start
       graphics: true,
       // real logo image in kitty / Ghostty / WezTerm (no-op elsewhere)
-      usageRefresh: 15
+      usageRefresh: 15,
       // the usage page's poll, seconds (0 = paused)
+      // The autonomy dial under the input bar (owner, 2026-11-25: "add the auto
+      // mode on off where composer was like this cli and work with shift+tab to
+      // cycle"). App.jsx has written this key since /auto existed, but the key was
+      // not in DEFAULTS, so save() dropped it and the choice never survived a
+      // restart. It is a CLI preference, not the model config: the pinned model,
+      // provider and ladder order (§22, §38) are untouched by it.
+      autoMode: "auto-edit"
+      // suggest | auto-edit | full-auto
     };
     var META2 = {
       model: { label: "Model", detail: "blank = the pinned HAKSTERAI-FLASH config" },
@@ -674,7 +682,8 @@ var require_prefs = __commonJS({
       opaqueBackdrop: { label: "Opaque backdrop", detail: "solid background over the terminal wallpaper" },
       intro: { label: "Intro splash", detail: "the five-line decode screen on start" },
       graphics: { label: "Kitty graphics", detail: "real logo image in kitty / Ghostty / WezTerm" },
-      usageRefresh: { label: "Usage refresh", detail: "seconds between usage polls (0 = paused)" }
+      usageRefresh: { label: "Usage refresh", detail: "seconds between usage polls (0 = paused)" },
+      autoMode: { label: "Auto mode", detail: "suggest / auto-edit / full-auto \u2014 shift+tab under the input" }
     };
     var KEYS = Object.keys(DEFAULTS);
     function readJson(file) {
@@ -1927,7 +1936,8 @@ function Composer({
   disabled = false,
   placeholder = "describe a task\u2026",
   hint,
-  adSlot
+  adSlot,
+  focusTag = "composer"
 }) {
   const inner = Math.max(8, (width || 80) - 4);
   return /* @__PURE__ */ jsxs5(
@@ -1960,7 +1970,10 @@ function Composer({
           ) : /* @__PURE__ */ jsx5("text", { fg: "gray", children: value || (disabled ? "working\u2026" : placeholder) })
         ] }),
         adSlot,
-        /* @__PURE__ */ jsx5("box", { style: { width: inner }, children: /* @__PURE__ */ jsx5("text", { fg: "gray", children: clipHint(hint || "enter send \xB7 esc stop \xB7 tab focus \xB7 ctrl+c quit", inner) }) })
+        /* @__PURE__ */ jsx5("box", { style: { width: inner }, children: /* @__PURE__ */ jsxs5("text", { children: [
+          /* @__PURE__ */ jsx5("span", { fg: focused ? "cyan" : "gray", children: `\u27EA${focusTag}\u27EB ` }),
+          /* @__PURE__ */ jsx5("span", { fg: "gray", children: clipHint(hint || "enter send \xB7 esc stop \xB7 tab focus \xB7 ctrl+c quit", Math.max(4, inner - focusTag.length - 4)) })
+        ] }) })
       ]
     }
   );
@@ -4451,7 +4464,7 @@ function StatusServicesPanel({
 // src/components/StatusBar.jsx
 import React24 from "react";
 import { TextAttributes as TextAttributes19 } from "@opentui/core";
-import { jsx as jsx24, jsxs as jsxs23 } from "react/jsx-runtime";
+import { Fragment as Fragment9, jsx as jsx24, jsxs as jsxs23 } from "react/jsx-runtime";
 var STATUS_STYLES = {
   idle: { text: "ready", color: "gray" },
   connecting: { text: "can't reach server\u2026", color: "yellow" },
@@ -4484,16 +4497,15 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
   if (handoff !== void 0 && handoff !== null) {
     segs.push({ key: "handoff", color: handoff ? "green" : "red", text: handoff ? "handoff auto" : "handoff off" });
   }
-  if (autoMode) {
-    segs.push({
-      key: "auto",
-      color: autoMode === "full-auto" ? "yellow" : autoMode === "suggest" ? "gray" : "green",
-      text: autoMode === "full-auto" ? "auto full" : autoMode === "suggest" ? "auto ask" : "auto edit"
-    });
-  }
   if (cols !== void 0 && cols !== null) segs.push({ key: "cols", color: "gray", text: `${cols}c` });
   segs.push({ key: "ads", color: adsOn ? "green" : "red", text: adsOn ? "ads on" : "ads off" });
-  const leftText = focus === "ad" ? "\u27EA ad \u27EB" : "\u27EA composer \u27EB";
+  const AUTO_DIAL = {
+    suggest: { text: "auto ask", color: "gray" },
+    "auto-edit": { text: "auto edit", color: "green" },
+    "full-auto": { text: "auto full", color: "yellow" }
+  };
+  const dial = AUTO_DIAL[autoMode] || null;
+  const leftText = dial ? `\u27EA ${dial.text} \u27EB shift+tab` : focus === "ad" ? "\u27EA ad \u27EB" : "\u27EA composer \u27EB";
   const hintText = hint ? `  ${hint}` : "";
   const barW = Math.max(20, Number(width) || 80);
   const avail = Math.max(8, barW - 2 - leftText.length - hintText.length - 2);
@@ -4504,7 +4516,10 @@ function StatusBar({ width, status, model, cols, focus, adsOn, elapsedMs, hint, 
     shown2[0] = { ...shown2[0], text: `${shown2[0].text.slice(0, Math.max(0, avail - 1))}\u2026` };
   }
   return /* @__PURE__ */ jsxs23("box", { style: { width: barW, flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1, overflow: "hidden", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx24("text", { fg: "gray", children: `${leftText}${hintText}` }),
+    /* @__PURE__ */ jsx24("text", { children: dial ? /* @__PURE__ */ jsxs23(Fragment9, { children: [
+      /* @__PURE__ */ jsx24("span", { fg: dial.color, attributes: TextAttributes19.BOLD, children: `\u27EA ${dial.text} \u27EB` }),
+      /* @__PURE__ */ jsx24("span", { fg: "gray", children: ` shift+tab${hintText}` })
+    ] }) : /* @__PURE__ */ jsx24("span", { fg: "gray", children: `${leftText}${hintText}` }) }),
     /* @__PURE__ */ jsx24("text", { children: shown2.map((seg, i) => /* @__PURE__ */ jsx24("span", { fg: seg.color, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) })
   ] });
 }
@@ -4821,7 +4836,7 @@ import { useKeyboard as useKeyboard7 } from "@opentui/react";
 // src/components/MessageBlock.jsx
 import React29, { useEffect as useEffect9, useState as useState11 } from "react";
 import { TextAttributes as TextAttributes22 } from "@opentui/core";
-import { Fragment as Fragment9, jsx as jsx29, jsxs as jsxs27 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx29, jsxs as jsxs27 } from "react/jsx-runtime";
 var RESULT_LINES = 3;
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
@@ -4968,7 +4983,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
         round.text && String(round.text).trim() ? /* @__PURE__ */ jsx29(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
         roundTools.map((tool, j) => /* @__PURE__ */ jsx29(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}-${j}`))
       ] }, `round-${i}`);
-    }) : /* @__PURE__ */ jsxs27(Fragment9, { children: [
+    }) : /* @__PURE__ */ jsxs27(Fragment10, { children: [
       message.thinking ? /* @__PURE__ */ jsx29(
         ThinkingBlock,
         {
@@ -6579,7 +6594,7 @@ var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
 var import_kitty_graphics3 = __toESM(require_kitty_graphics());
 var import_ad_client2 = __toESM(require_ad_client());
-import { Fragment as Fragment10, jsx as jsx31, jsxs as jsxs29 } from "react/jsx-runtime";
+import { Fragment as Fragment11, jsx as jsx31, jsxs as jsxs29 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 6;
 var MCP_PANEL_SETTLE_MS = 8e3;
@@ -6606,6 +6621,8 @@ var IMAGE_MIME = {
 };
 var MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 var AUTO_MODES = /* @__PURE__ */ new Set(["suggest", "auto-edit", "full-auto"]);
+var AUTO_ORDER = ["suggest", "auto-edit", "full-auto"];
+var autoNotice = (mode) => mode === "full-auto" ? "auto FULL \u2014 the agent runs and finishes without asking (sudo still confirms)" : mode === "auto-edit" ? "auto EDIT \u2014 it works and finishes on its own; a dangerous shell command still asks" : "auto ASK \u2014 every command that changes the box waits for you";
 function readPrefs() {
   try {
     return import_prefs3.default.load();
@@ -7033,9 +7050,7 @@ function App({ version = "0.1.0" }) {
         const want = String(arg || "").trim().toLowerCase();
         const next = want === "on" ? "auto-edit" : want === "off" || want === "ask" ? "suggest" : want === "full" ? "full-auto" : AUTO_MODES.has(want) ? want : autoMode === "suggest" ? "auto-edit" : autoMode === "auto-edit" ? "full-auto" : "suggest";
         setAutoMode(next);
-        showNotice(
-          next === "full-auto" ? "auto FULL \u2014 the agent runs and finishes without asking (sudo still confirms)" : next === "auto-edit" ? "auto EDIT \u2014 it works and finishes on its own; a dangerous shell command still asks" : "auto ASK \u2014 every command that changes the box waits for you"
-        );
+        showNotice(autoNotice(next));
         return;
       }
       case "/ports": {
@@ -7138,7 +7153,7 @@ function App({ version = "0.1.0" }) {
         showNotice("transcript cleared \xB7 steer queue emptied");
         return;
       case "/help":
-        showNotice("keys: tab focus \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /clear /quit");
+        showNotice("keys: tab focus \xB7 shift+tab auto mode \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /clear /quit");
         return;
       case "/quit":
       case "/exit":
@@ -7559,6 +7574,13 @@ function App({ version = "0.1.0" }) {
         }
         return;
       }
+      return;
+    }
+    if (key.name === "tab" && (key.shift || key.sequence === "\x1B[Z")) {
+      const next = AUTO_ORDER[(AUTO_ORDER.indexOf(autoMode) + 1) % AUTO_ORDER.length];
+      setAutoMode(next);
+      writePrefs({ autoMode: next });
+      showNotice(autoNotice(next));
       return;
     }
     if (key.name === "tab") {
@@ -7985,7 +8007,7 @@ function App({ version = "0.1.0" }) {
   return /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "column", width: cols || 100, height: rows || 30, overflow: "hidden" }, children: [
     /* @__PURE__ */ jsxs29("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
       /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "row" }, children: [
-        statusBoxShown ? null : /* @__PURE__ */ jsxs29(Fragment10, { children: [
+        statusBoxShown ? null : /* @__PURE__ */ jsxs29(Fragment11, { children: [
           /* @__PURE__ */ jsx31("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes23.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
           /* @__PURE__ */ jsx31("text", { fg: "cyan", attributes: TextAttributes23.BOLD, children: "\u25C6 haksterAi" }),
           /* @__PURE__ */ jsx31("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
@@ -8198,7 +8220,7 @@ function App({ version = "0.1.0" }) {
          services on top, then the big activity feed and live output beside
          the sidebar. Shift+↑/↓ scrolls the feed, shift+End resumes follow,
          esc returns to the chat. Nothing runs from here; it only watches. */
-      /* @__PURE__ */ jsxs29(Fragment10, { children: [
+      /* @__PURE__ */ jsxs29(Fragment11, { children: [
         /* @__PURE__ */ jsxs29("box", { style: { width: panelW, paddingLeft: 1, paddingRight: 1, flexDirection: "column", flexShrink: 0 }, children: [
           /* @__PURE__ */ jsx31(SystemPanel, { width: bodyW, meters, ctxUsed, ctxMax, host }),
           /* @__PURE__ */ jsx31(ServicesPanel, { width: bodyW, services, scan, dense, maxCells: monitorServicesCapacity })
@@ -8338,6 +8360,7 @@ function App({ version = "0.1.0" }) {
             onChange: setDraft,
             onSubmit: submit,
             focused: focus === "composer" && !approving && !dangerSetup,
+            focusTag: focus === "ad" ? "ad" : "composer",
             disabled: false,
             hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u22B8 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 \u2191 history \xB7 /menu commands \xB7 /attach \xB7 pgup scroll \xB7 q quit",
             adSlot: /* @__PURE__ */ jsx31(

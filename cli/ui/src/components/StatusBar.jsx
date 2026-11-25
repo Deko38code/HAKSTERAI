@@ -71,19 +71,25 @@ export default function StatusBar({ width, status, model, cols, focus, adsOn, el
   if (handoff !== undefined && handoff !== null) {
     segs.push({ key: 'handoff', color: handoff ? 'green' : 'red', text: handoff ? 'handoff auto' : 'handoff off' });
   }
-  // How much the agent does without asking (/auto). Green = it works and
-  // finishes on its own, yellow = it will never stop to ask, gray = it asks.
-  if (autoMode) {
-    segs.push({
-      key: 'auto',
-      color: autoMode === 'full-auto' ? 'yellow' : autoMode === 'suggest' ? 'gray' : 'green',
-      text: autoMode === 'full-auto' ? 'auto full' : autoMode === 'suggest' ? 'auto ask' : 'auto edit',
-    });
-  }
   if (cols !== undefined && cols !== null) segs.push({ key: 'cols', color: 'gray', text: `${cols}c` });
   segs.push({ key: 'ads', color: adsOn ? 'green' : 'red', text: adsOn ? 'ads on' : 'ads off' });
 
-  const leftText = focus === 'ad' ? '\u27ea ad \u27eb' : '\u27ea composer \u27eb';
+  // The leading slot is the autonomy dial, where the CLIs the owner runs put it
+  // (owner, 2026-11-25: "add the auto mode on off where composer was like this
+  // cli and work with shift+tab to cycle"). It is a display and a label for the
+  // keystroke \u2014 the shortcut itself lives in App's key layer \u2014 and it replaces
+  // the old `\u27ea composer \u27eb` focus tag, which moved into the composer's own hint
+  // row. Without an autoMode the slot falls back to that tag, so a caller that
+  // does not pass one still says where focus is.
+  const AUTO_DIAL = {
+    suggest: { text: 'auto ask', color: 'gray' },
+    'auto-edit': { text: 'auto edit', color: 'green' },
+    'full-auto': { text: 'auto full', color: 'yellow' },
+  };
+  const dial = AUTO_DIAL[autoMode] || null;
+  const leftText = dial
+    ? `\u27ea ${dial.text} \u27eb shift+tab`
+    : focus === 'ad' ? '\u27ea ad \u27eb' : '\u27ea composer \u27eb';
   const hintText = hint ? `  ${hint}` : '';
   const barW = Math.max(20, Number(width) || 80);
   // paddingLeft/Right (2) + two spaces that keep the halves apart.
@@ -99,7 +105,16 @@ export default function StatusBar({ width, status, model, cols, focus, adsOn, el
 
   return (
     <box style={{ width: barW, flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 1, paddingRight: 1, overflow: 'hidden', flexShrink: 0 }}>
-      <text fg="gray">{`${leftText}${hintText}`}</text>
+      <text>
+        {dial ? (
+          <>
+            <span fg={dial.color} attributes={TextAttributes.BOLD}>{`⟪ ${dial.text} ⟫`}</span>
+            <span fg="gray">{` shift+tab${hintText}`}</span>
+          </>
+        ) : (
+          <span fg="gray">{`${leftText}${hintText}`}</span>
+        )}
+      </text>
       <text>
         {shown.map((seg, i) => (
           <span key={seg.key} fg={seg.color}>{`${i ? ' \u00b7 ' : ''}${seg.text}`}</span>

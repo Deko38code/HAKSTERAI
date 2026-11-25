@@ -96,6 +96,18 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 /* The three amounts of autonomy /api/agent/run understands (server's
  * agent/approval.js). Stored in cli-prefs as `autoMode`. */
 const AUTO_MODES = new Set(['suggest', 'auto-edit', 'full-auto']);
+// The dial's order — safe → autonomous, so no keystroke jumps straight from
+// asking to running unattended. Shift+Tab walks it and `/auto` names it.
+const AUTO_ORDER = ['suggest', 'auto-edit', 'full-auto'];
+// One sentence per amount, so the dial and `/auto` can never describe the same
+// mode two different ways.
+const autoNotice = (mode) => (
+  mode === 'full-auto'
+    ? 'auto FULL — the agent runs and finishes without asking (sudo still confirms)'
+    : mode === 'auto-edit'
+      ? 'auto EDIT — it works and finishes on its own; a dangerous shell command still asks'
+      : 'auto ASK — every command that changes the box waits for you'
+);
 
 /* The auto-handoff switch is the owner's, and it stays where he left it.
  * One small file under ~/.hakster, read at start and rewritten on change; a
@@ -752,13 +764,7 @@ export default function App({ version = '0.1.0' }) {
           : AUTO_MODES.has(want) ? want
           : autoMode === 'suggest' ? 'auto-edit' : autoMode === 'auto-edit' ? 'full-auto' : 'suggest';
         setAutoMode(next);
-        showNotice(
-          next === 'full-auto'
-            ? 'auto FULL — the agent runs and finishes without asking (sudo still confirms)'
-            : next === 'auto-edit'
-              ? 'auto EDIT — it works and finishes on its own; a dangerous shell command still asks'
-              : 'auto ASK — every command that changes the box waits for you',
-        );
+        showNotice(autoNotice(next));
         return;
       }
       case '/ports': {
@@ -885,7 +891,7 @@ export default function App({ version = '0.1.0' }) {
         showNotice('transcript cleared · steer queue emptied');
         return;
       case '/help':
-        showNotice('keys: tab focus · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /clear /quit');
+        showNotice('keys: tab focus · shift+tab auto mode · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /clear /quit');
         return;
       case '/quit':
       case '/exit':
@@ -1331,6 +1337,20 @@ export default function App({ version = '0.1.0' }) {
         }
         return;
       }
+      return;
+    }
+
+    // Shift+Tab — the autonomy dial, where the CLIs the owner runs put it
+    // (owner, 2026-11-25: "add the auto mode on off where composer was like
+    // this cli and work with shift+tab to cycle"). It walks ask → edit → full
+    // in that order and says what it landed on. Plain Tab still moves focus
+    // between the composer and the ad rail. Some terminals send shift+tab as
+    // the CSI Z sequence instead of a shifted Tab; both are taken.
+    if (key.name === 'tab' && (key.shift || key.sequence === '\x1b[Z')) {
+      const next = AUTO_ORDER[(AUTO_ORDER.indexOf(autoMode) + 1) % AUTO_ORDER.length];
+      setAutoMode(next);
+      writePrefs({ autoMode: next });
+      showNotice(autoNotice(next));
       return;
     }
 
@@ -2407,6 +2427,10 @@ export default function App({ version = '0.1.0' }) {
                   onChange={setDraft}
                   onSubmit={submit}
                   focused={focus === 'composer' && !approving && !dangerSetup}
+                  // The old `⟪ composer ⟫` tag under the bar now sits on the
+                  // hint row instead, because the owner put the auto-mode dial
+                  // in that slot (2026-11-25).
+                  focusTag={focus === 'ad' ? 'ad' : 'composer'}
                   // The input never locks while the agent works (owner,
                   // 2026-11-24: "i can type while agent is working need steer
                   // que"). Enter queues the text; the drain effect above sends

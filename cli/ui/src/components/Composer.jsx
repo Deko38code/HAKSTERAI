@@ -32,6 +32,7 @@ export default function Composer({
   placeholder = 'describe a task…',
   hint,
   adSlot,
+  focusTag = 'composer',
 }) {
   const inner = Math.max(8, (width || 80) - 4);
 
@@ -72,7 +73,14 @@ export default function Composer({
       <box style={{ width: inner }}>
         {/* One row, always: the hint is clipped to the box so a long hint can
             never wrap and push the layout down by a line. */}
-        <text fg="gray">{clipHint(hint || 'enter send · esc stop · tab focus · ctrl+c quit', inner)}</text>
+        {/* The focus tag used to live in the status bar under the input; the
+            owner moved the auto-mode dial there (2026-11-25), so it sits here
+            instead: same information, one row higher, and it can never push a
+            panel because it shares the hint's single clipped row. */}
+        <text>
+          <span fg={focused ? 'cyan' : 'gray'}>{`⟪${focusTag}⟫ `}</span>
+          <span fg="gray">{clipHint(hint || 'enter send · esc stop · tab focus · ctrl+c quit', Math.max(4, inner - focusTag.length - 4))}</span>
+        </text>
       </box>
     </box>
   );

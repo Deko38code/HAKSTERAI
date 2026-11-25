@@ -30,6 +30,13 @@ const DEFAULTS = {
   intro: true, // the five-line decode splash on start
   graphics: true, // real logo image in kitty / Ghostty / WezTerm (no-op elsewhere)
   usageRefresh: 15, // the usage page's poll, seconds (0 = paused)
+  // The autonomy dial under the input bar (owner, 2026-11-25: "add the auto
+  // mode on off where composer was like this cli and work with shift+tab to
+  // cycle"). App.jsx has written this key since /auto existed, but the key was
+  // not in DEFAULTS, so save() dropped it and the choice never survived a
+  // restart. It is a CLI preference, not the model config: the pinned model,
+  // provider and ladder order (§22, §38) are untouched by it.
+  autoMode: 'auto-edit', // suggest | auto-edit | full-auto
 };
 
 /* What each key means, shown in the settings panel and the /menu catalog. This
@@ -45,6 +52,7 @@ const META = {
   intro: { label: 'Intro splash', detail: 'the five-line decode screen on start' },
   graphics: { label: 'Kitty graphics', detail: 'real logo image in kitty / Ghostty / WezTerm' },
   usageRefresh: { label: 'Usage refresh', detail: 'seconds between usage polls (0 = paused)' },
+  autoMode: { label: 'Auto mode', detail: 'suggest / auto-edit / full-auto — shift+tab under the input' },
 };
 
 const KEYS = Object.keys(DEFAULTS);

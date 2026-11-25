@@ -10,6 +10,7 @@
  * which is the failure this test exists to catch.
  */
 import React from 'react';
+import { createRequire } from 'node:module';
 import { createTestRenderer } from '@opentui/core/testing';
 import { createRoot, flushSync } from '@opentui/react';
 import App from '../src/App.jsx';
@@ -336,6 +337,33 @@ export async function run({ adsPort }) {
   await setup.flush();
   const idleFrame = frame();
 
+  // ── 0. The autonomy dial under the input bar ─────────────────────────────
+  // Owner, 2026-11-25: "in the tui under input bar says composer can we move
+  // that somewhere else without breaking and add the auto mode on off where
+  // composer was like this cli and work with shift+tab to cycle". The dial
+  // replaces the old focus tag in the status bar's left slot, the tag moved
+  // into the composer's hint row, and shift+tab walks ask → edit → full.
+  // Three presses return the mode to where it started, so the run leaves the
+  // owner's cli-prefs.json exactly as it found it — asserted, not assumed.
+  const prefsStore = createRequire(import.meta.url)('../../src/prefs.js');
+  const DIAL_ORDER = ['suggest', 'auto-edit', 'full-auto'];
+  const DIAL_LABEL = { suggest: 'auto ask', 'auto-edit': 'auto edit', 'full-auto': 'auto full' };
+  const dialBefore = String(prefsStore.load().autoMode || 'auto-edit');
+  // A stored value the dial does not know (an old file, a hand edit) starts at
+  // App's own default, so the expectations follow what is actually drawn.
+  const dialStart = DIAL_ORDER.includes(dialBefore) ? dialBefore : 'auto-edit';
+  const dialFrames = [];
+  for (let i = 0; i < DIAL_ORDER.length; i += 1) {
+    flushSync(() => setup.mockInput.pressTab({ shift: true }));
+    await settle(80);
+    await setup.flush();
+    dialFrames.push(frame());
+  }
+  const dialAfter = String(prefsStore.load().autoMode || 'auto-edit');
+  // The status bar is the frame's last drawn row; the composer tag must be out
+  // of it and in the composer, not merely absent from the whole frame.
+  const lastDrawnRow = idleFrame.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim()).pop() || '';
+
   // ── 1. A plain turn ──────────────────────────────────────────────────────
   await type('fix the bug', 800);
   await setup.flush();
@@ -565,6 +593,23 @@ export async function run({ adsPort }) {
     // this asserts the real ad service filled the rail, not one exact line.
     ['live ad rail fills from the real ad service', /haksterAi — your own/.test(idleFrame)],
     ['composer shows the placeholder', /describe a task/.test(idleFrame)],
+
+    // ── the autonomy dial that took the focus tag's slot ──
+    [
+      'the status bar carries the auto-mode dial with its shortcut',
+      new RegExp(`⟪ ${DIAL_LABEL[dialStart]} ⟫ shift\\+tab`).test(idleFrame),
+      `saw ${dialStart}`,
+    ],
+    ['the focus tag is gone from the status bar row', !/composer/.test(lastDrawnRow), lastDrawnRow.slice(0, 60)],
+    ['the focus tag sits on the composer hint row instead', /⟪composer⟫/.test(idleFrame)],
+    ...DIAL_ORDER.map((_, i) => {
+      const mode = DIAL_ORDER[(DIAL_ORDER.indexOf(dialStart) + 1 + i) % DIAL_ORDER.length];
+      return [`shift+tab ${i + 1} lands on ${DIAL_LABEL[mode]}`, new RegExp(`⟪ ${DIAL_LABEL[mode]} ⟫`).test(dialFrames[i])];
+    }),
+    ['three shift+tabs leave the saved mode where they found it', dialAfter === dialStart, `${dialBefore} -> ${dialAfter}`],
+    // Plain tab must still move focus: the dashboard assertions below depend on
+    // it, and the dial must not have eaten the keystroke it shares a name with.
+    ['plain tab still leaves the composer', !/⟪composer⟫/.test(dockFrame) || /⟪ad⟫/.test(dockFrame)],
 
     // ── plain chat turn ──
     ['submitted prompt appears in the transcript', /fix the bug/.test(chatFrame)],
