@@ -121,3 +121,29 @@ test('neither installer touches the user\'s own Claude Code config', () => {
     assert.doesNotMatch(src, /\.claude(\/|\\)/, `${name} must never read or write ~/.claude`);
   }
 });
+
+test('the installer applies our Guake look when Guake is already there', () => {
+  // Owner, 2026-11-26: "i want it to come with our install the png" and
+  // "yes it should add". The package carries the profile and the backdrop; the
+  // installer applies the look through `hakster quake --setup` (Guake's own
+  // import, previous profile backed up first) when the machine has Guake.
+  const src = readFileSync(path.join(repoRoot, 'install.sh'), 'utf8');
+  const block = src.slice(src.indexOf('The look comes with the install'));
+  const apply = block.slice(0, block.indexOf('say "Next:'));
+
+  assert.match(apply, /elif command -v guake >\/dev\/null 2>&1; then/, 'only when Guake is already installed');
+  assert.match(apply, /"\$HAKSTER_BIN" quake --setup/, 'the shipped CLI applies it, not the installer');
+  assert.match(apply, /Guake look applied/, 'a real apply is claimed only when it reports one');
+  assert.match(apply, /hakster quake --setup --repair/, 'a failure is reported with the way to fix it');
+  assert.match(apply, /HAKSTER_NO_QUAKE/, 'an operator can opt out');
+
+  // It never installs Guake and never elevates: no sudo, no package manager.
+  const commands = apply.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+  assert.doesNotMatch(commands, /sudo/, 'no elevation in the installer');
+  assert.doesNotMatch(commands, /apt-get|apt install|pacman|dnf|zypper|apk add/, 'Guake is never installed here');
+  assert.match(commands, /2>&1/, 'the apply output is captured, not dumped into the install log');
+
+  // Windows has no Guake: the look is not mentioned there at all.
+  const ps = readFileSync(path.join(repoRoot, 'install.ps1'), 'utf8');
+  assert.doesNotMatch(ps, /guake/i, 'install.ps1 stays quiet about a Linux-only terminal');
+});

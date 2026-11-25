@@ -267,6 +267,28 @@ if [ "$CHECKOUT" = yes ]; then
 else
   say "  updates: automatic — 'hakster update' checks now; a newer build applies at the next start"
 fi
+# The look comes with the install (owner, 2026-11-26: "i want it to come with our
+# install the png"; "yes it should add"). assets/guake-hakster.conf and
+# assets/haksterai-backdrop.png ship inside the package; when the machine already
+# has Guake, our profile is applied through Guake's own preference import with
+# the previous profile backed up first — never by writing Guake's files. Guake is
+# never installed here and no sudo is ever run: a machine without it is only told
+# the one command. Anything that goes wrong is reported and the install stands.
+if [ "${HAKSTER_NO_QUAKE:-0}" = 1 ]; then
+  say "  Guake: look not applied (HAKSTER_NO_QUAKE=1)"
+elif command -v guake >/dev/null 2>&1; then
+  if QUAKE_OUT=$("$HAKSTER_BIN" quake --setup 2>&1); then
+    if printf '%s' "$QUAKE_OUT" | grep -q "Guake look applied"; then
+      say "  Guake: our look applied — our palette, font and the backdrop behind the drop-down"
+    elif printf '%s' "$QUAKE_OUT" | grep -q "not applied"; then
+      say "  Guake: found, but our look did not apply — run: hakster quake --setup --repair"
+    else
+      say "  Guake: our look is already applied for this version"
+    fi
+  else
+    say "  Guake: found, but the look could not be applied — run: hakster quake --setup --repair"
+  fi
+fi
 say ""
 say "Next:"
 say "  1) sign in — a magic link opens in your browser, press Allow:"
