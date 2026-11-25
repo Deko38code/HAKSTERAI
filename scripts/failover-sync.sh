@@ -30,6 +30,8 @@
 #   ROUTER_STATUS    default http://127.0.0.1:3579/router/status   (the Dell's own router)
 #   STATE_FILE       default /tmp/hakster-failover-sync.state
 #   ENV_FILES        default "server/.env .env"  (secret env files to mirror)
+#   BANK_MIRROR      default 1    (1 = the standby's banks are the primary's exact
+#                                  copy; 0 = append-only, nothing ever removed)
 set -eu
 
 # Cron runs with a minimal PATH and no profile, and with $HOME as the working
@@ -51,6 +53,10 @@ STATE_FILE="${STATE_FILE:-/tmp/hakster-failover-sync.state}"
 ENV_FILES="${ENV_FILES:-server/.env .env}"
 LOCAL_DB="${LOCAL_DB:-/home/ghost/haksterAi/data/hakster.db}"
 BANK_DIR_SRC="${BANK_DIR_SRC:-/home/ghost/.hakster/memories/banks}"
+# 1 = the standby's banks are made the primary's exact copy (the default, so a
+# failover recalls identically); 0 = the old append-only merge, which keeps any
+# entry the standby learned on its own. See step 5c.
+BANK_MIRROR="${BANK_MIRROR:-1}"
 TMP="${TMPDIR:-/tmp}/hakster-sync.$$"
 
 say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -242,13 +248,21 @@ else
   done
 fi
 
-# ── 5c. carry the memory banks (append-only, merged by id) ─────────────────
+# ── 5c. carry the memory banks (mirror by default, merged by id) ────────────
 # The agent pulls the banks before every task (pullMemoryBanks, called per run),
 # so a standby that boots without them recalls nothing. Banks change on
 # consolidation, not on commits, so this rides the five-minute timer rather than
-# only the post-commit path. Entries are merged by id: anything the standby
-# learned on its own is kept, nothing is ever removed, and each file is swapped
-# atomically so a request reading banks mid-sync never sees a partial file.
+# only the post-commit path.
+#
+# Owner, 2026-11-26: "prune but dont break". BANK_MIRROR=1 (default) makes the
+# standby the primary's exact copy, file for file, so a failover recalls exactly
+# what the Dell recalls. It is safe because of what surrounds it: step 1 already
+# refused this run unless the primary is alive and no failover happened since the
+# last sync, and the helper archives every entry it removes under
+# ~/.hakster/memories/banks-pruned/<stamp>/ before the swap, refuses an empty or
+# implausibly small source (a damaged primary cannot wipe the standby), and swaps
+# each file atomically so a request reading banks mid-sync never sees a partial.
+# BANK_MIRROR=0 restores the old append-only merge (nothing ever removed).
 if [ "${SKIP_BANKS:-0}" = "1" ]; then
   say "banks sync skipped (SKIP_BANKS=1)"
 elif [ ! -d "$BANK_DIR_SRC" ]; then
@@ -259,14 +273,22 @@ else
   if tar -C "$BANK_DIR_SRC" -cf - --exclude='*.bak-*' . 2>/dev/null |
        ssh -o BatchMode=yes "$STANDBY_SSH" \
          'rm -rf ~/.hakster-banks-incoming && mkdir -p ~/.hakster-banks-incoming && tar -C ~/.hakster-banks-incoming -xf -'; then
+    if [ "$BANK_MIRROR" = "0" ]; then BANK_MODE=""; MODE_WORD="merged"; else BANK_MODE="--prune"; MODE_WORD="mirrored"; fi
     BOUT=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
-      "cd \$HOME && $NODE_REMOTE \$HOME/hakster-bank-merge.cjs \$HOME/.hakster-banks-incoming 2>&1; rc=\$?; rm -rf \$HOME/.hakster-banks-incoming; exit \$rc" 2>&1 || true)
+      "cd \$HOME && $NODE_REMOTE \$HOME/hakster-bank-merge.cjs \$HOME/.hakster-banks-incoming $BANK_MODE 2>&1; rc=\$?; rm -rf \$HOME/.hakster-banks-incoming; exit \$rc" 2>&1 || true)
     added=$(printf '%s\n' "$BOUT" | sed -n 's/^  "added": \([0-9][0-9]*\),\{0,1\}$/\1/p' | tail -1)
-    kept=$(printf '%s\n' "$BOUT" | sed -n 's/^  "kept": \([0-9][0-9]*\)$/\1/p' | tail -1)
-    if [ -n "$added" ]; then
-      say "banks: merged into the standby ($added new entr(y/ies), ${kept:-?} kept, none removed)"
+    kept=$(printf '%s\n' "$BOUT" | sed -n 's/^  "kept": \([0-9][0-9]*\),\{0,1\}$/\1/p' | tail -1)
+    removed=$(printf '%s\n' "$BOUT" | sed -n 's/^  "removed": \([0-9][0-9]*\),\{0,1\}$/\1/p' | tail -1)
+    if printf '%s' "$BOUT" | grep -q '"refused"'; then
+      say "banks: refused to $MODE_WORD - the primary's bank dir looks empty or partial; the standby keeps its copy"
+    elif [ -n "$added" ]; then
+      if [ -n "$removed" ] && [ "$removed" != "0" ]; then
+        say "banks: $MODE_WORD into the standby ($added new, $removed removed and archived, ${kept:-?} kept)"
+      else
+        say "banks: $MODE_WORD into the standby ($added new entr(y/ies), ${kept:-?} kept, none removed)"
+      fi
     else
-      say "banks: merge returned no count - the standby keeps its copy"
+      say "banks: $MODE_WORD returned no count - the standby keeps its copy"
       printf '%s\n' "$BOUT" | sed 's/^/  /'
     fi
     if printf '%s' "$BOUT" | grep -q '"blocked"'; then
