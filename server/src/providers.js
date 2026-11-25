@@ -2616,7 +2616,7 @@ const SYS_PROMPT_CACHE_TTL = 60000; // 60s; prompts are expensive to rebuild
  * get silently trimmed by the provider, and the agent then ends a turn with tool
  * calls and no answer. Each injected block is capped with an explicit note and a
  * path, so the agent can still read_file the full text when it needs it. */
-const SYS_PROMPT_BLOCK_CAPS = { agentsMd: 50000, memoryMd: 8000, lessons: 6000 };
+const SYS_PROMPT_BLOCK_CAPS = { agentsMd: 50000, masterSteering: 14000, memoryMd: 8000, lessons: 6000 };
 function capBlock(text, max, note) {
   if (!text) return text;
   if (text.length <= max) return text;
@@ -2656,7 +2656,15 @@ function phantomBrainBlock(limit = 6000) {
 
 function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
   const { lowToken = false } = opts;
-  const cacheKey = `${cwd}::${lowToken}`;
+  // steering: 'all'    — the cwd walk-up AGENTS.md chain, for lanes where nothing
+  //                      else puts the project rules in front of the model.
+  //           'master' — only the master rulebook head, for the claude-cli lane.
+  // The spawned `claude` loads its own project CLAUDE.md, and <cwd>/CLAUDE.md is
+  // byte-identical to <cwd>/AGENTS.md (sha256 0c7af095…, verified 2026-11-26), so
+  // that lane was sending the same ~48.9KB twice every turn. See the AGENTS.md
+  // block below. Default stays 'all' — no other caller changes behaviour.
+  const steeringMode = opts.steering === 'master' ? 'master' : 'all';
+  const cacheKey = `${cwd}::${lowToken}::${steeringMode}`;
   const now = Date.now();
   const cached = _sysPromptCache.get(cacheKey);
   if (cached && (now - cached.ts) < SYS_PROMPT_CACHE_TTL) {
@@ -2687,11 +2695,29 @@ function buildAgentSystemPrompt(cwd, contextTags, opts = {}) {
 
   // Inject AGENTS.md (walks up from cwd) — capped, see SYS_PROMPT_BLOCK_CAPS
   try {
-    const agentsMd = injectAgentsMd(cwd || process.cwd());
+    // 'master' mode: the child CLI loads its own CLAUDE.md, and <cwd>/CLAUDE.md is
+    // byte-identical to <cwd>/AGENTS.md — so the walk-up copy is already in the
+    // model's context and paying for it twice costs a full re-prefill of it on
+    // every turn (measured 2026-11-26: 48,905 of the prompt's 94,882 chars were
+    // that duplicate). The master /home/ghost/AGENTS.md is NOT loaded by the
+    // child, so its head is what this lane spends prompt on; the cap note gives
+    // the path for read_file. Fallback to the walk-up chain if it is unreadable.
+    const masterPath = '/home/ghost/AGENTS.md';
+    let agentsMd = '';
+    let steeringLabel = 'AGENTS.md';
+    let steeringCap = SYS_PROMPT_BLOCK_CAPS.agentsMd;
+    if (steeringMode === 'master') {
+      try { agentsMd = fs.readFileSync(masterPath, 'utf8'); } catch (_) { agentsMd = ''; }
+      if (agentsMd) {
+        steeringLabel = 'master AGENTS.md';
+        steeringCap = SYS_PROMPT_BLOCK_CAPS.masterSteering;
+      }
+    }
+    if (!agentsMd) agentsMd = injectAgentsMd(cwd || process.cwd());
     if (agentsMd) {
-      const capped = capBlock(agentsMd, SYS_PROMPT_BLOCK_CAPS.agentsMd,
-        `full steering: ${path.join(cwd || process.cwd(), 'AGENTS.md')} and /home/ghost/AGENTS.md — read_file for the rest`);
-      prompt += `\n\n═══ PROJECT STEERING (AGENTS.md) ═══\n${capped}\n═══ END STEERING ═══`;
+      const capped = capBlock(agentsMd, steeringCap,
+        `full steering: ${masterPath} and ${path.join(cwd || process.cwd(), 'AGENTS.md')} — read_file for the rest`);
+      prompt += `\n\n═══ PROJECT STEERING (${steeringLabel}) ═══\n${capped}\n═══ END STEERING ═══`;
     }
   } catch (e) { /* AGENTS.md injection is best-effort */ }
 

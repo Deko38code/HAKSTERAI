@@ -5494,7 +5494,13 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
       const claudeUserMsg = messages.filter(m => m.role === 'user').pop();
       const claudeCtxTags = String(getMessageText(claudeUserMsg?.content) || '')
         .split(/\s+/).filter(w => w.length > 3).slice(0, 10);
-      let sysPrompt = buildAgentSystemPrompt(workDir, claudeCtxTags, { lowToken });
+      // steering:'master' — the child `claude` loads <workDir-walk>/CLAUDE.md
+      // itself and that file is byte-identical to the project AGENTS.md, so the
+      // walk-up copy was being sent twice every turn (~48.9KB, measured
+      // 2026-11-26). The master rulebook head is still appended here because the
+      // child never loads /home/ghost/AGENTS.md. Prompt drops ~38% with no rule
+      // lost: everything removed is already in the child's own context.
+      let sysPrompt = buildAgentSystemPrompt(workDir, claudeCtxTags, { lowToken, steering: 'master' });
       sysPrompt += '\n\n=== NATIVE TOOLS (CLAUDE CODE CLI) ===\n'
         + 'This session runs the Claude Code CLI, so your tools are its native ones — '
         + 'Bash, Read, Edit, Write, Glob, Grep, Task. Where a hakster tool name appears '
