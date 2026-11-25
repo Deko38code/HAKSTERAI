@@ -66,7 +66,12 @@ const PROBE_TIMEOUT_MS = 2500;
 const UPSTREAM_TIMEOUT_MS = 30000;
 
 // Paths that must never be shared: they read or write account state.
-const STATEFUL_PREFIX = ['/api/', '/admin', '/login', '/auth', '/callback', '/oauth', '/logout'];
+// /miniforge/app is the signed-in bot app the login lands on. Its page is a
+// single file on each box's own disk and nothing syncs it, so sharing it handed
+// half the traffic the standby's stale build (2026-11-26: the Nov 3 Pandemonium
+// page, 5 of 10 loads). Only the primary serves it while both boxes are alive;
+// a real failover still reaches the peer, as it always did.
+const STATEFUL_PREFIX = ['/api/', '/admin', '/login', '/auth', '/callback', '/oauth', '/logout', '/miniforge/app'];
 // Long-lived streams: no socket timeout, keep the pipe open.
 const STREAM_PREFIX = ['/api/agent/run', '/api/tui', '/api/stream', '/api/events'];
 
