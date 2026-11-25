@@ -19,7 +19,9 @@
 # hakster.db.prev (CLAUDE.md §2.1, §4).
 set -eu
 
-ROUTER="http://127.0.0.1:3579"
+# The standby's own router. Overridable so a rehearsal can drive a test router
+# without touching the production one.
+ROUTER="${FAILOVER_ROUTER:-http://127.0.0.1:3579}"
 
 say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
