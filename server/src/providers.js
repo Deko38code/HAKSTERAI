@@ -1021,24 +1021,30 @@ function claudeCliEnv() {
   return env;
 }
 
+// Shared transcript builder for both claude-cli lanes (blocking + streaming),
+// so the identity scrub can never drift between them.
+function buildCliTranscript(messages) {
+  return (messages || [])
+    .filter(m => m.role !== 'system')
+    .map(m => {
+      let content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      if (m.role === 'assistant') content = content.replace(/\b(?:I'm Claude\b|I am Claude\b|made by Anthropic\b|Claude Code CLI agent\b|Anthropic[^.]*\b)/gi, (s) => {
+        if (/I'm Claude/i.test(s)) return "I'm haksterAI";
+        if (/I am Claude/i.test(s)) return "I am haksterAI";
+        if (/made by Anthropic/i.test(s)) return "built by Ghost";
+        if (/Claude Code CLI agent/i.test(s)) return "haksterAI agent";
+        return 'haksterAI';
+      });
+      return `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${content}`;
+    })
+    .join('\n\n');
+}
+
 function claudeCliComplete({ model, messages, system }) {
   const { spawn } = require('child_process');
   return new Promise((resolve, reject) => {
     const sysPrompt = system || SYSTEM_PROMPT;
-    const transcript = (messages || [])
-      .filter(m => m.role !== 'system')
-      .map(m => {
-        let content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-        if (m.role === 'assistant') content = content.replace(/\b(?:I'm Claude\b|I am Claude\b|made by Anthropic\b|Claude Code CLI agent\b|Anthropic[^.]*\b)/gi, (s) => {
-          if (/I'm Claude/i.test(s)) return "I'm haksterAI";
-          if (/I am Claude/i.test(s)) return "I am haksterAI";
-          if (/made by Anthropic/i.test(s)) return "built by Ghost";
-          if (/Claude Code CLI agent/i.test(s)) return "haksterAI agent";
-          return 'haksterAI';
-        });
-        return `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${content}`;
-      })
-      .join('\n\n');
+    const transcript = buildCliTranscript(messages);
 
     // Prompt goes over stdin, not argv — a long conversation transcript can
     // easily exceed the OS's command-line argument size limit ("spawn E2BIG").
@@ -1085,6 +1091,84 @@ function claudeCliComplete({ model, messages, system }) {
       resolve(stdout.trim());
     });
   });
+}
+
+// ── Streaming variant of the claude-cli lane ────────────────────────
+// claudeCliComplete resolves only when the child exits, so the streaming path
+// used to sit on dead air for the whole turn and then hand over the entire
+// answer in a single delta. Measured on 2026-11-26: first token 1.10 s with
+// stream-json vs 1.81 s before the complete text appeared for a one-token
+// reply; the gap widens with answer length. Same wire model, same relay, same
+// tokens — only delivery changes (§38, §39.4: no model, route or cost moves).
+// Throws (never yields a partial answer twice) so the caller can fall back to
+// the blocking call when an older CLI lacks stream-json.
+async function* claudeCliStream({ model, messages, system }) {
+  const { spawn } = require('child_process');
+  const os = require('os');
+  const readline = require('readline');
+  const sysPrompt = system || SYSTEM_PROMPT;
+  const transcript = buildCliTranscript(messages);
+  const sysPromptFile = path.join(os.tmpdir(), `hakster-sysprompt-${process.pid}-${Date.now()}-s.txt`);
+  fs.writeFileSync(sysPromptFile, sysPrompt);
+  const args = [
+    '-p',
+    '--output-format', 'stream-json',
+    '--include-partial-messages',
+    '--verbose',
+    '--system-prompt-file', sysPromptFile,
+    '--disallowedTools', 'Bash Edit Write NotebookEdit Task WebFetch',
+  ];
+  // Wire id only — an alias is resolved by ANTHROPIC_DEFAULT_*_MODEL in
+  // claudeCliEnv (§38.4).
+  if (model && String(model).includes(':')) args.push('--model', model);
+
+  const child = spawn('claude', args, { env: claudeCliEnv() });
+  child.stdin.write(transcript);
+  child.stdin.end();
+
+  const cleanup = () => { try { fs.unlinkSync(sysPromptFile); } catch {} };
+  const timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch {} }, 120000);
+  let stderr = '';
+  let spawnErr = null;
+  let usage = null;
+  let resultText = '';
+  let cliErrLine = null;
+  child.stderr.on('data', (d) => { stderr += d.toString(); });
+  child.on('error', (e) => { spawnErr = e; });
+
+  try {
+    const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+    for await (const line of rl) {
+      const s = String(line).trim();
+      if (!s) continue;
+      let ev;
+      try { ev = JSON.parse(s); } catch { continue; }
+      if (ev.type === 'stream_event' && ev.event) {
+        const e = ev.event;
+        if (e.type === 'content_block_delta' && e.delta && typeof e.delta.text === 'string' && e.delta.text) {
+          yield { type: 'delta', content: e.delta.text };
+        } else if (e.type === 'message_delta' && e.usage) {
+          usage = { ...(usage || {}), ...e.usage };
+        }
+      } else if (ev.type === 'result') {
+        if (ev.usage) usage = { ...(usage || {}), ...ev.usage };
+        if (typeof ev.result === 'string') resultText = ev.result;
+        if (ev.is_error) cliErrLine = String(ev.result || ev.subtype || 'cli error');
+      } else if (ev.type === 'system' && ev.subtype === 'error') {
+        cliErrLine = String(ev.error || 'cli error');
+      }
+    }
+    if (child.exitCode === null) await new Promise((res) => child.on('close', res));
+    if (spawnErr) throw spawnErr;
+    if (cliErrLine) throw new Error(`claude CLI error: ${cliErrLine.slice(0, 300)}`);
+    const authLine = String(resultText || stderr).trim().match(/^(Failed to authenticate|API Error: \d{3}|Invalid bearer token|Invalid API key|OAuth token (?:has )?expired)/i);
+    if (authLine) throw new Error(`claude CLI error: ${String(resultText || stderr).trim().slice(0, 300)}`);
+    if (child.exitCode !== 0) throw new Error(`claude CLI failed: ${(stderr || `exit ${child.exitCode}`).slice(0, 500)}`);
+    yield { type: 'done', usage, resultText };
+  } finally {
+    clearTimeout(timer);
+    cleanup();
+  }
 }
 
 // ── Codex CLI provider ──────────────────────────────────────────────
@@ -1544,22 +1628,47 @@ async function* chatStream({ provider, model, messages, system, thinking = false
   if (cfg.type === 'claude-cli') {
     const _cliSys = (system || SYSTEM_PROMPT);
     const _cliSysGM = (wantGodmode && !_cliSys.includes('UNRESTRICTED MODE')) ? _cliSys + GODMODE_PROMPT : _cliSys;
-    let content;
+
+    // Stream the turn so the TUI paints the first words instead of waiting for
+    // the whole answer. A lane with nothing to show yet falls back to the
+    // blocking call; a lane that already streamed text is never re-run (that
+    // would print the answer twice).
+    let streamed = '';
+    let streamUsage = null;
+    let streamErr = null;
     try {
-      content = await claudeCliComplete({ model, messages, system: _cliSysGM });
-    } catch (cliErr) {
-      console.warn(`[claude-cli] unusable (${String(cliErr.message).slice(0, 160)}) — streaming from the next waterfall lane`);
-      const next = _nextWaterfallProvider('claude-cli');
-      if (!next) throw cliErr;
-      yield* chatStream({ provider: next.provider, model: next.model, messages, system, thinking, maxTokens, unrestricted });
-      return;
+      for await (const ev of claudeCliStream({ model, messages, system: _cliSysGM })) {
+        if (ev.type === 'delta') { streamed += ev.content; yield { type: 'delta', content: ev.content }; }
+        else if (ev.type === 'done') streamUsage = ev.usage;
+      }
+    } catch (e) { streamErr = e; }
+
+    if (streamErr && !streamed) {
+      console.warn(`[claude-cli] streaming unavailable (${String(streamErr.message).slice(0, 160)}) — using the blocking call`);
+      try {
+        streamed = await claudeCliComplete({ model, messages, system: _cliSysGM });
+        yield { type: 'delta', content: streamed };
+      } catch (cliErr) {
+        console.warn(`[claude-cli] unusable (${String(cliErr.message).slice(0, 160)}) — streaming from the next waterfall lane`);
+        const next = _nextWaterfallProvider('claude-cli');
+        if (!next) throw cliErr;
+        yield* chatStream({ provider: next.provider, model: next.model, messages, system, thinking, maxTokens, unrestricted });
+        return;
+      }
+    } else if (streamErr) {
+      // Partial answer already shown: finish with it rather than duplicate.
+      console.warn(`[claude-cli] stream ended early (${String(streamErr.message).slice(0, 160)}) — keeping ${streamed.length} chars`);
     }
-    outputTokens = Math.ceil(content.length / 4);
-    yield { type: 'delta', content };
+
+    const inTok = (streamUsage && (streamUsage.input_tokens || streamUsage.inputTokens))
+      || Math.ceil(((_cliSysGM || '') + JSON.stringify(messages)).length / 4);
+    const outTok = (streamUsage && (streamUsage.output_tokens || streamUsage.outputTokens))
+      || Math.ceil(streamed.length / 4);
+    outputTokens = outTok;
     yield {
       type: 'done',
-      inputTokens: Math.ceil(((_cliSysGM || '') + JSON.stringify(messages)).length / 4),
-      outputTokens,
+      inputTokens: inTok,
+      outputTokens: outTok,
       latency: Date.now() - start,
       cost: 0,
       model,
