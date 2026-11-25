@@ -1609,6 +1609,7 @@ import { createRoot } from "@opentui/react";
 import React32, { useCallback as useCallback6, useEffect as useEffect19, useRef as useRef15, useState as useState19 } from "react";
 import fs10 from "node:fs";
 import path7 from "node:path";
+import { execFile as execFile2 } from "node:child_process";
 import { useKeyboard as useKeyboard8, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes23 } from "@opentui/core";
 
@@ -3737,7 +3738,7 @@ var MENU_ITEMS = [
   { cmd: "/auto", label: "Autonomy", detail: "ask \xB7 edit \xB7 full \u2014 how far it runs alone" },
   { cmd: "/mcp", label: "MCP servers", detail: "server manager \xB7 status, tools, pids" },
   { cmd: "/handoff", label: "Auto handoff", detail: "on/off \xB7 DeepSeek \u2192 Codex \u2192 others" },
-  { cmd: "/ports", label: "Ports", detail: "services and every listening port" },
+  { cmd: "/ports", label: "Ports", detail: "services and every listening port \xB7 /menu 1-0 starts one" },
   { cmd: "/attach", label: "Attach image", detail: "/attach <path> \xB7 sends with your message" },
   { cmd: "/dashboard", label: "Dashboard", detail: "system / session / agent panels" },
   { cmd: "/monitor", label: "Live monitor", detail: "full-screen feed + output \xB7 shift+\u2191/\u2193 scroll" },
@@ -3759,6 +3760,25 @@ var MENU_ITEMS = [
 // src/components/CatalogPopout.jsx
 import React15 from "react";
 import { TextAttributes as TextAttributes11 } from "@opentui/core";
+
+// src/utils/row-columns.js
+var MIN_DETAIL = 2;
+var MIN_LABEL = 8;
+function splitRowColumns(labelText, detailText, bodyW) {
+  const body = Math.max(8, Math.trunc(Number(bodyW) || 0));
+  const label = String(labelText == null ? "" : labelText);
+  const detail = String(detailText == null ? "" : detailText);
+  if (!detail) return { labelW: body, valueW: 0 };
+  if (label.length + 1 + MIN_DETAIL <= body) {
+    return { labelW: label.length, valueW: Math.min(detail.length, body - label.length - 1) };
+  }
+  const valueW = Math.min(detail.length, Math.max(0, Math.floor(body / 2)));
+  const labelW = body - (valueW ? valueW + 1 : 0);
+  if (labelW >= MIN_LABEL) return { labelW, valueW };
+  return { labelW: body, valueW: 0 };
+}
+
+// src/components/CatalogPopout.jsx
 import { jsx as jsx15, jsxs as jsxs15 } from "react/jsx-runtime";
 var clip2 = (s, n) => {
   const t = String(s == null ? "" : s);
@@ -3768,7 +3788,8 @@ var KIND_COLOR = {
   agent: "magenta",
   model: "cyan",
   mcp: "blue",
-  cmd: "green"
+  cmd: "green",
+  port: "green"
 };
 function CatalogPopout({
   width = 72,
@@ -3814,19 +3835,19 @@ function CatalogPopout({
           ] }, `h:${row.label}`);
         }
         const isSel = abs === selRow;
-        const color = KIND_COLOR[row.kind] || "white";
+        const color = row.color || KIND_COLOR[row.kind] || "white";
         const detail = compact ? "" : String(row.detail || "");
-        const valueW = detail ? Math.min(detail.length, Math.max(0, Math.floor(bodyW / 2))) : 0;
-        const labelW = Math.max(8, bodyW - (valueW ? valueW + 1 : 0));
+        const labelText = `${isSel ? "\u25B8 " : "  "}${row.label}`;
+        const { labelW, valueW } = splitRowColumns(labelText, detail, bodyW);
         return /* @__PURE__ */ jsxs15("box", { style: { width: inner, flexDirection: "row", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx15("text", { fg: isSel ? "yellow" : color, attributes: isSel ? TextAttributes11.BOLD : 0, children: clip2(`${isSel ? "\u25B8 " : "  "}${row.label}`, labelW) }),
+          /* @__PURE__ */ jsx15("text", { fg: isSel ? "yellow" : color, attributes: isSel ? TextAttributes11.BOLD : 0, children: clip2(labelText, labelW) }),
           valueW ? /* @__PURE__ */ jsx15("text", { fg: isSel ? "white" : "gray", children: ` ${clip2(detail, valueW)}` }) : null,
           gutter ? /* @__PURE__ */ jsx15("text", { fg: "gray", children: gutter }) : null
         ] }, `${row.kind}:${row.label}`);
       }),
       Array.from({ length: Math.max(0, bodyRows - Math.max(1, shown2.length)) }, (_, i) => /* @__PURE__ */ jsx15("box", { style: { width: inner, flexShrink: 0 }, children: /* @__PURE__ */ jsx15("text", { children: " " }) }, `pad:${i}`))
     ] }),
-    /* @__PURE__ */ jsx15("box", { style: { width: inner, flexDirection: "row" }, children: /* @__PURE__ */ jsx15("text", { fg: "gray", children: clip2(filter || "type to filter \xB7 a model row switches this session \xB7 esc closes", inner) }) })
+    /* @__PURE__ */ jsx15("box", { style: { width: inner, flexDirection: "row" }, children: /* @__PURE__ */ jsx15("text", { fg: "gray", children: clip2(filter || "type to filter \xB7 1-0 starts a port \xB7 enter applies \xB7 esc closes", inner) }) })
   ] });
 }
 
@@ -7678,6 +7699,66 @@ function richBar(pct, width = 5, fg = "green", trackFg = "gray") {
 // src/App.jsx
 var import_prefs3 = __toESM(require_prefs());
 var import_input_history = __toESM(require_input_history());
+
+// src/ports-quickstart.mjs
+var QUICKSTART_PORTS = [
+  { n: 1, port: 3579, name: "HAKSTER-AI", pm2: "hakster-router" },
+  { n: 2, port: 8081, name: "cinevault", pm2: "cinevault" },
+  { n: 3, port: 4e3, name: "phantom", pm2: null },
+  // runs on the Parrot box
+  { n: 4, port: 8082, name: "claude-proxy", pm2: "claude-code-proxy" },
+  { n: 5, port: 5555, name: "miniforge", pm2: "miniforge" },
+  { n: 6, port: 8888, name: "stalkerhek", pm2: "stalkerhek" },
+  { n: 7, port: 8111, name: "rmt", pm2: "rmt" },
+  { n: 8, port: 8100, name: "hakterm", pm2: "hakterm" },
+  { n: 9, port: 3580, name: "hakster", pm2: "hakster" },
+  { n: 10, port: 5599, name: "tools-gateway", pm2: "tools-gateway" }
+];
+function quickStartNumber(keyName) {
+  const k = String(keyName == null ? "" : keyName);
+  if (!/^[0-9]$/.test(k)) return 0;
+  return k === "0" ? 10 : Number(k);
+}
+function quickStartRows(services = [], scan = null) {
+  const list = Array.isArray(services) ? services : [];
+  const fromServices = new Set(list.filter((s) => s && s.up).map((s) => Number(s.port)));
+  const fromScan = new Set((scan && scan.ports || []).map(Number));
+  const scanOk = !!(scan && scan.ok);
+  const isUp = (port) => scanOk ? fromScan.has(port) : fromServices.has(port);
+  return QUICKSTART_PORTS.map((entry) => {
+    const up = isUp(entry.port);
+    const state = scanOk || fromServices.size ? up ? "online" : "down" : "unknown";
+    return {
+      kind: "port",
+      n: entry.n,
+      port: entry.port,
+      name: entry.name,
+      pm2: entry.pm2,
+      up,
+      color: up ? "green" : "red",
+      label: `${entry.n} ${up ? "\u25CF" : "\u25CB"} :${entry.port} ${entry.name}`,
+      detail: entry.pm2 ? `${state} \xB7 pm2 ${entry.pm2}` : `${state} \xB7 Parrot box, no local start`,
+      action: { port: entry.n }
+    };
+  });
+}
+function quickStartEntry(n, services = [], scan = null) {
+  const want = Math.trunc(Number(n) || 0);
+  if (!want) return null;
+  return quickStartRows(services, scan).find((r) => r.n === want) || null;
+}
+function startPlan(entry) {
+  if (!entry) return { skip: "no such port number" };
+  if (entry.up) {
+    return { skip: `already online \u2014 not bouncing it (an update never drops a live session)` };
+  }
+  if (!entry.pm2) {
+    return { skip: `no local start command \u2014 ${entry.name} runs on the Parrot box` };
+  }
+  return { cmd: "pm2", args: ["start", String(entry.pm2)] };
+}
+
+// src/App.jsx
 var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
 var import_kitty_graphics3 = __toESM(require_kitty_graphics());
@@ -7991,6 +8072,36 @@ function App({ version = "0.1.0" }) {
     setNotice(text);
     setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
   }, []);
+  const startingRef = useRef15(/* @__PURE__ */ new Set());
+  const startPortByNumber = useCallback6((n) => {
+    const entry = quickStartEntry(n, services, scan);
+    if (!entry) {
+      showNotice(`\u25CC no port ${n} \u2014 /menu lists 1-0`);
+      return;
+    }
+    const plan = startPlan(entry);
+    if (plan.skip) {
+      showNotice(`\u25CB :${entry.port} ${entry.name} \u2014 ${plan.skip}`);
+      return;
+    }
+    if (startingRef.current.has(entry.port)) return;
+    startingRef.current.add(entry.port);
+    showNotice(`\u25D4 starting :${entry.port} ${entry.name} \xB7 pm2 ${entry.pm2} \u2026`);
+    execFile2(plan.cmd, plan.args, { timeout: 2e4, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+      const text = `${String(stdout || "")}${String(stderr || "")}`.trim();
+      const lastLine2 = text.split("\n").map((l) => l.trim()).filter(Boolean).pop() || "";
+      if (err) {
+        startingRef.current.delete(entry.port);
+        showNotice(`\u2717 :${entry.port} ${entry.name} \u2014 pm2 start failed \xB7 ${lastLine2.slice(0, 70)}`);
+        return;
+      }
+      scanPorts().then((next) => {
+        setScan(next);
+        const up = (next && next.ports || []).includes(entry.port);
+        showNotice(up ? `\u25CF :${entry.port} ${entry.name} online` : `\u25CC :${entry.port} ${entry.name} \u2014 pm2 says started, port not listening yet${lastLine2 ? ` \xB7 ${lastLine2.slice(0, 50)}` : ""}`);
+      }).catch(() => showNotice(`\u25CC :${entry.port} ${entry.name} \u2014 started; re-scan failed, check /ports`)).finally(() => startingRef.current.delete(entry.port));
+    });
+  }, [services, scan, showNotice]);
   useServerWatch_default({
     api: API,
     busy: agent.busy,
@@ -8316,6 +8427,7 @@ function App({ version = "0.1.0" }) {
       rows2.push({ kind: "header", label: section });
       rows2.push(...hits);
     };
+    pushSection("PORTS \xB7 press 1-0 to start one", quickStartRows(services, scan));
     pushSection("AGENTS", [
       { kind: "agent", label: `Claude \xB7 ${(0, import_ladder2.displayModel)(import_ladder2.PRIMARY_MODEL)}`, detail: "our config \xB7 ollama", action: { model: import_ladder2.PRIMARY_MODEL, provider: import_ladder2.PRIMARY_PROVIDER } },
       { kind: "agent", label: "Codex (Pro)", detail: "provider default \xB7 ladder 2", action: { model: "", provider: "codex-cli" } },
@@ -8366,6 +8478,10 @@ function App({ version = "0.1.0" }) {
       changeSetting(row.action.setting);
       return;
     }
+    if ("port" in row.action) {
+      startPortByNumber(row.action.port);
+      return;
+    }
     if (row.action.mcp) {
       const at = (mcp && Array.isArray(mcp.servers) ? mcp.servers : []).findIndex((s) => s.name === row.action.mcp);
       setMcpIdx(at > 0 ? at : 0);
@@ -8373,7 +8489,7 @@ function App({ version = "0.1.0" }) {
       return;
     }
     if (row.action.cmd) runCommand(row.action.cmd);
-  }, [runCommand, showNotice, changeSetting, mcp]);
+  }, [runCommand, showNotice, changeSetting, mcp, startPortByNumber]);
   const submit = useCallback6(
     (text) => {
       const v = String(text == null ? "" : text).trim();
@@ -8529,6 +8645,13 @@ function App({ version = "0.1.0" }) {
         setMenuQuery((q) => q.slice(0, -1));
         setMenuIndex(0);
         return;
+      }
+      if (!menuQuery) {
+        const portNumber = quickStartNumber(key.name);
+        if (portNumber) {
+          startPortByNumber(portNumber);
+          return;
+        }
       }
       if (key.name === "return") {
         const row = catalogRows[catalogSelectable[Math.min(menuIndex, catalogSelectable.length - 1)]];

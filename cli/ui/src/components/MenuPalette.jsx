@@ -15,7 +15,7 @@ export const MENU_ITEMS = [
   { cmd: '/auto', label: 'Autonomy', detail: 'ask · edit · full — how far it runs alone' },
   { cmd: '/mcp', label: 'MCP servers', detail: 'server manager · status, tools, pids' },
   { cmd: '/handoff', label: 'Auto handoff', detail: 'on/off · DeepSeek → Codex → others' },
-  { cmd: '/ports', label: 'Ports', detail: 'services and every listening port' },
+  { cmd: '/ports', label: 'Ports', detail: 'services and every listening port · /menu 1-0 starts one' },
   { cmd: '/attach', label: 'Attach image', detail: '/attach <path> · sends with your message' },
   { cmd: '/dashboard', label: 'Dashboard', detail: 'system / session / agent panels' },
   { cmd: '/monitor', label: 'Live monitor', detail: 'full-screen feed + output · shift+↑/↓ scroll' },

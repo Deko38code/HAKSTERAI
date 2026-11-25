@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react';
 import { TextAttributes } from '@opentui/core';
 import AdRailSlot from './components/DockAd.jsx';
@@ -49,6 +50,7 @@ import { richBar } from './utils/bar.js';
 import cliPrefs from '../../src/prefs.js';
 import { appendInputHistory, loadInputHistory } from '../../src/input-history.js';
 import { barColor, fileGuard, otherListening, scanPorts, serviceStates, smartLabel, meterArrow as arrowFor, arrowColor as arrowFg } from '../../smartness.mjs';
+import { quickStartEntry, quickStartNumber, quickStartRows, startPlan } from './ports-quickstart.mjs';
 import { MODEL_LADDER, PRIMARY_MODEL, PRIMARY_PROVIDER, displayModel } from '../../src/models/ladder.js';
 import catalog from '../../src/models/catalog.js';
 import { isSupported as kittyGraphicsSupported } from '../../src/kitty-graphics.js';
@@ -580,6 +582,49 @@ export default function App({ version = '0.1.0' }) {
     setTimeout(() => setNotice((cur) => (cur === text ? null : cur)), 6000);
   }, []);
 
+  /* Quick start from /menu — the operator presses 1-0 and that numbered port is
+   * started (owner, 2026-11-26: "add ports to /menu for quick start ports etc
+   * with 1-10 commands to start from clicking what # to start in menu").
+   *
+   * Three things this will not do, on purpose:
+   *   - it never starts a port that is already listening. `pm2 start` on a live
+   *     app is a bounce, and a bounce drops whoever is attached (CLAUDE.md §37,
+   *     §45). The refusal says so in those words.
+   *   - it never claims a start that did not happen. Success is read back from
+   *     a fresh `ss -tlnp` scan — the port listening — not from pm2's wording.
+   *   - it never fires two starts for one port at once.
+   */
+  const startingRef = useRef(new Set());
+  const startPortByNumber = useCallback((n) => {
+    const entry = quickStartEntry(n, services, scan);
+    if (!entry) { showNotice(`◌ no port ${n} — /menu lists 1-0`); return; }
+    const plan = startPlan(entry);
+    if (plan.skip) { showNotice(`○ :${entry.port} ${entry.name} — ${plan.skip}`); return; }
+    if (startingRef.current.has(entry.port)) return;
+    startingRef.current.add(entry.port);
+    showNotice(`◔ starting :${entry.port} ${entry.name} · pm2 ${entry.pm2} …`);
+    execFile(plan.cmd, plan.args, { timeout: 20000, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+      const text = `${String(stdout || '')}${String(stderr || '')}`.trim();
+      const lastLine = text.split('\n').map((l) => l.trim()).filter(Boolean).pop() || '';
+      if (err) {
+        startingRef.current.delete(entry.port);
+        showNotice(`✗ :${entry.port} ${entry.name} — pm2 start failed · ${lastLine.slice(0, 70)}`);
+        return;
+      }
+      // Read the port table back: the scan is the evidence, not the exit code.
+      scanPorts()
+        .then((next) => {
+          setScan(next);
+          const up = ((next && next.ports) || []).includes(entry.port);
+          showNotice(up
+            ? `● :${entry.port} ${entry.name} online`
+            : `◌ :${entry.port} ${entry.name} — pm2 says started, port not listening yet${lastLine ? ` · ${lastLine.slice(0, 50)}` : ''}`);
+        })
+        .catch(() => showNotice(`◌ :${entry.port} ${entry.name} — started; re-scan failed, check /ports`))
+        .finally(() => startingRef.current.delete(entry.port));
+    });
+  }, [services, scan, showNotice]);
+
   /* A server restart is now named by its cause (owner, 2026-11-24: "if server
    * drops after updates"). The panels already recover on their own — the
    * status poll re-reads every 3 s and a turn in flight reconnects and resends
@@ -998,6 +1043,12 @@ export default function App({ version = '0.1.0' }) {
       rows.push({ kind: 'header', label: section });
       rows.push(...hits);
     };
+    // PORTS first: this is the quick-start block. Pressing the number beside a
+    // row starts that port (the same action enter runs on the row), so the
+    // owner's "1-10 commands to start from clicking what #" is the first thing
+    // the menu offers. Rows carry live state — green while listening, red while
+    // not — measured from the same 30 s `ss -tlnp` scan the grid uses.
+    pushSection('PORTS · press 1-0 to start one', quickStartRows(services, scan));
     pushSection('AGENTS', [
       { kind: 'agent', label: `Claude · ${displayModel(PRIMARY_MODEL)}`, detail: 'our config · ollama', action: { model: PRIMARY_MODEL, provider: PRIMARY_PROVIDER } },
       { kind: 'agent', label: 'Codex (Pro)', detail: 'provider default · ladder 2', action: { model: '', provider: 'codex-cli' } },
@@ -1048,6 +1099,9 @@ export default function App({ version = '0.1.0' }) {
       return;
     }
     if (row.action.setting) { changeSetting(row.action.setting); return; }
+    // A port row starts that numbered service, whether it was reached by enter
+    // on the row or by pressing its number.
+    if ('port' in row.action) { startPortByNumber(row.action.port); return; }
     if (row.action.mcp) {
       const at = (mcp && Array.isArray(mcp.servers) ? mcp.servers : []).findIndex((s) => s.name === row.action.mcp);
       setMcpIdx(at > 0 ? at : 0);
@@ -1055,7 +1109,7 @@ export default function App({ version = '0.1.0' }) {
       return;
     }
     if (row.action.cmd) runCommand(row.action.cmd);
-  }, [runCommand, showNotice, changeSetting, mcp]);
+  }, [runCommand, showNotice, changeSetting, mcp, startPortByNumber]);
 
   const submit = useCallback(
     (text) => {
@@ -1286,6 +1340,15 @@ export default function App({ version = '0.1.0' }) {
       if (key.name === 'up') { setMenuIndex((i) => (i - 1 + n) % n); return; }
       if (key.name === 'down') { setMenuIndex((i) => (i + 1) % n); return; }
       if (key.name === 'backspace') { setMenuQuery((q) => q.slice(0, -1)); setMenuIndex(0); return; }
+      // Quick start (owner, 2026-11-26): while nothing is typed, a number key
+      // starts that numbered port — `1`-`9`, `0` is the tenth — and the menu
+      // stays open so several can be started in a row. Once a filter is being
+      // typed, digits are filter text again, which is why the footer says
+      // "1-0 starts a port" rather than promising digits never filter.
+      if (!menuQuery) {
+        const portNumber = quickStartNumber(key.name);
+        if (portNumber) { startPortByNumber(portNumber); return; }
+      }
       if (key.name === 'return') {
         const row = catalogRows[catalogSelectable[Math.min(menuIndex, catalogSelectable.length - 1)]];
         // A settings row toggles in place and the catalog stays open, so several

@@ -1,6 +1,7 @@
 import React from 'react';
 import { TextAttributes } from '@opentui/core';
 import { gutterChar, overflows } from '../utils/panel-scroll.js';
+import { splitRowColumns } from '../utils/row-columns.js';
 import HeroLogo, { heroRowCount } from './HeroLogo.jsx';
 
 /* CatalogPopout — the `/menu` popout, crush-style.
@@ -32,6 +33,7 @@ const KIND_COLOR = {
   model: 'cyan',
   mcp: 'blue',
   cmd: 'green',
+  port: 'green',
 };
 
 export default function CatalogPopout({
@@ -102,14 +104,19 @@ export default function CatalogPopout({
             );
           }
           const isSel = abs === selRow;
-          const color = KIND_COLOR[row.kind] || 'white';
+          // A row may carry its own colour (a port row is green while it
+          // listens and red while it does not — the same reading as the grid).
+          const color = row.color || KIND_COLOR[row.kind] || 'white';
           const detail = compact ? '' : String(row.detail || '');
-          const valueW = detail ? Math.min(detail.length, Math.max(0, Math.floor(bodyW / 2))) : 0;
-          const labelW = Math.max(8, bodyW - (valueW ? valueW + 1 : 0));
+          const labelText = `${isSel ? '▸ ' : '  '}${row.label}`;
+          // A name that fits is never clipped (the owner's own complaint about
+          // the ports grid: `● clau…` with empty space beside it). The split
+          // lives in utils/row-columns.js so a test can pin it.
+          const { labelW, valueW } = splitRowColumns(labelText, detail, bodyW);
           return (
             <box key={`${row.kind}:${row.label}`} style={{ width: inner, flexDirection: 'row', flexShrink: 0 }}>
               <text fg={isSel ? 'yellow' : color} attributes={isSel ? TextAttributes.BOLD : 0}>
-                {clip(`${isSel ? '▸ ' : '  '}${row.label}`, labelW)}
+                {clip(labelText, labelW)}
               </text>
               {valueW ? <text fg={isSel ? 'white' : 'gray'}>{` ${clip(detail, valueW)}`}</text> : null}
               {gutter ? <text fg="gray">{gutter}</text> : null}
@@ -125,7 +132,7 @@ export default function CatalogPopout({
         ))}
       </box>
       <box style={{ width: inner, flexDirection: 'row' }}>
-        <text fg="gray">{clip(filter || 'type to filter · a model row switches this session · esc closes', inner)}</text>
+        <text fg="gray">{clip(filter || 'type to filter · 1-0 starts a port · enter applies · esc closes', inner)}</text>
       </box>
     </box>
   );
