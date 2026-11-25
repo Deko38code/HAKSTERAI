@@ -1507,15 +1507,37 @@ function autolearnBar() {
 // .md / config / source) means he lost real work -> smartness drops.
 const IMPORTANT_FILES = ['AGENTS.md','package.json','cli/index.js','cli/memory.js','server/src/index.js','server/src/agent/index.js','server/src/agent/loop.js','server/src/agent/autolearn.js','server/hakster-config.json','server/src/hakster-config.json','scripts/hakster-guardrails.sh','HAKSTERAI-PHANTOM-MERGED.md','.env'];
 let _smartMissedFiles = new Set();   // tracked-missing files already penalized this task
+// The source tree this module lives in, if it lives in one: the nearest ancestor
+// that is a real repo (`AGENTS.md`/`.git`) carrying this agent loop. A packaged
+// install, a deploy slot or a staged update has no such ancestor, and those 13
+// files were never missing there — counting them gave "2/13 important files" and
+// docked smartness -10 per file (owner, 2026-11-26: "hakster made some files
+// missing says 2/13 fix on dell").
+function _projectTree(start) {
+  let dir = start;
+  for (let i = 0; i < 6; i += 1) {
+    try {
+      const isRepo = fs.existsSync(path.join(dir, 'AGENTS.md')) || fs.existsSync(path.join(dir, '.git'));
+      if (isRepo && fs.existsSync(path.join(dir, 'server', 'src', 'agent', 'index.js'))) return dir;
+    } catch (_) { /* keep walking */ }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return null;
+}
 function fileIntegrity() {
-  const root = path.join(__dirname, '..', '..', '..');
+  const root = _projectTree(__dirname);
+  // No source tree (package install / slot / stage): the 13 files are not
+  // applicable here. Report nothing missing and never dock smartness for it.
+  if (!root) return { pct: 100, present: 0, total: 0, missing: [], mode: 'install' };
   const present = [], missing = [];
   for (const f of IMPORTANT_FILES) {
     try { if (fs.existsSync(path.join(root, f))) present.push(f); else missing.push(f); }
     catch (_) { missing.push(f); }
   }
   const pct = Math.round(present.length / IMPORTANT_FILES.length * 100);
-  return { pct, present: present.length, missing, total: IMPORTANT_FILES.length };
+  return { pct, present: present.length, missing, total: IMPORTANT_FILES.length, mode: 'project', root };
 }
 // Per-call outcome scoring: real success climbs, real failure / lost files drop.
 function scoreToolCall(fnName, fnArgs, ok, out) {
@@ -11147,8 +11169,11 @@ async function repl() {
     // 📁 File integrity — important files present vs missing (%)
     const _fi = fileIntegrity();
     const _fiBar = (() => { const bl = 20, f = Math.round(_fi.pct / 100 * bl); const c = _fi.pct >= 90 ? C.success : _fi.pct >= 60 ? C.mustard : C.error; return c + '█'.repeat(f) + C.fgSubtle + '░'.repeat(bl - f) + C.reset; })();
-    const fileRows = [`${_fiBar} ${_fi.pct}%  ${_fi.present}/${_fi.total} important files`];
-    if (_fi.missing.length) fileRows.push(..._fi.missing.map(file => `${C.error}Missing: ${file}${C.reset}`));
+    const fileRows = _fi.mode === 'install'
+      ? [`${_fiBar} packaged install — project files are checked in the source tree`]
+      : [`${_fiBar} ${_fi.pct}%  ${_fi.present}/${_fi.total} important files`];
+    if (_fi.mode === 'install') { /* not applicable here — nothing missing, nothing docked */ }
+    else if (_fi.missing.length) fileRows.push(..._fi.missing.map(file => `${C.error}Missing: ${file}${C.reset}`));
     else fileRows.push(`${C.success}✓ all important files present${C.reset}`);
     printReviewBox('FILE INTEGRITY', fileRows, C.cyan);
     for (const f of _fi.missing) { if (!_smartMissedFiles.has(f)) { _smartMissedFiles.add(f); bumpSmart(-10, 'file-missing:' + f); } }

@@ -295,12 +295,50 @@ export const IMPORTANT_FILES = [
   '.env',
 ];
 
-// Check the list against `root` (default: this repository). Read-only —
-// existsSync only; nothing is created, repaired or deleted here.
-export function fileGuard(root = path.resolve(CLI_DIR, '..')) {
+// Files every published CLI package ships — the tarball carries `cli/` only,
+// so the 13 project files above cannot exist in a package install. Counting
+// them there read as lost work (owner, 2026-11-26: "hakster made some files
+// missing says 2/13 fix on dell"): a package install legitimately has
+// cli/index.js and cli/memory.js only, i.e. "2/13 files". This list is the
+// install's own guard — same count, the files that are really shipped.
+export const INSTALL_FILES = [
+  'cli/index.js',
+  'cli/ui-fb.mjs',
+  'cli/tui-entry.mjs',
+  'cli/smartness.mjs',
+  'cli/tools.js',
+  'cli/memory.js',
+  'cli/providers.js',
+  'cli/package.json',
+  'cli/ui.mjs',
+  'cli/src/updater.js',
+  'cli/src/prefs.js',
+  'cli/src/models/ladder.js',
+  'cli/src/self-config-guard.js',
+];
+
+// The source tree this copy lives in, if it lives in one: the nearest ancestor
+// that is a real repo (`AGENTS.md`/`.git`) carrying the server's agent loop. A
+// package install, a deploy slot or a staged update has no such ancestor —
+// that is exactly why its "missing" files were never missing.
+function findProjectTree(start) {
+  let dir = start;
+  for (let i = 0; i < 6; i += 1) {
+    try {
+      const isRepo = fs.existsSync(path.join(dir, 'AGENTS.md')) || fs.existsSync(path.join(dir, '.git'));
+      if (isRepo && fs.existsSync(path.join(dir, 'server', 'src', 'agent', 'index.js'))) return dir;
+    } catch { /* keep walking */ }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return null;
+}
+
+function countFiles(root, list, mode) {
   const present = [];
   const missing = [];
-  for (const rel of IMPORTANT_FILES) {
+  for (const rel of list) {
     try {
       if (fs.existsSync(path.join(root, rel))) present.push(rel);
       else missing.push(rel);
@@ -308,7 +346,17 @@ export function fileGuard(root = path.resolve(CLI_DIR, '..')) {
       missing.push(rel);
     }
   }
-  return { present: present.length, total: IMPORTANT_FILES.length, missing };
+  return { present: present.length, total: list.length, missing, mode, root };
+}
+
+// Check the files against `root` (default: the source tree this copy lives in,
+// else the package it is). Read-only — existsSync only; nothing is created,
+// repaired or deleted here.
+export function fileGuard(root) {
+  if (root) return countFiles(root, IMPORTANT_FILES, 'project');
+  const project = findProjectTree(CLI_DIR);
+  if (project) return countFiles(project, IMPORTANT_FILES, 'project');
+  return countFiles(path.resolve(CLI_DIR, '..'), INSTALL_FILES, 'install');
 }
 
 // A short human label for a listening port that is not a known service: the

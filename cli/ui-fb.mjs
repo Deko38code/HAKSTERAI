@@ -4559,10 +4559,39 @@ var IMPORTANT_FILES = [
   "HAKSTERAI-PHANTOM-MERGED.md",
   ".env"
 ];
-function fileGuard(root2 = path4.resolve(CLI_DIR, "..")) {
+var INSTALL_FILES = [
+  "cli/index.js",
+  "cli/ui-fb.mjs",
+  "cli/tui-entry.mjs",
+  "cli/smartness.mjs",
+  "cli/tools.js",
+  "cli/memory.js",
+  "cli/providers.js",
+  "cli/package.json",
+  "cli/ui.mjs",
+  "cli/src/updater.js",
+  "cli/src/prefs.js",
+  "cli/src/models/ladder.js",
+  "cli/src/self-config-guard.js"
+];
+function findProjectTree(start2) {
+  let dir = start2;
+  for (let i = 0; i < 6; i += 1) {
+    try {
+      const isRepo = fs6.existsSync(path4.join(dir, "AGENTS.md")) || fs6.existsSync(path4.join(dir, ".git"));
+      if (isRepo && fs6.existsSync(path4.join(dir, "server", "src", "agent", "index.js"))) return dir;
+    } catch {
+    }
+    const up = path4.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return null;
+}
+function countFiles(root2, list, mode) {
   const present = [];
   const missing = [];
-  for (const rel of IMPORTANT_FILES) {
+  for (const rel of list) {
     try {
       if (fs6.existsSync(path4.join(root2, rel))) present.push(rel);
       else missing.push(rel);
@@ -4570,7 +4599,13 @@ function fileGuard(root2 = path4.resolve(CLI_DIR, "..")) {
       missing.push(rel);
     }
   }
-  return { present: present.length, total: IMPORTANT_FILES.length, missing };
+  return { present: present.length, total: list.length, missing, mode, root: root2 };
+}
+function fileGuard(root2) {
+  if (root2) return countFiles(root2, IMPORTANT_FILES, "project");
+  const project = findProjectTree(CLI_DIR);
+  if (project) return countFiles(project, IMPORTANT_FILES, "project");
+  return countFiles(path4.resolve(CLI_DIR, ".."), INSTALL_FILES, "install");
 }
 function portLabel(entry, max = 14) {
   const proc = String(entry && entry.proc || "").split(/\s+/)[0];
