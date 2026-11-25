@@ -164,8 +164,9 @@ if [ "${SKIP_CODE:-0}" != "1" ]; then
     -e "ssh -o BatchMode=yes" \
     /home/ghost/haksterAi/cli /home/ghost/haksterAi/server /home/ghost/haksterAi/dist \
     /home/ghost/haksterAi/scripts /home/ghost/haksterAi/public /home/ghost/haksterAi/package.json \
+    /home/ghost/haksterAi/install.sh /home/ghost/haksterAi/install.ps1 \
     "$STANDBY_SSH:$TARGET_DIR/" \
-    && say "code synced into $TARGET_DIR (dist, server, cli, scripts)" \
+    && say "code synced into $TARGET_DIR (dist, server, cli, scripts, installers)" \
     || { say "warning: code sync did not complete - the slot keeps its previous build"; }
 else
   say "code sync skipped (SKIP_CODE=1)"
