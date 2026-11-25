@@ -24,6 +24,7 @@
 
   var pendingUpdate = false; // set by the Update button
   var downSince = 0;
+  var failStreak = 0;        // consecutive failed probes (one lost packet is not a downed server)
   var retryTimer = 0;
   var probeTimer = 0;
   // Why the tab believes the server is away. The page sets 'apply' when the
@@ -106,6 +107,7 @@
     }
     healthy().then(function (ok) {
       if (ok) {
+        failStreak = 0;
         // A pending Update reloads as soon as the server answers — whether it
         // was actually down or the first health check merely timed out.
         if (pendingUpdate) {
@@ -130,6 +132,18 @@
         scheduleProbe(PROBE_MS);
         return;
       }
+      // One lost probe is not a downed server (owner, 2026-11-25). A phone
+      // waking its radio, a tab resuming, or one dropped packet used to make
+      // this banner announce a restart that never happened — on mobile that
+      // fired on nearly every tab resume. Two consecutive failures are required
+      // before the server is called away; a real restart outlasts the 2 s retry.
+      // A user-initiated Update still says so at once: that promise is theirs.
+      failStreak += 1;
+      // The outage clock starts only on a confirmed (second) failure, so a
+      // single lost packet can never produce a "Back online" toast for an
+      // outage the tab never reported. A user-initiated Update still starts
+      // it at once — that promise is theirs.
+      if (!pendingUpdate && failStreak < 2) { scheduleProbe(RETRY_MS); return; }
       if (!downSince) downSince = Date.now();
       banner(pendingUpdate ? 'Updating — waiting for the server…'
         : causeNow() === 'apply' ? 'Server is restarting to apply an update — reconnecting…'
