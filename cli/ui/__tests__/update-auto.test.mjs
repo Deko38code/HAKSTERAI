@@ -27,7 +27,18 @@ const UPDATER = require.resolve('../../src/updater.js');
 const HOOK = path.join(here, '..', 'src', 'hooks', 'useCliUpdate.js');
 const REAL_HOME = process.env.HOME;
 
-function makeInstall({ running = '0.3.61', pending = '0.3.62', checkout = false } = {}) {
+// The running CLI's own version decides whether a stage is "superseded", so the
+// fake install tracks this checkout's version instead of a pinned literal — a
+// version bump must never turn these tests into a downgrade story.
+const REAL_VERSION = JSON.parse(fs.readFileSync(path.join(here, '..', '..', 'package.json'), 'utf8')).version;
+const bump = (v) => {
+  const p = String(v).split('.');
+  p[p.length - 1] = String((parseInt(p[p.length - 1], 10) || 0) + 1);
+  return p.join('.');
+};
+const NEXT_VERSION = bump(REAL_VERSION);
+
+function makeInstall({ running = REAL_VERSION, pending = NEXT_VERSION, checkout = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hakster-auto-update-'));
   const home = path.join(root, 'home');
   const cli = path.join(root, 'cli');
@@ -69,8 +80,8 @@ test('an installed copy applies a verified stage at start without asking', async
     // And the copy really happens — the badge can say "installed" afterwards.
     const applied = updater.applyPending(cli);
     assert.equal(applied.applied, true);
-    assert.equal(applied.version, '0.3.62');
-    assert.match(fs.readFileSync(path.join(cli, 'ui-fb.mjs'), 'utf8'), /staged 0\.3\.62/);
+    assert.equal(applied.version, NEXT_VERSION);
+    assert.match(fs.readFileSync(path.join(cli, 'ui-fb.mjs'), 'utf8'), new RegExp(`staged ${NEXT_VERSION.replace(/\./g, '\\.')}`));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -83,7 +94,7 @@ test('a source checkout is refused, never auto-installed', async () => {
     const applied = updater.applyPending(cli);
     assert.equal(applied.applied, false);
     assert.equal(applied.reason, 'source-checkout');
-    assert.match(fs.readFileSync(path.join(cli, 'ui-fb.mjs'), 'utf8'), /running 0\.3\.61/);
+    assert.match(fs.readFileSync(path.join(cli, 'ui-fb.mjs'), 'utf8'), new RegExp(`running ${REAL_VERSION.replace(/\./g, '\\.')}`));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

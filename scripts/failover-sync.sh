@@ -156,7 +156,15 @@ scp -q -o BatchMode=yes scripts/failover-router.cjs "$STANDBY_SSH:~/hakster-stan
 ssh -n -o BatchMode=yes "$STANDBY_SSH" "mkdir -p ~/$TARGET_DIR/data" \
   || { say "failed: could not create $TARGET_DIR"; exit 1; }
 
+# The commit the package was built from travels with it, so the standby (which
+# has no .git) can answer /cli/latest.json with the same count the primary
+# reads from git. Owner, 2026-11-26: "i want our cli to say in tui how many
+# commits is behind before installs like hermes". Derived data only — the file
+# is gitignored and rewritten here on every sync.
 if [ "${SKIP_CODE:-0}" != "1" ]; then
+  node /home/ghost/haksterAi/scripts/cli-build-stamp.cjs --write >/dev/null 2>&1 \
+    && say "build stamp refreshed ($(node /home/ghost/haksterAi/scripts/cli-build-stamp.cjs 2>/dev/null || echo unknown))" \
+    || say "warning: could not refresh the CLI build stamp"
   rsync -a --safe-links \
     --exclude='node_modules' --exclude='.git' --exclude='*.bak*' --exclude='*.db' --exclude='*.db-*' \
     --exclude='.env*' --exclude='*.key' --exclude='*.pem' --exclude='*.p12' \

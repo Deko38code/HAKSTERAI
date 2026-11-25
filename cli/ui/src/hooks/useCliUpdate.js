@@ -46,6 +46,10 @@ function readStartup() {
           status: pending.blocked ? 'blocked' : 'staged',
           version: pending.version,
           blocked: pending.blocked || undefined,
+          // How many commits the published build was ahead when this stage was
+          // taken (owner, 2026-11-26: "say in tui how many commits is behind
+          // before installs like hermes").
+          behind: Number(pending.behind) > 0 ? Number(pending.behind) : 0,
           checkedAt: pending.stagedAt,
         },
       };
@@ -178,13 +182,20 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000, sessionVersion
             };
           }
           if (installedNow && installedNow.needsInstall) {
-            return { status: 'staged', version: res.version, needsInstall: true, checkedAt: res.checkedAt };
+            return {
+              status: 'staged', version: res.version, needsInstall: true,
+              behind: Number(res.behind) > 0 ? Number(res.behind) : 0,
+              checkedAt: res.checkedAt,
+            };
           }
           return {
             status: res.status,
             version: res.version,
             blocked: res.blocked || (res.status === 'blocked' ? 'source-checkout' : undefined),
             reason: res.reason,
+            // Commits the published build is ahead of this install, counted from
+            // the stamps (unknown reads 0, never a guess — §10).
+            behind: Number(res.behind) > 0 ? Number(res.behind) : 0,
             checkedAt: res.checkedAt,
           };
         });

@@ -58,12 +58,28 @@ function sha256File(file) {
   }
 }
 
+/** Which commit this install was built from. The package ships
+ *  cli/.build-stamp.json (scripts/cli-build-stamp.cjs), so an installed copy —
+ *  which has no .git — can still count how far behind it is. Owner, 2026-11-26:
+ *  "i want our cli to say in tui how many commits is behind before installs
+ *  like hermes". */
+function stampOf(dir) {
+  const stamp = readJson(path.join(dir, '.build-stamp.json'), null);
+  if (!stamp) return null;
+  const commits = parseInt(stamp.commits, 10);
+  if (!Number.isFinite(commits) || commits <= 0) return null;
+  return { commit: String(stamp.commit || ''), commits };
+}
+
 function runningInfo(explicitDir) {
   const dir = cliDirOf(explicitDir);
   const pkg = readJson(path.join(dir, 'package.json'), {});
+  const stamp = stampOf(dir);
   return {
     version: String(pkg.version || '0.0.0'),
     bundleSha: sha256File(path.join(dir, 'ui-fb.mjs')),
+    commit: stamp ? stamp.commit : '',
+    commits: stamp ? stamp.commits : null,
     dir,
   };
 }
@@ -193,6 +209,19 @@ async function checkForUpdate(opts = {}) {
   if (!staged.version || !staged.bundleSha) {
     return { status: 'error', reason: 'staged package unreadable', checkedAt: new Date().toISOString(), running };
   }
+  // How far behind the published build this install is, in commits. The staged
+  // package carries its own stamp, so this describes exactly what was
+  // downloaded; the endpoint's count (git on the primary) is the fallback for a
+  // package built before the stamp existed. Unknown on either side reads null,
+  // never a guessed number (§10).
+  const stagedStamp = stampOf(path.join(STAGED_DIR, 'cli'));
+  const latestCommit = (stagedStamp && stagedStamp.commit)
+    || (latest && latest.commit ? String(latest.commit) : '');
+  const latestCommits = (stagedStamp && stagedStamp.commits)
+    || (latest && Number.isFinite(parseInt(latest.commits, 10)) ? parseInt(latest.commits, 10) : null);
+  const behind = Number.isFinite(running.commits) && Number.isFinite(latestCommits) && latestCommits > running.commits
+    ? latestCommits - running.commits
+    : 0;
   const upToDate = cmpVersion(staged.version, running.version) === 0 && staged.bundleSha === running.bundleSha;
   if (upToDate) {
     // A stage left by an earlier check is marked current, not deleted: the
@@ -231,6 +260,9 @@ async function checkForUpdate(opts = {}) {
     stagedAt: new Date().toISOString(),
     verifiedAt: new Date().toISOString(),
     runningVersion: running.version,
+    latestCommit,
+    latestCommits,
+    behind,
     source: origin,
     dir: path.join(STAGED_DIR, 'cli'),
     state: blocked ? 'blocked' : 'staged',

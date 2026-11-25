@@ -871,12 +871,22 @@ var require_updater = __commonJS({
         return "";
       }
     }
+    function stampOf(dir) {
+      const stamp = readJson(path9.join(dir, ".build-stamp.json"), null);
+      if (!stamp) return null;
+      const commits = parseInt(stamp.commits, 10);
+      if (!Number.isFinite(commits) || commits <= 0) return null;
+      return { commit: String(stamp.commit || ""), commits };
+    }
     function runningInfo(explicitDir) {
       const dir = cliDirOf2(explicitDir);
       const pkg = readJson(path9.join(dir, "package.json"), {});
+      const stamp = stampOf(dir);
       return {
         version: String(pkg.version || "0.0.0"),
         bundleSha: sha256File(path9.join(dir, "ui-fb.mjs")),
+        commit: stamp ? stamp.commit : "",
+        commits: stamp ? stamp.commits : null,
         dir
       };
     }
@@ -982,6 +992,10 @@ var require_updater = __commonJS({
       if (!staged.version || !staged.bundleSha) {
         return { status: "error", reason: "staged package unreadable", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
       }
+      const stagedStamp = stampOf(path9.join(STAGED_DIR, "cli"));
+      const latestCommit = stagedStamp && stagedStamp.commit || (latest && latest.commit ? String(latest.commit) : "");
+      const latestCommits = stagedStamp && stagedStamp.commits || (latest && Number.isFinite(parseInt(latest.commits, 10)) ? parseInt(latest.commits, 10) : null);
+      const behind = Number.isFinite(running.commits) && Number.isFinite(latestCommits) && latestCommits > running.commits ? latestCommits - running.commits : 0;
       const upToDate = cmpVersion(staged.version, running.version) === 0 && staged.bundleSha === running.bundleSha;
       if (upToDate) {
         const pending2 = readJson(PENDING_FILE, null);
@@ -1012,6 +1026,9 @@ var require_updater = __commonJS({
         stagedAt: (/* @__PURE__ */ new Date()).toISOString(),
         verifiedAt: (/* @__PURE__ */ new Date()).toISOString(),
         runningVersion: running.version,
+        latestCommit,
+        latestCommits,
+        behind,
         source: origin,
         dir: path9.join(STAGED_DIR, "cli"),
         state: blocked ? "blocked" : "staged",
@@ -6975,6 +6992,10 @@ function readStartup() {
           status: pending.blocked ? "blocked" : "staged",
           version: pending.version,
           blocked: pending.blocked || void 0,
+          // How many commits the published build was ahead when this stage was
+          // taken (owner, 2026-11-26: "say in tui how many commits is behind
+          // before installs like hermes").
+          behind: Number(pending.behind) > 0 ? Number(pending.behind) : 0,
           checkedAt: pending.stagedAt
         }
       };
@@ -7060,13 +7081,22 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
             };
           }
           if (installedNow && installedNow.needsInstall) {
-            return { status: "staged", version: res.version, needsInstall: true, checkedAt: res.checkedAt };
+            return {
+              status: "staged",
+              version: res.version,
+              needsInstall: true,
+              behind: Number(res.behind) > 0 ? Number(res.behind) : 0,
+              checkedAt: res.checkedAt
+            };
           }
           return {
             status: res.status,
             version: res.version,
             blocked: res.blocked || (res.status === "blocked" ? "source-checkout" : void 0),
             reason: res.reason,
+            // Commits the published build is ahead of this install, counted from
+            // the stamps (unknown reads 0, never a guess — §10).
+            behind: Number(res.behind) > 0 ? Number(res.behind) : 0,
             checkedAt: res.checkedAt
           };
         });
@@ -8541,21 +8571,23 @@ function App({ version = "0.1.0" }) {
   const updatePending = updateInstalled || !!(update && !update.applied && (update.status === "staged" || update.status === "blocked"));
   const updateBlocked = !updateInstalled && updatePending && update.status === "blocked";
   const updateVer = updatePending && update.version ? ` v${update.version}` : "";
+  const updateBehind = updatePending && Number(update && update.behind) > 0 ? Number(update.behind) : 0;
+  const updateBehindText = updateBehind ? ` \xB7 ${updateBehind} commit${updateBehind === 1 ? "" : "s"} behind` : "";
   const updateBadgeVariants = !updatePending ? [null] : (updateInstalled ? [
     "\u2714 Update installed \xB7 Restart to update",
     "\u2714 installed \xB7 Restart to update",
     "\u2714 Restart to update",
     "\u2714 restart"
   ] : updateNeedsInstall ? [
-    `\u2B06 update${updateVer} \xB7 re-run the installer`,
+    `\u2B06 update${updateVer}${updateBehindText} \xB7 re-run the installer`,
     "\u2B06 re-run the installer",
     "\u2B06 installer"
   ] : updateBlocked ? [
-    `\u2B06 update${updateVer} \xB7 pull to update`,
+    `\u2B06 update${updateVer}${updateBehindText} \xB7 pull to update`,
     "\u2B06 update \xB7 pull to update",
     "\u2B06 pull to update"
   ] : [
-    `\u2B06 update${updateVer} \xB7 installs on restart`,
+    `\u2B06 update${updateVer}${updateBehindText} \xB7 installs on restart`,
     "\u2B06 update \xB7 installs on restart",
     "\u2B06 installs on restart"
   ]).filter((text, i, all) => all.indexOf(text) === i).map((text) => ({ text, fg: updateBlocked ? "yellow" : "green" }));

@@ -77,3 +77,6 @@ __pycache__/
 # Astro builds to a temp dir before the reviewed overlay into dist/
 .tmp-build-*/
 .tmp-mailbuild/
+
+# CLI build stamp — written from git on the primary, synced with the package
+cli/.build-stamp.json

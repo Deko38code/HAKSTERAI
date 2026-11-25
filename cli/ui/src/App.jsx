@@ -1749,6 +1749,16 @@ export default function App({ version = '0.1.0' }) {
     && (update.status === 'staged' || update.status === 'blocked'));
   const updateBlocked = !updateInstalled && updatePending && update.status === 'blocked';
   const updateVer = updatePending && update.version ? ` v${update.version}` : '';
+  // How many commits the published build is ahead of this install, counted from
+  // the build stamps on both sides — shown BEFORE it installs, Hermes-style
+  // (owner, 2026-11-26: "i want our cli to say in tui how many commits is
+  // behind before installs like hermes"; "so it always is upto date"). Unknown
+  // is omitted, never guessed (§10). The count rides the richest form only; the
+  // narrower forms keep the instruction so it still fits a narrow header.
+  const updateBehind = updatePending && Number(update && update.behind) > 0 ? Number(update.behind) : 0;
+  const updateBehindText = updateBehind
+    ? ` · ${updateBehind} commit${updateBehind === 1 ? '' : 's'} behind`
+    : '';
   const updateBadgeVariants = !updatePending
     ? [null]
     : (updateInstalled
@@ -1760,18 +1770,18 @@ export default function App({ version = '0.1.0' }) {
         ]
       : updateNeedsInstall
       ? [
-          `⬆ update${updateVer} · re-run the installer`,
+          `⬆ update${updateVer}${updateBehindText} · re-run the installer`,
           '⬆ re-run the installer',
           '⬆ installer',
         ]
       : updateBlocked
       ? [
-          `\u2B06 update${updateVer} \u00b7 pull to update`,
+          `\u2B06 update${updateVer}${updateBehindText} \u00b7 pull to update`,
           '\u2B06 update \u00b7 pull to update',
           '\u2B06 pull to update',
         ]
       : [
-          `\u2B06 update${updateVer} \u00b7 installs on restart`,
+          `\u2B06 update${updateVer}${updateBehindText} \u00b7 installs on restart`,
           '\u2B06 update \u00b7 installs on restart',
           '\u2B06 installs on restart',
         ])

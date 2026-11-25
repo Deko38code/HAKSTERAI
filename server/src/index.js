@@ -13469,11 +13469,22 @@ if (fs.existsSync(distPath)) {
       const pkg = JSON.parse(fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8'));
       const bundlePath = path.join(cliRoot, 'ui-fb.mjs');
       const stat = fs.existsSync(bundlePath) ? fs.statSync(bundlePath) : null;
+      // Which commit this package was built from, so a running CLI can say how
+      // many commits behind it is before it installs (owner, 2026-11-26: "i
+      // want our cli to say in tui how many commits is behind before installs
+      // like hermes"). Git first — on the primary it is always current — and
+      // the synced stamp second, because the standby slot has no .git.
+      let build = null;
+      try {
+        build = require('../../scripts/cli-build-stamp.cjs').current(path.join(cliRoot, '..'));
+      } catch { /* the count is informational; never fail the route over it */ }
       res.set('cache-control', 'no-store');
       res.json({
         version: String(pkg.version || ''),
         bundleSha256: stat ? crypto.createHash('sha256').update(fs.readFileSync(bundlePath)).digest('hex') : '',
         builtAt: stat ? stat.mtime.toISOString() : null,
+        commit: build ? build.commit : '',
+        commits: build ? build.commits : null,
         package: '/cli/pkg.tar.gz',
       });
     } catch (e) {
