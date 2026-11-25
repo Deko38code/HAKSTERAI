@@ -5089,7 +5089,16 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
   // tool_result, delta, done) the CLI/TUI already renders for every other
   // provider, so tool use "just shows up" the same way.
   if (cfg.type === 'claude-cli') {
-    async function runClaudeCliAgent() {
+    // Live steering on this lane (owner, 2026-11-25: "make sure his steer is
+    // working and he recieves his messages while working to do it all in one
+    // shot"). `claude -p` reads its prompt once and has no stdin turn loop, so
+    // a message typed mid-run cannot be handed to the running child. It is
+    // taken here instead: the turn is stopped at the next boundary, the steer
+    // is written to the client as a live `steer` event, and the run restarts
+    // on the same conversation with what was already completed spelled out,
+    // so the update lands inside THIS run and nothing is repeated.
+    const CLAUDE_CLI_MAX_STEERS = 4;
+    async function runClaudeCliAgent(continuationNote) {
       const { spawn } = require('child_process');
       const transcript = messages
         .filter(m => m.role !== 'system')
@@ -5128,6 +5137,7 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
           + 'with a short rundown of what was done and verified.\n';
       }
       if (clientSys) sysPrompt += `\n=== CLIENT DIRECTIVE ===\n${clientSys}\n`;
+      if (continuationNote) sysPrompt += `\n${continuationNote}\n`;
 
       // Prompt goes over stdin, not argv — a resumed session's transcript can
       // easily exceed the OS's command-line argument size limit ("spawn E2BIG").
@@ -5145,8 +5155,70 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
       // Same pentest MCP toolkit (nmap, playwright, serena, sqlite, etc.) the
       // rest of Hakster's agent loop uses — see server/src/agent/mcp.js's
       // loadMcpServers(), which reads this same file.
+      //
+      // ── Per-run MCP scope (latency) ────────────────────────────────────
+      // Measured 2026-11-25 on this box, same prompt, wall clock end to end:
+      // no MCP servers 3.9 s, the 6-server core 5.1–6.4 s, all 20 configured
+      // servers 11.1–11.6 s — and the server's own reply measured 14.2 s,
+      // because every turn pays that startup before the model is even asked.
+      // The owner's bar is "10 sec or less, not 20" (2026-11-25), so an
+      // interactive turn starts the core set plus any server its own message
+      // names, and a full-auto autonomous run keeps the whole toolkit. The
+      // lean file is derived from the same mcp.json — no server definition is
+      // copied, edited or removed from the config itself.
       const mcpConfigPath = path.join(__dirname, '..', '..', '.hakster', 'mcp.json');
-      if (fs.existsSync(mcpConfigPath)) args.push('--mcp-config', mcpConfigPath);
+      const MCP_CORE = new Set(['filesystem', 'phantom', 'hakster', 'sqlite', 'memory', 'sequential-thinking']);
+      // Words in the operator's own message that earn a heavy server a start.
+      const MCP_ALIASES = {
+        nmap: /\bnmap\b|\bscan(ned|ning)?\b|\bport scan\b/i,
+        playwright: /\bplaywright\b|\bbrowser\b|\bscreenshot\b|\bpage\b/i,
+        serena: /\bserena\b|\bred?name\b|\bsymbol\b|\brefactor\b/i,
+        hermes: /\bhermes\b/i,
+        'bounty-platforms': /\bbounty\b|\bhackerone\b|\bbugcrowd\b/i,
+        'writeup-search': /\bwriteup\b|\bwrite-up\b/i,
+        squad: /\bsquad\b|\bhackbot\b/i,
+        'stealth-bot': /\bstealth\b/i,
+        kiro: /\bkiro\b/i,
+        codex: /\bcodex\b/i,
+        hivemind: /\bhivemind\b/i,
+        subagents: /\bsub-?agents?\b/i,
+        'miniforge-bridge': /\bminiforge\b/i,
+        'claude-code': /\bclaude code\b/i,
+      };
+      let leanMcpFile = null;
+      if (fs.existsSync(mcpConfigPath)) {
+        try {
+          // A full-auto run is the autonomous pentest path — it keeps every
+          // tool. Everything else is an interactive turn and gets the lean set.
+          const wantsAll = effectiveApprovalMode === 'full-auto'
+            || /\ball tools\b|\bfull toolkit\b|\bevery tool\b/i.test(String(getMessageText(claudeUserMsg?.content) || ''));
+          if (!wantsAll) {
+            const fullCfg = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf8'));
+            const msgText = String(getMessageText(claudeUserMsg?.content) || '');
+            const keep = new Set(MCP_CORE);
+            for (const [name, re] of Object.entries(MCP_ALIASES)) if (re.test(msgText)) keep.add(name);
+            for (const name of Object.keys(fullCfg.mcpServers || {})) {
+              // Naming a server outright ("use nmap") also earns it a start.
+              if (new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(msgText)) keep.add(name);
+            }
+            const lean = { mcpServers: {} };
+            for (const [name, def] of Object.entries(fullCfg.mcpServers || {})) if (keep.has(name)) lean.mcpServers[name] = def;
+            if (Object.keys(lean.mcpServers).length && Object.keys(lean.mcpServers).length < Object.keys(fullCfg.mcpServers || {}).length) {
+              leanMcpFile = path.join(os.tmpdir(), `hakster-mcp-lean-${process.pid}-${Date.now()}.json`);
+              fs.writeFileSync(leanMcpFile, JSON.stringify(lean, null, 2));
+            }
+          }
+        } catch (leanErr) {
+          // A lean scope that cannot be built must never cost the run its
+          // tools: fall back to the full config.
+          console.warn('[claude-cli] lean MCP scope skipped, using the full toolkit:', leanErr.message);
+          leanMcpFile = null;
+        }
+        args.push('--mcp-config', leanMcpFile || mcpConfigPath);
+        // Only the file above is consulted — otherwise a user-level config
+        // could re-add every server the lean scope just left out.
+        if (leanMcpFile) args.push('--strict-mcp-config');
+      }
       // The system prompt is often huge (steering docs, memory summaries) — passing
       // it as a raw --system-prompt argv string hits Linux's ~128KB per-argument
       // limit and fails with "spawn E2BIG". A file has no such cap.
@@ -5159,12 +5231,37 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         fs.writeFileSync(sysPromptFile, sysPrompt);
         args.push('--append-system-prompt-file', sysPromptFile);
       }
-      if (agentModel) args.push('--model', agentModel);
+      // Pass --model only for a wire model id ("deepseek-v4.1-flash:cloud").
+      // A Claude-style alias is resolved by claudeCliEnv's ANTHROPIC_DEFAULT_*
+      // _MODEL to the pinned model (§22.2); passing an alias as --model would
+      // ask the relay for a name it does not serve, which fails slowly.
+      if (agentModel && String(agentModel).includes(':')) args.push('--model', agentModel);
 
       return new Promise((resolve, reject) => {
         const child = spawn('claude', args, { cwd: workDir, env: claudeCliEnv() });
         child.stdin.write(transcript);
         child.stdin.end();
+
+        // ── Live steer on this lane ────────────────────────────────────
+        // `claude -p` has no open stdin turn loop, so the running child is
+        // stopped at the next boundary and the run restarts on the same
+        // conversation with this update in front of it (see the loop below).
+        // The steer is acknowledged on the wire the moment it is taken, so a
+        // message typed mid-run is never silently held until the run ends.
+        let steeredText = '';
+        const steerPoll = setInterval(() => {
+          if (settled || steeredText || !runId) return;
+          const box = agentSteerRuns.get(runId);
+          if (!box || !box.items.length) return;
+          const text = box.items.splice(0, 8).map((t) => String(t).trim()).filter(Boolean).join('\n\n').slice(0, 16000);
+          if (!text) return;
+          steeredText = text;
+          box.at = Date.now();
+          res.write(`data: ${JSON.stringify({ type: 'steer', content: text, supersede: true })}\n\n`);
+          console.log(`[agent] live steer interrupted the claude-cli turn: ${text.slice(0, 60).replace(/\s+/g, ' ')}`);
+          try { child.kill('SIGTERM'); } catch { /* already gone */ }
+          setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, 4000);
+        }, 350);
 
         // Guard against a stuck spawn (e.g. MCP tool-discovery hanging) —
         // without this, a hung `claude` process never closes and the SSE
@@ -5280,22 +5377,56 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
           }
         });
         child.stderr.on('data', (c) => { stderrBuf += c.toString(); });
-        const cleanupSysPromptFile = () => { if (sysPromptFile) { try { fs.unlinkSync(sysPromptFile); } catch {} } };
-        child.on('error', (err) => { if (!settled) { settled = true; clearTimeout(timeoutTimer); cleanupSysPromptFile(); reject(err); } });
+        const cleanupSysPromptFile = () => {
+          if (sysPromptFile) { try { fs.unlinkSync(sysPromptFile); } catch { /* already gone */ } }
+          if (leanMcpFile) { try { fs.unlinkSync(leanMcpFile); } catch { /* already gone */ } }
+        };
+        child.on('error', (err) => { if (!settled) { settled = true; clearTimeout(timeoutTimer); clearInterval(steerPoll); cleanupSysPromptFile(); reject(err); } });
         child.on('close', (code) => {
           if (settled) return;
           settled = true;
           clearTimeout(timeoutTimer);
+          clearInterval(steerPoll);
           cleanupSysPromptFile();
           if (timedOut) reject(new Error(`claude-cli timed out after ${AGENT_TIMEOUT_MS / 1000}s (killed)`));
-          else if (code !== 0 && !finalText) reject(new Error(stderrBuf.slice(0, 500) || `claude exited with code ${code}`));
-          else resolve({ finalText, toolCount, realModel, costUsd, usage });
+          // A turn stopped to take a steer is not a failure: the loop below
+          // restarts it with the update applied.
+          else if (code !== 0 && !finalText && !steeredText) reject(new Error(stderrBuf.slice(0, 500) || `claude exited with code ${code}`));
+          else resolve({ finalText, toolCount, realModel, costUsd, usage, steered: steeredText });
         });
       });
     }
 
     try {
-      const result = await runClaudeCliAgent();
+      let result = await runClaudeCliAgent('');
+      let steers = 0;
+      let totalToolCalls = result.toolCount || 0;
+      let totalIn = result.usage?.input_tokens || 0;
+      let totalOut = result.usage?.output_tokens || 0;
+      const progress = [];
+      // A steer taken mid-run restarts the turn on the same conversation with
+      // the update in front of it and what was already done spelled out, so the
+      // whole job finishes inside this one run instead of after it (owner,
+      // 2026-11-25: "do it all in one shot"). Bounded, so a chatty operator
+      // cannot pin one run open forever.
+      while (result.steered && steers < CLAUDE_CLI_MAX_STEERS) {
+        steers++;
+        progress.push(`round ${steers}: ${result.toolCount || 0} tool call(s)${result.finalText ? `; text delivered ended with: ${result.finalText.trim().slice(-240)}` : ''}`);
+        const note = [
+          '=== CONTINUATION — LIVE OPERATOR STEERING ===',
+          'The operator typed an update while you were working. It arrived inside this same run, so apply it now and finish the whole task in one go.',
+          'Already completed in this run before the interruption:',
+          ...progress.map((p) => `- ${p}`),
+          'Do not repeat completed steps, and do not restate text the operator has already seen unless the update requires it. Continue from where you were.',
+          '',
+          'OPERATOR UPDATE:',
+          result.steered,
+        ].join('\n');
+        result = await runClaudeCliAgent(note);
+        totalToolCalls += result.toolCount || 0;
+        totalIn += result.usage?.input_tokens || 0;
+        totalOut += result.usage?.output_tokens || 0;
+      }
       // Real identity of what answered — the model the CLI reported back, not
       // the alias that was requested. Cost is recorded as 0: the CLI's own
       // total_cost_usd is priced at Anthropic rates, but this route is the
@@ -5305,10 +5436,11 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         type: 'done',
         provider: 'claude-cli',
         model: result.realModel || agentModel,
-        toolCalls: result.toolCount,
-        inputTokens: result.usage?.input_tokens || 0,
-        outputTokens: result.usage?.output_tokens || 0,
+        toolCalls: totalToolCalls,
+        inputTokens: totalIn,
+        outputTokens: totalOut,
         cost: 0,
+        ...(steers ? { steers } : {}),
       })}\n\n`);
     } catch (err) {
       console.error('[claude-cli] run failed:', err.message || err);

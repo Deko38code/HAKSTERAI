@@ -422,8 +422,8 @@ var require_inline_ad_layout = __commonJS({
 var require_kitty_graphics = __commonJS({
   "../src/kitty-graphics.js"(exports, module) {
     "use strict";
-    var fs10 = __require("fs");
-    var path8 = __require("path");
+    var fs11 = __require("fs");
+    var path9 = __require("path");
     var CHUNK_BYTES = 4096;
     var LOGO_ID = 18507;
     function isSupported3(env = process.env, out = process.stdout) {
@@ -450,18 +450,18 @@ var require_kitty_graphics = __commonJS({
     }
     function logoPath(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path8.join(__dirname, "..");
-      return path8.join(root2, "assets", "haksterai-logo.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
+      return path9.join(root2, "assets", "haksterai-logo.png");
     }
     function heroPath2(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path8.join(__dirname, "..");
-      return path8.join(root2, "assets", "haksterai-hero.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
+      return path9.join(root2, "assets", "haksterai-hero.png");
     }
     function placeImage3({ file, cols = 24, rows = 12, id = LOGO_ID, zIndex = -1, write = (s) => process.stdout.write(s) } = {}) {
       let data;
       try {
-        data = fs10.readFileSync(file || logoPath());
+        data = fs11.readFileSync(file || logoPath());
       } catch {
         return null;
       }
@@ -515,11 +515,11 @@ var require_kitty_graphics = __commonJS({
 var require_live_image = __commonJS({
   "../src/live-image.js"(exports, module) {
     "use strict";
-    var fs10 = __require("fs");
+    var fs11 = __require("fs");
     var os6 = __require("os");
-    var path8 = __require("path");
+    var path9 = __require("path");
     var crypto = __require("crypto");
-    var CACHE_DIR = path8.join(os6.homedir(), ".hakster", "cache", "live");
+    var CACHE_DIR = path9.join(os6.homedir(), ".hakster", "cache", "live");
     var MAX_BYTES = 12 * 1024 * 1024;
     var FETCH_TIMEOUT_MS = 12e3;
     var EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
@@ -555,14 +555,14 @@ var require_live_image = __commonJS({
         const url = text.match(/https?:\/\/[^\s"'<>()\]]+/gi) || [];
         for (const u of url) {
           const ext = urlExt(u);
-          if (ext) return { kind: "url", ref: u.replace(/[.,;]+$/, ""), name: path8.basename(new URL(u.replace(/[.,;]+$/, "")).pathname) || `image.${ext}` };
+          if (ext) return { kind: "url", ref: u.replace(/[.,;]+$/, ""), name: path9.basename(new URL(u.replace(/[.,;]+$/, "")).pathname) || `image.${ext}` };
         }
         const paths = text.match(/(?:file:\/\/)?\/[^\s"'<>()\]]+\.(?:png|jpe?g|webp|gif|bmp)\b/gi) || [];
         for (const p of paths) {
           const file = p.replace(/^file:\/\//, "");
           try {
-            if (fs10.existsSync(file) && fs10.statSync(file).size <= MAX_BYTES) {
-              return { kind: "file", ref: file, name: path8.basename(file) };
+            if (fs11.existsSync(file) && fs11.statSync(file).size <= MAX_BYTES) {
+              return { kind: "file", ref: file, name: path9.basename(file) };
             }
           } catch {
           }
@@ -571,19 +571,19 @@ var require_live_image = __commonJS({
       return null;
     }
     function cacheFile(ext) {
-      return path8.join(CACHE_DIR, `${crypto.createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex").slice(0, 24)}.${ext}`);
+      return path9.join(CACHE_DIR, `${crypto.createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex").slice(0, 24)}.${ext}`);
     }
     function writeCache(buffer, ext) {
-      if (!fs10.existsSync(CACHE_DIR)) fs10.mkdirSync(CACHE_DIR, { recursive: true, mode: 448 });
+      if (!fs11.existsSync(CACHE_DIR)) fs11.mkdirSync(CACHE_DIR, { recursive: true, mode: 448 });
       const file = cacheFile(ext);
-      fs10.writeFileSync(file, buffer, { mode: 384 });
+      fs11.writeFileSync(file, buffer, { mode: 384 });
       return file;
     }
     async function materialize2(source) {
       if (!source || !source.ref) return { ok: false, reason: "no image" };
       if (source.kind === "file") {
         try {
-          const st = fs10.statSync(source.ref);
+          const st = fs11.statSync(source.ref);
           if (!st.isFile()) return { ok: false, reason: "not a file" };
           if (st.size > MAX_BYTES) return { ok: false, reason: `too big (${Math.round(st.size / 1048576)} MB)` };
           return { ok: true, file: source.ref, name: source.name };
@@ -637,12 +637,12 @@ var require_live_image = __commonJS({
 var require_prefs = __commonJS({
   "../src/prefs.js"(exports, module) {
     "use strict";
-    var fs10 = __require("fs");
+    var fs11 = __require("fs");
     var os6 = __require("os");
-    var path8 = __require("path");
-    var PREFS_DIR = path8.join(os6.homedir(), ".hakster");
-    var PREFS_FILE = path8.join(PREFS_DIR, "cli-prefs.json");
-    var LEGACY_FILE = path8.join(PREFS_DIR, "tui-prefs.json");
+    var path9 = __require("path");
+    var PREFS_DIR = path9.join(os6.homedir(), ".hakster");
+    var PREFS_FILE = path9.join(PREFS_DIR, "cli-prefs.json");
+    var LEGACY_FILE = path9.join(PREFS_DIR, "tui-prefs.json");
     var DEFAULTS = {
       model: "",
       // '' = the pinned primary model (§22)
@@ -679,7 +679,7 @@ var require_prefs = __commonJS({
     var KEYS = Object.keys(DEFAULTS);
     function readJson(file) {
       try {
-        const value = JSON.parse(fs10.readFileSync(file, "utf8"));
+        const value = JSON.parse(fs11.readFileSync(file, "utf8"));
         return value && typeof value === "object" && !Array.isArray(value) ? value : null;
       } catch {
         return null;
@@ -701,11 +701,11 @@ var require_prefs = __commonJS({
         if (patch && Object.prototype.hasOwnProperty.call(patch, key)) next[key] = patch[key];
       }
       try {
-        fs10.mkdirSync(PREFS_DIR, { recursive: true, mode: 448 });
+        fs11.mkdirSync(PREFS_DIR, { recursive: true, mode: 448 });
         const tmp = `${PREFS_FILE}.tmp-${process.pid}`;
-        fs10.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}
+        fs11.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}
 `, { mode: 384 });
-        fs10.renameSync(tmp, PREFS_FILE);
+        fs11.renameSync(tmp, PREFS_FILE);
       } catch {
       }
       return next;
@@ -827,55 +827,55 @@ var require_ladder = __commonJS({
 var require_updater = __commonJS({
   "../src/updater.js"(exports, module) {
     "use strict";
-    var fs10 = __require("fs");
+    var fs11 = __require("fs");
     var os6 = __require("os");
-    var path8 = __require("path");
+    var path9 = __require("path");
     var crypto = __require("crypto");
     var { spawn: spawn2 } = __require("child_process");
-    var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path8.join(__dirname, "..") : "");
-    function cliDirOf(explicit) {
-      return path8.resolve(String(explicit || DEFAULT_CLI_DIR || process.cwd()));
+    var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path9.join(__dirname, "..") : "");
+    function cliDirOf2(explicit) {
+      return path9.resolve(String(explicit || DEFAULT_CLI_DIR || process.cwd()));
     }
-    var UPDATES_DIR = path8.join(os6.homedir(), ".hakster", "updates");
-    var STAGED_DIR = path8.join(UPDATES_DIR, "staged");
-    var TARBALL = path8.join(UPDATES_DIR, "latest.tar.gz");
-    var PENDING_FILE = path8.join(UPDATES_DIR, "pending.json");
+    var UPDATES_DIR = path9.join(os6.homedir(), ".hakster", "updates");
+    var STAGED_DIR = path9.join(UPDATES_DIR, "staged");
+    var TARBALL = path9.join(UPDATES_DIR, "latest.tar.gz");
+    var PENDING_FILE = path9.join(UPDATES_DIR, "pending.json");
     var MAX_TARBALL = 32 * 1024 * 1024;
     function readJson(file, fallback) {
       try {
-        return JSON.parse(fs10.readFileSync(file, "utf8"));
+        return JSON.parse(fs11.readFileSync(file, "utf8"));
       } catch {
         return fallback;
       }
     }
     function writeJson(file, value) {
-      fs10.mkdirSync(path8.dirname(file), { recursive: true, mode: 448 });
+      fs11.mkdirSync(path9.dirname(file), { recursive: true, mode: 448 });
       const tmp = `${file}.tmp-${process.pid}`;
-      fs10.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
+      fs11.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
 `, { mode: 384 });
-      fs10.renameSync(tmp, file);
+      fs11.renameSync(tmp, file);
     }
     function sha256File(file) {
       try {
-        return crypto.createHash("sha256").update(fs10.readFileSync(file)).digest("hex");
+        return crypto.createHash("sha256").update(fs11.readFileSync(file)).digest("hex");
       } catch {
         return "";
       }
     }
     function runningInfo(explicitDir) {
-      const dir = cliDirOf(explicitDir);
-      const pkg = readJson(path8.join(dir, "package.json"), {});
+      const dir = cliDirOf2(explicitDir);
+      const pkg = readJson(path9.join(dir, "package.json"), {});
       return {
         version: String(pkg.version || "0.0.0"),
-        bundleSha: sha256File(path8.join(dir, "ui-fb.mjs")),
+        bundleSha: sha256File(path9.join(dir, "ui-fb.mjs")),
         dir
       };
     }
     function isSourceCheckout(explicitDir) {
-      return fs10.existsSync(path8.join(cliDirOf(explicitDir), "..", ".git"));
+      return fs11.existsSync(path9.join(cliDirOf2(explicitDir), "..", ".git"));
     }
     function serverUrl() {
-      const cfg = readJson(path8.join(os6.homedir(), ".hakster", "config.json"), {});
+      const cfg = readJson(path9.join(os6.homedir(), ".hakster", "config.json"), {});
       return String(cfg.server || process.env.HAKSTER_SERVER || "").replace(/\/+$/, "");
     }
     function cmpVersion(a, b) {
@@ -914,8 +914,8 @@ var require_updater = __commonJS({
         const buf = Buffer.from(await res.arrayBuffer());
         if (!buf.length) return { ok: false, reason: "empty package" };
         if (buf.length > MAX_TARBALL) return { ok: false, reason: "package too large" };
-        fs10.mkdirSync(UPDATES_DIR, { recursive: true, mode: 448 });
-        fs10.writeFileSync(TARBALL, buf, { mode: 384 });
+        fs11.mkdirSync(UPDATES_DIR, { recursive: true, mode: 448 });
+        fs11.writeFileSync(TARBALL, buf, { mode: 384 });
         return { ok: true, bytes: buf.length };
       } catch (e) {
         return { ok: false, reason: e && e.name === "AbortError" ? "timeout" : String(e && e.message || e) };
@@ -924,7 +924,7 @@ var require_updater = __commonJS({
       }
     }
     function extractStaged() {
-      fs10.mkdirSync(STAGED_DIR, { recursive: true, mode: 448 });
+      fs11.mkdirSync(STAGED_DIR, { recursive: true, mode: 448 });
       return new Promise((resolve) => {
         const tar = spawn2("tar", ["-xzf", TARBALL, "-C", STAGED_DIR], { stdio: "ignore" });
         tar.on("error", (e) => resolve({ ok: false, reason: String(e.message || e) }));
@@ -932,10 +932,10 @@ var require_updater = __commonJS({
       });
     }
     function stagedInfo() {
-      const pkg = readJson(path8.join(STAGED_DIR, "cli", "package.json"), {});
+      const pkg = readJson(path9.join(STAGED_DIR, "cli", "package.json"), {});
       return {
         version: String(pkg.version || ""),
-        bundleSha: sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")),
+        bundleSha: sha256File(path9.join(STAGED_DIR, "cli", "ui-fb.mjs")),
         deps: JSON.stringify(pkg && pkg.dependencies || {})
       };
     }
@@ -1004,7 +1004,7 @@ var require_updater = __commonJS({
         verifiedAt: (/* @__PURE__ */ new Date()).toISOString(),
         runningVersion: running.version,
         source: origin,
-        dir: path8.join(STAGED_DIR, "cli"),
+        dir: path9.join(STAGED_DIR, "cli"),
         state: blocked ? "blocked" : "staged",
         blocked
       };
@@ -1019,7 +1019,7 @@ var require_updater = __commonJS({
     function pendingInfo2(explicitDir) {
       const pending = readJson(PENDING_FILE, null);
       if (!pending || !pending.version) return null;
-      const ok = !!pending.bundleSha && sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
+      const ok = !!pending.bundleSha && sha256File(path9.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
       const running = runningInfo(explicitDir);
       return {
         ...pending,
@@ -1047,7 +1047,7 @@ var require_updater = __commonJS({
     function applyPending(explicitDir) {
       const pending = pendingInfo2();
       if (!pending) return null;
-      const target = cliDirOf(explicitDir);
+      const target = cliDirOf2(explicitDir);
       if (pending.appliedAt) return { applied: false, reason: "already applied", version: pending.version };
       if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
       if (pending.superseded) {
@@ -1060,22 +1060,22 @@ var require_updater = __commonJS({
         writeJson(PENDING_FILE, { ...pending, matchedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current" });
         return { applied: false, reason: "current", version: pending.version };
       }
-      const installedDeps = readJson(path8.join(target, "package.json"), {}).dependencies || {};
+      const installedDeps = readJson(path9.join(target, "package.json"), {}).dependencies || {};
       const staged = stagedInfo();
       if (!sameDeps(JSON.stringify(installedDeps), staged.deps)) {
         return { applied: false, reason: "dependencies changed \u2014 run npm install for the new version", version: pending.version };
       }
-      const backupDir = path8.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
-      const stagedCli = path8.join(STAGED_DIR, "cli");
+      const backupDir = path9.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
+      const stagedCli = path9.join(STAGED_DIR, "cli");
       try {
-        fs10.cpSync(stagedCli, backupDir, {
+        fs11.cpSync(stagedCli, backupDir, {
           recursive: true,
-          filter: (src) => !src.includes(`${path8.sep}node_modules`) && !src.includes(`${path8.sep}.git`)
+          filter: (src) => !src.includes(`${path9.sep}node_modules`) && !src.includes(`${path9.sep}.git`)
         });
-        fs10.cpSync(stagedCli, target, {
+        fs11.cpSync(stagedCli, target, {
           recursive: true,
           force: true,
-          filter: (src) => !src.includes(`${path8.sep}node_modules`) && !src.includes(`${path8.sep}.git`)
+          filter: (src) => !src.includes(`${path9.sep}node_modules`) && !src.includes(`${path9.sep}.git`)
         });
       } catch (e) {
         return { applied: false, reason: `copy failed: ${e && e.message || e}`, version: pending.version, backupDir };
@@ -1172,7 +1172,7 @@ var require_updater = __commonJS({
       promptStagedUpdate,
       runningInfo,
       isSourceCheckout,
-      cliDirOf,
+      cliDirOf: cliDirOf2,
       UPDATES_DIR,
       PENDING_FILE
     };
@@ -1182,13 +1182,13 @@ var require_updater = __commonJS({
 // ../src/input-history.js
 var require_input_history = __commonJS({
   "../src/input-history.js"(exports, module) {
-    var fs10 = __require("fs");
+    var fs11 = __require("fs");
     var os6 = __require("os");
-    var path8 = __require("path");
+    var path9 = __require("path");
     var MAX_KEEP = 500;
     var MAX_RECALL = 200;
     function historyPath() {
-      return path8.join(process.env.HAKSTER_HOME || path8.join(os6.homedir(), ".hakster"), "history");
+      return path9.join(process.env.HAKSTER_HOME || path9.join(os6.homedir(), ".hakster"), "history");
     }
     var TERMINAL_JUNK = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\x1b|rgb:|VTE\(|[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋]|;\d+\$y|\[\?/;
     var BOX_ONLY = /^[\s│┃|]+|[\s│┃|]+$/;
@@ -1284,7 +1284,7 @@ var require_input_history = __commonJS({
     }
     function loadInputHistory2(limit = MAX_RECALL) {
       try {
-        const lines = fs10.readFileSync(historyPath(), "utf8").split("\n");
+        const lines = fs11.readFileSync(historyPath(), "utf8").split("\n");
         return sanitizeLines(lines).slice(-Math.max(0, limit));
       } catch {
         return [];
@@ -1296,14 +1296,14 @@ var require_input_history = __commonJS({
       const value = String(line).replace(/\r/g, "").trim();
       try {
         const file = historyPath();
-        const dir = path8.dirname(file);
-        if (!fs10.existsSync(dir)) fs10.mkdirSync(dir, { recursive: true });
+        const dir = path9.dirname(file);
+        if (!fs11.existsSync(dir)) fs11.mkdirSync(dir, { recursive: true });
         const existing = sanitizeLines(
-          fs10.existsSync(file) ? fs10.readFileSync(file, "utf8").split("\n") : []
+          fs11.existsSync(file) ? fs11.readFileSync(file, "utf8").split("\n") : []
         );
         const next = existing.filter((h) => h !== value);
         next.push(value);
-        fs10.writeFileSync(file, next.slice(-limit).join("\n") + "\n");
+        fs11.writeFileSync(file, next.slice(-limit).join("\n") + "\n");
         return true;
       } catch {
         return false;
@@ -1503,8 +1503,8 @@ import { createRoot } from "@opentui/react";
 
 // src/App.jsx
 import React29, { useCallback as useCallback6, useEffect as useEffect18, useRef as useRef13, useState as useState18 } from "react";
-import fs9 from "node:fs";
-import path7 from "node:path";
+import fs10 from "node:fs";
+import path8 from "node:path";
 import { useKeyboard as useKeyboard7, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes21 } from "@opentui/core";
 
@@ -6111,6 +6111,8 @@ function useMemoryBank(intervalMs = 1e4) {
 var import_updater = __toESM(require_updater());
 var import_prefs2 = __toESM(require_prefs());
 import { useEffect as useEffect16, useRef as useRef11, useState as useState16 } from "react";
+import fs9 from "node:fs";
+import path7 from "node:path";
 function readStartup() {
   try {
     const applied = (0, import_updater.appliedNotice)();
@@ -6139,23 +6141,62 @@ function readStartup() {
   }
   return { applied: null, status: { status: "idle" } };
 }
-function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
+function useCliUpdate(intervalMs = 30 * 60 * 1e3, sessionVersion = "") {
   const startup = useRef11(null);
   if (startup.current === null) startup.current = readStartup();
   const applied = startup.current.applied;
   const [state, setState] = useState16(startup.current.status);
+  const diskNewer = () => {
+    try {
+      if (!sessionVersion) return null;
+      const diskVersion = String(
+        JSON.parse(fs9.readFileSync(path7.join((0, import_updater.cliDirOf)(), "package.json"), "utf8")).version || ""
+      );
+      if (!diskVersion || diskVersion === sessionVersion) return null;
+      const pa = diskVersion.split(".").map((n) => parseInt(n, 10) || 0);
+      const pb = String(sessionVersion).split(".").map((n) => parseInt(n, 10) || 0);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+        if ((pa[i] || 0) === (pb[i] || 0)) continue;
+        return (pa[i] || 0) > (pb[i] || 0) ? { version: diskVersion, from: sessionVersion } : null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+  useEffect16(() => {
+    if (!sessionVersion) return void 0;
+    const probe = () => {
+      const onDisk = diskNewer();
+      if (!onDisk) return;
+      setState((prev) => prev.status === "installed" ? prev : { status: "installed", version: onDisk.version, from: onDisk.from, checkedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    };
+    probe();
+    const id = setInterval(probe, 5e3);
+    try {
+      if (typeof id.unref === "function") id.unref();
+    } catch {
+    }
+    return () => clearInterval(id);
+  }, [sessionVersion]);
   useEffect16(() => {
     let alive = true;
     const tick = async () => {
+      const onDisk = diskNewer();
+      if (onDisk) {
+        if (alive) setState({ status: "installed", version: onDisk.version, from: onDisk.from, checkedAt: (/* @__PURE__ */ new Date()).toISOString() });
+        return;
+      }
       if (import_prefs2.default.load().updateCheck === false) return;
       setState(
-        (prev) => prev.status === "staged" || prev.status === "blocked" || prev.status === "applied" ? prev : { ...prev, status: "checking" }
+        (prev) => prev.status === "staged" || prev.status === "blocked" || prev.status === "applied" || prev.status === "installed" ? prev : { ...prev, status: "checking" }
       );
       try {
         const res = await (0, import_updater.checkForUpdate)();
         if (!alive) return;
         setState((prev) => {
           if (applied) return prev;
+          if (prev.status === "installed" && diskNewer()) return prev;
           return {
             status: res.status,
             version: res.version,
@@ -6178,7 +6219,7 @@ function useCliUpdate(intervalMs = 30 * 60 * 1e3) {
       alive = false;
       clearInterval(id);
     };
-  }, [intervalMs, applied]);
+  }, [intervalMs, applied, sessionVersion]);
   return { ...state, applied };
 }
 
@@ -6380,13 +6421,13 @@ function writePrefs(patch) {
   }
 }
 var CRUSH_CONFIG_PATHS = [
-  path7.join(process.env.HOME || "/home/ghost", ".crush.json"),
-  path7.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
+  path8.join(process.env.HOME || "/home/ghost", ".crush.json"),
+  path8.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
 ];
 function readCrushModels() {
   for (const p of CRUSH_CONFIG_PATHS) {
     try {
-      const j = JSON.parse(fs9.readFileSync(p, "utf8"));
+      const j = JSON.parse(fs10.readFileSync(p, "utf8"));
       const out = [];
       for (const [slot, m] of Object.entries(j.models || {})) {
         if (m && m.model) out.push({ slot, model: m.model, provider: m.provider || "ollama" });
@@ -6410,18 +6451,18 @@ var toolArgLine = (args) => {
 function readImageAttachment(file) {
   const raw = String(file || "").trim();
   if (!raw) throw new Error("no file given");
-  const abs = path7.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ""));
-  const mime = IMAGE_MIME[path7.extname(abs).toLowerCase()];
+  const abs = path8.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ""));
+  const mime = IMAGE_MIME[path8.extname(abs).toLowerCase()];
   if (!mime) throw new Error("not an image (png, jpg, webp, gif, bmp)");
-  const st = fs9.statSync(abs);
+  const st = fs10.statSync(abs);
   if (!st.isFile()) throw new Error("not a file");
   if (st.size > MAX_IMAGE_BYTES) {
     throw new Error(`too large (${Math.round(st.size / 1024 / 1024)}MB, max 12MB)`);
   }
-  const buf = fs9.readFileSync(abs);
+  const buf = fs10.readFileSync(abs);
   return {
     path: abs,
-    name: path7.basename(abs),
+    name: path8.basename(abs),
     bytes: buf.length,
     dataUrl: `data:${mime};base64,${buf.toString("base64")}`
   };
@@ -6609,7 +6650,7 @@ function App({ version = "0.1.0" }) {
   const liveImage = React29.useMemo(() => lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null, [lastAssistant, lastTool]);
   const host = useHostStats(5e3);
   const memory = useMemoryBank(1e4);
-  const update = useCliUpdate();
+  const update = useCliUpdate(void 0, version);
   const runner = useScriptRunner_default();
   const { userTurns, toolCalls, webCalls } = React29.useMemo(() => {
     const msgs = agent.messages;
@@ -6664,6 +6705,13 @@ function App({ version = "0.1.0" }) {
   useEffect18(() => {
     if (update && update.applied) return;
     if (!update || !update.version) return;
+    if (update.status === "installed") {
+      const key2 = `installed:${update.version}`;
+      if (updateAnnounced.current === key2) return;
+      updateAnnounced.current = key2;
+      showNotice(`\u2713 CLI v${update.version} installed \u2014 restart the CLI to see the changes`);
+      return;
+    }
     if (update.status !== "staged" && update.status !== "blocked") return;
     const key = `${update.status}:${update.version}`;
     if (updateAnnounced.current === key) return;
@@ -6861,7 +6909,7 @@ function App({ version = "0.1.0" }) {
       }
       case "/update":
         showNotice(
-          !update || update.status === "idle" || update.status === "checking" ? "\u2B06 update \u2014 checking the server for a newer CLI\u2026" : update.status === "applied" || update.applied && update.applied.version ? `\u2B06 update \u2014 running v${version}, installed on this start${update.applied && update.applied.from ? ` (was v${update.applied.from})` : ""}` : update.status === "current" ? `\u2B06 update \u2014 up to date (v${update.version || version})` : update.status === "staged" ? `\u2B06 update \u2014 v${update.version} staged; applies when the CLI restarts` : update.status === "blocked" ? `\u2B06 update \u2014 v${update.version} staged; source checkout, not applied (pull/install when ready)` : `\u2B06 update \u2014 check failed: ${update.reason || "unknown"}`
+          !update || update.status === "idle" || update.status === "checking" ? "\u2B06 update \u2014 checking the server for a newer CLI\u2026" : update.status === "applied" || update.applied && update.applied.version ? `\u2B06 update \u2014 running v${version}, installed on this start${update.applied && update.applied.from ? ` (was v${update.applied.from})` : ""}` : update.status === "current" ? `\u2B06 update \u2014 up to date (v${update.version || version})` : update.status === "installed" ? `\u2713 update \u2014 v${update.version} is installed on disk; this session is v${version} \u2014 restart the CLI to see the changes` : update.status === "staged" ? `\u2B06 update \u2014 v${update.version} staged; applies when the CLI restarts` : update.status === "blocked" ? `\u2B06 update \u2014 v${update.version} staged; source checkout, not applied (pull/install when ready)` : `\u2B06 update \u2014 check failed: ${update.reason || "unknown"}`
         );
         return;
       case "/clear":
@@ -7053,7 +7101,7 @@ function App({ version = "0.1.0" }) {
   useKeyboard7((key) => {
     if (process.env.HAKSTER_TUI_KEYLOG) {
       try {
-        fs9.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
+        fs10.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
       } catch {
       }
     }
@@ -7461,10 +7509,16 @@ function App({ version = "0.1.0" }) {
     cpu: heatFg(host && host.cpuPct),
     ram: heatFg(host && host.memPct)
   };
-  const updatePending = !!(update && !update.applied && (update.status === "staged" || update.status === "blocked"));
-  const updateBlocked = updatePending && update.status === "blocked";
+  const updateInstalled = !!(update && !update.applied && update.status === "installed" && update.version);
+  const updatePending = updateInstalled || !!(update && !update.applied && (update.status === "staged" || update.status === "blocked"));
+  const updateBlocked = !updateInstalled && updatePending && update.status === "blocked";
   const updateVer = updatePending && update.version ? ` v${update.version}` : "";
-  const updateBadgeVariants = !updatePending ? [null] : (updateBlocked ? [
+  const updateBadgeVariants = !updatePending ? [null] : (updateInstalled ? [
+    `\u2B06 v${update.version} installed \xB7 restart CLI to see changes`,
+    "\u2B06 installed \xB7 restart CLI to see changes",
+    "\u2B06 restart CLI to see changes",
+    "\u2B06 restart CLI"
+  ] : updateBlocked ? [
     `\u2B06 update${updateVer} \xB7 pull to update`,
     "\u2B06 update \xB7 pull to update",
     "\u2B06 pull to update"

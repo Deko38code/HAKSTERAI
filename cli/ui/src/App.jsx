@@ -502,7 +502,7 @@ export default function App({ version = '0.1.0' }) {
   // ⬆ Update: the Claude Code model — check in the background while this
   // session runs, download and verify a newer CLI into ~/.hakster/updates and
   // let the next launch apply it. The session itself is never restarted.
-  const update = useCliUpdate();
+  const update = useCliUpdate(undefined, version);
   // ⌘ Live scripts: discovered from this checkout, run one at a time, bounded.
   const runner = useScriptRunner();
   // ◔ Usage, counted from the session itself: tool calls actually streamed,
@@ -599,6 +599,15 @@ export default function App({ version = '0.1.0' }) {
     // notice above covers it, and announcing "staged" would contradict it.
     if (update && update.applied) return;
     if (!update || !update.version) return;
+    // Already on disk, this session is the older build: say it once, so the
+    // badge on the top line is not the only place it appears.
+    if (update.status === 'installed') {
+      const key = `installed:${update.version}`;
+      if (updateAnnounced.current === key) return;
+      updateAnnounced.current = key;
+      showNotice(`✓ CLI v${update.version} installed — restart the CLI to see the changes`);
+      return;
+    }
     if (update.status !== 'staged' && update.status !== 'blocked') return;
     const key = `${update.status}:${update.version}`;
     if (updateAnnounced.current === key) return;
@@ -835,7 +844,9 @@ export default function App({ version = '0.1.0' }) {
               ? `⬆ update — running v${version}, installed on this start${update.applied && update.applied.from ? ` (was v${update.applied.from})` : ''}`
               : update.status === 'current'
               ? `⬆ update — up to date (v${update.version || version})`
-              : update.status === 'staged'
+              : update.status === 'installed'
+                ? `✓ update — v${update.version} is installed on disk; this session is v${version} — restart the CLI to see the changes`
+                : update.status === 'staged'
                 ? `⬆ update — v${update.version} staged; applies when the CLI restarts`
                 : update.status === 'blocked'
                   ? `⬆ update — v${update.version} staged; source checkout, not applied (pull/install when ready)`
@@ -1534,13 +1545,26 @@ export default function App({ version = '0.1.0' }) {
   // written into (§8), so it says pull rather than promising an install.
   // Nothing renders for current / checking / error: a badge that cries wolf is
   // worse than none, and the check re-runs on its own interval.
-  const updatePending = !!(update && !update.applied
+  // A build already installed on disk that this session is not running. On a
+  // source checkout this is the normal case after an update lands: nothing can
+  // be swapped under a git tree (§8), so the only step left is a restart —
+  // and that is exactly what it says (owner, 2026-11-25: "should say installed
+  // restart cli to see changes", to the right of cpu/ram).
+  const updateInstalled = !!(update && !update.applied && update.status === 'installed' && update.version);
+  const updatePending = updateInstalled || !!(update && !update.applied
     && (update.status === 'staged' || update.status === 'blocked'));
-  const updateBlocked = updatePending && update.status === 'blocked';
+  const updateBlocked = !updateInstalled && updatePending && update.status === 'blocked';
   const updateVer = updatePending && update.version ? ` v${update.version}` : '';
   const updateBadgeVariants = !updatePending
     ? [null]
-    : (updateBlocked
+    : (updateInstalled
+      ? [
+          `⬆ v${update.version} installed · restart CLI to see changes`,
+          '⬆ installed · restart CLI to see changes',
+          '⬆ restart CLI to see changes',
+          '⬆ restart CLI',
+        ]
+      : updateBlocked
       ? [
           `\u2B06 update${updateVer} \u00b7 pull to update`,
           '\u2B06 update \u00b7 pull to update',

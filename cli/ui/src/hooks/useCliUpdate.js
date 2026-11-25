@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { appliedNotice, checkForUpdate, pendingInfo } from '../../../src/updater.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { appliedNotice, checkForUpdate, pendingInfo, cliDirOf } from '../../../src/updater.js';
 import prefs from '../../../src/prefs.js';
 
 /* useCliUpdate — the Claude Code update model in the TUI: the running session
@@ -54,7 +56,7 @@ function readStartup() {
   return { applied: null, status: { status: 'idle' } };
 }
 
-export default function useCliUpdate(intervalMs = 30 * 60 * 1000) {
+export default function useCliUpdate(intervalMs = 30 * 60 * 1000, sessionVersion = '') {
   // Read the install/update facts exactly once — they describe this launch.
   const startup = useRef(null);
   if (startup.current === null) startup.current = readStartup();
@@ -62,14 +64,75 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000) {
 
   const [state, setState] = useState(startup.current.status);
 
+  // ── The code on disk is newer than the code this session started on ───────
+  // Owner, 2026-11-25: "his cli updates arent installing when cli starts and
+  // dosnt say installed restart cli to see changes". On this box the CLI runs
+  // from its source checkout, where a stage is never written over a git tree
+  // (§8) — so the update that lands is the tree itself, and the only thing
+  // that makes it take effect is restarting the CLI. This compares the version
+  // this session loaded (`sessionVersion`, fixed at start) with the version on
+  // disk right now, and reports the honest state: installed, restart to see it.
+  const diskNewer = () => {
+    try {
+      if (!sessionVersion) return null;
+      // package.json only: this runs on a short interval, so it must stay
+      // cheap (no bundle hashing on the render loop's timer).
+      const diskVersion = String(
+        JSON.parse(fs.readFileSync(path.join(cliDirOf(), 'package.json'), 'utf8')).version || '',
+      );
+      if (!diskVersion || diskVersion === sessionVersion) return null;
+      // A downgrade is not "installed": it is an older tree, and saying so
+      // would invite a restart that loses features.
+      const pa = diskVersion.split('.').map((n) => parseInt(n, 10) || 0);
+      const pb = String(sessionVersion).split('.').map((n) => parseInt(n, 10) || 0);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+        if ((pa[i] || 0) === (pb[i] || 0)) continue;
+        return (pa[i] || 0) > (pb[i] || 0) ? { version: diskVersion, from: sessionVersion } : null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  // The badge has to appear while the operator is looking at the screen, not
+  // half an hour later: the on-disk version is compared every few seconds.
+  useEffect(() => {
+    if (!sessionVersion) return undefined;
+    const probe = () => {
+      const onDisk = diskNewer();
+      if (!onDisk) return;
+      setState((prev) => (prev.status === 'installed'
+        ? prev
+        : { status: 'installed', version: onDisk.version, from: onDisk.from, checkedAt: new Date().toISOString() }));
+    };
+    probe(); // the start of a session is exactly when this is most likely true
+    const id = setInterval(probe, 5000);
+    try {
+      if (typeof id.unref === 'function') id.unref();
+    } catch {
+      /* timer housekeeping must never break the header */
+    }
+    return () => clearInterval(id);
+  }, [sessionVersion]);
+
   useEffect(() => {
     let alive = true;
     const tick = async () => {
+      // A newer build already on disk outranks any network answer: it is the
+      // only state where a restart alone changes what this CLI runs.
+      const onDisk = diskNewer();
+      if (onDisk) {
+        if (alive) setState({ status: 'installed', version: onDisk.version, from: onDisk.from, checkedAt: new Date().toISOString() });
+        return;
+      }
       // /settings updateCheck off stops the background check; a package already
       // staged stays visible and still applies on the next launch.
       if (prefs.load().updateCheck === false) return;
       setState((prev) =>
-        prev.status === 'staged' || prev.status === 'blocked' || prev.status === 'applied' ? prev : { ...prev, status: 'checking' },
+        prev.status === 'staged' || prev.status === 'blocked' || prev.status === 'applied' || prev.status === 'installed'
+          ? prev
+          : { ...prev, status: 'checking' },
       );
       try {
         const res = await checkForUpdate();
@@ -78,6 +141,8 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000) {
           // The install confirmation outranks the network answer: this session
           // is running the version an earlier start installed.
           if (applied) return prev;
+          // Nor does a later check talk over a newer build already on disk.
+          if (prev.status === 'installed' && diskNewer()) return prev;
           return {
             status: res.status,
             version: res.version,
@@ -101,7 +166,7 @@ export default function useCliUpdate(intervalMs = 30 * 60 * 1000) {
       alive = false;
       clearInterval(id);
     };
-  }, [intervalMs, applied]);
+  }, [intervalMs, applied, sessionVersion]);
 
   return { ...state, applied };
 }

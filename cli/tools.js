@@ -658,6 +658,12 @@ const CLI_CLAUDE_TOOLS = [
 
 async function cliExecuteTool(name, args, trustCfg) {
   try {
+    // Hakster may fix and patch, never break his own config (CLAUDE.md §22/§35,
+    // owner 2026-11-25). The guard refuses a write that would rewrite the model
+    // ladder, the prefs store, ~/.hakster/config.json or a model var into an
+    // env file — it never rewrites anything itself.
+    const selfRefusal = require('./src/self-config-guard').guardSelfConfig(name, args, trustCfg && trustCfg.cwd);
+    if (selfRefusal) return { ok: false, output: '', error: selfRefusal };
     switch (name) {
       case 'read_file':
       case 'hak_read': {

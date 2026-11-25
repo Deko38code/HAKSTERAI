@@ -913,11 +913,19 @@ const CLAUDE_CLI_HOME = '/home/ghost';
 const CLAUDE_CLI_BASE_URL = 'http://127.0.0.1:11434';
 const CLAUDE_CLI_MODEL = 'deepseek-v4.1-flash:cloud';
 function claudeCliEnv() {
+  // PATH word for word: the owner's own login PATH when it can find `claude`,
+  // otherwise the same PATH with ~/.local/bin put in front once (a PM2 process
+  // can start with a minimal PATH that lacks it). Never a duplicated entry.
+  const binDir = `${CLAUDE_CLI_HOME}/.local/bin`;
+  const inheritedPath = process.env.PATH || '';
+  const pathValue = inheritedPath.split(':').includes(binDir)
+    ? inheritedPath
+    : `${binDir}:${inheritedPath}`;
   return {
     ...process.env,
     HOME: CLAUDE_CLI_HOME,
     USER: 'ghost',
-    PATH: `${CLAUDE_CLI_HOME}/.local/bin:${process.env.PATH || ''}`,
+    PATH: pathValue,
     ANTHROPIC_BASE_URL: CLAUDE_CLI_BASE_URL,
     ANTHROPIC_AUTH_TOKEN: 'ollama',
     ANTHROPIC_API_KEY: '',
@@ -926,7 +934,19 @@ function claudeCliEnv() {
     ANTHROPIC_DEFAULT_HAIKU_MODEL: CLAUDE_CLI_MODEL,
     CLAUDE_CODE_SUBAGENT_MODEL: CLAUDE_CLI_MODEL,
     CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1048576',
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1048576',
+    // The rest of this session's own CLI config, mirrored exactly so the
+    // spawned CLI does no startup work it does not need (owner, 2026-11-25:
+    // "make sure his model has our config from this cli for speed"; "make it
+    // exacly like this cli and my model are set to"). Values copied from the
+    // running session's own launch env, not invented. None of them touches
+    // which model answers or where the request goes (§22 unchanged).
+    CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
+    CLAUDE_CODE_AUTO_MODE_SERVER: '0',
+    CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: '1',
+    CLAUDE_CODE_TOTAL_TOKENS_REMINDER: 'off',
+    DISABLE_ERROR_REPORTING: '1',
+    DISABLE_FEEDBACK_COMMAND: '1',
   };
 }
 
@@ -3089,6 +3109,19 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
   const fs = require('fs');
   const path = require('path');
   const { execFileSync, spawn } = require('child_process');
+
+  // ── Self-config guard (CLAUDE.md §22/§35; owner 2026-11-25: hakster may fix
+  // and patch, never break his own config). Refuses a tool call that would
+  // rewrite the model ladder, the prefs store, ~/.hakster/config.json or a
+  // model var into an env file. It refuses — it never rewrites (§22.5).
+  try {
+    const { guardSelfConfig } = require('../../cli/src/self-config-guard');
+    const selfRefusal = guardSelfConfig(name, args, cwd);
+    if (selfRefusal) return selfRefusal;
+  } catch (_guardErr) {
+    // A guard that cannot load must not take the tool loop down with it; the
+    // CLI-side guard and the repo lock test still cover the same surface.
+  }
 
   function resolveSafe(p) {
     return path.resolve(cwd, p);
