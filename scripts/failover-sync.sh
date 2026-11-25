@@ -29,6 +29,7 @@
 #   SLOT_B_PORT      default 3592
 #   ROUTER_STATUS    default http://127.0.0.1:3579/router/status   (the Dell's own router)
 #   STATE_FILE       default /tmp/hakster-failover-sync.state
+#   ENV_FILES        default "server/.env .env"  (secret env files to mirror)
 set -eu
 
 # Cron runs with a minimal PATH and no profile, and with $HOME as the working
@@ -47,6 +48,7 @@ SLOT_B_DIR="${SLOT_B_DIR:-haksterAi-standby-b}"
 SLOT_B_PORT="${SLOT_B_PORT:-3592}"
 ROUTER_STATUS="${ROUTER_STATUS:-http://127.0.0.1:3579/router/status}"
 STATE_FILE="${STATE_FILE:-/tmp/hakster-failover-sync.state}"
+ENV_FILES="${ENV_FILES:-server/.env .env}"
 LOCAL_DB="${LOCAL_DB:-/home/ghost/haksterAi/data/hakster.db}"
 TMP="${TMPDIR:-/tmp}/hakster-sync.$$"
 
@@ -164,6 +166,50 @@ scp -q -o BatchMode=yes "$TMP/hakster.db" "$STANDBY_SSH:$TARGET_DIR/data/hakster
 ssh -n -o BatchMode=yes "$STANDBY_SSH" \
   "sh ~/hakster-standby-ctl.sh install ~/$TARGET_DIR $WANT" \
   | sed 's/^/  /' || { say "failed: install refused (checksum?)"; exit 1; }
+
+# ── 5b. the standby's env files, by hash (owner, 2026-11-25: "go copy") ────
+# Secrets never pass through a log, an argument or a report: the file goes over
+# ssh stdin, is compared by SHA-256, and only the outcome is printed. A copy is
+# staged as .new and swapped in only once it verifies, with the previous file
+# kept as .prev — a half-written env can never be booted. A file that is
+# unreadable on the Dell is skipped, so a fault here cannot blank the standby.
+if [ "${SKIP_ENV:-0}" = "1" ]; then
+  say "env sync skipped (SKIP_ENV=1)"
+else
+  for f in $ENV_FILES; do
+    if [ ! -r "$f" ]; then
+      say "env: $f unreadable here - the standby keeps its copy"
+      continue
+    fi
+    want=$(sha256sum "$f" | cut -d' ' -f1)
+    have=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+      "sha256sum ~/$TARGET_DIR/$f 2>/dev/null | cut -d' ' -f1" || true)
+    if [ "$have" = "$want" ]; then
+      say "env: $f already current in $TARGET_DIR"
+      continue
+    fi
+    if ! ssh -n -o BatchMode=yes "$STANDBY_SSH" "mkdir -p ~/$TARGET_DIR/$(dirname "$f")"; then
+      say "env: could not create $(dirname "$f") in $TARGET_DIR - keeping the copy"
+      continue
+    fi
+    ssh -o BatchMode=yes "$STANDBY_SSH" \
+      "cat > ~/$TARGET_DIR/$f.new && chmod 600 ~/$TARGET_DIR/$f.new" < "$f"
+    got=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+      "sha256sum ~/$TARGET_DIR/$f.new 2>/dev/null | cut -d' ' -f1" || true)
+    if [ "$got" != "$want" ]; then
+      ssh -n -o BatchMode=yes "$STANDBY_SSH" "rm -f ~/$TARGET_DIR/$f.new" || true
+      say "env: $f copy did not verify - the standby keeps its previous copy"
+      continue
+    fi
+    if ! ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+      "if [ -f ~/$TARGET_DIR/$f ]; then cp -p ~/$TARGET_DIR/$f ~/$TARGET_DIR/$f.prev; fi
+       mv ~/$TARGET_DIR/$f.new ~/$TARGET_DIR/$f; chmod 600 ~/$TARGET_DIR/$f"; then
+      say "env: $f could not be swapped in - the previous copy stands"
+      continue
+    fi
+    say "env: $f updated in $TARGET_DIR (sha ${want%%????????????????????????????????????????}, previous kept as .prev)"
+  done
+fi
 
 # ── 6. boot the idle slot and wait until it really answers ─────────────────
 if [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://$STANDBY_HOST:$TARGET_PORT/api/version" 2>/dev/null || true)" != "200" ]; then
