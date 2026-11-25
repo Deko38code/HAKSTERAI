@@ -760,3 +760,44 @@ Setback"**. What it makes binding here:
    key name only. A secret in a stage or in history is exposed: rotate, then the owner decides (§23.2).
 9. **HaksterAI scope** — this project's own repository and its two boxes; nothing in it authorises a commit
    or a write into Junkalot, PhantomIDE or another project (§16).
+
+---
+
+## Section 48 Added — Every Commit Is Scanned For Secrets First (2026-11-26)
+
+_Appended 2026-11-26 at the owner's direction ("add rule we check always before commiting for secrets etc").
+Nothing above this line was rewritten, reordered or removed. Backups taken and hash-verified before the
+edit: `CLAUDE.md.bak-20261125T232123Z` (93,907 B, sha256 `b25b8b14d1be…`), `haksterAi/AGENTS.md.bak-20261125T232123Z`
+(59,289 B, sha256 `621288c8c508…`)._
+
+`/home/ghost/CLAUDE.md` is now **§1–§48**. §48 is **"Every Commit Is Scanned For Secrets First — Always,
+And Before It Lands"**. What it makes binding here:
+
+1. **One scanner, every layer.** `~/bin/secret-scan.sh` sits behind this repo's `.git/hooks/pre-commit`
+   (`--staged`), its `pre-push` (`--commits <range>`, which blocks the push), and the global `~/.git/hooks/`
+   pair covering every other repository on the box. `--tree` / `--at REV` sweep a whole tree; `--deep` also
+   matches the live values in `~/.secrets.env` by value, so an unknown key format is still caught.
+2. **Shape only, never the value.** Output is `file:line` and the rule name; a finding is reported by rule
+   name and path only (§9, §23, §31).
+3. **Named hard rules** — `private-key`, `anthropic`, `openrouter`, `openai`, `groq`, `nvidia`, `google`,
+   `aws`, `github`, `slack`, `stripe`, `telegram`, `cftunnel`, `dburl`, `jwt` — fail the commit; `bearer` and
+   `assignment` warn, and `--strict` makes them fail too.
+4. **"Clean" can mean filtered.** The placeholder noise list (`example`, `dummy`, `changeme`,
+   `process.env`, `<var>`, …) skips lines on purpose — `AKIAIOSFODNN7EXAMPLE` scans clean for that reason.
+   Confirm against the rule that should have matched; never widen the list to silence a finding.
+5. **Scan before committing, not after.** Stage by filename (§8, §28.3, §47.1), then run
+   `~/bin/secret-scan.sh --staged` and read the exit code (0 clean, 1 findings, 2 usage error). Use
+   `--commits <range>` before a push and `--tree --deep` before packing or publishing (§28, §42). The hooks
+   fail open and `.git/hooks` is unversioned (§41.2), so a gate that never ran is not evidence (§13).
+6. **A finding stops the commit** — unstage, move the value to `~/.secrets.env` (mode 600, via
+   `/home/ghost/bin/secret-add`, §23) or an untracked `.env`, use `process.env.NAME`, rescan.
+7. **Committed means exposed** — rotate, and the owner decides the history scrub; never a quiet deletion
+   (§23.2, §31.5). `--no-verify` is for a confirmed false positive only, and the allow list stays empty
+   unless a match is proven to be a placeholder or public fixture.
+8. **Nothing here moves the setup** — no model, route, provider order, rate, plan or allowance changes
+   (§19.3, §22.4, §26). It covers every project we serve; this project's scanner and hooks are the reference
+   (§16).
+
+Verified at adoption: a throwaway repo with the real hook installed refused a `ghp_…`-shaped fixture
+(`1 hard`, exit 1, no commit object created) and committed cleanly once the line became
+`process.env.GITHUB_TOKEN`; `--staged` clean at HEAD; no active allow-list exemptions.
