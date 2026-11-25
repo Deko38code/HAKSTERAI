@@ -50,6 +50,7 @@ ROUTER_STATUS="${ROUTER_STATUS:-http://127.0.0.1:3579/router/status}"
 STATE_FILE="${STATE_FILE:-/tmp/hakster-failover-sync.state}"
 ENV_FILES="${ENV_FILES:-server/.env .env}"
 LOCAL_DB="${LOCAL_DB:-/home/ghost/haksterAi/data/hakster.db}"
+BANK_DIR_SRC="${BANK_DIR_SRC:-/home/ghost/.hakster/memories/banks}"
 TMP="${TMPDIR:-/tmp}/hakster-sync.$$"
 
 say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -73,6 +74,11 @@ fi
 mkdir -p "$TMP"
 
 ctl() { ssh -n -o BatchMode=yes "$STANDBY_SSH" "sh ~/hakster-standby-ctl.sh $*"; }
+
+# node on the standby lives under nvm, which a non-login ssh may not put on PATH.
+# Resolve it once, with `node` as the fallback, so the bank merge can always run.
+NODE_REMOTE=$(ssh -n -o BatchMode=yes -o ConnectTimeout=6 "$STANDBY_SSH" 'command -v node 2>/dev/null' || true)
+[ -n "$NODE_REMOTE" ] || NODE_REMOTE=node
 
 # ── 1. refuse while a failover has happened since the last sync ────────────
 STATUS=$(curl -s -m 5 "$ROUTER_STATUS" 2>/dev/null || true)
@@ -153,6 +159,11 @@ scp -q -o BatchMode=yes scripts/failover-slot.sh "$STANDBY_SSH:~/hakster-standby
 scp -q -o BatchMode=yes scripts/failover-router.cjs "$STANDBY_SSH:~/hakster-standby-router.cjs" \
   || { say "warning: could not update the standby's router file"; }
 
+# The bank merge helper travels the same way, so a standby can carry the primary's
+# memory banks by entry id without ever removing one of its own (§41).
+scp -q -o BatchMode=yes scripts/merge-banks-from-dir.cjs "$STANDBY_SSH:~/hakster-bank-merge.cjs" \
+  || { say "warning: could not update the standby's bank merge helper"; }
+
 ssh -n -o BatchMode=yes "$STANDBY_SSH" "mkdir -p ~/$TARGET_DIR/data" \
   || { say "failed: could not create $TARGET_DIR"; exit 1; }
 
@@ -229,6 +240,44 @@ else
     fi
     say "env: $f updated in $TARGET_DIR (sha ${want%%????????????????????????????????????????}, previous kept as .prev)"
   done
+fi
+
+# ── 5c. carry the memory banks (append-only, merged by id) ─────────────────
+# The agent pulls the banks before every task (pullMemoryBanks, called per run),
+# so a standby that boots without them recalls nothing. Banks change on
+# consolidation, not on commits, so this rides the five-minute timer rather than
+# only the post-commit path. Entries are merged by id: anything the standby
+# learned on its own is kept, nothing is ever removed, and each file is swapped
+# atomically so a request reading banks mid-sync never sees a partial file.
+if [ "${SKIP_BANKS:-0}" = "1" ]; then
+  say "banks sync skipped (SKIP_BANKS=1)"
+elif [ ! -d "$BANK_DIR_SRC" ]; then
+  say "banks: no bank dir at $BANK_DIR_SRC - the standby keeps its copy"
+elif ! ssh -n -o BatchMode=yes "$STANDBY_SSH" 'test -f ~/hakster-bank-merge.cjs'; then
+  say "banks: merge helper missing on the standby - the standby keeps its copy"
+else
+  if tar -C "$BANK_DIR_SRC" -cf - --exclude='*.bak-*' . 2>/dev/null |
+       ssh -o BatchMode=yes "$STANDBY_SSH" \
+         'rm -rf ~/.hakster-banks-incoming && mkdir -p ~/.hakster-banks-incoming && tar -C ~/.hakster-banks-incoming -xf -'; then
+    BOUT=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+      "cd \$HOME && $NODE_REMOTE \$HOME/hakster-bank-merge.cjs \$HOME/.hakster-banks-incoming 2>&1; rc=\$?; rm -rf \$HOME/.hakster-banks-incoming; exit \$rc" 2>&1 || true)
+    added=$(printf '%s\n' "$BOUT" | sed -n 's/^  "added": \([0-9][0-9]*\),\{0,1\}$/\1/p' | tail -1)
+    kept=$(printf '%s\n' "$BOUT" | sed -n 's/^  "kept": \([0-9][0-9]*\)$/\1/p' | tail -1)
+    if [ -n "$added" ]; then
+      say "banks: merged into the standby ($added new entr(y/ies), ${kept:-?} kept, none removed)"
+    else
+      say "banks: merge returned no count - the standby keeps its copy"
+      printf '%s\n' "$BOUT" | sed 's/^/  /'
+    fi
+    if printf '%s' "$BOUT" | grep -q '"blocked"'; then
+      say "banks: at least one bank file could not be written - the standby keeps its previous copy of it"
+    fi
+    if printf '%s' "$BOUT" | grep -q '"replacedOwner"'; then
+      say "banks: a previous root-owned bank file was replaced (derived cache, nothing removed)"
+    fi
+  else
+    say "warning: could not ship the banks to the standby - it keeps its copy"
+  fi
 fi
 
 # ── 6. boot the idle slot and wait until it really answers ─────────────────

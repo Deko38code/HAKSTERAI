@@ -39,6 +39,8 @@ function loadDir(dir) {
   return m;
 }
 
+try { fs.mkdirSync(BANK_DIR, { recursive: true }); } catch { /* the dir usually exists; a failure below reports */ }
+
 const src = loadDir(SRC);
 const dst = loadDir(BANK_DIR);
 
@@ -61,11 +63,24 @@ for (const [file, srcEntries] of src) {
   result.kept += cur.length;
   if (!add.length || DRY) continue;
 
+  // Write to a temp file in the same directory and rename it over the target.
+  // rename() needs only directory write permission, so a bank left root-owned by
+  // an old root-run server no longer blocks the merge — and because the swap is
+  // atomic, a slot reading banks mid-sync never parses a half-written file.
+  const body = JSON.stringify([...cur, ...add], null, 2) + (hadNewline ? '\n' : '');
+  const tmp = path.join(BANK_DIR, '.' + file + '.merge-' + process.pid + '.tmp');
   try {
-    fs.writeFileSync(target, JSON.stringify([...cur, ...add], null, 2) + (hadNewline ? '\n' : ''));
+    fs.writeFileSync(tmp, body, { mode: 0o644 });
+    let replacingOtherOwner = false;
+    try {
+      const st = fs.statSync(target);
+      if (typeof process.getuid === 'function' && st.uid !== process.getuid()) replacingOtherOwner = true;
+    } catch { /* no target yet: a plain create */ }
+    fs.renameSync(tmp, target);
+    if (replacingOtherOwner) stat.replacedOwner = true;
   } catch (err) {
-    // A bank owned by another user (the server once ran as root) cannot be
-    // written here and is reported, never forced — ownership is the owner's call.
+    try { fs.unlinkSync(tmp); } catch { /* nothing to clean */ }
+    // Still unwritable (e.g. the directory is not ours): reported, never forced.
     stat.blocked = String(err.code || err.message || err);
     result.blocked = result.blocked || [];
     result.blocked.push({ file, reason: stat.blocked });
