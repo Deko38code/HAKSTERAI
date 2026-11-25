@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createMeter } from '../../../smartness.mjs';
 import { attemptsFor } from '../../../src/models/ladder.js';
+import { applySteer } from '../utils/steer-rounds.js';
 
 /* useAgentStream — the TUI's one connection to the agent.
  *
@@ -726,24 +727,13 @@ export function useAgentStream({
             // they are — and because a steer that never appeared would look
             // like it was dropped.
             const text = String(evt.content || '').trim();
-            if (evt.supersede) {
-              // The server stopped generating to take this steer before the
-              // answer was finished, so the prose it had already streamed for
-              // the current round is retracted here: the regenerated answer
-              // replaces it instead of stacking underneath it (owner,
-              // 2026-11-24 — one answer, not an answer plus a correction).
-              // Completed rounds keep their text and tool rows untouched.
-              patch(assistantId, (m) => {
-                const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => ({ ...r })) : [];
-                const cur = rounds[rounds.length - 1];
-                if (cur) cur.text = '';
-                return { ...m, rounds, text: rounds.map((r) => String(r.text || '')).join('') };
-              });
-            }
-            if (text) {
-              append({ id: nextId('user'), role: 'user', text });
-              pushActivity('sys', evt.supersede ? '↳ live steer — reply restarted with it' : '↳ live steer applied');
-            }
+            // Drawn INSIDE the run it corrected, not as a new turn after it —
+            // see utils/steer-rounds.js for why a trailing turn blocked the
+            // output panel (owner, 2026-11-25: "when i send messeages steer
+            // they dont clear and block my outputpanel"). One marker round,
+            // then a fresh round, so the answer continues underneath it.
+            patch(assistantId, (m) => applySteer(m, text, !!evt.supersede));
+            if (text) pushActivity('sys', evt.supersede ? '↳ live steer — reply restarted with it' : '↳ live steer applied');
             break;
           }
 

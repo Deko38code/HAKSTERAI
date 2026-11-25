@@ -315,7 +315,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
    * every tool row is what made a streaming turn read as shell calls only —
    * the newest sentence was never the newest row. */
   const rounds = (Array.isArray(message.rounds) ? message.rounds : []).filter(
-    (r) => r && ((r.text && String(r.text).trim()) || (r.thinking && String(r.thinking).trim()) || (Array.isArray(r.tools) && r.tools.length)),
+    (r) => r && ((r.text && String(r.text).trim()) || (r.thinking && String(r.thinking).trim()) || (r.steer && String(r.steer).trim()) || (Array.isArray(r.tools) && r.tools.length)),
   );
 
   return (
@@ -338,6 +338,13 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
           const thinkLive = proseLive && String(round.thinking || '').trim() !== '' && String(round.text || '').trim() === '';
           return (
             <box key={`round-${i}`} style={{ flexDirection: 'column', width: inner, flexShrink: 0 }}>
+              {round.steer && String(round.steer).trim() ? (
+                // A steer the operator typed while this run was live, drawn
+                // where it landed in the run — one row, in the operator's own
+                // colour, so the answer after it reads underneath it and the
+                // panel's newest row is never a leftover input line.
+                <text fg="cyan">{clip(`↳ you · ${String(round.steer).replace(/\s+/g, ' ').trim()}`, inner)}</text>
+              ) : null}
               {round.thinking && String(round.thinking).trim() ? (
                 <ThinkingBlock
                   text={round.thinking}

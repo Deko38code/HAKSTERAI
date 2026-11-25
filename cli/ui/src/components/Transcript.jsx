@@ -71,7 +71,7 @@ function turnWeight(message) {
   let n = textLen(message.text) + textLen(message.thinking);
   for (const t of (Array.isArray(message.tools) ? message.tools : [])) n += toolLen(t);
   for (const r of (Array.isArray(message.rounds) ? message.rounds : [])) {
-    n += textLen(r && r.text) + textLen(r && r.thinking);
+    n += textLen(r && r.text) + textLen(r && r.thinking) + textLen(r && r.steer);
     for (const t of (Array.isArray(r && r.tools) ? r.tools : [])) n += toolLen(t);
   }
   return n;

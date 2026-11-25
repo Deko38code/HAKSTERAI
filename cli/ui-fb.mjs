@@ -5453,7 +5453,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   }
   const tools = Array.isArray(message.tools) ? message.tools : [];
   const rounds = (Array.isArray(message.rounds) ? message.rounds : []).filter(
-    (r) => r && (r.text && String(r.text).trim() || r.thinking && String(r.thinking).trim() || Array.isArray(r.tools) && r.tools.length)
+    (r) => r && (r.text && String(r.text).trim() || r.thinking && String(r.thinking).trim() || r.steer && String(r.steer).trim() || Array.isArray(r.tools) && r.tools.length)
   );
   return /* @__PURE__ */ jsxs27("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
     compact ? null : /* @__PURE__ */ jsx29("text", { fg: border, attributes: TextAttributes22.BOLD, children: roleStyle.label }),
@@ -5464,6 +5464,13 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
       const proseLive = tail && roundTools.length === 0;
       const thinkLive = proseLive && String(round.thinking || "").trim() !== "" && String(round.text || "").trim() === "";
       return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width: inner, flexShrink: 0 }, children: [
+        round.steer && String(round.steer).trim() ? (
+          // A steer the operator typed while this run was live, drawn
+          // where it landed in the run — one row, in the operator's own
+          // colour, so the answer after it reads underneath it and the
+          // panel's newest row is never a leftover input line.
+          /* @__PURE__ */ jsx29("text", { fg: "cyan", children: clip(`\u21B3 you \xB7 ${String(round.steer).replace(/\s+/g, " ").trim()}`, inner) })
+        ) : null,
         round.thinking && String(round.thinking).trim() ? /* @__PURE__ */ jsx29(
           ThinkingBlock,
           {
@@ -5528,7 +5535,7 @@ function turnWeight(message) {
   let n = textLen(message.text) + textLen(message.thinking);
   for (const t of Array.isArray(message.tools) ? message.tools : []) n += toolLen(t);
   for (const r of Array.isArray(message.rounds) ? message.rounds : []) {
-    n += textLen(r && r.text) + textLen(r && r.thinking);
+    n += textLen(r && r.text) + textLen(r && r.thinking) + textLen(r && r.steer);
     for (const t of Array.isArray(r && r.tools) ? r.tools : []) n += toolLen(t);
   }
   return n;
@@ -5647,6 +5654,20 @@ var Transcript_default = MemoTranscript;
 // src/hooks/useAgentStream.js
 import { useCallback as useCallback3, useEffect as useEffect12, useRef as useRef9, useState as useState13 } from "react";
 var import_ladder = __toESM(require_ladder());
+
+// src/utils/steer-rounds.js
+function applySteer(message, text, supersede = false) {
+  const m = message || {};
+  const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => ({ ...r, tools: Array.isArray(r && r.tools) ? r.tools.slice() : [] })) : [];
+  const cur = rounds[rounds.length - 1];
+  if (supersede && cur) cur.text = "";
+  const marker = String(text == null ? "" : text).trim();
+  if (marker) rounds.push({ steer: marker, text: "", thinking: "", tools: [] });
+  rounds.push({ text: "", thinking: "", tools: [] });
+  return { ...m, rounds, text: rounds.map((r) => String(r && r.text || "")).join("") };
+}
+
+// src/hooks/useAgentStream.js
 var DEFAULT_API2 = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var DEFAULT_TIMEOUT_MS = Math.max(3e4, Number(process.env.HAKSTER_AGENT_TIMEOUT_MS) || 3e5);
 var RECONNECT_WINDOW_MS = Math.max(5e3, Number(process.env.HAKSTER_RECONNECT_MS) || 6e4);
@@ -6114,18 +6135,8 @@ function useAgentStream({
           }
           case "steer": {
             const text2 = String(evt.content || "").trim();
-            if (evt.supersede) {
-              patch(assistantId, (m) => {
-                const rounds = Array.isArray(m.rounds) ? m.rounds.map((r) => ({ ...r })) : [];
-                const cur = rounds[rounds.length - 1];
-                if (cur) cur.text = "";
-                return { ...m, rounds, text: rounds.map((r) => String(r.text || "")).join("") };
-              });
-            }
-            if (text2) {
-              append({ id: nextId("user"), role: "user", text: text2 });
-              pushActivity("sys", evt.supersede ? "\u21B3 live steer \u2014 reply restarted with it" : "\u21B3 live steer applied");
-            }
+            patch(assistantId, (m) => applySteer(m, text2, !!evt.supersede));
+            if (text2) pushActivity("sys", evt.supersede ? "\u21B3 live steer \u2014 reply restarted with it" : "\u21B3 live steer applied");
             break;
           }
           case "steer_undelivered": {
