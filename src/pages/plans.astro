@@ -49,6 +49,11 @@ import Layout from '../layouts/Layout.astro';
           <code class="min-w-0 break-all rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2.5 py-1.5 text-[11px] text-[#a7f3d0]">curl -fsSL https://haksterai.com/install.sh | sh</code>
           <button type="button" id="copy-install" class="min-h-9 rounded-lg border border-[#00ff41]/40 px-2.5 py-1 text-[11px] font-semibold text-[#00ff41] hover:bg-[#00ff41]/10">Copy</button>
         </div>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <span class="text-[11px] font-semibold text-[#c4b5fd]">Windows&nbsp;10/11:</span>
+          <code class="min-w-0 break-all rounded-lg border border-[#1e1e2e] bg-[#0a0a0f] px-2.5 py-1.5 text-[11px] text-[#a7f3d0]">irm https://haksterai.com/install.ps1 | iex</code>
+          <button type="button" id="copy-install-win" class="min-h-9 rounded-lg border border-[#00ff41]/40 px-2.5 py-1 text-[11px] font-semibold text-[#00ff41] hover:bg-[#00ff41]/10">Copy</button>
+        </div>
       </section>
       <p class="text-sm text-[#94a3b8] mb-8 max-w-2xl">
         Every plan is billed through Stripe. Prices below are read live from Stripe, so what you
@@ -109,6 +114,13 @@ import Layout from '../layouts/Layout.astro';
         try { await navigator.clipboard.writeText(cmd); copy.textContent = 'Copied'; }
         catch (_) { copy.textContent = 'Select it'; }
         setTimeout(function () { copy.textContent = 'Copy'; }, 1800);
+      });
+      const copyWin = document.getElementById('copy-install-win');
+      if (copyWin) copyWin.addEventListener('click', async function () {
+        const cmd = 'irm https://haksterai.com/install.ps1 | iex';
+        try { await navigator.clipboard.writeText(cmd); copyWin.textContent = 'Copied'; }
+        catch (_) { copyWin.textContent = 'Select it'; }
+        setTimeout(function () { copyWin.textContent = 'Copy'; }, 1800);
       });
       if (!list) return;
       // Skills come from the same skills_paths Crush is configured with, so the

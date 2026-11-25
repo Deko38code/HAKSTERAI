@@ -13386,17 +13386,45 @@ if (fs.existsSync(distPath)) {
       res.status(500).json({ error: 'CLI metadata unavailable' });
     }
   });
-  app.get('/install.sh', (req, res) => {
-    // Behind the Cloudflare tunnel req.protocol is http and no trust-proxy is set,
-    // so a public install would be told http:// and point the CLI at a redirect.
+  // Behind the Cloudflare tunnel req.protocol is http and no trust-proxy is set,
+  // so a public install would be told http:// and point the CLI at a redirect.
+  const publicOrigin = (req) => {
     const host = req.get('host') || 'haksterai.com';
     const fwd = String(req.get('x-forwarded-proto') || '').split(',')[0].trim().toLowerCase();
     const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
     const scheme = fwd === 'https' || fwd === 'http' ? fwd : (isLocal ? (req.protocol || 'http') : 'https');
-    const origin = scheme + '://' + host;
+    return scheme + '://' + host;
+  };
+  app.get('/install.sh', (req, res) => {
+    const origin = publicOrigin(req);
     res.type('text/plain; charset=utf-8');
     res.set('cache-control', 'no-store');
-    res.send(CLI_INSTALL_SH.replace(/__ORIGIN__/g, origin));
+    // The installer lives in install.sh at the repo root (owner, 2026-11-25:
+    // "make the install xheck if users have whats needed if not install" — it
+    // now brings Node and Bun when the machine has none). Read per request so
+    // an edit ships without a restart; the old inline script stays as the
+    // fallback so this route cannot break if that file is ever missing.
+    let script = CLI_INSTALL_SH;
+    try {
+      script = fs.readFileSync(path.join(__dirname, '..', '..', 'install.sh'), 'utf8');
+    } catch { /* keep the inline installer */ }
+    res.send(script.replace(/__ORIGIN__/g, origin));
+  });
+  // Windows 10/11 (owner, 2026-11-25: "and we need avalible for windows to 11
+  // 10 etc"). Same contract as /install.sh — check, then install only what is
+  // missing — written in PowerShell. Installed with:
+  //   irm <origin>/install.ps1 | iex
+  app.get('/install.ps1', (req, res) => {
+    const origin = publicOrigin(req);
+    res.type('text/plain; charset=utf-8');
+    res.set('cache-control', 'no-store');
+    let script = '';
+    try {
+      script = fs.readFileSync(path.join(__dirname, '..', '..', 'install.ps1'), 'utf8');
+    } catch {
+      return res.status(404).send('# install.ps1 is not present on this server. Install Node.js 20+ and run: npm install -g hakster-cli\n');
+    }
+    res.send(script.replace(/__ORIGIN__/g, origin));
   });
   app.get('/cli/pkg.tar.gz', (req, res) => {
     const root = path.join(__dirname, '..', '..');

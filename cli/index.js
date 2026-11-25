@@ -18,8 +18,18 @@ const os = require('os');
 const http = require('http');
 const https = require('https');
 
-// License check — must pass before anything else runs
-const { checkLicense } = require('../server/src/license');
+// License check — must pass before anything else runs. The module ships inside
+// this package (src/license.js) so a standalone install — /install.sh, the
+// Windows installer, `npm install -g hakster-cli` — works; a git checkout uses
+// the same shipped copy, and cli/ui/__tests__/license-copy.test.mjs fails if it
+// ever drifts from server/src/license.js. The monorepo path stays as a fallback
+// for a tree that predates the copy (owner, 2026-11-25: "make sure its solid").
+let checkLicense;
+try {
+  ({ checkLicense } = require('./src/license'));
+} catch (_) {
+  ({ checkLicense } = require('../server/src/license'));
+}
 async function _haksterLicenseGate() {
   const lic = await checkLicense(false); // paid plans only; owner agent entrypoint is separate
   if (!lic.valid) {
@@ -3079,13 +3089,25 @@ program
     const { spawn } = require('child_process');
     const path = require('path');
     const entry = path.join(__dirname, 'tui-entry.mjs');
-    const child = spawn('bun', [entry], {
-      stdio: 'inherit',
-      env: { ...process.env, HAKSTER_TUI_VERSION: version },
-    });
+    // Bun on PATH wins; otherwise the one our installer brought into
+    // ~/.hakster/runtime/bun is used (owner, 2026-11-25: a clean machine gets
+    // the full TUI without installing anything by hand). Only when neither
+    // exists does this fall back to the Ink TUI — announced, never silent.
+    let bun = null;
+    try { bun = require('./src/runtime-paths').findBun(); } catch { /* older tree */ }
+    if (!bun) {
+      fallbackInk('Bun is not installed (run install.sh again, or install Bun from bun.sh to get the full dashboard)');
+      return;
+    }
+    // A .cmd/.bat launcher (Windows npm shim) cannot be spawned directly; it
+    // needs the shell, and the quoted form keeps a path with spaces intact.
+    const viaShell = /\.(cmd|bat)$/i.test(bun);
+    const child = viaShell
+      ? spawn(`"${bun}" "${entry}"`, { shell: true, stdio: 'inherit', env: { ...process.env, HAKSTER_TUI_VERSION: version } })
+      : spawn(bun, [entry], { stdio: 'inherit', env: { ...process.env, HAKSTER_TUI_VERSION: version } });
     child.on('exit', (code) => process.exit(code || 0));
     child.on('error', (err) => {
-      fallbackInk(`Bun is not available (${err.message})`);
+      fallbackInk(`Bun could not start (${err.message})`);
     });
   });
 

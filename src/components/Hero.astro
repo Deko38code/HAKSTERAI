@@ -191,6 +191,10 @@ const cliLabel = cliVersion ? `v${cliVersion} · always running` : 'always runni
         <div class="border-b border-[#1e1e2e] px-4 py-3 font-mono text-sm text-[#c4b5fd]">Quick install · macOS / Linux</div>
         <pre class="overflow-x-auto p-4 text-sm leading-6 text-[#e2e8f0]"><code>curl -fsSL https://haksterai.com/install.sh | bash</code></pre>
       </div>
+      <div class="overflow-hidden rounded-xl border border-[#00ff41]/30 bg-[#111118]">
+        <div class="border-b border-[#1e1e2e] px-4 py-3 font-mono text-sm text-[#a7f3d0]">Quick install · Windows 10 / 11</div>
+        <pre class="overflow-x-auto p-4 text-sm leading-6 text-[#e2e8f0]"><code>irm https://haksterai.com/install.ps1 | iex</code></pre>
+      </div>
       <div class="overflow-hidden rounded-xl border border-[#1e1e2e] bg-[#111118]">
         <div class="border-b border-[#1e1e2e] px-4 py-3 font-mono text-sm text-[#c4b5fd]">Install from source with npm</div>
         <pre class="overflow-x-auto p-4 text-sm leading-6 text-[#e2e8f0]"><code>git clone --depth 1 https://github.com/Deko38code/haksterAi.git ~/.local/share/haksterai-cli
@@ -201,7 +205,7 @@ npm link</code></pre>
     </div>
 
     <p class="mt-5 text-center text-sm text-[#64748b]">
-      Requires Node.js 22.12 or newer and Git. After installation, run <code class="rounded bg-[#111118] px-1.5 py-0.5 text-[#c4b5fd]">hakster --help</code> to see CLI commands. The install path must not already exist.
+      The quick installers check what your machine has and bring anything missing (Node.js, Bun), so no manual setup is needed. Git is only required for the source install. After installation, run <code class="rounded bg-[#111118] px-1.5 py-0.5 text-[#c4b5fd]">hakster --help</code> to see CLI commands.
     </p>
   </div>
 </section>
