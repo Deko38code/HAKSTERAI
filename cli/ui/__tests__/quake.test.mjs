@@ -86,6 +86,27 @@ test('nothing installs Guake without consent', async () => {
   assert.equal(calls.length, 1, 'nothing else was run');
 });
 
+test('a login-shell banner before the path still finds Guake', () => {
+  // The owner's bashrc prints "[haksterAI] terminal functions loaded: …" on a
+  // login shell, so `bash -lc 'command -v guake'` answers with a banner AND the
+  // path. The old findGuake() passed that whole blob to spawnSync as the
+  // program name → ENOENT → "Guake look not applied (restore-failed)" on Mint
+  // (seen 2026-11-26). Only an existing absolute path may be returned.
+  const banner = '[haksterAI] terminal functions loaded: think glitch multi probe_multi\n/usr/bin/guake\n';
+  const found = quake.findGuake({ run: () => ({ stdout: banner }), exists: (f) => f === '/usr/bin/guake' });
+  assert.equal(found, '/usr/bin/guake');
+  // The plain answer is unchanged.
+  assert.equal(quake.findGuake({ run: () => ({ stdout: '/usr/bin/guake\n' }), exists: () => true }), '/usr/bin/guake');
+  // A stale path that no longer exists is not a Guake.
+  assert.equal(quake.findGuake({ run: () => ({ stdout: '/gone/guake\n' }), exists: () => false }), '');
+  // No answer at all stays no answer.
+  assert.equal(quake.findGuake({ run: () => ({ stdout: '' }), exists: () => true }), '');
+  // And the shipped probe keeps using a login shell (PATH from the user's profile).
+  const src = read('cli/src/quake.js');
+  assert.match(src, /\['-lc', 'command -v guake'\]/);
+  assert.match(src, /lines\[i\]\.startsWith\('\/'?\)/, 'the path is picked out of the output');
+});
+
 test('the profile goes in through Guake\'s own import, backed up first', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'quake-home-'));
   const prev = process.env.HAKSTER_HOME;

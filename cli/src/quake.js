@@ -39,11 +39,23 @@ function markerPath() {
   return path.join(home(), '.hakster', 'quake-profile.json');
 }
 
-/** The Guake binary, or ''. Read-only probe; never starts it. */
-function findGuake() {
+/** The Guake binary, or ''. Read-only probe; never starts it.
+ *
+ *  A login shell may print a banner before the path — the owner's bashrc
+ *  prints "[haksterAI] terminal functions loaded: …" — so the whole stdout is
+ *  NOT the binary name. Take the last line that is an existing absolute path;
+ *  anything else is no answer. (Seen 2026-11-26: on Mint the blob was passed to
+ *  spawnSync as the program, which failed ENOENT, so `hakster quake --setup`
+ *  never applied the backdrop.)
+ */
+function findGuake({ run = spawnSync, exists = fs.existsSync } = {}) {
   try {
-    const out = spawnSync('bash', ['-lc', 'command -v guake'], { encoding: 'utf8', timeout: 5000 });
-    return String((out.stdout || '').trim());
+    const out = run('bash', ['-lc', 'command -v guake'], { encoding: 'utf8', timeout: 5000 });
+    const lines = String((out && out.stdout) || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (lines[i].startsWith('/') && exists(lines[i])) return lines[i];
+    }
+    return '';
   } catch {
     return '';
   }
