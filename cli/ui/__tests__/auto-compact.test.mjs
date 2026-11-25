@@ -28,11 +28,21 @@ const COMPACT_WINDOW = '200000';
 const MAX_CONTEXT = '1048576';
 
 test('every claude spawn carries this session’s compact window and max context', () => {
+  // The value must be a literal in code (§22.4) — but there is ONE place that
+  // defines it. A lane may carry the literals itself or delegate to
+  // providers.claudeCliEnv(); a delegating lane is verified against the
+  // canonical body, so the pin follows the value instead of demanding a copy.
+  const canonical = read('server/src/providers.js');
+  const cStart = canonical.indexOf('function claudeCliEnv()');
+  const canonicalBody = canonical.slice(cStart, canonical.indexOf('\n}', cStart));
   for (const file of ['server/src/providers.js', 'server/src/agent/index.js']) {
     const src = read(file);
     const start = src.indexOf('function claudeCliEnv()');
     assert.ok(start !== -1, `${file} has no claudeCliEnv()`);
-    const body = src.slice(start, src.indexOf('\n}', start));
+    let body = src.slice(start, src.indexOf('\n}', start));
+    const delegates = /require\('\.\.\/providers'\)\.claudeCliEnv\s*\(/.test(body)
+      || /require\('\.\.\/providers'\)\.claudeCliEnv/.test(body);
+    if (delegates) body = canonicalBody;
     for (const [key, value] of [
       ['CLAUDE_CODE_AUTO_COMPACT_WINDOW', COMPACT_WINDOW],
       ['CLAUDE_CODE_MAX_CONTEXT_TOKENS', MAX_CONTEXT],
