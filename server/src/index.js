@@ -13179,8 +13179,8 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
   h1{font-size:18px;margin:0 0 6px}
   .muted{color:#94a3b8;font-size:13px}
   .head{display:flex;gap:14px;align-items:center}
-  .head img{width:56px;height:56px;flex:0 0 auto;border-radius:12px;background:#000;border:1px solid rgba(0,255,65,.18);object-fit:contain}
-  @media (max-width:420px){.head img{width:46px;height:46px;border-radius:10px}}
+  .head img{width:56px;height:56px;flex:0 0 auto;border-radius:14px;background:#000;border:1px solid rgba(0,255,65,.22);object-fit:contain;box-shadow:0 6px 20px -10px rgba(0,255,65,.5)}
+  @media (max-width:420px){.head img{width:46px;height:46px;border-radius:11px}}
   .code{margin:16px 0;padding:14px;border:1px solid rgba(0,255,65,.3);border-radius:12px;background:rgba(0,255,65,.05);font-size:22px;letter-spacing:2px;text-align:center;color:#00ff41}
   .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
   button{flex:1 1 160px;padding:11px 14px;border-radius:10px;font:inherit;font-weight:700;cursor:pointer;border:1px solid #1e1e2e;background:#0a0a0f;color:#e2e8f0}
@@ -13195,7 +13195,7 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
 </style></head>
 <body><main>
   <div class="head">
-    <img src="/icons/authorize-logo.png" alt="HaksterAI logo" width="56" height="56" onerror="this.style.display='none'"/>
+    <img src="/icons/authorize-icon.png" alt="HaksterAI" width="56" height="56" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='/icons/authorize-logo.png'}else{this.style.display='none'}"/>
     <div>
       <h1>Authorize the HaksterAI CLI</h1>
       <div class="muted">A terminal is asking to sign in as your account. Check the code matches the one it printed.</div>
