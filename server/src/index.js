@@ -967,7 +967,7 @@ printf '  2) sign in - a magic link opens in your browser, press Allow:\\n'
 printf '       hakster login\\n'
 printf '  3) start your agent, or run Claude Code on this plan:\\n'
 printf '       hakster            # our own terminal agent\\n'
-printf '       hakster claude     # your own claude on this plan (needs Claude Code installed)\\n'
+printf '       hakster claude     # Claude Code on this plan (sets it up once if you have none)\\n'
 printf '\\n  Check any time:  hakster whoami\\n'
 printf '  No browser handy?  export HAKSTER_API_KEY=<key from %s/dashboard/>\\n' "\$ORIGIN"
 `;

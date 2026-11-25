@@ -9,6 +9,9 @@
  *     HaksterAI key, so the CLI never asks Anthropic to sign in and never
  *     needs an Anthropic account. The server's /anthropic/v1/messages relay
  *     answers with the locked wire model on our Ollama relay (§22, §28.5).
+ *   - If they have no `claude`, one is installed into ~/.hakster/claude-code on
+ *     first run — so a paid plan works right after our install, with no local
+ *     Claude Code and no second sign-in (cli/src/claude-code-provision.js).
  *   - It points `claude` at an isolated config dir (~/.hakster-claude), so the
  *     machine's real Claude Code login (~/.claude, ~/.claude.json) is never
  *     read for credentials, never refreshed and never overwritten. The owner's
@@ -30,6 +33,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const {
+  findClaudeOnPath,
+  resolveClaudeBinary,
+} = require('./claude-code-provision');
 
 // The locked wire model (§22, §35) — a label for the user, the wire id to the relay.
 const WIRE_MODEL = 'deepseek-v4.1-flash:cloud';
@@ -46,16 +53,7 @@ function loadCliConfig() {
 
 /** Resolve `claude` from PATH without executing anything. */
 function findClaude() {
-  const names = process.platform === 'win32' ? ['claude.cmd', 'claude.exe', 'claude'] : ['claude'];
-  for (const dir of String(process.env.PATH || '').split(path.delimiter).filter(Boolean)) {
-    for (const name of names) {
-      const full = path.join(dir, name);
-      try {
-        if (fs.statSync(full).isFile()) return full;
-      } catch { /* keep looking */ }
-    }
-  }
-  return null;
+  return findClaudeOnPath();
 }
 
 /**
@@ -103,6 +101,35 @@ async function verifyAccount(origin, key) {
   }
 }
 
+/**
+ * The environment the child `claude` runs with. Ours, not Anthropic's: the
+ * account key is the bearer token and the base URL is our own relay — no OAuth,
+ * no Anthropic account. The config dir is isolated, so the machine's real
+ * ~/.claude is never read for credentials or written.
+ */
+function buildManagedEnv({ origin, key, cfgDir, base = process.env }) {
+  const env = {
+    ...base,
+    CLAUDE_CONFIG_DIR: cfgDir,
+    ANTHROPIC_BASE_URL: `${origin}/anthropic`,
+    ANTHROPIC_AUTH_TOKEN: key,
+    ANTHROPIC_API_KEY: '',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: WIRE_MODEL,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: WIRE_MODEL,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: WIRE_MODEL,
+    CLAUDE_CODE_SUBAGENT_MODEL: WIRE_MODEL,
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1048576',
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
+    // The copy we install is pinned, so its self-updater would only replace
+    // itself mid-session (a ~500 MB surprise). Our install is the update path.
+    DISABLE_AUTOUPDATER: '1',
+  };
+  // An inherited OAuth token outranks both the relay token and the config dir,
+  // which is exactly the "OAuth session expired" failure measured on 2026-11-25.
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  return env;
+}
+
 /** Run `claude <args>` on this account's plan. Resolves to a process exit code. */
 async function runManagedClaude(args) {
   const cfg = loadCliConfig();
@@ -130,12 +157,24 @@ async function runManagedClaude(args) {
     return 1;
   }
 
-  const bin = findClaude();
-  if (!bin) {
+  // Claude Code itself: the user's own copy if they have one, ours in
+  // ~/.hakster/claude-code if we have set it up before, otherwise a one-time
+  // install into that private folder on this first run (paid plans only, which
+  // the entitlement check above has already established — §28.5).
+  let resolved;
+  try {
+    resolved = resolveClaudeBinary({ log: console });
+  } catch (e) {
+    console.error(String((e && e.message) || e));
+    console.error('Use `hakster` for our own terminal agent while that is sorted out.');
+    return 1;
+  }
+  if (!resolved || !resolved.bin) {
     console.error('Claude Code (claude) is not installed on this machine.');
     console.error('Use `hakster` for our own terminal agent, or install Claude Code and re-run `hakster claude`.');
     return 1;
   }
+  const bin = resolved.bin;
 
   // Isolated config dir: no Anthropic login is read, refreshed or written here,
   // and the machine's real ~/.claude is left untouched.
@@ -153,24 +192,7 @@ async function runManagedClaude(args) {
   }
   if (mcp) finalArgs.push('--mcp-config', mcp.path);
 
-  const env = {
-    ...process.env,
-    CLAUDE_CONFIG_DIR: cfgDir,
-    // Ours, not Anthropic's: the account key is the bearer token and the base
-    // URL is our own relay. No OAuth, no Anthropic account.
-    ANTHROPIC_BASE_URL: `${origin}/anthropic`,
-    ANTHROPIC_AUTH_TOKEN: key,
-    ANTHROPIC_API_KEY: '',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: WIRE_MODEL,
-    ANTHROPIC_DEFAULT_OPUS_MODEL: WIRE_MODEL,
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: WIRE_MODEL,
-    CLAUDE_CODE_SUBAGENT_MODEL: WIRE_MODEL,
-    CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1048576',
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
-  };
-  // An inherited OAuth token outranks both the relay token and the config dir,
-  // which is exactly the "OAuth session expired" failure measured on 2026-11-25.
-  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  const env = buildManagedEnv({ origin, key, cfgDir });
 
   console.log(`▸ ${DISPLAY_MODEL} · ${origin}`);
   console.log(`▸ Signed in as ${me.user.email || me.user.username || 'your account'} — no Anthropic sign-in needed.`);
@@ -191,4 +213,11 @@ async function runManagedClaude(args) {
   });
 }
 
-module.exports = { runManagedClaude, WIRE_MODEL, DISPLAY_MODEL, carryMcpServers, findClaude };
+module.exports = {
+  runManagedClaude,
+  WIRE_MODEL,
+  DISPLAY_MODEL,
+  carryMcpServers,
+  findClaude,
+  buildManagedEnv,
+};

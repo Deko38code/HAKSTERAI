@@ -620,6 +620,10 @@ program
     const cli = res.cli || {};
     if (cli.included) {
       console.log(`${C.green}✓ your plan includes the CLI${C.reset} ${C.gray}— run 'hakster tui' or 'hakster chat'.${C.reset}`);
+      // Claude Code is part of the plan's CLI too: `hakster claude` installs it
+      // into ~/.hakster/claude-code on first run and signs it in with this key,
+      // so no local Claude Code and no Anthropic account are needed.
+      console.log(`${C.gray}  Claude Code on this plan: 'hakster claude' (installs it once if you don't have it).${C.reset}`);
     } else {
       console.log(`${C.yellow}⚠ signed in, but this plan does not include the CLI.${C.reset}`);
       console.log(`${C.gray}Upgrade at ${res.server}${cli.upgrade || '/plans/'} — the agent tools unlock once the plan does.${C.reset}`);
