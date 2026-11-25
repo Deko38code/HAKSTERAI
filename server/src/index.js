@@ -950,12 +950,26 @@ if ! npm install -g . >/dev/null 2>&1; then
   npm install -g . --prefix "\$HOME/.local"
   printf 'Add this to your shell profile:  export PATH="\$HOME/.local/bin:\$PATH"\\n'
 fi
+# Point the freshly installed CLI at the server it came from, so the only
+# step left for the operator is signing in (magic link, verified in browser).
+HAKSTER_BIN="\$(command -v hakster 2>/dev/null || true)"
+[ -n "\$HAKSTER_BIN" ] || HAKSTER_BIN="\$HOME/.local/bin/hakster"
+if [ -x "\$HAKSTER_BIN" ]; then
+  "\$HAKSTER_BIN" config set server "\$ORIGIN" >/dev/null 2>&1 || true
+  printf '\\nCLI configured for %s\\n' "\$ORIGIN"
+fi
 cd /
 rm -rf "\$TMP"
 printf '\\nInstalled. Next:\\n'
-printf '  hakster config set server %s\\n' "\$ORIGIN"
-printf '  export HAKSTER_API_KEY=<your key from %s/dashboard/>\\n' "\$ORIGIN"
-printf '  hakster\\n'
+printf '  1) point the CLI at this server:\\n'
+printf '       hakster config set server %s\\n' "\$ORIGIN"
+printf '  2) sign in - a magic link opens in your browser, press Allow:\\n'
+printf '       hakster login\\n'
+printf '  3) start your agent, or run Claude Code on this plan:\\n'
+printf '       hakster            # our own terminal agent\\n'
+printf '       hakster claude     # your own claude on this plan (needs Claude Code installed)\\n'
+printf '\\n  Check any time:  hakster whoami\\n'
+printf '  No browser handy?  export HAKSTER_API_KEY=<key from %s/dashboard/>\\n' "\$ORIGIN"
 `;
 function planPriceHasCli(price) {
   if (!price) return false;
