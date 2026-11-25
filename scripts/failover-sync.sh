@@ -95,22 +95,49 @@ print(json.dumps(out, sort_keys=True))
 PYFP
 }
 LOCK_DIR="${TMPDIR:-/tmp}/hakster-failover-sync.lock"
-cleanup() { rm -rf "$TMP"; rmdir "$LOCK_DIR" 2>/dev/null || true; }
+LOCK_PID="$LOCK_DIR/pid"
+cleanup() { rm -rf "$TMP"; rm -f "$LOCK_PID" 2>/dev/null; rmdir "$LOCK_DIR" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 # One sync at a time: a slow copy must never overlap the next timer tick.
 # A run killed mid-flight leaves its lock behind and would block every later sync
 # forever (seen 2026-11-26 when a commit's background sync was killed with its tool
-# process group). Only a lock with NO live failover-sync process counts as stale.
+# process group). The lock records its owner's pid, so a stale lock is one whose
+# owner is no longer running. Asking pgrep instead never worked: this script's own
+# command line matches the pattern it searched for, so the stale branch was dead
+# code and a killed run blocked every later sync permanently.
+# Three details keep a live lock from being swept away:
+#   · the holder must be alive AND actually a failover-sync process, so a recycled
+#     pid belonging to something else is not mistaken for a running sync;
+#   · a lock with no pid file yet is not stale while it is brand new — mkdir lands
+#     microseconds before the pid is written, and that gap is a live run starting;
+#   · the sweep is a rename, which only one process can win, so two runs that both
+#     see a stale lock cannot both take it.
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  if command -v pgrep >/dev/null 2>&1 && pgrep -f 'scripts/failover-sync\.sh' >/dev/null 2>&1; then
+  HOLDER=$(cat "$LOCK_PID" 2>/dev/null || true)
+  if [ -n "$HOLDER" ] && kill -0 "$HOLDER" 2>/dev/null \
+     && ps -p "$HOLDER" -o args= 2>/dev/null | grep -q 'failover-sync'; then
+    say "held: another sync is still running (pid $HOLDER)"
+    exit 0
+  fi
+  if [ -z "$HOLDER" ]; then
+    LOCK_MT=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)
+    if [ $(( $(date +%s) - LOCK_MT )) -lt 10 ]; then
+      say "held: another sync is starting up"
+      exit 0
+    fi
+  fi
+  STALE="$LOCK_DIR.stale.$$"
+  if mv "$LOCK_DIR" "$STALE" 2>/dev/null; then
+    rm -rf "$STALE"
+    mkdir "$LOCK_DIR" 2>/dev/null || { say "held: another sync is still running"; exit 0; }
+    say "clearing a stale sync lock (holder pid ${HOLDER:-unknown} is not running)"
+  else
     say "held: another sync is still running"
     exit 0
   fi
-  say "clearing a stale sync lock (no failover-sync process is running)"
-  rmdir "$LOCK_DIR" 2>/dev/null || true
-  mkdir "$LOCK_DIR" 2>/dev/null || { say "held: another sync is still running"; exit 0; }
 fi
+printf '%s' "$$" > "$LOCK_PID" 2>/dev/null || true
 mkdir -p "$TMP"
 
 ctl() { ssh -n -o BatchMode=yes "$STANDBY_SSH" "sh ~/hakster-standby-ctl.sh $*"; }
