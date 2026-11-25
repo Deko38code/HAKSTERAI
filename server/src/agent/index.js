@@ -17,6 +17,7 @@ const { AGENT_TYPES, getAgentRole, delegationGuidance } = require('./agent-roste
 const os = require('os');
 const crypto = require('crypto');
 const net = require('net');
+const firecrawlApi = require('../firecrawl-api');
 // ── Service health: lightweight TCP connect check on the main ports, cached
 //    and refreshed every 20s. Shown as a compact \u2705/\u274c chip in the
 //    status bar so you always know which services are up at a glance.
@@ -5381,9 +5382,14 @@ const toolExecutors = {
     const _fcUnique = [...new Set(_fcKeys)].filter(k => k && k.trim().length > 10);
     if (_fcUnique.length === 0) return 'Error: FIRECRAWL_API_KEY not configured (set FIRECRAWL_API_KEY or FIRECRAWL_API_KEY_1..4 in .env).';
     let _fcIdx = 0;
-    const base = process.env.FIRECRAWL_BASE_URL || 'https://api.firecrawl.dev/v1';
-    const fetchJson = async (path, body, timeoutMs = 30000) => {
+    // Firecrawl moved to API v2 (v1 retires 2026-12-10; owner's notice 2026-11-26). v2 is
+    // tried first with v1 behind it, the same rule providers.firecrawlCall uses. A key/limit
+    // refusal repeats on any version, so it is not retried on the older base.
+    const _fcBases = firecrawlApi.apiBases();
+    const runOnBase = async (base, path, body, timeoutMs) => {
       // try each key until one works (rotate on auth/rate-limit/5xx)
+      let lastStatus = 0;
+      let lastData = null;
       for (let attempt = 0; attempt < _fcUnique.length; attempt++) {
         const key = _fcUnique[(_fcIdx + attempt) % _fcUnique.length];
         const hdrs = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -5393,12 +5399,30 @@ const toolExecutors = {
           const r = await fetch(base + path, { method: 'POST', headers: hdrs, body: JSON.stringify(body), signal: ctrl.signal });
           const txt = await r.text();
           let data; try { data = JSON.parse(txt); } catch (_) { data = { raw: txt }; }
-          if ([401, 403, 429].includes(r.status) || r.status >= 500) { _fcIdx++; continue; }  // rotate to next key
-          return { ok: r.ok, status: r.status, data };
-        } catch (e) { _fcIdx++; continue; }
+          if ([401, 403, 429].includes(r.status) || r.status >= 500) {
+            _fcIdx++; lastStatus = r.status; lastData = data; continue;  // rotate to next key
+          }
+          return { ok: r.ok, status: r.status, data, account: [401, 403, 429].includes(r.status) };
+        } catch (e) {
+          _fcIdx++; lastStatus = 0; lastData = { error: (e && e.message) || String(e) }; continue;
+        }
         finally { clearTimeout(t); }
       }
-      return { ok: false, status: 0, data: { error: 'all firecrawl keys failed (rate-limited/unauthorized)' } };
+      return {
+        ok: false,
+        status: lastStatus,
+        data: lastData || { error: 'all firecrawl keys failed (rate-limited/unauthorized)' },
+        account: [401, 403, 429].includes(lastStatus),
+      };
+    };
+    const fetchJson = async (path, body, timeoutMs = 30000) => {
+      let last = null;
+      for (const base of _fcBases) {
+        const r = await runOnBase(base, path, body, timeoutMs);
+        if (r.ok || r.account) return r;
+        last = r;
+      }
+      return last;
     };
     const trunc = (str, n) => str.length > n ? str.slice(0, n) + '\n... (truncated)' : str;
     try {
@@ -5417,15 +5441,17 @@ ${trunc(md, 12000)}`;
         if (!url) return 'Error: map requires url';
         const { ok, status, data } = await fetchJson('/map', { url, limit: limit || 25 }, 30000);
         if (!ok) return `Error: Firecrawl map failed (${status}): ${JSON.stringify(data).slice(0, 400)}`;
-        const links = data?.links || data?.data?.links || [];
+        const _mapLinks = data?.links || data?.data?.links || [];
+        const links = Array.isArray(_mapLinks) ? _mapLinks : [];
         return `🔥 Firecrawl map ${url} — ${links.length} URLs\n${trunc(links.join('\n'), 8000)}`;
       }
       if (action === 'search') {
         if (!query) return 'Error: search requires query';
         const { ok, status, data } = await fetchJson('/search', { query, limit: limit || 25 }, 30000);
         if (!ok) return `Error: Firecrawl search failed (${status}): ${JSON.stringify(data).slice(0, 400)}`;
-        const items = data?.data || data?.results || [];
-        const out = items.map((it, i) => `${i + 1}. ${it.title || ''}\n   ${it.url || it.link || ''}\n   ${(it.description || it.markdown || '').slice(0, 200)}`).join('\n\n');
+        // v1 answers data[], v2 answers data.web[] — read both (server/src/firecrawl-api.js).
+        const items = firecrawlApi.searchRows(data);
+        const out = items.map((it, i) => `${i + 1}. ${it.title || ''}\n   ${it.url || ''}\n   ${(it.snippet || '').slice(0, 200)}`).join('\n\n');
         return `🔥 Firecrawl search "${query}" — ${items.length} results\n${trunc(out, 10000)}`;
       }
       if (action === 'crawl') {
@@ -5433,7 +5459,7 @@ ${trunc(md, 12000)}`;
         const { ok, status, data } = await fetchJson('/crawl', { url, limit: limit || 10 }, 30000);
         if (!ok) return `Error: Firecrawl crawl failed (${status}): ${JSON.stringify(data).slice(0, 400)}`;
         const jobId = data?.id || data?.jobId;
-        const docs = data?.data || [];
+        const docs = Array.isArray(data?.data) ? data.data : [];
         const sample = docs.slice(0, 3).map((d, i) => `--- ${i + 1}: ${d.source || d.url || ''} ---\n${(d.markdown || '').slice(0, 800)}`).join('\n\n');
         return `🔥 Firecrawl crawl ${url} — job ${jobId || 'n/a'} (first ${docs.length} pages)\n${trunc(sample, 10000)}`;
       }

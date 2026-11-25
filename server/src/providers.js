@@ -7,6 +7,7 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '../.env'), override: true });
 const crypto = require('crypto');
+const firecrawlApi = require('./firecrawl-api');
 
 // Approval mode — bypass confirmation prompts in FULL_AUTO / AUTO_EDIT
 const { FULL_AUTO, shouldConfirm: shouldConfirmApproval } = require('./agent/approval');
@@ -706,7 +707,7 @@ function nextOpenRouterKey() {
   return key;
 }
 
-async function firecrawlRequest(endpoint, body, keysLeft = null) {
+async function firecrawlRequest(endpoint, body, keysLeft = null, base = null) {
   const keys = keysLeft || (() => {
     const allKeys = getFirecrawlKeys();
     if (allKeys.length === 0) return [];
@@ -718,7 +719,8 @@ async function firecrawlRequest(endpoint, body, keysLeft = null) {
   const key = keys[0];
   const https = require('https');
   const postData = JSON.stringify(body);
-  const url = new URL(`https://api.firecrawl.dev/v1${endpoint}`);
+  const apiBase = base || firecrawlApi.apiBases()[0];
+  const url = new URL(`${apiBase}${endpoint}`);
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: url.hostname,
@@ -737,7 +739,7 @@ async function firecrawlRequest(endpoint, body, keysLeft = null) {
         try {
           const json = JSON.parse(data);
           if ([401, 403, 429].includes(res.statusCode) || res.statusCode >= 500 || json?.error?.includes?.('rate limit')) {
-            if (keys.length > 1) return resolve(firecrawlRequest(endpoint, body, keys.slice(1)));
+            if (keys.length > 1) return resolve(firecrawlRequest(endpoint, body, keys.slice(1), apiBase));
           }
           resolve({ status: res.statusCode, json });
         } catch {
@@ -752,18 +754,36 @@ async function firecrawlRequest(endpoint, body, keysLeft = null) {
   });
 }
 
+// One Firecrawl call across API versions: v2 first, v1 behind it (owner, 2026-11-26:
+// "i got noti saying firecralwer swithing to dev 2 on dec 10"). A key/limit refusal is
+// an account answer that the older base would repeat, so it is returned as-is; a network
+// error, a 5xx, or a route this version does not serve falls through to the older base.
+async function firecrawlCall(endpoint, body) {
+  let last = null;
+  for (const base of firecrawlApi.apiBases()) {
+    let res;
+    try {
+      res = await firecrawlRequest(endpoint, body, null, base);
+    } catch (err) {
+      last = { base, error: err };
+      continue;
+    }
+    if (res.status < 400 || firecrawlApi.isAccountFailure(res.status)) return { base, res };
+    last = { base, res };
+    console.warn(`[firecrawl] ${base}${endpoint} answered ${res.status} - trying the next API version`);
+  }
+  if (last && last.res) return { base: last.base, res: last.res };
+  throw (last && last.error) || new Error('Firecrawl request failed');
+}
+
 async function firecrawlSearch(query, count = 5) {
-  const res = await firecrawlRequest('/search', { query, limit: Math.min(count, 10) });
+  const { res } = await firecrawlCall('/search', { query, limit: Math.min(count, 10) });
   if (res.status >= 400) throw new Error(res.json?.error || res.text || `HTTP ${res.status}`);
-  return res.json?.data?.map(r => ({
-    title: r.title || r.metadata?.title || '(No title)',
-    url: r.url || r.metadata?.sourceURL || '',
-    snippet: r.description || r.markdown?.slice(0, 300) || '',
-  })) || [];
+  return firecrawlApi.searchRows(res.json);
 }
 
 async function firecrawlScrape(url) {
-  const res = await firecrawlRequest('/scrape', { url, formats: ['markdown'] });
+  const { res } = await firecrawlCall('/scrape', { url, formats: ['markdown'] });
   if (res.status >= 400) throw new Error(res.json?.error || res.text || `HTTP ${res.status}`);
   return res.json?.data?.markdown || res.json?.data?.content || JSON.stringify(res.json?.data, null, 2);
 }
