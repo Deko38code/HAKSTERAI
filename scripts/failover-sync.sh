@@ -58,7 +58,18 @@ cleanup() { rm -rf "$TMP"; rmdir "$LOCK_DIR" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 # One sync at a time: a slow copy must never overlap the next timer tick.
-mkdir "$LOCK_DIR" 2>/dev/null || { say "held: another sync is still running"; exit 0; }
+# A run killed mid-flight leaves its lock behind and would block every later sync
+# forever (seen 2026-11-26 when a commit's background sync was killed with its tool
+# process group). Only a lock with NO live failover-sync process counts as stale.
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  if command -v pgrep >/dev/null 2>&1 && pgrep -f 'scripts/failover-sync\.sh' >/dev/null 2>&1; then
+    say "held: another sync is still running"
+    exit 0
+  fi
+  say "clearing a stale sync lock (no failover-sync process is running)"
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+  mkdir "$LOCK_DIR" 2>/dev/null || { say "held: another sync is still running"; exit 0; }
+fi
 mkdir -p "$TMP"
 
 ctl() { ssh -n -o BatchMode=yes "$STANDBY_SSH" "sh ~/hakster-standby-ctl.sh $*"; }
