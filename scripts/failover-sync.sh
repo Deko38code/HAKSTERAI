@@ -23,6 +23,10 @@
 #   STATE_FILE       default /tmp/hakster-failover-sync.state
 set -eu
 
+# Cron runs with a minimal PATH and no profile; name the one we depend on.
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+
 STANDBY_SSH="${STANDBY_SSH:-mint}"
 STANDBY_URL="${STANDBY_URL:-http://10.0.0.210:3581}"
 STANDBY_PORT="${STANDBY_PORT:-3581}"
@@ -32,8 +36,12 @@ LOCAL_DB="${LOCAL_DB:-/home/ghost/haksterAi/data/hakster.db}"
 TMP="${TMPDIR:-/tmp}/hakster-sync.$$"
 
 say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
-cleanup() { rm -rf "$TMP"; }
+LOCK_DIR="${TMPDIR:-/tmp}/hakster-failover-sync.lock"
+cleanup() { rm -rf "$TMP"; rmdir "$LOCK_DIR" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
+
+# One sync at a time: a slow copy must never overlap the next timer tick.
+mkdir "$LOCK_DIR" 2>/dev/null || { say "held: another sync is still running"; exit 0; }
 mkdir -p "$TMP"
 
 # ── 1. refuse while a failover has happened since the last sync ────────────
@@ -90,21 +98,33 @@ else
   say "code sync skipped (SKIP_CODE=1)"
 fi
 
-# ── 3. stop the standby, swap the file in, start it again ──────────────────
+# ── 3. copy first, so the standby is stopped for ~2 s instead of ~20 ───────
+# A timer that fires every few minutes must not mean a standing 20 s hole in
+# the shared static capacity: the transfer happens while the standby serves,
+# and only the swap needs it stopped.
 say "standby: $STANDBY_SSH:$REMOTE_DIR (port $STANDBY_PORT)"
 
-ssh -n -o BatchMode=yes "$STANDBY_SSH" "
-  pid=\$(ss -ltnp 2>/dev/null | grep ':$STANDBY_PORT ' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n 1)
-  if [ -n \"\$pid\" ]; then kill \"\$pid\"; sleep 1; fi
-" || true
+HAVE=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+  "sha256sum '$REMOTE_DIR/data/hakster.db' 2>/dev/null | cut -d' ' -f1" || true)
+if [ "$HAVE" = "$WANT" ]; then
+  say "unchanged: the standby already holds this exact database"
+  exit 0
+fi
 
 scp -q -o BatchMode=yes "$TMP/hakster.db" "$STANDBY_SSH:$REMOTE_DIR/data/hakster.db.new" || {
   say "failed: copy did not arrive"; exit 1; }
 
+# ── 4. short stop, verify, swap, start ─────────────────────────────────────
 ssh -n -o BatchMode=yes "$STANDBY_SSH" "
   cd '$REMOTE_DIR/data' || exit 1
   got=\$(sha256sum hakster.db.new | cut -d' ' -f1)
   [ \"\$got\" = '$WANT' ] || { echo 'checksum mismatch - keeping the old copy'; rm -f hakster.db.new; exit 1; }
+  pid=\$(ss -ltnp 2>/dev/null | grep ':$STANDBY_PORT ' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n 1)
+  if [ -n \"\$pid\" ]; then kill \"\$pid\"; fi
+  n=0
+  while [ \$n -lt 16 ] && ss -ltn 2>/dev/null | grep -q ':$STANDBY_PORT '; do
+    sleep 0.25; n=\$((n + 1))
+  done
   [ -f hakster.db ] && cp -p hakster.db hakster.db.prev
   mv hakster.db.new hakster.db
   chmod 600 hakster.db
@@ -113,7 +133,7 @@ ssh -n -o BatchMode=yes "$STANDBY_SSH" "
   setsid env PORT=$STANDBY_PORT node src/index.js </dev/null >> ../failover.log 2>&1 &
 " || { say "failed: standby swap did not complete"; exit 1; }
 
-# ── 4. confirm the standby is answering again ─────────────────────────────
+# ── 5. confirm the standby is answering again ─────────────────────────────
 i=0
 while [ $i -lt 12 ]; do
   code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$STANDBY_URL/api/version" 2>/dev/null || true)
