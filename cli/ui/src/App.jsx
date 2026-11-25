@@ -564,10 +564,6 @@ export default function App({ version = '0.1.0' }) {
     // cannot stand behind (§10).
     tokensKnown: !!(agent.tokens && agent.tokens.reported),
     ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round((ctxUsed / ctxMax) * 100))) : null,
-    // The two raw numbers behind that share, so the sidebar can print the
-    // reading itself (`12.4k / 200k · 6%`) instead of a bare percent.
-    ctxUsed: ctxUsed > 0 ? ctxUsed : null,
-    ctxMax,
   };
   const peers = peersFromMcp(mcp);
   const services = serviceStates(scan);

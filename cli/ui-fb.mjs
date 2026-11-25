@@ -2659,7 +2659,7 @@ function LiveSidebar({
         {
           width: inner,
           k: "ctx",
-          v: usage && usage.ctxPct != null ? compact || !usage.ctxUsed ? `${usage.ctxPct}%` : `${fmtTok(usage.ctxUsed)} / ${fmtTok(usage.ctxMax)} \xB7 ${usage.ctxPct}%` : "\u2014",
+          v: usage && usage.ctxPct != null ? `${usage.ctxPct}%` : "\u2014",
           color: Number(usage && usage.ctxPct) > 85 ? "red" : Number(usage && usage.ctxPct) > 60 ? "yellow" : "green"
         }
       )
@@ -7558,11 +7558,7 @@ function App({ version = "0.1.0" }) {
     // loop does not). Until one does, the panel says "—" rather than a zero it
     // cannot stand behind (§10).
     tokensKnown: !!(agent.tokens && agent.tokens.reported),
-    ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round(ctxUsed / ctxMax * 100))) : null,
-    // The two raw numbers behind that share, so the sidebar can print the
-    // reading itself (`12.4k / 200k · 6%`) instead of a bare percent.
-    ctxUsed: ctxUsed > 0 ? ctxUsed : null,
-    ctxMax
+    ctxPct: ctxUsed > 0 && ctxMax > 0 ? Math.max(0, Math.min(100, Math.round(ctxUsed / ctxMax * 100))) : null
   };
   const peers = peersFromMcp(mcp);
   const services = serviceStates(scan);
