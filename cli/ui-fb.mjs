@@ -1618,7 +1618,7 @@ function DockAd({
 }
 
 // src/components/ApprovalPrompt.jsx
-import React3, { useEffect as useEffect2, useState as useState2 } from "react";
+import React3, { useEffect as useEffect2, useMemo, useState as useState2 } from "react";
 import { useKeyboard as useKeyboard2 } from "@opentui/react";
 import { TextAttributes as TextAttributes3 } from "@opentui/core";
 
@@ -1749,7 +1749,7 @@ function ApprovalPrompt({ width = 80, request, onAnswer }) {
   const command = request && request.command || "";
   const toolCallId = request && request.toolCallId;
   const sudo = isSudoCommand(command);
-  const dangerPassword = getDangerPassword();
+  const dangerPassword = useMemo(() => getDangerPassword(), [toolCallId]);
   const needsPassword = !!dangerPassword;
   useEffect2(() => {
     setPassword("");
@@ -1970,7 +1970,7 @@ function Composer({
 import React6 from "react";
 
 // src/hooks/useGridLayout.js
-import { useMemo } from "react";
+import { useMemo as useMemo2 } from "react";
 
 // src/utils/layout-helpers.js
 var MIN_COLUMN_WIDTH = 10;
@@ -2019,7 +2019,7 @@ function computeGridLayout(items, availableWidth) {
   return { columns, columnWidth, columnWidths, columnGroups };
 }
 function useGridLayout(items, availableWidth) {
-  return useMemo(
+  return useMemo2(
     () => computeGridLayout(items, availableWidth),
     [items, availableWidth]
   );
@@ -3662,7 +3662,7 @@ function McpView({
 }
 
 // src/components/ScriptsView.jsx
-import React19, { useMemo as useMemo2 } from "react";
+import React19, { useMemo as useMemo3 } from "react";
 import { TextAttributes as TextAttributes14 } from "@opentui/core";
 
 // src/utils/scripts.js
@@ -3821,9 +3821,9 @@ function ScriptsView({
   const listPanelRows = listRows + 3;
   const snapshotRows = Math.max(5, h - listPanelRows - 1);
   const paneRows = Math.max(2, snapshotRows - 3);
-  const src = useMemo2(() => chosen ? linesOf(chosen) : [], [chosen]);
+  const src = useMemo3(() => chosen ? linesOf(chosen) : [], [chosen]);
   const prev = chosen ? lastSnapshot(chosen) : null;
-  const diff = useMemo2(() => diffLines(prev, src), [prev, src]);
+  const diff = useMemo3(() => diffLines(prev, src), [prev, src]);
   const changed = diff.filter((d) => d.mark).length;
   const diffRows = diff.map((d) => `${d.mark === "+" ? "+" : d.mark === "-" ? "-" : " "} ${d.text}`);
   const lines = Array.isArray(run.lines) ? run.lines : [];

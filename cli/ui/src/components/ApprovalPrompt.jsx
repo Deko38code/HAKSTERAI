@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
 import { TextAttributes } from '@opentui/core';
 import { getDangerPassword, isSudoCommand } from '../utils/danger-password.js';
@@ -42,7 +42,11 @@ export default function ApprovalPrompt({ width = 80, request, onAnswer }) {
   const command = (request && request.command) || '';
   const toolCallId = request && request.toolCallId;
   const sudo = isSudoCommand(command);
-  const dangerPassword = getDangerPassword();
+  // Read once per request, not once per keystroke: the field re-renders on
+  // every character typed, and re-reading the config file that often is work
+  // for nothing. A new request re-reads, so a password changed elsewhere is
+  // still picked up by the next prompt.
+  const dangerPassword = useMemo(() => getDangerPassword(), [toolCallId]);
   const needsPassword = !!dangerPassword;
 
   // A new request is a new question: never leave a half-typed password or a
