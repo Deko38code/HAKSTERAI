@@ -239,6 +239,12 @@ export function useAgentStream({
   // The recap of the last finished run, shown on the idle row and addressable
   // by its `#id` (owner, 2026-11-25). Null until a run has finished.
   const [lastRecap, setLastRecap] = useState(null);
+  // Every finished run's recap this session, newest first. The idle panel shows
+  // these ids right where the full recap is (owner, 2026-11-26: "full recap
+  // while idle in bottom where our recap ids are"), so a run can be reached
+  // with `/recap #id` without scrolling the transcript to find it. Capped —
+  // it is a handle list, not a history log.
+  const [recapHistory, setRecapHistory] = useState([]);
   // The distinct failures of the run in flight, short and capped. They are
   // posted with the session summary so the mistakes become autolearn `error`
   // memories instead of scrolling away with the transcript.
@@ -1142,12 +1148,19 @@ export function useAgentStream({
       // next session recalls it and the same mistake is not made twice. The
       // post is fire-and-forget — the TUI goes idle immediately — and every
       // number in it is the meter's own count, never an estimate (§10).
+      // How long the turn took. Measured here so the recap — and its card —
+      // state the same duration; both read this one figure (§10).
+      const turnMs = startedAtRef.current ? Math.max(0, Date.now() - startedAtRef.current) : 0;
+
       try {
         const snap = meterRef.current.snapshot();
         const start = learnedAtStartRef.current || { added: 0, skills: 0, events: 0 };
         const recap = {
           id: recapId,
           at: Date.now(),
+          // The run's own wall clock, so a recap id carries how long its run
+          // took and the panel never borrows another run's timer.
+          ms: turnMs,
           // What the run was: the row states it, so the recap says what it is a
           // recap OF (owner, 2026-11-26: "make sure the recapp is working and
           // says what the recap is"). The task as sent, not a rewritten title.
@@ -1161,6 +1174,9 @@ export function useAgentStream({
           failures: failuresRef.current.slice(0, 5),
         };
         setLastRecap(recap);
+        // Newest first, one entry per id — re-running never duplicates a row,
+        // and the list is capped so it stays a handle list.
+        setRecapHistory((prev) => [recap, ...prev.filter((one) => one.id !== recap.id)].slice(0, 25));
         if (snap.rounds > 0) {
           fetch(`${api}/api/agent/session-summary`, {
             method: 'POST',
@@ -1177,6 +1193,9 @@ export function useAgentStream({
               // row gains `mem N` only from the server's accepted-entry count.
               if (!data || data.ok !== true) return;
               setLastRecap((prev) => (prev && prev.id === recapId ? { ...prev, memWritten: Number(data.written) || 0 } : prev));
+              setRecapHistory((prev) => prev.map((one) => (
+                one.id === recapId ? { ...one, memWritten: Number(data.written) || 0 } : one
+              )));
             })
             .catch(() => { /* memory capture is best-effort; the row still shows the run */ });
         }
@@ -1188,8 +1207,8 @@ export function useAgentStream({
       // success, failure and cancel all arrive here — written onto the turn's
       // own message so the card can state it. `patch` no-ops when the card was
       // dropped (a failed turn that never spoke), so nothing is invented and no
-      // orphan time floats in the transcript (§10).
-      const turnMs = startedAtRef.current ? Math.max(0, Date.now() - startedAtRef.current) : 0;
+      // orphan time floats in the transcript (§10). `turnMs` was measured above,
+      // next to the recap, so the card and the recap can never disagree.
       if (turnMs) patch(assistantId, (m) => ({ ...m, ms: turnMs, finishedAt: Date.now() }));
 
       abortRef.current = null;
@@ -1275,6 +1294,7 @@ export function useAgentStream({
     meters,
     learned,
     lastRecap,
+    recapHistory,
     activity,
     progressAtRef,
     loopAt,

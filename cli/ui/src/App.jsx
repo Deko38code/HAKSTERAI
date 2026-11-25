@@ -30,6 +30,7 @@ import StatusBar from './components/StatusBar.jsx';
 import SystemPanel from './components/SystemPanel.jsx';
 import CrushStatus from './components/CrushStatus.jsx';
 import Recap from './components/Recap.jsx';
+import RecapPanel from './components/RecapPanel.jsx';
 import DebugView from './components/DebugView.jsx';
 import TodoPanel from './components/TodoPanel.jsx';
 import Transcript from './components/Transcript.jsx';
@@ -913,6 +914,22 @@ export default function App({ version = '0.1.0' }) {
         const want = String(arg || '').trim().toLowerCase().replace(/^#?/, '#');
         const last = agent.lastRecap;
         if (!arg) {
+          // Several runs this session? List them — each with its own id, tools
+          // and what it was — so the ids on the idle panel have a readable
+          // index on demand (owner, 2026-11-26: "full recap ... where our recap
+          // ids are"). One run keeps the single-line receipt.
+          const hist = Array.isArray(agent.recapHistory) ? agent.recapHistory : [];
+          if (hist.length > 1) {
+            const rows = hist.slice(0, 8).map((r) => {
+              const text = String(r.task || '').replace(/\s+/g, ' ').trim();
+              const tools = `${Number(r.tools) || 0} tools (${Number(r.ok) || 0} ok · ${Number(r.fail) || 0} err)`;
+              const pts = Number(r.points) > 0 ? ` · ✦ ${Math.round(Number(r.points))}p` : '';
+              const what = text ? `  ${text.length > 40 ? `${text.slice(0, 39)}…` : text}` : '';
+              return `  ${r.id}  ${tools}${pts}${what}`;
+            });
+            agent.note([`▣ recap — ${hist.length} runs this session`, ...rows, '  /recap #id reads one back out of memory'].join('\n'), 'notice');
+            return;
+          }
           // Name the run as well as its id — a recap that does not say what it
           // recapped is just a row of numbers (owner, 2026-11-26: "says what the
           // recap is").
@@ -2058,6 +2075,23 @@ export default function App({ version = '0.1.0' }) {
     )
     : 0;
   const transcriptRows = Math.max(1, sharedBudget - liveOutputLines);
+  // ── Full recap while idle ────────────────────────────────────────────────
+  // Owner, 2026-11-26: "fix our recap to work like claude's does with fullrecap
+  // while idle in bottom where our recap ids are". Once a run ends and the row
+  // is free, the receipt grows into a short block — what the run was, what it
+  // did, what it got wrong, and the recap ids themselves. It takes ONLY rows
+  // the transcript can spare and never drops it below 4, so a short terminal
+  // keeps the one-row receipt rather than losing its output panel (§39.4).
+  // Rows moved here come straight out of the transcript, so the total height
+  // the terminal gave this column is unchanged.
+  const RECAP_PANEL_MAX = 6;
+  const recapSpare = showRecap ? Math.max(0, transcriptRows - 4) : 0;
+  const recapExtra = Math.max(0, Math.min(RECAP_PANEL_MAX - 1, recapSpare));
+  const showFullRecap = showRecap && recapExtra >= 2;
+  // The panel's own lines: one already budgeted for the run row plus the extra
+  // it was given.
+  const recapPanelLines = showFullRecap ? recapExtra + 1 : 1;
+  const transcriptRowsFinal = Math.max(4, transcriptRows - (showFullRecap ? recapExtra : 0));
 
   const dashboardItems = [
     {
@@ -2581,7 +2615,7 @@ export default function App({ version = '0.1.0' }) {
               <Transcript
                 messages={agent.messages}
                 width={mainW}
-                height={transcriptRows}
+                height={transcriptRowsFinal}
                 grow
                 scrollRef={scrollRef}
                 live={agent.status !== 'idle'}
@@ -2668,8 +2702,35 @@ export default function App({ version = '0.1.0' }) {
             ) : showRecap ? (
               // Idle: the same row states what the finished run did instead of
               // leaving it blank (owner, 2026-11-24: "add recap in cli when
-              // agent is idle").
+              // agent is idle"). Where the column can spare the rows it becomes
+              // the FULL recap — the run, its mistakes and the session's recap
+              // ids, right where the ids belong (owner, 2026-11-26).
               <box style={{ flexShrink: 0 }}>
+                {showFullRecap ? (
+                  <RecapPanel
+                    width={mainW}
+                    lines={recapPanelLines}
+                    recap={agent.lastRecap}
+                    history={agent.recapHistory}
+                    turns={usage.turns}
+                    tools={usage.tools}
+                    ok={usage.ok}
+                    fail={usage.fail}
+                    web={usage.web}
+                    requests={usage.requests}
+                    elapsedMs={agent.elapsedMs}
+                    inTok={usage.inTok}
+                    outTok={usage.outTok}
+                    tokensKnown={usage.tokensKnown}
+                    ctxPct={usage.ctxPct}
+                    failed={agent.status === 'error'}
+                    todosDone={todosDone}
+                    todosTotal={agent.todos.length}
+                    points={agent.meters?.points || 0}
+                    learned={agent.learned?.added || 0}
+                    learnedSkills={agent.learned?.skills || 0}
+                  />
+                ) : (
                 <Recap
                   width={mainW}
                   recapId={agent.lastRecap?.id || ''}
@@ -2693,6 +2754,7 @@ export default function App({ version = '0.1.0' }) {
                   todosDone={todosDone}
                   todosTotal={agent.todos.length}
                 />
+                )}
               </box>
             ) : null}
           </box>

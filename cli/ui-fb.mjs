@@ -1601,12 +1601,12 @@ var require_catalog = __commonJS({
 });
 
 // src/index.jsx
-import React32 from "react";
+import React33 from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React31, { useCallback as useCallback6, useEffect as useEffect19, useRef as useRef15, useState as useState19 } from "react";
+import React32, { useCallback as useCallback6, useEffect as useEffect19, useRef as useRef15, useState as useState19 } from "react";
 import fs10 from "node:fs";
 import path7 from "node:path";
 import { useKeyboard as useKeyboard8, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
@@ -5239,10 +5239,157 @@ function Recap({
   return /* @__PURE__ */ jsx26("box", { style: { width: barW, flexDirection: "row", paddingLeft: 1, overflow: "hidden", flexShrink: 0 }, children: /* @__PURE__ */ jsx26("text", { children: shown2.map((seg, i) => /* @__PURE__ */ jsx26("span", { fg: seg.fg, children: `${i ? " \xB7 " : ""}${seg.text}` }, seg.key)) }) });
 }
 
-// src/components/DebugView.jsx
+// src/components/RecapPanel.jsx
 import React27 from "react";
+import { jsx as jsx27 } from "react/jsx-runtime";
+function clipSpans(spans, avail) {
+  let left = Math.max(0, avail);
+  const out = [];
+  for (const span of spans) {
+    if (left <= 0) break;
+    const text = String(span.text == null ? "" : span.text);
+    if (text.length > left) {
+      out.push({ ...span, text: `${text.slice(0, Math.max(0, left - 1))}\u2026` });
+      left = 0;
+      break;
+    }
+    out.push({ ...span, text });
+    left -= text.length;
+  }
+  return out;
+}
+function RecapPanel({
+  width,
+  lines = 6,
+  recap = null,
+  history = [],
+  // Session facts, used when no single run is being described (a restored
+  // transcript) and for the totals line under the run's own facts.
+  turns = 0,
+  tools = 0,
+  ok = 0,
+  fail = 0,
+  web = 0,
+  requests = 0,
+  elapsedMs = 0,
+  inTok = 0,
+  outTok = 0,
+  tokensKnown = false,
+  ctxPct = null,
+  failed = false,
+  todosDone = 0,
+  todosTotal = 0,
+  points = 0,
+  learned = 0,
+  learnedSkills = 0,
+  memWritten = 0
+}) {
+  const barW = Math.max(12, Number(width) || 80);
+  const avail = Math.max(8, barW - 2);
+  const budget = Math.max(1, Math.min(8, Number(lines) || 6));
+  const r = recap && typeof recap === "object" ? recap : {};
+  const rid = String(r.id || "").trim();
+  const runFail = Math.max(0, Number(r.fail) || 0);
+  const bad = runFail || Math.max(0, Number(fail) || 0);
+  const isBad = Boolean(failed);
+  const el = rid ? fmtElapsed(Number(r.ms) || Number(elapsedMs) || 0) : null;
+  const outcome = rid ? isBad ? "run failed" : "run complete" : "session totals";
+  const head = [
+    { text: "\u25A3 ", fg: isBad ? "red" : "#3fb950" },
+    { text: "full recap", fg: isBad ? "red" : "#3fb950" }
+  ];
+  if (rid) head.push({ text: ` ${rid}`, fg: "#58a6ff" });
+  head.push({ text: ` \xB7 ${outcome}`, fg: isBad ? "red" : "gray" });
+  if (el) head.push({ text: ` \xB7 ${el}`, fg: "gray" });
+  const idList = [];
+  for (const one of Array.isArray(history) ? history : []) {
+    const id = String(one && one.id || "").trim();
+    if (id && !idList.includes(id)) idList.push(id);
+    if (idList.length >= 6) break;
+  }
+  if (rid && !idList.includes(rid)) idList.unshift(rid);
+  const others = idList.filter((id) => id !== rid);
+  const idsSpans = others.length ? [
+    { text: "also ", fg: "gray" },
+    { text: others.join(" "), fg: "#58a6ff" },
+    { text: " \xB7 /recap #id reads it", fg: "gray" }
+  ] : [{ text: "/recap #id reads any finished run out of memory", fg: "gray" }];
+  const taskText = String(r.task || "").replace(/\s+/g, " ").trim();
+  const taskSpans = taskText ? [{ text: `"${taskText}"`, fg: "white" }] : [{ text: "this session", fg: "gray" }];
+  const tc = Math.max(0, Number(r.tools) || 0);
+  const gd = Math.max(0, Number(r.ok) || 0);
+  const lrn = Math.max(0, Number(r.learned) || 0);
+  const skills = Math.max(0, Number(r.learnedSkills) || 0);
+  const pts = Math.max(0, Math.round(Number(r.points != null ? r.points : points) || 0));
+  const memN = Math.max(0, Number(r.memWritten != null ? r.memWritten : memWritten) || 0);
+  const facts = [];
+  if (tc > 0) facts.push({ text: plural(tc, "tool"), fg: bad > 0 ? "yellow" : "white" });
+  if (tc > 0 && (gd > 0 || bad > 0)) {
+    facts.push({ text: `${gd} ok`, fg: "#3fb950" });
+    if (bad > 0) facts.push({ text: `${bad} err`, fg: "red" });
+  }
+  if (lrn > 0) {
+    const from = bad > 0 ? plural(bad, "error") : `${gd} ok`;
+    facts.push({ text: `learned ${lrn} from ${from}${skills ? ` \xB7 ${plural(skills, "skill")}` : ""}`, fg: "#3fb950" });
+  }
+  if (pts > 0) facts.push({ text: `\u2726 ${pts}p`, fg: barColor("points", pts) });
+  if (memN > 0) facts.push({ text: `mem +${memN}`, fg: "#58a6ff" });
+  const factSpans = [];
+  for (const one of facts) {
+    if (factSpans.length) factSpans.push({ text: " \xB7 ", fg: "gray" });
+    factSpans.push(one);
+  }
+  if (!factSpans.length) factSpans.push({ text: "no tool calls in this run", fg: "gray" });
+  const mistakeLines = [];
+  for (const f of (Array.isArray(r.failures) ? r.failures : []).slice(0, 2)) {
+    const tool = String(f && f.tool || "tool");
+    const error = String(f && f.error || f || "").replace(/\s+/g, " ").trim();
+    if (!error) continue;
+    mistakeLines.push([
+      { text: "\u2717 ", fg: "red" },
+      { text: `${tool}: `, fg: "yellow" },
+      { text: error, fg: "gray" }
+    ]);
+  }
+  const t = Math.max(0, Number(turns) || 0);
+  const sess = [];
+  if (t > 0) sess.push({ text: plural(t, "turn"), fg: "gray" });
+  if (tokensKnown) sess.push({ text: `${fmtCount(inTok)} in / ${fmtCount(outTok)} out`, fg: "gray" });
+  const pct = Number(ctxPct);
+  if (ctxPct !== null && ctxPct !== void 0 && Number.isFinite(pct)) {
+    sess.push({ text: `ctx ${Math.max(0, Math.min(100, Math.round(pct)))}%`, fg: "gray" });
+  }
+  const tt = Math.max(0, Number(todosTotal) || 0);
+  if (tt > 0) {
+    sess.push({ text: `${Math.max(0, Number(todosDone) || 0)}/${tt} todos`, fg: Math.max(0, Number(todosDone) || 0) >= tt ? "#3fb950" : "gray" });
+  }
+  if (Math.max(0, Number(web) || 0) > 0) sess.push({ text: `${Math.max(0, Number(web) || 0)} web`, fg: "gray" });
+  if (Math.max(0, Number(requests) || 0) > t) sess.push({ text: `${Math.max(0, Number(requests) || 0)} req`, fg: "gray" });
+  const sessSpans = [];
+  for (const one of sess) {
+    if (sessSpans.length) sessSpans.push({ text: " \xB7 ", fg: "gray" });
+    sessSpans.push(one);
+  }
+  if (!sessSpans.length) sessSpans.push({ text: "session idle", fg: "gray" });
+  const candidates = [
+    { key: "head", prio: 100, spans: head },
+    { key: "ids", prio: 95, spans: idsSpans },
+    { key: "task", prio: 80, spans: taskSpans },
+    ...mistakeLines.map((spans, i) => ({ key: `miss${i}`, prio: 70 - i * 5, spans })),
+    { key: "facts", prio: 60, spans: factSpans },
+    { key: "sess", prio: 40, spans: sessSpans }
+  ];
+  const chosen = new Set(
+    candidates.slice().sort((a, b) => b.prio - a.prio).slice(0, budget).map((line) => line.key)
+  );
+  const shown2 = candidates.filter((line) => chosen.has(line.key));
+  return /* @__PURE__ */ jsx27("box", { style: { width: barW, flexDirection: "column", paddingLeft: 1, overflow: "hidden", flexShrink: 0 }, children: shown2.map((line) => /* @__PURE__ */ jsx27("box", { style: { width: Math.max(8, barW - 2), height: 1, overflow: "hidden", flexShrink: 0 }, children: /* @__PURE__ */ jsx27("text", { children: clipSpans(line.spans, avail).map((span, i) => /* @__PURE__ */ jsx27("span", { fg: span.fg, children: span.text }, i)) }) }, line.key)) });
+}
+
+// src/components/DebugView.jsx
+import React28 from "react";
 import { TextAttributes as TextAttributes20 } from "@opentui/core";
-import { jsx as jsx27, jsxs as jsxs25 } from "react/jsx-runtime";
+import { jsx as jsx28, jsxs as jsxs25 } from "react/jsx-runtime";
 var clip8 = (s, n) => {
   const t = String(s == null ? "" : s);
   if (n <= 0) return "";
@@ -5272,14 +5419,14 @@ var yesNo = (v) => v ? "yes" : "no";
 function Row3({ width, labelW, label, value, color = "white" }) {
   const valueW = Math.max(4, width - labelW - 4);
   return /* @__PURE__ */ jsxs25("box", { style: { width, flexDirection: "row", flexShrink: 0 }, children: [
-    /* @__PURE__ */ jsx27("text", { fg: "gray", children: `  ${clip8(label, labelW).padEnd(labelW)} ` }),
-    /* @__PURE__ */ jsx27("text", { fg: color, children: clip8(value, valueW) })
+    /* @__PURE__ */ jsx28("text", { fg: "gray", children: `  ${clip8(label, labelW).padEnd(labelW)} ` }),
+    /* @__PURE__ */ jsx28("text", { fg: color, children: clip8(value, valueW) })
   ] });
 }
 function Section({ width, title, hint }) {
   return /* @__PURE__ */ jsxs25("box", { style: { width, flexDirection: "row", flexShrink: 0, justifyContent: "space-between" }, children: [
-    /* @__PURE__ */ jsx27("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: `\u25B8 ${title}` }),
-    hint ? /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip8(hint, Math.max(0, width - title.length - 8)) }) : null
+    /* @__PURE__ */ jsx28("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: `\u25B8 ${title}` }),
+    hint ? /* @__PURE__ */ jsx28("text", { fg: "gray", children: clip8(hint, Math.max(0, width - title.length - 8)) }) : null
   ] });
 }
 function slowestTools(messages, limit = 5) {
@@ -5309,45 +5456,45 @@ function DebugView({
   const lag = stats && stats.lag ? stats.lag : null;
   const proc = stats && stats.proc ? stats.proc : null;
   const srv = version && version.server ? version.server : null;
-  const tools = React27.useMemo(() => slowestTools(messages), [messages]);
+  const tools = React28.useMemo(() => slowestTools(messages), [messages]);
   const ctx = session.ctxPct == null ? "\u2014" : `${session.ctxPct}%`;
   const tokens = session.tokensKnown ? `${fmtNum2(session.inTok)} in / ${fmtNum2(session.outTok)} out` : "not reported";
   const auto = session.autoMode || "\u2014";
   return /* @__PURE__ */ jsxs25("box", { style: { width: w, flexDirection: "column" }, children: [
     /* @__PURE__ */ jsxs25("box", { style: { width: w, flexDirection: "row", justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx27("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: "\u25C7 Debugger" }),
-      /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip8(stats ? `live \xB7 ${Math.max(0, Math.round((Date.now() - stats.at) / 1e3))}s ago` : "sampling\u2026", Math.max(0, w - 12)) })
+      /* @__PURE__ */ jsx28("text", { fg: "cyan", attributes: TextAttributes20.BOLD, children: "\u25C7 Debugger" }),
+      /* @__PURE__ */ jsx28("text", { fg: "gray", children: clip8(stats ? `live \xB7 ${Math.max(0, Math.round((Date.now() - stats.at) / 1e3))}s ago` : "sampling\u2026", Math.max(0, w - 12)) })
     ] }),
-    /* @__PURE__ */ jsx27("text", { fg: "gray", children: clip8('r reset counters \xB7 pgup/pgdn scroll \xB7 esc back \u2014 every figure is measured, "\u2014" means no sample yet', w - 2) }),
-    /* @__PURE__ */ jsx27(Section, { width: w, title: "RENDER", hint: render ? `${fmtNum2(render.total)} app renders` : "" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "rate", value: render && render.perSec != null ? `${render.perSec.toFixed(1)} / s` : "\u2014", color: render && render.perSec != null && render.perSec > 8 ? "yellow" : "white" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "last", value: fmtMs(render && render.last), color: render && render.last > 50 ? "red" : "white" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "p50 / p95", value: render ? `${fmtMs(render.p50)} / ${fmtMs(render.p95)}` : "\u2014", color: render && render.p95 > 50 ? "yellow" : "white" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "max", value: fmtMs(render && render.max), color: render && render.max > 120 ? "red" : "white" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "samples", value: render ? `${fmtNum2(render.samples)} renders in this window` : "\u2014" }),
-    /* @__PURE__ */ jsx27(Section, { width: w, title: "EVENT LOOP", hint: lag ? `${fmtNum2(lag.samples)} samples \xB7 50 ms timer` : "" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "lag p50", value: fmtMs(lag && lag.p50), color: lag && lag.p50 > 20 ? "yellow" : "white" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "lag p95", value: fmtMs(lag && lag.p95), color: lag && lag.p95 > 40 ? "yellow" : "white" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "lag max", value: fmtMs(lag && lag.max), color: lag && lag.max > 120 ? "red" : "white" }),
-    /* @__PURE__ */ jsx27(Section, { width: w, title: "PROCESS" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "pid", value: proc ? `${proc.pid} \xB7 up ${fmtDur2(proc.uptimeSec)} (page open)` : "\u2014" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "rss / heap", value: proc ? `${fmtBytes(proc.rss)} \xB7 ${fmtBytes(proc.heapUsed)} of ${fmtBytes(proc.heapTotal)}` : "\u2014" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "handles", value: proc ? proc.handles == null ? "unavailable" : fmtNum2(proc.handles) : "\u2014" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "runtime", value: proc ? `node ${proc.node}${proc.bun ? ` \xB7 bun ${proc.bun}` : ""}` : "\u2014" }),
-    /* @__PURE__ */ jsx27(Section, { width: w, title: "TERMINAL" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "size", value: `${fmtNum2(terminal.cols)} x ${fmtNum2(terminal.rows)}` }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "graphics", value: terminal.graphics ? "kitty supported" : "none (half-block only)", color: terminal.graphics ? "green" : "gray" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "bundle", value: terminal.version ? `v${terminal.version}` : "\u2014" }),
-    /* @__PURE__ */ jsx27(Section, { width: w, title: "SESSION", hint: session.connected ? "server connected" : "server offline" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "view \xB7 phase", value: `${session.view || "chat"} \xB7 ${session.phase || "idle"}` }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "model", value: `${session.model || "\u2014"} \xB7 ${session.provider || "\u2014"}` }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "auto \xB7 handoff", value: `${auto}${session.handoff ? " \xB7 handoff on" : " \xB7 handoff off"}` }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "turns \xB7 tools", value: `${fmtNum2(session.turns)} turns \xB7 ${fmtNum2(session.tools)} calls (${fmtNum2(session.ok)} ok, ${fmtNum2(session.fail)} failed) \xB7 ${fmtNum2(session.web)} web` }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "tokens \xB7 ctx", value: `${tokens} \xB7 ctx ${ctx}`, color: session.tokensKnown ? "white" : "gray" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "files", value: session.guard ? `${session.guard.present}/${session.guard.total} guarded` : "\u2014" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "trust", value: session.trust == null ? "\u2014" : fmtNum2(session.trust) }),
-    /* @__PURE__ */ jsx27(Section, { width: w, title: "TOOLS", hint: tools.length ? "slowest calls this session" : "" }),
-    tools.length === 0 ? /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "none", value: "no timed tool calls yet", color: "gray" }) : tools.map((t, i) => /* @__PURE__ */ jsx27(
+    /* @__PURE__ */ jsx28("text", { fg: "gray", children: clip8('r reset counters \xB7 pgup/pgdn scroll \xB7 esc back \u2014 every figure is measured, "\u2014" means no sample yet', w - 2) }),
+    /* @__PURE__ */ jsx28(Section, { width: w, title: "RENDER", hint: render ? `${fmtNum2(render.total)} app renders` : "" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "rate", value: render && render.perSec != null ? `${render.perSec.toFixed(1)} / s` : "\u2014", color: render && render.perSec != null && render.perSec > 8 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "last", value: fmtMs(render && render.last), color: render && render.last > 50 ? "red" : "white" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "p50 / p95", value: render ? `${fmtMs(render.p50)} / ${fmtMs(render.p95)}` : "\u2014", color: render && render.p95 > 50 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "max", value: fmtMs(render && render.max), color: render && render.max > 120 ? "red" : "white" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "samples", value: render ? `${fmtNum2(render.samples)} renders in this window` : "\u2014" }),
+    /* @__PURE__ */ jsx28(Section, { width: w, title: "EVENT LOOP", hint: lag ? `${fmtNum2(lag.samples)} samples \xB7 50 ms timer` : "" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "lag p50", value: fmtMs(lag && lag.p50), color: lag && lag.p50 > 20 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "lag p95", value: fmtMs(lag && lag.p95), color: lag && lag.p95 > 40 ? "yellow" : "white" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "lag max", value: fmtMs(lag && lag.max), color: lag && lag.max > 120 ? "red" : "white" }),
+    /* @__PURE__ */ jsx28(Section, { width: w, title: "PROCESS" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "pid", value: proc ? `${proc.pid} \xB7 up ${fmtDur2(proc.uptimeSec)} (page open)` : "\u2014" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "rss / heap", value: proc ? `${fmtBytes(proc.rss)} \xB7 ${fmtBytes(proc.heapUsed)} of ${fmtBytes(proc.heapTotal)}` : "\u2014" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "handles", value: proc ? proc.handles == null ? "unavailable" : fmtNum2(proc.handles) : "\u2014" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "runtime", value: proc ? `node ${proc.node}${proc.bun ? ` \xB7 bun ${proc.bun}` : ""}` : "\u2014" }),
+    /* @__PURE__ */ jsx28(Section, { width: w, title: "TERMINAL" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "size", value: `${fmtNum2(terminal.cols)} x ${fmtNum2(terminal.rows)}` }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "graphics", value: terminal.graphics ? "kitty supported" : "none (half-block only)", color: terminal.graphics ? "green" : "gray" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "bundle", value: terminal.version ? `v${terminal.version}` : "\u2014" }),
+    /* @__PURE__ */ jsx28(Section, { width: w, title: "SESSION", hint: session.connected ? "server connected" : "server offline" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "view \xB7 phase", value: `${session.view || "chat"} \xB7 ${session.phase || "idle"}` }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "model", value: `${session.model || "\u2014"} \xB7 ${session.provider || "\u2014"}` }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "auto \xB7 handoff", value: `${auto}${session.handoff ? " \xB7 handoff on" : " \xB7 handoff off"}` }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "turns \xB7 tools", value: `${fmtNum2(session.turns)} turns \xB7 ${fmtNum2(session.tools)} calls (${fmtNum2(session.ok)} ok, ${fmtNum2(session.fail)} failed) \xB7 ${fmtNum2(session.web)} web` }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "tokens \xB7 ctx", value: `${tokens} \xB7 ctx ${ctx}`, color: session.tokensKnown ? "white" : "gray" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "files", value: session.guard ? `${session.guard.present}/${session.guard.total} guarded` : "\u2014" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "trust", value: session.trust == null ? "\u2014" : fmtNum2(session.trust) }),
+    /* @__PURE__ */ jsx28(Section, { width: w, title: "TOOLS", hint: tools.length ? "slowest calls this session" : "" }),
+    tools.length === 0 ? /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "none", value: "no timed tool calls yet", color: "gray" }) : tools.map((t, i) => /* @__PURE__ */ jsx28(
       Row3,
       {
         width: w,
@@ -5358,11 +5505,11 @@ function DebugView({
       },
       `${t.name}-${i}`
     )),
-    /* @__PURE__ */ jsx27(Section, { width: w, title: "SERVER", hint: versionErr ? "" : version ? "live /api/version" : "" }),
-    versionErr ? /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "error", value: versionErr, color: "red" }) : null,
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "web build", value: version && version.build ? version.build : "\u2014" }),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "server build", value: srv && srv.build ? srv.build : "\u2014" }),
-    /* @__PURE__ */ jsx27(
+    /* @__PURE__ */ jsx28(Section, { width: w, title: "SERVER", hint: versionErr ? "" : version ? "live /api/version" : "" }),
+    versionErr ? /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "error", value: versionErr, color: "red" }) : null,
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "web build", value: version && version.build ? version.build : "\u2014" }),
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "server build", value: srv && srv.build ? srv.build : "\u2014" }),
+    /* @__PURE__ */ jsx28(
       Row3,
       {
         width: w,
@@ -5372,7 +5519,7 @@ function DebugView({
         color: srv && srv.applying ? "yellow" : srv && srv.stale ? "yellow" : "white"
       }
     ),
-    /* @__PURE__ */ jsx27(
+    /* @__PURE__ */ jsx28(
       Row3,
       {
         width: w,
@@ -5382,15 +5529,15 @@ function DebugView({
         color: srv && srv.cliAttached ? "green" : "white"
       }
     ),
-    /* @__PURE__ */ jsx27(Row3, { width: w, labelW, label: "mcp", value: session.mcp ? `${fmtNum2(session.mcp.up)}/${fmtNum2(session.mcp.total)} servers up` : "\u2014" }),
-    /* @__PURE__ */ jsx27("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx27("text", { fg: "gray", children: " " }) })
+    /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "mcp", value: session.mcp ? `${fmtNum2(session.mcp.up)}/${fmtNum2(session.mcp.total)} servers up` : "\u2014" }),
+    /* @__PURE__ */ jsx28("box", { style: { width: w, flexShrink: 0 }, children: /* @__PURE__ */ jsx28("text", { fg: "gray", children: " " }) })
   ] });
 }
 
 // src/components/TodoPanel.jsx
-import React28 from "react";
+import React29 from "react";
 import { TextAttributes as TextAttributes21 } from "@opentui/core";
-import { jsx as jsx28, jsxs as jsxs26 } from "react/jsx-runtime";
+import { jsx as jsx29, jsxs as jsxs26 } from "react/jsx-runtime";
 var GLYPH_DONE = "\u2713";
 var GLYPH_TODO = "\u25CB";
 var EMPTY_TEXT = "No todos yet \u2014 the agent's checklist appears here once it creates one.";
@@ -5398,7 +5545,7 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
   const list = Array.isArray(todos) ? todos : [];
   const completed = list.filter((t) => t && t.done).length;
   const title = width && width < 34 ? `Todos ${completed}/${list.length}` : `Todos \u2014 ${completed}/${list.length} completed`;
-  return /* @__PURE__ */ jsx28(
+  return /* @__PURE__ */ jsx29(
     ScrollPanel_default,
     {
       width,
@@ -5413,8 +5560,8 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
         const done = !!todo.done;
         const text = clip(todo.text || "", Math.max(1, bodyW - 2));
         return /* @__PURE__ */ jsxs26("box", { style: { width: bodyW, flexDirection: "row", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx28("text", { fg: done ? "green" : "gray", attributes: done || compact ? 0 : TextAttributes21.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
-          /* @__PURE__ */ jsx28("text", { fg: done ? "white" : "gray", children: ` ${text}` })
+          /* @__PURE__ */ jsx29("text", { fg: done ? "green" : "gray", attributes: done || compact ? 0 : TextAttributes21.DIM, children: done ? GLYPH_DONE : GLYPH_TODO }),
+          /* @__PURE__ */ jsx29("text", { fg: done ? "white" : "gray", children: ` ${text}` })
         ] });
       }
     }
@@ -5422,13 +5569,13 @@ function TodoPanel({ todos = [], width, hint, maxVisibleRows = 8 }) {
 }
 
 // src/components/Transcript.jsx
-import React30, { useEffect as useEffect11, useRef as useRef8, useState as useState12 } from "react";
+import React31, { useEffect as useEffect11, useRef as useRef8, useState as useState12 } from "react";
 import { useKeyboard as useKeyboard7 } from "@opentui/react";
 
 // src/components/MessageBlock.jsx
-import React29, { useEffect as useEffect10, useMemo as useMemo4, useState as useState11 } from "react";
+import React30, { useEffect as useEffect10, useMemo as useMemo4, useState as useState11 } from "react";
 import { TextAttributes as TextAttributes22 } from "@opentui/core";
-import { Fragment as Fragment10, jsx as jsx29, jsxs as jsxs27 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 var RESULT_LINES = 3;
 var ROLE_STYLE = {
   user: { border: "cyan", label: "you" },
@@ -5475,7 +5622,7 @@ function DecodedReasoning({ text, width }) {
   const out = plan ? waveText(plan, frame) : { text: plain.text, done: true, progress: 1 };
   const color = out.done ? plain.color : waveColor(0, frame, out.progress);
   const lines = out.text.replace(/^\n/, "").replace(/\n$/, "").split("\n");
-  return /* @__PURE__ */ jsx29("box", { style: { flexDirection: "column", width: columns, flexShrink: 0, overflow: "hidden" }, children: lines.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: color, children: line }, `rd-${i}`)) });
+  return /* @__PURE__ */ jsx30("box", { style: { flexDirection: "column", width: columns, flexShrink: 0, overflow: "hidden" }, children: lines.map((line, i) => /* @__PURE__ */ jsx30("text", { fg: color, children: line }, `rd-${i}`)) });
 }
 function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand, label = true }) {
   const frame = useSpinnerFrame(live);
@@ -5494,25 +5641,25 @@ function ThinkingBlock({ text, startedAt, endedAt, live, width, compact, expand,
   if (live) {
     return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
       label ? /* @__PURE__ */ jsxs27("text", { children: [
-        /* @__PURE__ */ jsx29("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
-        /* @__PURE__ */ jsx29("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur(Date.now() - started)}` : ""}` })
+        /* @__PURE__ */ jsx30("span", { fg: "yellow", children: `${SPINNER_FRAMES[frame]} ` }),
+        /* @__PURE__ */ jsx30("span", { fg: "gray", children: `thinking\u2026${started ? ` ${fmtDur(Date.now() - started)}` : ""}` })
       ] }) : null,
-      settled.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "gray", children: line.trim() }, `th-${i}`)),
-      newest ? /* @__PURE__ */ jsx29("text", { fg: newestWave.done ? "gray" : waveColor(0, newestFrame, newestWave.progress), children: (newestWave.done ? newest : newestWave.text).trim() }) : null
+      settled.map((line, i) => /* @__PURE__ */ jsx30("text", { fg: "gray", children: line.trim() }, `th-${i}`)),
+      newest ? /* @__PURE__ */ jsx30("text", { fg: newestWave.done ? "gray" : waveColor(0, newestFrame, newestWave.progress), children: (newestWave.done ? newest : newestWave.text).trim() }) : null
     ] });
   }
   if (!expand) {
     const label2 = started && ended ? thoughtFor(ended - started) : lastLine(text);
-    return /* @__PURE__ */ jsx29("text", { fg: "gray", children: clip(`\u22EF ${label2}`, Math.max(4, width)) });
+    return /* @__PURE__ */ jsx30("text", { fg: "gray", children: clip(`\u22EF ${label2}`, Math.max(4, width)) });
   }
-  return /* @__PURE__ */ jsx29(DecodedReasoning, { text, width });
+  return /* @__PURE__ */ jsx30(DecodedReasoning, { text, width });
 }
 function ProseBlock({ text, live, width, compact }) {
-  if (!live) return /* @__PURE__ */ jsx29("text", { fg: "white", children: String(text) });
+  if (!live) return /* @__PURE__ */ jsx30("text", { fg: "white", children: String(text) });
   const window = tailWindow(text, compact ? 3 : LIVE_TEXT_LINES);
   return /* @__PURE__ */ jsxs27("box", { style: { flexDirection: "column", width, flexShrink: 0 }, children: [
-    window.hidden ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: `\u22EF ${window.hidden} earlier line${window.hidden === 1 ? "" : "s"} (writing)` }) : null,
-    window.lines.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: "white", children: line.trim() }, `pr-${i}`))
+    window.hidden ? /* @__PURE__ */ jsx30("text", { fg: "gray", children: `\u22EF ${window.hidden} earlier line${window.hidden === 1 ? "" : "s"} (writing)` }) : null,
+    window.lines.map((line, i) => /* @__PURE__ */ jsx30("text", { fg: "white", children: line.trim() }, `pr-${i}`))
   ] });
 }
 var SPINNER_FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
@@ -5563,17 +5710,17 @@ function ToolRow({ tool, width, compact = false, outputLabel = "\u25B6 Output" }
         glyph,
         " "
       ] }),
-      /* @__PURE__ */ jsx29("span", { fg: "white", children: name }),
-      args ? /* @__PURE__ */ jsx29("span", { fg: "gray", children: ` ${clip(args, argW)}` }) : null,
-      dur ? /* @__PURE__ */ jsx29("span", { fg: "gray", children: `  ${dur}` }) : null
+      /* @__PURE__ */ jsx30("span", { fg: "white", children: name }),
+      args ? /* @__PURE__ */ jsx30("span", { fg: "gray", children: ` ${clip(args, argW)}` }) : null,
+      dur ? /* @__PURE__ */ jsx30("span", { fg: "gray", children: `  ${dur}` }) : null
     ] }),
-    lines.map((line, i) => /* @__PURE__ */ jsx29("text", { fg: failed ? "red" : "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
-    pending && !lines.length ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: clip("\u2502 waiting for output\u2026", Math.max(4, width)) }) : null,
+    lines.map((line, i) => /* @__PURE__ */ jsx30("text", { fg: failed ? "red" : "gray", children: clip(line.trim() || " ", Math.max(4, width - 1)) }, `r-${i}`)),
+    pending && !lines.length ? /* @__PURE__ */ jsx30("text", { fg: "gray", children: clip("\u2502 waiting for output\u2026", Math.max(4, width)) }) : null,
     hidden > 0 ? (
       // The pointer names the pane that actually holds the rest: the right
       // ◈ Live → ▶ Output on a wide terminal, the middle ▶ Result box on a
       // narrow one (owner, 2026-11-24: one live panel, on the right).
-      /* @__PURE__ */ jsx29("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 ${outputLabel}` })
+      /* @__PURE__ */ jsx30("text", { fg: "gray", children: `\u2026 +${hidden} more line${hidden === 1 ? "" : "s"} \xB7 ${outputLabel}` })
     ) : null
   ] });
 }
@@ -5583,7 +5730,7 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   const border = message.role === "system" && message.tone ? TONE_COLOR[message.tone] || roleStyle.border : roleStyle.border;
   const inner = Math.max(8, (width || 80) - 4);
   if (message.role === "system") {
-    return /* @__PURE__ */ jsx29("box", { style: { width, flexShrink: 0, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx29("text", { fg: border, children: String(message.text || "") }) });
+    return /* @__PURE__ */ jsx30("box", { style: { width, flexShrink: 0, border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx30("text", { fg: border, children: String(message.text || "") }) });
   }
   const tools = Array.isArray(message.tools) ? message.tools : [];
   const rounds = (Array.isArray(message.rounds) ? message.rounds : []).filter(
@@ -5591,10 +5738,10 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
   );
   return /* @__PURE__ */ jsxs27("box", { style: { width, flexShrink: 0, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: border, paddingLeft: 1, paddingRight: 1 }, children: [
     compact ? null : /* @__PURE__ */ jsxs27("box", { style: { width: inner, flexDirection: "row", overflow: "hidden", flexShrink: 0 }, children: [
-      /* @__PURE__ */ jsx29("text", { fg: border, attributes: TextAttributes22.BOLD, children: roleStyle.label }),
-      message.role === "assistant" && message.ms != null ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: ` \xB7 ${fmtDur(message.ms)}` }) : null
+      /* @__PURE__ */ jsx30("text", { fg: border, attributes: TextAttributes22.BOLD, children: roleStyle.label }),
+      message.role === "assistant" && message.ms != null ? /* @__PURE__ */ jsx30("text", { fg: "gray", children: ` \xB7 ${fmtDur(message.ms)}` }) : null
     ] }),
-    message.images ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: `\u22B8 ${message.imageName || `${message.images} image`}` }) : null,
+    message.images ? /* @__PURE__ */ jsx30("text", { fg: "gray", children: `\u22B8 ${message.imageName || `${message.images} image`}` }) : null,
     rounds.length ? rounds.map((round, i) => {
       const tail = live && i === rounds.length - 1;
       const roundTools = Array.isArray(round.tools) ? round.tools : [];
@@ -5606,9 +5753,9 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
           // where it landed in the run — one row, in the operator's own
           // colour, so the answer after it reads underneath it and the
           // panel's newest row is never a leftover input line.
-          /* @__PURE__ */ jsx29("text", { fg: "cyan", children: clip(`\u21B3 you \xB7 ${String(round.steer).replace(/\s+/g, " ").trim()}`, inner) })
+          /* @__PURE__ */ jsx30("text", { fg: "cyan", children: clip(`\u21B3 you \xB7 ${String(round.steer).replace(/\s+/g, " ").trim()}`, inner) })
         ) : null,
-        round.thinking && String(round.thinking).trim() ? /* @__PURE__ */ jsx29(
+        round.thinking && String(round.thinking).trim() ? /* @__PURE__ */ jsx30(
           ThinkingBlock,
           {
             text: round.thinking,
@@ -5621,11 +5768,11 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
             label: showLiveLabel
           }
         ) : null,
-        round.text && String(round.text).trim() ? /* @__PURE__ */ jsx29(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
-        roundTools.map((tool, j) => /* @__PURE__ */ jsx29(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}-${j}`))
+        round.text && String(round.text).trim() ? /* @__PURE__ */ jsx30(ProseBlock, { text: round.text, live: proseLive, width: inner, compact }) : null,
+        roundTools.map((tool, j) => /* @__PURE__ */ jsx30(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}-${j}`))
       ] }, `round-${i}`);
     }) : /* @__PURE__ */ jsxs27(Fragment10, { children: [
-      message.thinking ? /* @__PURE__ */ jsx29(
+      message.thinking ? /* @__PURE__ */ jsx30(
         ThinkingBlock,
         {
           text: message.thinking,
@@ -5638,20 +5785,20 @@ function MessageBlock({ message, width, compact = false, live = false, expandThi
           label: showLiveLabel
         }
       ) : null,
-      message.text ? /* @__PURE__ */ jsx29(ProseBlock, { text: message.text, live: live && !tools.length, width: inner, compact }) : !message.thinking && tools.length === 0 ? (
+      message.text ? /* @__PURE__ */ jsx30(ProseBlock, { text: message.text, live: live && !tools.length, width: inner, compact }) : !message.thinking && tools.length === 0 ? (
         // Same duplicate, one row lower: the plain "thinking…" under the
         // live spinner. Only drawn where the spinner row is absent.
-        showLiveLabel ? /* @__PURE__ */ jsx29("text", { fg: "gray", children: "thinking\u2026" }) : null
+        showLiveLabel ? /* @__PURE__ */ jsx30("text", { fg: "gray", children: "thinking\u2026" }) : null
       ) : null,
-      tools.map((tool, i) => /* @__PURE__ */ jsx29(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}`))
+      tools.map((tool, i) => /* @__PURE__ */ jsx30(ToolRow, { tool, width: inner, compact, outputLabel }, `tool-${i}`))
     ] })
   ] });
 }
-var MemoMessageBlock = React29.memo(MessageBlock);
+var MemoMessageBlock = React30.memo(MessageBlock);
 var MessageBlock_default = MemoMessageBlock;
 
 // src/components/Transcript.jsx
-import { jsx as jsx30, jsxs as jsxs28 } from "react/jsx-runtime";
+import { jsx as jsx31, jsxs as jsxs28 } from "react/jsx-runtime";
 var MAX_TURNS = 40;
 var CONTENT_OPTIONS = { justifyContent: "flex-end" };
 var SCROLLBAR_OPTIONS = {
@@ -5746,12 +5893,12 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
       // fresh start the composer floated up under a one-line hint with a big
       // blank gap beneath it instead of sitting at the bottom of the screen.
       // The hint is bottom-aligned so it hugs the composer row.
-      /* @__PURE__ */ jsx30("box", { style: { width, ...frame, overflow: "hidden", flexDirection: "column", justifyContent: "flex-end" }, children: /* @__PURE__ */ jsx30("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) })
+      /* @__PURE__ */ jsx31("box", { style: { width, ...frame, overflow: "hidden", flexDirection: "column", justifyContent: "flex-end" }, children: /* @__PURE__ */ jsx31("text", { fg: "gray", children: emptyHint || "Ask for something and the agent runs it." }) })
     );
   }
   const contentW = Math.max(8, (Number(width) || 80) - 1);
   const compact = budget < 12 || contentW < 40;
-  return /* @__PURE__ */ jsx30("box", { style: { width, ...frame, overflow: "hidden" }, children: /* @__PURE__ */ jsxs28(
+  return /* @__PURE__ */ jsx31("box", { style: { width, ...frame, overflow: "hidden" }, children: /* @__PURE__ */ jsxs28(
     "scrollbox",
     {
       ref: setBox,
@@ -5768,8 +5915,8 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
       contentOptions: CONTENT_OPTIONS,
       scrollbarOptions: SCROLLBAR_OPTIONS,
       children: [
-        hidden > 0 ? /* @__PURE__ */ jsx30("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
-        /* @__PURE__ */ jsx30("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message, i) => /* @__PURE__ */ jsx30("box", { style: { marginBottom: compact ? 0 : 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx30(
+        hidden > 0 ? /* @__PURE__ */ jsx31("text", { fg: "gray", children: `\u2026 ${hidden} earlier turn${hidden === 1 ? "" : "s"} (PgUp)` }) : null,
+        /* @__PURE__ */ jsx31("box", { style: { flexDirection: "column", width: contentW }, children: capped.map((message, i) => /* @__PURE__ */ jsx31("box", { style: { marginBottom: compact ? 0 : 1, flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
           MessageBlock_default,
           {
             message,
@@ -5785,7 +5932,7 @@ function Transcript({ messages = [], width, height, emptyHint, scrollRef, live =
     }
   ) });
 }
-var MemoTranscript = React30.memo(Transcript);
+var MemoTranscript = React31.memo(Transcript);
 var Transcript_default = MemoTranscript;
 
 // src/hooks/useAgentStream.js
@@ -5924,6 +6071,7 @@ function useAgentStream({
   const [learned, setLearned] = useState13({ added: 0, skills: 0, events: 0 });
   const learnedRef = useRef9({ added: 0, skills: 0, events: 0 });
   const [lastRecap, setLastRecap] = useState13(null);
+  const [recapHistory, setRecapHistory] = useState13([]);
   const failuresRef = useRef9([]);
   const learnedAtStartRef = useRef9({ added: 0, skills: 0, events: 0 });
   const toolMetaRef = useRef9(/* @__PURE__ */ new Map());
@@ -6566,12 +6714,16 @@ function useAgentStream({
         setError(null);
         setStatusBoth("connecting");
       }
+      const turnMs = startedAtRef.current ? Math.max(0, Date.now() - startedAtRef.current) : 0;
       try {
         const snap = meterRef.current.snapshot();
         const start2 = learnedAtStartRef.current || { added: 0, skills: 0, events: 0 };
         const recap = {
           id: recapId,
           at: Date.now(),
+          // The run's own wall clock, so a recap id carries how long its run
+          // took and the panel never borrows another run's timer.
+          ms: turnMs,
           // What the run was: the row states it, so the recap says what it is a
           // recap OF (owner, 2026-11-26: "make sure the recapp is working and
           // says what the recap is"). The task as sent, not a rewritten title.
@@ -6585,6 +6737,7 @@ function useAgentStream({
           failures: failuresRef.current.slice(0, 5)
         };
         setLastRecap(recap);
+        setRecapHistory((prev) => [recap, ...prev.filter((one) => one.id !== recap.id)].slice(0, 25));
         if (snap.rounds > 0) {
           fetch(`${api}/api/agent/session-summary`, {
             method: "POST",
@@ -6597,12 +6750,12 @@ function useAgentStream({
           }).then((r) => r.ok ? r.json() : null).then((data) => {
             if (!data || data.ok !== true) return;
             setLastRecap((prev) => prev && prev.id === recapId ? { ...prev, memWritten: Number(data.written) || 0 } : prev);
+            setRecapHistory((prev) => prev.map((one) => one.id === recapId ? { ...one, memWritten: Number(data.written) || 0 } : one));
           }).catch(() => {
           });
         }
       } catch {
       }
-      const turnMs = startedAtRef.current ? Math.max(0, Date.now() - startedAtRef.current) : 0;
       if (turnMs) patch(assistantId, (m) => ({ ...m, ms: turnMs, finishedAt: Date.now() }));
       abortRef.current = null;
       activeRunIdRef.current = null;
@@ -6666,6 +6819,7 @@ function useAgentStream({
     meters,
     learned,
     lastRecap,
+    recapHistory,
     activity,
     progressAtRef,
     loopAt,
@@ -7457,7 +7611,7 @@ var import_ladder2 = __toESM(require_ladder());
 var import_catalog = __toESM(require_catalog());
 var import_kitty_graphics3 = __toESM(require_kitty_graphics());
 var import_ad_client2 = __toESM(require_ad_client());
-import { Fragment as Fragment11, jsx as jsx31, jsxs as jsxs29 } from "react/jsx-runtime";
+import { Fragment as Fragment11, jsx as jsx32, jsxs as jsxs29 } from "react/jsx-runtime";
 var API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 var MCP_OUTPUT_LINES = 6;
 var MCP_PANEL_SETTLE_MS = 8e3;
@@ -7551,7 +7705,7 @@ function App({ version = "0.1.0" }) {
   const renderT0 = noteRenderStart();
   const renderer2 = useRenderer3();
   const { width: cols, height: rows } = useTerminalDimensions();
-  React31.useLayoutEffect(() => {
+  React32.useLayoutEffect(() => {
     noteRenderEnd(renderT0);
   });
   const [view, setView] = useState19("chat");
@@ -7712,7 +7866,7 @@ function App({ version = "0.1.0" }) {
   const ctxMax = Number(agent.contextWindow) > 0 ? Number(agent.contextWindow) : import_catalog.default.contextMaxFor(model || import_ladder2.PRIMARY_MODEL) || 1;
   const ctxUsed = Number(agent.contextUsed || status && (status.tokens || status.contextUsed) || 0);
   const meters = agent.meters || null;
-  const lastAssistant = React31.useMemo(() => {
+  const lastAssistant = React32.useMemo(() => {
     for (let i = agent.messages.length - 1; i >= 0; i--) {
       if (agent.messages[i].role === "assistant") return agent.messages[i];
     }
@@ -7721,19 +7875,19 @@ function App({ version = "0.1.0" }) {
   const lastTool = lastAssistant && Array.isArray(lastAssistant.tools) && lastAssistant.tools.length ? lastAssistant.tools[lastAssistant.tools.length - 1] : null;
   const liveToolTxt = lastTool ? `${lastTool.name}${toolArgLine(lastTool.args)}` : "";
   const livePhase = !agent.busy ? "result" : lastAssistant && String(lastAssistant.text || "").trim() ? "writing" : lastAssistant && String(lastAssistant.thinking || "").trim() ? "thinking" : lastTool && lastTool.result == null ? "running" : "waiting";
-  const liveLines = React31.useMemo(() => {
+  const liveLines = React32.useMemo(() => {
     if (!lastAssistant) return [];
     const toLines = (v) => String(v == null ? "" : v).replace(/\r/g, "").split("\n").filter((l) => l.trim());
     const text = toLines(lastAssistant.text);
     const result = lastTool && lastTool.result != null ? toLines(lastTool.result) : [];
     return text.length ? text : result;
   }, [lastAssistant, lastTool]);
-  const liveImage = React31.useMemo(() => lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null, [lastAssistant, lastTool]);
+  const liveImage = React32.useMemo(() => lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null, [lastAssistant, lastTool]);
   const host = useHostStats(1e3);
   const memory = useMemoryBank(1e4);
   const update = useCliUpdate(void 0, version);
   const runner = useScriptRunner_default();
-  const { userTurns, toolCalls, webCalls } = React31.useMemo(() => {
+  const { userTurns, toolCalls, webCalls } = React32.useMemo(() => {
     const msgs = agent.messages;
     let turns = 0;
     let calls = 0;
@@ -7801,7 +7955,7 @@ function App({ version = "0.1.0" }) {
       update.status === "blocked" ? `\u2B06 CLI v${update.version} staged \u2014 this is a source checkout; nothing was written, pull/install when ready` : `\u2B06 CLI v${update.version} staged \u2014 applies when the CLI restarts`
     );
   }, [update, showNotice]);
-  const settingsRows = React31.useMemo(() => {
+  const settingsRows = React32.useMemo(() => {
     void prefsTick;
     let rows2 = [];
     try {
@@ -8022,6 +8176,18 @@ function App({ version = "0.1.0" }) {
         const want = String(arg || "").trim().toLowerCase().replace(/^#?/, "#");
         const last = agent.lastRecap;
         if (!arg) {
+          const hist = Array.isArray(agent.recapHistory) ? agent.recapHistory : [];
+          if (hist.length > 1) {
+            const rows2 = hist.slice(0, 8).map((r) => {
+              const text = String(r.task || "").replace(/\s+/g, " ").trim();
+              const tools = `${Number(r.tools) || 0} tools (${Number(r.ok) || 0} ok \xB7 ${Number(r.fail) || 0} err)`;
+              const pts = Number(r.points) > 0 ? ` \xB7 \u2726 ${Math.round(Number(r.points))}p` : "";
+              const what2 = text ? `  ${text.length > 40 ? `${text.slice(0, 39)}\u2026` : text}` : "";
+              return `  ${r.id}  ${tools}${pts}${what2}`;
+            });
+            agent.note([`\u25A3 recap \u2014 ${hist.length} runs this session`, ...rows2, "  /recap #id reads one back out of memory"].join("\n"), "notice");
+            return;
+          }
           const what = last && last.task ? ` "${String(last.task).length > 48 ? `${String(last.task).slice(0, 47)}\u2026` : String(last.task)}"` : "";
           showNotice(last && last.id ? `\u25A3 recap ${last.id}${what} \xB7 ${last.tools} tools (${last.ok} ok \xB7 ${last.fail} err) \xB7 \u2726 ${last.points}p \u2014 /recap ${last.id} reads it from memory` : "\u25A3 recap \u2014 no finished run yet \xB7 /recap #id reads any run from memory");
           return;
@@ -8854,6 +9020,12 @@ function App({ version = "0.1.0" }) {
     Math.min(liveOutputLineCap, sharedBudget - 1, Math.max(liveFloor, Math.round(sharedBudget * 0.35)))
   ) : 0;
   const transcriptRows = Math.max(1, sharedBudget - liveOutputLines);
+  const RECAP_PANEL_MAX = 6;
+  const recapSpare = showRecap ? Math.max(0, transcriptRows - 4) : 0;
+  const recapExtra = Math.max(0, Math.min(RECAP_PANEL_MAX - 1, recapSpare));
+  const showFullRecap = showRecap && recapExtra >= 2;
+  const recapPanelLines = showFullRecap ? recapExtra + 1 : 1;
+  const transcriptRowsFinal = Math.max(4, transcriptRows - (showFullRecap ? recapExtra : 0));
   const dashboardItems = [
     {
       key: "system",
@@ -8939,7 +9111,7 @@ function App({ version = "0.1.0" }) {
       color: "#00ff41",
       bold: true
     } : update && update.status === "blocked" ? { text: `update v${update.version} held \xB7 source checkout`, color: "gray" } : update && update.status === "staged" ? { text: `update v${update.version} staged \xB7 applies on restart`, color: "yellow" } : { text: "up to date \xB7 updates check live", color: "gray" };
-    return /* @__PURE__ */ jsx31(
+    return /* @__PURE__ */ jsx32(
       DecodeSplash,
       {
         width: cols || 100,
@@ -8965,23 +9137,23 @@ function App({ version = "0.1.0" }) {
     /* @__PURE__ */ jsxs29("box", { style: { width: panelW, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: [
       /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "row" }, children: [
         statusBoxShown ? null : /* @__PURE__ */ jsxs29(Fragment11, { children: [
-          /* @__PURE__ */ jsx31("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes23.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
-          /* @__PURE__ */ jsx31("text", { fg: "cyan", attributes: TextAttributes23.BOLD, children: "\u25C6 HAKSTER-AI" }),
-          /* @__PURE__ */ jsx31("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
-          headerFiles ? /* @__PURE__ */ jsx31("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
+          /* @__PURE__ */ jsx32("text", { fg: status ? statusErr ? "red" : "green" : "yellow", attributes: TextAttributes23.BOLD, children: statusErr ? "\u25CB " : status ? "\u25CF " : "\u25CC " }),
+          /* @__PURE__ */ jsx32("text", { fg: "cyan", attributes: TextAttributes23.BOLD, children: "\u25C6 HAKSTER-AI" }),
+          /* @__PURE__ */ jsx32("text", { fg: statusErr ? "red" : status ? "green" : "yellow", children: ` \xB7 ${headerState}` }),
+          headerFiles ? /* @__PURE__ */ jsx32("text", { fg: guard.missing && guard.missing.length ? "red" : "gray", children: `   ${headerFiles}` }) : null
         ] }),
         headerMeter ? /* @__PURE__ */ jsxs29("text", { children: [
-          statusBoxShown ? null : /* @__PURE__ */ jsx31("span", { fg: "gray", children: "   " }),
-          headerMeter.parts.map((part, i) => /* @__PURE__ */ jsx31("span", { fg: part.fg, attributes: part.bold ? TextAttributes23.BOLD : 0, children: part.t }, i))
+          statusBoxShown ? null : /* @__PURE__ */ jsx32("span", { fg: "gray", children: "   " }),
+          headerMeter.parts.map((part, i) => /* @__PURE__ */ jsx32("span", { fg: part.fg, attributes: part.bold ? TextAttributes23.BOLD : 0, children: part.t }, i))
         ] }) : null
       ] }),
-      headerRight ? /* @__PURE__ */ jsx31("text", { children: headerRight.parts.map((part, i) => /* @__PURE__ */ jsx31("span", { fg: part.fg, attributes: part.bold ? TextAttributes23.BOLD : 0, children: part.t }, i)) }) : null
+      headerRight ? /* @__PURE__ */ jsx32("text", { children: headerRight.parts.map((part, i) => /* @__PURE__ */ jsx32("span", { fg: part.fg, attributes: part.bold ? TextAttributes23.BOLD : 0, children: part.t }, i)) }) : null
     ] }),
-    statusErr ? /* @__PURE__ */ jsx31("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs29("text", { fg: "red", children: [
+    statusErr ? /* @__PURE__ */ jsx32("box", { style: { width: panelW, border: true, borderStyle: "rounded", borderColor: "red", paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsxs29("text", { fg: "red", children: [
       "server unreachable \u2014 ",
       statusErr
     ] }) }) : null,
-    view === "models" ? /* @__PURE__ */ jsx31(
+    view === "models" ? /* @__PURE__ */ jsx32(
       ScrollPanel_default,
       {
         width: panelW,
@@ -8997,8 +9169,8 @@ function App({ version = "0.1.0" }) {
           const active = index === modelIdx;
           const vendorW = compact ? 7 : 11;
           return /* @__PURE__ */ jsxs29("box", { style: { width: rowW, flexDirection: "row", flexShrink: 0 }, children: [
-            /* @__PURE__ */ jsx31("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes23.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clipLine2(pick.vendor, vendorW)}` }),
-            /* @__PURE__ */ jsx31("text", { fg: active ? "yellow" : "white", children: ` ${clipLine2(pick.value, Math.max(4, rowW - vendorW - 3))}` })
+            /* @__PURE__ */ jsx32("text", { fg: active ? "yellow" : "gray", attributes: active ? TextAttributes23.BOLD : 0, children: `${active ? "\u25B8 " : "  "}${clipLine2(pick.vendor, vendorW)}` }),
+            /* @__PURE__ */ jsx32("text", { fg: active ? "yellow" : "white", children: ` ${clipLine2(pick.value, Math.max(4, rowW - vendorW - 3))}` })
           ] });
         }
       }
@@ -9006,7 +9178,7 @@ function App({ version = "0.1.0" }) {
       /* The full settings page: every key in cli-prefs.json, its live value
          and what it does. Same row budget as the models picker so the status
          bar never moves. */
-      /* @__PURE__ */ jsx31(
+      /* @__PURE__ */ jsx32(
         SettingsView,
         {
           width: panelW,
@@ -9018,7 +9190,7 @@ function App({ version = "0.1.0" }) {
     ) : view === "mcp" ? (
       /* The MCP server manager: each server's real state from
          /api/agent/mcp-status, with the selected server's tool names. */
-      /* @__PURE__ */ jsx31(
+      /* @__PURE__ */ jsx32(
         McpView,
         {
           width: panelW,
@@ -9027,7 +9199,7 @@ function App({ version = "0.1.0" }) {
           selected: mcpIdx
         }
       )
-    ) : view === "scripts" ? /* @__PURE__ */ jsx31(
+    ) : view === "scripts" ? /* @__PURE__ */ jsx32(
       ScriptsView,
       {
         width: panelW,
@@ -9036,7 +9208,7 @@ function App({ version = "0.1.0" }) {
         selected: scriptIdx,
         run: runner.run
       }
-    ) : view === "squad" ? /* @__PURE__ */ jsx31(
+    ) : view === "squad" ? /* @__PURE__ */ jsx32(
       SquadView,
       {
         width: panelW,
@@ -9048,13 +9220,13 @@ function App({ version = "0.1.0" }) {
       /* One scrollable page, like the dashboard: the page can be taller than
          a short terminal, so it scrolls with OpenTUI's own ▲/█/▼ bar instead
          of clipping the last measured rows (§ all-panels rule). */
-      /* @__PURE__ */ jsx31("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
+      /* @__PURE__ */ jsx32("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx32(
         "scrollbox",
         {
           ref: usageRef,
           style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
           scrollbarOptions: PAGE_SCROLLBAR,
-          children: /* @__PURE__ */ jsx31(
+          children: /* @__PURE__ */ jsx32(
             UsageView,
             {
               width: Math.max(1, panelW - 1),
@@ -9072,13 +9244,13 @@ function App({ version = "0.1.0" }) {
          plus the box's build state from /api/version. Every field is a sample
          this process took or a value the server reported; "\u2014" is printed
          where there is no sample yet. */
-      /* @__PURE__ */ jsx31("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
+      /* @__PURE__ */ jsx32("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx32(
         "scrollbox",
         {
           ref: debugRef,
           style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
           scrollbarOptions: PAGE_SCROLLBAR,
-          children: /* @__PURE__ */ jsx31(
+          children: /* @__PURE__ */ jsx32(
             DebugView,
             {
               width: Math.max(1, panelW - 1),
@@ -9125,20 +9297,20 @@ function App({ version = "0.1.0" }) {
          stack, so a short terminal clipped the services grid and pushed the
          status bar off the bottom. PgUp/PgDn (and ↑/↓, Home/End) scroll it;
          the panel cells auto-compact to one line on a short screen. */
-      /* @__PURE__ */ jsx31("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
+      /* @__PURE__ */ jsx32("box", { style: { width: panelW, height: dashRows, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx32(
         "scrollbox",
         {
           ref: dashRef,
           style: { width: panelW, height: dashRows, scrollY: true, scrollX: false, viewportCulling: true },
           scrollbarOptions: PAGE_SCROLLBAR,
           children: /* @__PURE__ */ jsxs29("box", { style: { width: Math.max(1, panelW - 1), flexDirection: "column" }, children: [
-            /* @__PURE__ */ jsx31(
+            /* @__PURE__ */ jsx32(
               GridLayout_default,
               {
                 items: dashboardItems,
                 availableWidth: Math.max(1, panelW - 1),
                 getItemKey: (item) => item.key,
-                renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx31(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, dense: dashDense, children: item.cells.map((c) => /* @__PURE__ */ jsx31(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)), dense: dashDense }, c.label)) })
+                renderItem: (item, index, columnWidth) => /* @__PURE__ */ jsx32(GridPanel_default, { title: item.title, width: columnWidth, hint: item.hint, dense: dashDense, children: item.cells.map((c) => /* @__PURE__ */ jsx32(Cell, { label: c.label, value: c.value, color: c.color, w: Math.max(1, Math.floor((columnWidth - 6) / 2)), dense: dashDense }, c.label)) })
               }
             ),
             /* @__PURE__ */ jsxs29(
@@ -9149,26 +9321,26 @@ function App({ version = "0.1.0" }) {
                 hint: `${smartLabel(meters ? meters.score : 0)} \xB7 ${meterPoints}p autolearn`,
                 children: [
                   /* @__PURE__ */ jsxs29("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx31("text", { fg: "gray", children: "smartness   " }),
-                    /* @__PURE__ */ jsx31(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
-                    /* @__PURE__ */ jsx31("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
+                    /* @__PURE__ */ jsx32("text", { fg: "gray", children: "smartness   " }),
+                    /* @__PURE__ */ jsx32(Meter, { value: meters ? meters.score : 0, max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("smart", meters ? meters.score : 0) }),
+                    /* @__PURE__ */ jsx32("text", { fg: "white", children: ` ${meters ? meters.score : 0}% ${meters && meters.delta > 0 ? "\u25B2" : meters && meters.delta < 0 ? "\u25BC" : "\u25C6"} ${smartLabel(meters ? meters.score : 0)}` })
                   ] }),
                   /* @__PURE__ */ jsxs29("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx31("text", { fg: "gray", children: "autolearn   " }),
-                    /* @__PURE__ */ jsx31(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
-                    /* @__PURE__ */ jsx31("text", { fg: "white", children: ` ${meterPoints}p` }),
-                    /* @__PURE__ */ jsx31("text", { fg: arrowColor(meters && meters.pointsDelta), children: meterArrow(meters && meters.pointsDelta) }),
-                    /* @__PURE__ */ jsx31("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx31(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
+                    /* @__PURE__ */ jsx32("text", { fg: "gray", children: "autolearn   " }),
+                    /* @__PURE__ */ jsx32(Meter, { value: Math.min(100, meterPoints), max: 100, w: Math.min(40, Math.max(10, panelW - 40)), color: barColor("points", meterPoints) }),
+                    /* @__PURE__ */ jsx32("text", { fg: "white", children: ` ${meterPoints}p` }),
+                    /* @__PURE__ */ jsx32("text", { fg: arrowColor(meters && meters.pointsDelta), children: meterArrow(meters && meters.pointsDelta) }),
+                    /* @__PURE__ */ jsx32("box", { style: { marginLeft: 2 }, children: /* @__PURE__ */ jsx32(Spark, { data: pointsHistory, w: Math.min(24, Math.max(8, panelW - 70)) }) })
                   ] }),
                   /* @__PURE__ */ jsxs29("box", { style: { width: Math.max(10, panelW - 5), flexDirection: "row", flexShrink: 0 }, children: [
-                    /* @__PURE__ */ jsx31("text", { fg: "gray", children: "context     " }),
-                    /* @__PURE__ */ jsx31(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
-                    /* @__PURE__ */ jsx31("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
+                    /* @__PURE__ */ jsx32("text", { fg: "gray", children: "context     " }),
+                    /* @__PURE__ */ jsx32(Meter, { value: ctxUsed, max: ctxMax, w: Math.min(40, Math.max(10, panelW - 40)), color: ctxUsed / ctxMax > 0.8 ? "red" : "green" }),
+                    /* @__PURE__ */ jsx32("text", { fg: "white", children: ` ${Math.round(ctxUsed / ctxMax * 100)}%` })
                   ] })
                 ]
               }
             ),
-            /* @__PURE__ */ jsx31(ServicesPanel, { width: dashServicesWidth, services, scan, showAll: true, dense: dashDense, maxCells: dashServicesCapacity })
+            /* @__PURE__ */ jsx32(ServicesPanel, { width: dashServicesWidth, services, scan, showAll: true, dense: dashDense, maxCells: dashServicesCapacity })
           ] })
         }
       ) })
@@ -9179,11 +9351,11 @@ function App({ version = "0.1.0" }) {
          esc returns to the chat. Nothing runs from here; it only watches. */
       /* @__PURE__ */ jsxs29(Fragment11, { children: [
         /* @__PURE__ */ jsxs29("box", { style: { width: panelW, paddingLeft: 1, paddingRight: 1, flexDirection: "column", flexShrink: 0 }, children: [
-          /* @__PURE__ */ jsx31(SystemPanel, { width: bodyW, meters, ctxUsed, ctxMax, host }),
-          /* @__PURE__ */ jsx31(ServicesPanel, { width: bodyW, services, scan, dense, maxCells: monitorServicesCapacity })
+          /* @__PURE__ */ jsx32(SystemPanel, { width: bodyW, meters, ctxUsed, ctxMax, host }),
+          /* @__PURE__ */ jsx32(ServicesPanel, { width: bodyW, services, scan, dense, maxCells: monitorServicesCapacity })
         ] }),
         /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
-          /* @__PURE__ */ jsx31("box", { style: { width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
+          /* @__PURE__ */ jsx32("box", { style: { width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx32(
             MonitorFeed,
             {
               width: sideW ? Math.max(20, bodyW - sideW - 1) : bodyW,
@@ -9194,12 +9366,12 @@ function App({ version = "0.1.0" }) {
               busy: agent.busy
             }
           ) }),
-          sideW ? /* @__PURE__ */ jsx31("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx31(LiveSidebar, { ...sidebarProps, height: monitorRows, feed: false }) }) : null
+          sideW ? /* @__PURE__ */ jsx32("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx32(LiveSidebar, { ...sidebarProps, height: monitorRows, feed: false }) }) : null
         ] })
       ] })
     ) : /* @__PURE__ */ jsxs29("box", { style: { flexDirection: "row", width: panelW, paddingLeft: 1, paddingRight: 1, flexGrow: 1, flexShrink: 1, overflow: "hidden" }, children: [
       /* @__PURE__ */ jsxs29("box", { style: { width: mainW, flexDirection: "column", flexShrink: 0, overflow: "hidden" }, children: [
-        /* @__PURE__ */ jsx31(
+        /* @__PURE__ */ jsx32(
           StatusServicesPanel,
           {
             width: mainW,
@@ -9216,7 +9388,7 @@ function App({ version = "0.1.0" }) {
             dense: true
           }
         ),
-        showTodo ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
+        showTodo ? /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx32(
           TodoPanel,
           {
             todos: agent.todos,
@@ -9225,7 +9397,7 @@ function App({ version = "0.1.0" }) {
             maxVisibleRows: Math.min(agent.todos.length, todoVisible)
           }
         ) }) : null,
-        showLiveBox ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
+        showLiveBox ? /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx32(
           LiveOutputPanel,
           {
             width: mainW,
@@ -9240,7 +9412,7 @@ function App({ version = "0.1.0" }) {
             bindings: sideW ? null : { up: "shift", down: "shift", pageup: "shift", pagedown: "shift", home: "shift", end: "shift" }
           }
         ) }) : null,
-        showMcpPanel ? /* @__PURE__ */ jsx31(
+        showMcpPanel ? /* @__PURE__ */ jsx32(
           ScrollPanel_default,
           {
             width: mainW,
@@ -9252,11 +9424,11 @@ function App({ version = "0.1.0" }) {
             bindings: { up: "ctrl", down: "ctrl", pageup: "ctrl", pagedown: "ctrl", home: "ctrl", end: "ctrl" },
             empty: "Waiting for MCP server output\u2026",
             borderColor: "magenta",
-            children: (index, { width: rowW }) => /* @__PURE__ */ jsx31("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx31("text", { fg: "white", children: clipLine2(String(mcpOutputLines[index] || " "), rowW) }) })
+            children: (index, { width: rowW }) => /* @__PURE__ */ jsx32("box", { style: { width: rowW }, children: /* @__PURE__ */ jsx32("text", { fg: "white", children: clipLine2(String(mcpOutputLines[index] || " "), rowW) }) })
           },
           latestMcpTool.id || latestMcpTool.name || "mcp"
         ) : null,
-        /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
+        /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx32(
           DockAd,
           {
             width: mainW,
@@ -9266,7 +9438,7 @@ function App({ version = "0.1.0" }) {
             expanded: dockExpanded
           }
         ) }),
-        approving ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
+        approving ? /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx32(
           ApprovalPrompt,
           {
             width: mainW,
@@ -9274,7 +9446,7 @@ function App({ version = "0.1.0" }) {
             onAnswer: answerApproval
           }
         ) }) : null,
-        dangerSetup ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
+        dangerSetup ? /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx32(
           DangerPasswordPrompt,
           {
             width: mainW,
@@ -9285,13 +9457,13 @@ function App({ version = "0.1.0" }) {
             }
           }
         ) }) : null,
-        notice ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx31("text", { fg: "cyan", children: clipLine2(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
-        /* @__PURE__ */ jsx31("box", { style: { flexGrow: 1, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx31(
+        notice ? /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0, width: mainW }, children: /* @__PURE__ */ jsx32("text", { fg: "cyan", children: clipLine2(`\u25C6 ${notice}`, Math.max(8, mainW - 2)) }) }) : null,
+        /* @__PURE__ */ jsx32("box", { style: { flexGrow: 1, flexShrink: 0, overflow: "hidden" }, children: /* @__PURE__ */ jsx32(
           Transcript_default,
           {
             messages: agent.messages,
             width: mainW,
-            height: transcriptRows,
+            height: transcriptRowsFinal,
             grow: true,
             scrollRef,
             live: agent.status !== "idle",
@@ -9301,7 +9473,7 @@ function App({ version = "0.1.0" }) {
             emptyHint: "Type a task and the agent runs it with tools. /attach <path> sends an image. PgUp/PgDn scroll the transcript; Ctrl+T opens the reasoning; esc stops a run."
           }
         ) }),
-        /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx31(
+        /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0 }, children: menuOpen ? /* @__PURE__ */ jsx32(
           CatalogPopout,
           {
             width: mainW,
@@ -9311,7 +9483,7 @@ function App({ version = "0.1.0" }) {
             selected: menuIndex,
             query: menuQuery
           }
-        ) : /* @__PURE__ */ jsx31(
+        ) : /* @__PURE__ */ jsx32(
           Composer,
           {
             width: mainW,
@@ -9322,7 +9494,7 @@ function App({ version = "0.1.0" }) {
             focusTag: focus === "ad" ? "ad" : "composer",
             disabled: false,
             hint: approving ? "answer the request above \u2014 it is holding the run" : agent.busy ? `enter queues a steer${steerQueue.length ? ` (${steerQueue.length} waiting)` : ""} \xB7 it sends when this run ends \xB7 esc stop` : attachment ? `\u22B8 ${attachment.name} ${Math.round(attachment.bytes / 1024)}K \xB7 enter sends it \xB7 /attach clear` : "enter send \xB7 alt+enter newline \xB7 ctrl+c copies \xB7 \u2191 history \xB7 /menu",
-            adSlot: /* @__PURE__ */ jsx31(
+            adSlot: /* @__PURE__ */ jsx32(
               DockAd,
               {
                 width: Math.max(8, mainW - 4),
@@ -9334,7 +9506,7 @@ function App({ version = "0.1.0" }) {
             )
           }
         ) }),
-        showCrushStatus ? /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
+        showCrushStatus ? /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx32(
           CrushStatus,
           {
             width: mainW,
@@ -9349,8 +9521,35 @@ function App({ version = "0.1.0" }) {
         ) }) : showRecap ? (
           // Idle: the same row states what the finished run did instead of
           // leaving it blank (owner, 2026-11-24: "add recap in cli when
-          // agent is idle").
-          /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
+          // agent is idle"). Where the column can spare the rows it becomes
+          // the FULL recap — the run, its mistakes and the session's recap
+          // ids, right where the ids belong (owner, 2026-11-26).
+          /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0 }, children: showFullRecap ? /* @__PURE__ */ jsx32(
+            RecapPanel,
+            {
+              width: mainW,
+              lines: recapPanelLines,
+              recap: agent.lastRecap,
+              history: agent.recapHistory,
+              turns: usage.turns,
+              tools: usage.tools,
+              ok: usage.ok,
+              fail: usage.fail,
+              web: usage.web,
+              requests: usage.requests,
+              elapsedMs: agent.elapsedMs,
+              inTok: usage.inTok,
+              outTok: usage.outTok,
+              tokensKnown: usage.tokensKnown,
+              ctxPct: usage.ctxPct,
+              failed: agent.status === "error",
+              todosDone,
+              todosTotal: agent.todos.length,
+              points: agent.meters?.points || 0,
+              learned: agent.learned?.added || 0,
+              learnedSkills: agent.learned?.skills || 0
+            }
+          ) : /* @__PURE__ */ jsx32(
             Recap,
             {
               width: mainW,
@@ -9378,9 +9577,9 @@ function App({ version = "0.1.0" }) {
           ) })
         ) : null
       ] }),
-      sideW ? /* @__PURE__ */ jsx31("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx31(LiveSidebar, { ...sidebarProps }) }) : null
+      sideW ? /* @__PURE__ */ jsx32("box", { style: { marginLeft: 1 }, children: /* @__PURE__ */ jsx32(LiveSidebar, { ...sidebarProps }) }) : null
     ] }),
-    /* @__PURE__ */ jsx31("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx31(
+    /* @__PURE__ */ jsx32("box", { style: { flexShrink: 0 }, children: /* @__PURE__ */ jsx32(
       StatusBar,
       {
         width: panelW,
@@ -9416,7 +9615,7 @@ async function start({ version = "0.1.0" } = {}) {
     backgroundColor: process.env.HAKSTER_TUI_OPAQUE || import_prefs4.default.load().opaqueBackdrop ? "#000000" : "transparent"
   });
   root = createRoot(renderer);
-  root.render(React32.createElement(App, { version }));
+  root.render(React33.createElement(App, { version }));
   return {
     unmount() {
       if (root) {

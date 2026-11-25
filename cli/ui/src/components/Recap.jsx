@@ -24,8 +24,12 @@ import { barColor } from '../../../smartness.mjs';
  * (▣ · — no colour emoji, see __tests__/glyphs.test.mjs).
  */
 
+/* The formatters are exported because the full recap panel (RecapPanel.jsx)
+ * prints the same facts and must round them the same way — one definition of
+ * "1.2K" and "1m42s" in the TUI, not two that can drift (§38).
+ */
 /** 1234 -> '1.2K', 12345678 -> '12.3M'. Never invents a figure. */
-function fmtCount(n) {
+export function fmtCount(n) {
   const v = Math.max(0, Number(n) || 0);
   if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
   if (v >= 1e4) return `${Math.round(v / 1e3)}K`;
@@ -34,7 +38,7 @@ function fmtCount(n) {
 }
 
 /** Millisecond duration as '4.2s' / '38s' / '1m42s'. Null when not worth a row. */
-function fmtElapsed(ms) {
+export function fmtElapsed(ms) {
   const s = Math.max(0, Number(ms) || 0) / 1000;
   if (!Number.isFinite(s) || s < 1) return null;
   if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
@@ -42,7 +46,7 @@ function fmtElapsed(ms) {
   return `${m}m${String(Math.round(s % 60)).padStart(2, '0')}s`;
 }
 
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
+export const plural = (n, one, many) => `${n} ${n === 1 ? one : many || `${one}s`}`;
 
 export default function Recap({
   width,
