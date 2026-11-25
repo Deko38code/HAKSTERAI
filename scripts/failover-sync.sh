@@ -50,6 +50,9 @@ SLOT_B_DIR="${SLOT_B_DIR:-haksterAi-standby-b}"
 SLOT_B_PORT="${SLOT_B_PORT:-3592}"
 ROUTER_STATUS="${ROUTER_STATUS:-http://127.0.0.1:3579/router/status}"
 STATE_FILE="${STATE_FILE:-/tmp/hakster-failover-sync.state}"
+# The standby's own databases, as they stood at the last sync: the evidence a
+# failover is judged on (size + mtime, both slots, WAL included).
+DBFP_FILE="${DBFP_FILE:-/tmp/hakster-failover-sync.dbfp}"
 ENV_FILES="${ENV_FILES:-server/.env .env}"
 LOCAL_DB="${LOCAL_DB:-/home/ghost/haksterAi/data/hakster.db}"
 BANK_DIR_SRC="${BANK_DIR_SRC:-/home/ghost/.hakster/memories/banks}"
@@ -60,6 +63,37 @@ BANK_MIRROR="${BANK_MIRROR:-1}"
 TMP="${TMPDIR:-/tmp}/hakster-sync.$$"
 
 say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+# Digest of the USER STATE the standby's live slot carries — row count and top
+# rowid for every table a person's work lands in. Read-only, one ssh, and it
+# never fails the run: an unreadable answer is an empty string, which holds.
+# A whole-file fingerprint was the wrong measure: the standby's own server
+# rewrites its database every minute (auto-heal, security scans), so the file
+# always moves while the thing that can be lost — an account, a session, a
+# message, a memory — does not.
+standby_db_fingerprint() {
+  # The Python travels on stdin, so no shell quoting can mangle it.
+  ssh -o BatchMode=yes -o ConnectTimeout=8 "$STANDBY_SSH" \
+    "SLOT_A='$SLOT_A_DIR' SLOT_B='$SLOT_B_DIR' python3 -I -" 2>/dev/null <<'PYFP'
+import os, sqlite3, json
+out = {}
+for key in ('SLOT_A', 'SLOT_B'):
+    slot = os.environ.get(key, '')
+    try:
+        c = sqlite3.connect('file:/home/ghost/%s/data/hakster.db?mode=ro' % slot, uri=True)
+        row = {}
+        for t in ('users','accounts','subscriptions','memories','sessions','messages','conversations'):
+            try:
+                n, top = c.execute('select count(*), coalesce(max(rowid),0) from "%s"' % t).fetchone()
+                row[t] = [n, top]
+            except Exception:
+                pass
+        out[slot] = row
+        c.close()
+    except Exception as e:
+        out[slot] = str(e)
+print(json.dumps(out, sort_keys=True))
+PYFP
+}
 LOCK_DIR="${TMPDIR:-/tmp}/hakster-failover-sync.lock"
 cleanup() { rm -rf "$TMP"; rmdir "$LOCK_DIR" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
@@ -97,10 +131,22 @@ if [ -n "$STATUS" ]; then
     exit 0
   fi
   if [ -n "$FAILOVERS" ] && [ "$FAILOVERS" != "$LAST" ]; then
-    say "held: the standby answered $FAILOVERS request(s) during a failover (was $LAST)."
-    say "       Its database may hold writes the Dell does not - not copying over them."
-    say "       Decide which copy wins, then set $STATE_FILE to the current count."
-    exit 0
+    # A failover means the standby may have answered stateful traffic. The only
+    # thing that can actually be lost is a write on the standby's own database,
+    # so ask that file rather than the counter: the router's `failovers` rises
+    # on every probe it loses, while half the static traffic is shared with the
+    # standby by design (`staticMode: share`) and carries no state at all.
+    # Unchanged since the last sync -> nothing to lose -> continue. Unreadable
+    # or changed -> hold, exactly as before (§41.5).
+    NOW_FP=$(standby_db_fingerprint || true)
+    if [ -n "$NOW_FP" ] && [ -f "$DBFP_FILE" ] && [ "$NOW_FP" = "$(cat "$DBFP_FILE" 2>/dev/null)" ]; then
+      say "failover seen ($FAILOVERS, was $LAST) but the standby's database is unchanged since the last sync - nothing to lose, continuing"
+    else
+      say "held: the standby answered $FAILOVERS request(s) during a failover (was $LAST)."
+      say "       Its database may hold writes the Dell does not - not copying over them."
+      say "       Decide which copy wins, then set $STATE_FILE to the current count."
+      exit 0
+    fi
   fi
   printf '%s' "$FAILOVERS" > "$STATE_FILE"
 else
@@ -342,5 +388,8 @@ while [ $i -lt 10 ]; do
   [ "$code" = "200" ] && break
   i=$((i + 1)); sleep 1
 done
+# The databases as they now stand on the standby: the baseline the next run
+# compares a failover against. Written only after the door answered.
+standby_db_fingerprint > "$DBFP_FILE" 2>/dev/null || true
 say "done: standby door answered ${code:-nothing} on $STANDBY_URL (active slot $TARGET_PORT)"
 [ "$code" = "200" ]
