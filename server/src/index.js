@@ -13175,19 +13175,32 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
 <style>
   :root{color-scheme:dark}
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#07070b;color:#e2e8f0;font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-  main{width:min(560px,calc(100vw - 32px));border:1px solid #1e1e2e;background:#111118;border-radius:16px;padding:24px}
+  main{box-sizing:border-box;width:min(560px,calc(100vw - 40px));border:1px solid #1e1e2e;background:#111118;border-radius:16px;padding:24px}
   h1{font-size:18px;margin:0 0 6px}
   .muted{color:#94a3b8;font-size:13px}
+  .head{display:flex;gap:14px;align-items:center}
+  .head img{width:56px;height:56px;flex:0 0 auto;border-radius:12px;background:#000;border:1px solid rgba(0,255,65,.18);object-fit:contain}
+  @media (max-width:420px){.head img{width:46px;height:46px;border-radius:10px}}
   .code{margin:16px 0;padding:14px;border:1px solid rgba(0,255,65,.3);border-radius:12px;background:rgba(0,255,65,.05);font-size:22px;letter-spacing:2px;text-align:center;color:#00ff41}
   .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
   button{flex:1 1 160px;padding:11px 14px;border-radius:10px;font:inherit;font-weight:700;cursor:pointer;border:1px solid #1e1e2e;background:#0a0a0f;color:#e2e8f0}
   button.allow{border-color:rgba(0,255,65,.4);background:rgba(0,255,65,.1);color:#00ff41}
-  #state{margin-top:14px;font-size:13px;color:#94a3b8}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  #state{margin-top:14px;font-size:13px;color:#94a3b8;min-height:19px}
+  #state.ok{color:#00ff41}
+  #state.err{color:#f87171}
+  #state.work{color:#fbbf24}
+  #signin{display:none;margin-top:14px;padding:11px 14px;border-radius:10px;border:1px solid rgba(0,255,65,.45);background:rgba(0,255,65,.12);color:#00ff41;font-weight:700;text-align:center;text-decoration:none}
   a{color:#00ff41}
 </style></head>
 <body><main>
-  <h1>Authorize the HaksterAI CLI</h1>
-  <div class="muted">A terminal is asking to sign in as your account. Check the code matches the one it printed.</div>
+  <div class="head">
+    <img src="/icons/authorize-logo.png" alt="HaksterAI logo" width="56" height="56" onerror="this.style.display='none'"/>
+    <div>
+      <h1>Authorize the HaksterAI CLI</h1>
+      <div class="muted">A terminal is asking to sign in as your account. Check the code matches the one it printed.</div>
+    </div>
+  </div>
   <div class="code" id="code">— —</div>
   <div class="muted" id="plan">checking your sign-in…</div>
   <div class="row">
@@ -13195,49 +13208,100 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
     <button id="deny" disabled>Deny</button>
   </div>
   <div id="state"></div>
+  <a id="signin" href="/">Sign in to haksterai.com</a>
 </main>
 <script>
 (function () {
   var code = (new URLSearchParams(location.search).get('user_code') || '').toUpperCase();
   document.getElementById('code').textContent = code || 'missing code';
-  var key = null;
-  try { key = localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key'); } catch (e) {}
   var state = document.getElementById('state');
+  var plan = document.getElementById('plan');
   var allow = document.getElementById('allow');
   var deny = document.getElementById('deny');
-  if (!code) { state.innerHTML = 'Open the link the CLI printed, or run <b>hakster login</b> again.'; return; }
-  if (!key) {
-    state.innerHTML = '<a href="/">Sign in to haksterai.com</a>, then open this link again.';
-    return;
+  var signin = document.getElementById('signin');
+  var ready = false, done = false, timer = null, lastPlan = '';
+
+  function setState(text, kind) { state.textContent = text || ''; state.className = kind || ''; }
+  function readKey() {
+    try { return localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch (e) { return ''; }
   }
-  fetch('/api/auth/me', { headers: { 'x-api-key': key } })
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      if (!d || !d.user) throw new Error('sign-in expired');
-      document.getElementById('plan').textContent = 'Signed in as ' + d.user.username + ' · plan ' + d.user.plan;
-      allow.disabled = false; deny.disabled = false;
-    })
-    .catch(function () {
-      state.innerHTML = '<a href="/">Sign in again</a>, then reload this page.';
-    });
+  function showSignin(text) {
+    ready = false; allow.disabled = true; deny.disabled = true;
+    signin.style.display = 'block';
+    signin.href = '/?signin=1&redirect=' + encodeURIComponent('/cli/authorize?user_code=' + code);
+    plan.textContent = 'not signed in on this browser';
+    if (text) setState(text, 'err');
+  }
+  function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+  function schedule() { if (!timer && !done) timer = setInterval(check, 3000); }
+  function check() {
+    if (done) { stopTimer(); return; }
+    if (!code) { stopTimer(); setState('Open the link the CLI printed, or run "hakster login" again.', 'err'); return; }
+    var key = readKey();
+    if (!key) { showSignin(''); schedule(); return; }
+    fetch('/api/auth/me', { headers: { 'x-api-key': key }, cache: 'no-store', credentials: 'same-origin' })
+      .then(function (r) {
+        if (r.status === 401) return { expired: true };
+        if (!r.ok) throw new Error('server answered ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        if (d && d.expired) { showSignin('This browser has no valid sign-in any more — sign in below and this page carries on by itself.'); schedule(); return; }
+        if (!d || !d.user) throw new Error('sign-in could not be verified');
+        var line = 'Signed in as ' + (d.user.username || d.user.email || 'your account') + ' · plan ' + (d.user.plan || 'free');
+        if (line !== lastPlan) { plan.textContent = line; lastPlan = line; }
+        ready = true; stopTimer();
+        signin.style.display = 'none';
+        allow.disabled = false; deny.disabled = false;
+        if (!state.textContent) setState('', '');
+      })
+      .catch(function (e) {
+        setState('Could not reach the server (' + ((e && e.message) || 'network error') + '). Retrying…', 'err');
+        schedule();
+      });
+  }
   function answer(approve) {
+    if (!ready || done) return;
+    var key = readKey();
     allow.disabled = true; deny.disabled = true;
+    setState(approve ? 'Approving…' : 'Denying…', 'work');
     fetch('/api/cli/device/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      cache: 'no-store',
+      credentials: 'same-origin',
       body: JSON.stringify({ userCode: code, approve: approve })
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (!d || !d.ok) throw new Error((d && d.error) || 'approval failed');
-      state.textContent = approve
-        ? 'Approved — return to the terminal. Your plan: ' + (d.cliIncluded ? d.plan + ' (CLI included)' : d.plan + ' (CLI not included on this plan)')
-        : 'Denied — the terminal will say the sign-in was refused.';
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, body: d }; });
+    }).then(function (out) {
+      var d = out.body || {};
+      if (out.status === 401) {
+        ready = false;
+        showSignin('Your sign-in expired before the answer was sent — sign in below, then press ' + (approve ? 'Allow' : 'Deny') + ' again.');
+        return;
+      }
+      if (out.status === 404) {
+        done = true; stopTimer();
+        setState('That code has expired or was already used. In the terminal press Ctrl+C and run "hakster login" again for a fresh link.', 'err');
+        return;
+      }
+      if (!d || !d.ok) throw new Error(d.error || ('server answered ' + out.status));
+      done = true; stopTimer();
+      if (approve) {
+        setState('Approved — return to the terminal. Plan: ' + (d.plan || 'free') + (d.cliIncluded ? ' (CLI included)' : ' (CLI not included on this plan)'), 'ok');
+      } else {
+        setState('Denied — the terminal will say the sign-in was refused.', 'ok');
+      }
     }).catch(function (e) {
-      state.textContent = e.message || 'approval failed';
-      allow.disabled = false; deny.disabled = false;
+      setState('Could not reach the server (' + ((e && e.message) || 'network error') + '). Press ' + (approve ? 'Allow' : 'Deny') + ' to try again.', 'err');
+      ready = true; allow.disabled = false; deny.disabled = false;
     });
   }
   allow.addEventListener('click', function () { answer(true); });
   deny.addEventListener('click', function () { answer(false); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && !done) check(); });
+  window.addEventListener('focus', function () { if (!done) check(); });
+  check();
 })();
 </script></body></html>`;
 
