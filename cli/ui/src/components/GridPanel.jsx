@@ -52,7 +52,9 @@ export function Cell({ label, value, w = 18, color = 'white', dense = false }) {
   };
   if (dense) {
     // One row: the label takes at most half the cell, the value the rest.
-    const lw = Math.max(3, Math.min(Math.floor(w / 2), 8));
+    // The label takes only the columns it needs — a 5-char ":8082" must not
+    // steal 8 of a 19-wide cell from a 14-char service name.
+    const lw = Math.max(3, Math.min(Math.floor(w / 2), 8, String(label == null ? '' : label).length));
     return (
       <box style={{ width: Math.max(1, w), flexDirection: 'row', flexShrink: 0, marginRight: 1 }}>
         <text fg="gray">{clip(label, lw)}</text>

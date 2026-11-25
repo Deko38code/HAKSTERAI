@@ -2,6 +2,7 @@ import React from 'react';
 import { TextAttributes } from '@opentui/core';
 import SystemPanel from './SystemPanel.jsx';
 import { Cell } from './GridPanel.jsx';
+import { gridShape, statusServicesRows } from './services-grid.mjs';
 
 /* StatusServicesPanel — ONE box carrying the status line, the meters row and
  * the service ports grid.
@@ -17,27 +18,11 @@ import { Cell } from './GridPanel.jsx';
  * existsSync on this checkout (smartness.mjs fileGuard), the ports from
  * `ss -tlnp` through smartness.mjs. Nothing here invents a reading.
  */
-export const CELL_W = 16;
-
-/** Split `n` cells across exactly two rows at `width`: at most `perRow` per
- *  row, and never more than `capacity` cells shown (the rest become "+N"). */
-function gridShape(width, n) {
-  const inner = Math.max(1, (Number(width) || 80) - 4);
-  const perRowCap = Math.max(1, Math.floor(inner / (CELL_W + 1)));
-  const perRow = Math.max(1, Math.min(perRowCap, Math.ceil(Math.max(1, n) / 2)));
-  const capacity = perRow * 2;
-  return { perRow, capacity };
-}
-
-/** Rows this panel occupies at `width` for `count` service cells, for the row
- *  budget: border 2 + status line 1 + meters line 1 + the two cell rows. */
-export function statusServicesRows(width, count, dense = true, showMeters = true) {
-  const n = Math.max(1, Number(count) || 1);
-  const { perRow, capacity } = gridShape(width, n);
-  const shown = Math.min(n, capacity);
-  const rows = Math.max(1, Math.min(2, Math.ceil(shown / perRow)));
-  return 3 + (showMeters ? 1 : 0) + rows * (dense ? 1 : 2);
-}
+// The wrapping math lives in ./services-grid.mjs so this renderer, the row
+// budget in App.jsx and the tests all read one implementation — a panel that
+// drew more rows than were reserved would push every panel below it down.
+// Re-exported here because callers import it from this panel.
+export { statusServicesRows };
 
 export default function StatusServicesPanel({
   width = 100,
@@ -86,19 +71,25 @@ export default function StatusServicesPanel({
   const rightText = head.right;
 
   const cells = list.map((s) => ({
-    key: String(s.port),
+    // Port + name: two entries can share a port (a v4 and a v6 bind), and a
+    // duplicate React key silently drops one of them from the grid.
+    key: `:${s.port} ${s.name}`,
     label: `:${s.port}`,
     value: `● ${s.name}`,
     color: s.up ? 'green' : 'red',
   }));
-  const { perRow, capacity } = gridShape(w, cells.length);
+  const { cols, cellW, capacity } = gridShape(w, cells.length);
   const shown = cells.length > capacity ? cells.slice(0, capacity - 1) : cells;
   const hidden = cells.length - shown.length;
-  const items = hidden > 0
-    ? [...shown, { key: '__more', label: 'more', value: `+${hidden}`, color: 'cyan' }]
-    : shown;
+  // One cell is always drawn, even with nothing to list, so the box occupies
+  // exactly the rows statusServicesRows() reserved for it.
+  const items = cells.length === 0
+    ? [{ key: '__none', label: 'ports', value: online ? 'none up' : 'waiting', color: 'gray' }]
+    : hidden > 0
+      ? [...shown, { key: '__more', label: 'more', value: `+${hidden}`, color: 'cyan' }]
+      : shown;
   const rows = [];
-  for (let i = 0; i < items.length; i += perRow) rows.push(items.slice(i, i + perRow));
+  for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols));
 
   return (
     <box style={{ width: w, flexDirection: 'column', border: true, borderStyle: 'rounded', borderColor: 'gray', paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
@@ -121,7 +112,7 @@ export default function StatusServicesPanel({
       {rows.map((row, i) => (
         <box key={`r${i}`} style={{ width: inner, flexDirection: 'row' }}>
           {row.map((c) => (
-            <Cell key={c.key} label={c.label} value={c.value} w={CELL_W} color={c.color} dense={dense} />
+            <Cell key={c.key} label={c.label} value={c.value} w={cellW} color={c.color} dense={dense} />
           ))}
         </box>
       ))}

@@ -2284,7 +2284,7 @@ function Cell({ label, value, w = 18, color = "white", dense = false }) {
     return t.length <= n ? t : t.slice(0, Math.max(0, n - 1)) + "\u2026";
   };
   if (dense) {
-    const lw = Math.max(3, Math.min(Math.floor(w / 2), 8));
+    const lw = Math.max(3, Math.min(Math.floor(w / 2), 8, String(label == null ? "" : label).length));
     return /* @__PURE__ */ jsxs7("box", { style: { width: Math.max(1, w), flexDirection: "row", flexShrink: 0, marginRight: 1 }, children: [
       /* @__PURE__ */ jsx7("text", { fg: "gray", children: clip9(label, lw) }),
       /* @__PURE__ */ jsx7("text", { fg: color, attributes: TextAttributes6.BOLD, children: ` ${clip9(value, Math.max(1, w - lw - 1))}` })
@@ -4796,23 +4796,36 @@ function SystemPanel({ width = 100, meters = null, ctxUsed = 0, ctxMax = 1, host
   return /* @__PURE__ */ jsx22("box", { style: { width: w, flexDirection: "column", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }, children: /* @__PURE__ */ jsx22("text", { children: /* @__PURE__ */ jsx22("span", { fg: barColor("smart", score), attributes: TextAttributes17.BOLD, children: clip6(compact.length <= w ? compact : terse, Math.max(10, w - 2)) }) }) });
 }
 
-// src/components/StatusServicesPanel.jsx
-import { jsx as jsx23, jsxs as jsxs22 } from "react/jsx-runtime";
-var CELL_W2 = 16;
-function gridShape(width, n) {
-  const inner = Math.max(1, (Number(width) || 80) - 4);
-  const perRowCap = Math.max(1, Math.floor(inner / (CELL_W2 + 1)));
-  const perRow = Math.max(1, Math.min(perRowCap, Math.ceil(Math.max(1, n) / 2)));
-  const capacity = perRow * 2;
-  return { perRow, capacity };
+// src/components/services-grid.mjs
+var CELL_MIN = 11;
+var CELL_TARGET = 20;
+var GAP = 1;
+function maxRowsFor(width) {
+  return Math.max(24, Number(width) || 80) - 4 >= 60 ? 2 : 3;
+}
+function gridShape(width, count, maxRows = null) {
+  const w = Math.max(24, Number(width) || 80);
+  const inner = Math.max(1, w - 4);
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const rowCap = Math.max(1, Math.min(4, Math.floor(Number(maxRows) || maxRowsFor(w))));
+  if (n === 0) return { inner, cols: 1, cellW: inner, capacity: 0, rows: 0 };
+  const colsAtTarget = Math.max(1, Math.floor((inner + GAP) / (CELL_TARGET + GAP)));
+  const colsAtMin = Math.max(1, Math.floor((inner + GAP) / (CELL_MIN + GAP)));
+  const colsNeeded = Math.ceil(n / rowCap);
+  const widest = Math.max(1, Math.min(n, colsAtMin, Math.max(colsAtTarget, colsNeeded)));
+  const rows = Math.max(1, Math.min(rowCap, Math.ceil(Math.min(n, widest * rowCap) / widest)));
+  const cols = Math.max(1, Math.min(widest, rows > 1 ? Math.ceil(n / rows) : widest));
+  const cellW = Math.max(1, Math.min(inner, Math.floor((inner - (cols - 1) * GAP) / cols)));
+  const capacity = cols * rowCap;
+  return { inner, cols, cellW, capacity, rows };
 }
 function statusServicesRows(width, count, dense = true, showMeters = true) {
-  const n = Math.max(1, Number(count) || 1);
-  const { perRow, capacity } = gridShape(width, n);
-  const shown2 = Math.min(n, capacity);
-  const rows = Math.max(1, Math.min(2, Math.ceil(shown2 / perRow)));
-  return 3 + (showMeters ? 1 : 0) + rows * (dense ? 1 : 2);
+  const { rows } = gridShape(width, count);
+  return 3 + (showMeters ? 1 : 0) + Math.max(1, rows) * (dense ? 1 : 2);
 }
+
+// src/components/StatusServicesPanel.jsx
+import { jsx as jsx23, jsxs as jsxs22 } from "react/jsx-runtime";
 function StatusServicesPanel({
   width = 100,
   services = [],
@@ -4852,17 +4865,19 @@ function StatusServicesPanel({
   const showGuardHere = head.guard && !!guardTxt;
   const rightText = head.right;
   const cells = list.map((s) => ({
-    key: String(s.port),
+    // Port + name: two entries can share a port (a v4 and a v6 bind), and a
+    // duplicate React key silently drops one of them from the grid.
+    key: `:${s.port} ${s.name}`,
     label: `:${s.port}`,
     value: `\u25CF ${s.name}`,
     color: s.up ? "green" : "red"
   }));
-  const { perRow, capacity } = gridShape(w, cells.length);
+  const { cols, cellW, capacity } = gridShape(w, cells.length);
   const shown2 = cells.length > capacity ? cells.slice(0, capacity - 1) : cells;
   const hidden = cells.length - shown2.length;
-  const items = hidden > 0 ? [...shown2, { key: "__more", label: "more", value: `+${hidden}`, color: "cyan" }] : shown2;
+  const items = cells.length === 0 ? [{ key: "__none", label: "ports", value: online ? "none up" : "waiting", color: "gray" }] : hidden > 0 ? [...shown2, { key: "__more", label: "more", value: `+${hidden}`, color: "cyan" }] : shown2;
   const rows = [];
-  for (let i = 0; i < items.length; i += perRow) rows.push(items.slice(i, i + perRow));
+  for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols));
   return /* @__PURE__ */ jsxs22("box", { style: { width: w, flexDirection: "column", border: true, borderStyle: "rounded", borderColor: "gray", paddingLeft: 1, paddingRight: 1, flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs22("box", { style: { width: inner, flexDirection: "row", justifyContent: "space-between" }, children: [
       /* @__PURE__ */ jsxs22("text", { children: [
@@ -4874,7 +4889,7 @@ function StatusServicesPanel({
       rightText ? /* @__PURE__ */ jsx23("text", { fg: allUp ? "green" : up > 0 ? "yellow" : "red", children: rightText }) : null
     ] }),
     showMeters ? /* @__PURE__ */ jsx23(SystemPanel, { width: inner, meters, ctxUsed, ctxMax, host }) : null,
-    rows.map((row, i) => /* @__PURE__ */ jsx23("box", { style: { width: inner, flexDirection: "row" }, children: row.map((c) => /* @__PURE__ */ jsx23(Cell, { label: c.label, value: c.value, w: CELL_W2, color: c.color, dense }, c.key)) }, `r${i}`))
+    rows.map((row, i) => /* @__PURE__ */ jsx23("box", { style: { width: inner, flexDirection: "row" }, children: row.map((c) => /* @__PURE__ */ jsx23(Cell, { label: c.label, value: c.value, w: cellW, color: c.color, dense }, c.key)) }, `r${i}`))
   ] });
 }
 
