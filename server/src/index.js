@@ -13305,6 +13305,21 @@ try {
 wss.on('connection', (ws) => {
   console.log('[ws] client connected');
 
+  // Keepalive. Cloudflare and the tunnel cull a WebSocket that sends no frames
+  // for ~100 s, and the dashboard only listens after it opens — so the socket
+  // was dropped and re-opened every couple of minutes, which the dashboard
+  // paints as "reconnecting..." over and over. A ping frame plus a tiny JSON
+  // heartbeat every 25 s is real traffic, so the socket stays up; the client
+  // ignores message types it does not know.
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  ws.on('error', () => { /* abrupt tunnel disconnects must not throw */ });
+  ws._keepAlive = setInterval(() => {
+    if (ws.readyState !== 1) return;
+    try { ws.ping(); } catch {}
+    try { ws.send(JSON.stringify({ type: 'ping', t: Date.now() })); } catch {}
+  }, 25000);
+
   ws.on('message', async (raw) => {
     let msg;
     try {
@@ -13357,7 +13372,10 @@ wss.on('connection', (ws) => {
     }
   });
 
-  ws.on('close', () => console.log('[ws] client disconnected'));
+  ws.on('close', () => {
+    try { clearInterval(ws._keepAlive); } catch {}
+    console.log('[ws] client disconnected');
+  });
 });
 
 // ── PTY WebSocket — Real terminal in the browser ──────────────────

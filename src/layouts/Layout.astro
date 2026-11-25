@@ -2735,7 +2735,7 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
          hiccups while a tab is open, the tab shows a small "reconnecting" line and
          picks itself back up on the same page instead of going dead; the Update
          button reloads only once the server is confirmed answering. -->
-    <script is:inline data-cfasync="false" src="/js/hakster-resume.js" defer></script>
+    <script is:inline data-cfasync="false" src={`/js/hakster-resume.js?v=${haksterBuildId}`} defer></script>
 
     <!-- First-party, privacy-minimized page and click counts for the owner dashboard.
          DNT is respected, admin/API routes are excluded, and the server only keeps
