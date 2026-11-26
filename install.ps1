@@ -71,6 +71,50 @@
     return ''
   }
 
+  # npm on Windows ships as several shims (npm, npm.cmd, npm.ps1), and a name
+  # that Get-Command can find is no proof it can be started: a bare `npm`
+  # resolves to npm.ps1 first, which a default execution policy refuses, and an
+  # extensionless shim (nvm-for-windows, scoop, Git for Windows) cannot be
+  # executed by PowerShell at all. Either way the line printed is
+  #   The term '...npm...' is not recognized as the name of a cmdlet
+  # exactly one line after node reported OK, which reads like a Node problem and
+  # is not (Surface Pro, 2026-11-26). So every candidate is PROVEN by running
+  # it, and npm's own JS entry started by node.exe is the fallback that needs no
+  # shim, no PATHEXT and no execution policy at all.
+  function Test-NpmRuns($cand) {
+    if (-not $cand -or -not $cand.exe) { return $false }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      $probe = @($cand.pre) + @('--version')
+      $v = (& $cand.exe @probe 2>$null | Select-Object -Last 1)
+      if ($v -and ("$v" -match '^\d+\.\d+\.')) { return $true }
+      return $false
+    } catch { return $false } finally { $ErrorActionPreference = $prev }
+  }
+
+  function Get-NpmCommand {
+    $nodeExe = ''
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd -and $nodeCmd.Source) { $nodeExe = [string]$nodeCmd.Source }
+    $cands = @()
+    foreach ($n in @('npm.cmd', 'npm.exe')) {
+      $c = Get-Command $n -ErrorAction SilentlyContinue
+      if ($c -and $c.Source) { $cands += @{ exe = [string]$c.Source; pre = @(); label = [string]$c.Source } }
+    }
+    # npm's own JS entry beside node.exe: no shim, no PATHEXT, no policy.
+    if ($nodeExe) {
+      $npmCli = Join-Path (Split-Path $nodeExe -Parent) 'node_modules\npm\bin\npm-cli.js'
+      if (Test-Path $npmCli) { $cands += @{ exe = $nodeExe; pre = @($npmCli); label = "node $npmCli" } }
+    }
+    # cmd.exe resolves npm.cmd through PATHEXT and ignores the execution policy.
+    if ($env:ComSpec) { $cands += @{ exe = [string]$env:ComSpec; pre = @('/d', '/c', 'npm'); label = 'cmd /c npm' } }
+    foreach ($cand in $cands) {
+      if (Test-NpmRuns $cand) { return $cand }
+    }
+    return $null
+  }
+
   New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
   Say "HaksterAI CLI - from $Origin"
 
@@ -80,6 +124,19 @@
       if (-not $v) { return 0 }
       return [int]($v.Split('.')[0])
     } catch { return 0 }
+  }
+
+  # One resolution for the whole script: $npmExe is a command that actually
+  # answered --version, or it is empty (and the install says so instead of
+  # printing a cmdlet error and pretending npm failed on its own).
+  $npm = Get-NpmCommand
+  $npmExe = ''
+  $npmPre = @()
+  $npmLabel = 'none found'
+  if ($npm) {
+    $npmExe = [string]$npm.exe
+    $npmPre = @($npm.pre)
+    $npmLabel = [string]$npm.label
   }
 
   # ── what this machine already has ───────────────────────────────────────
@@ -92,8 +149,10 @@
   if (Get-Command node -ErrorAction SilentlyContinue) {
     $nodeVer = ''
     try { $nodeVer = (& node --version 2>$null) } catch { }
-    if ((Get-NodeMajor) -ge 20 -and (Get-Command npm -ErrorAction SilentlyContinue)) {
-      Say ("  OK node " + $nodeVer + " - used as it is")
+    if ((Get-NodeMajor) -ge 20 -and $npmExe) {
+      Say ("  OK node " + $nodeVer + " and npm (" + $npmLabel + ") - used as they are")
+    } elseif ((Get-NodeMajor) -ge 20) {
+      Say ("  X  node " + $nodeVer + " is here but no npm on this machine could be started - a Node 20+ runtime comes with this install")
     } else {
       Say ("  X  node " + $nodeVer + " is older than 20 - a Node 20+ runtime comes with this install")
     }
@@ -133,13 +192,14 @@
   Say ''
 
   # ── Node.js ─────────────────────────────────────────────────────────────
+  # $npmExe was resolved by Get-NpmCommand above, so it is a command that ran.
   $nodeOk = $false
-  if (Get-Command node -ErrorAction SilentlyContinue) {
-    if ((Get-Command npm -ErrorAction SilentlyContinue) -and (Get-NodeMajor) -ge 20) { $nodeOk = $true }
-  }
+  if ($npmExe -and (Get-Command node -ErrorAction SilentlyContinue) -and (Get-NodeMajor) -ge 20) { $nodeOk = $true }
 
   if ($nodeOk) {
-    Say ("OK Node " + (& node --version) + " and npm " + (& npm --version) + " are already here - using them")
+    $npmVer = ''
+    try { $npmVer = (& $npmExe @($npmPre + @('--version')) 2>$null | Select-Object -Last 1) } catch { }
+    Say ("OK Node " + (& node --version) + " and npm " + $npmVer + " are already here - using them (" + $npmLabel + ")")
   } else {
     $arch = $env:PROCESSOR_ARCHITECTURE
     if ($arch -eq 'ARM64') { $tag = 'win-arm64' }
@@ -172,6 +232,19 @@
     $env:Path = "$nodeDir;$env:Path"
     Say ("OK Node " + (& node --version) + " installed in $nodeDir")
   }
+
+  if (-not $npmExe) {
+    $npm = Get-NpmCommand
+    if ($npm) {
+      $npmExe = [string]$npm.exe
+      $npmPre = @($npm.pre)
+      $npmLabel = [string]$npm.label
+    }
+  }
+  if (-not $npmExe) {
+    Fail ('no npm on this machine could be started - tried npm.cmd, npm.exe, node''s own npm-cli.js and cmd /c npm. Install Node.js 20+ from https://nodejs.org (it ships npm.cmd) and run this again.')
+  }
+  Say ("  npm: " + $npmLabel)
 
   # ── the CLI itself ──────────────────────────────────────────────────────
   $tarExe = Get-Command tar.exe -ErrorAction SilentlyContinue
@@ -229,17 +302,105 @@
   }
 
   Say '.. installing the CLI (this takes a minute)'
+  # npm writes the reason it failed to stderr, and this script used to discard it
+  # (2>$null) - so a failed Windows install said only "npm error" with nothing to
+  # act on (Surface Pro, 2026-11-26). Every npm step below is kept in one log, and
+  # a failure prints npm's own last lines plus the npm that produced them. The
+  # error preference is lowered around these calls: with 'Stop', merging a native
+  # command's stderr (2>&1) throws NativeCommandError on an ordinary npm warning.
+  $npmLog = Join-Path $Tmp 'npm-install.log'
+  function Invoke-Npm([string[]]$NpmArgs) {
+    if (-not $npmExe) {
+      Say ("! npm could not be started (" + $npmLabel + ")")
+      return 1
+    }
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      # Reset first. A native command that never starts leaves $LASTEXITCODE
+      # untouched, so a stale 0 used to report a failed npm as a success - the
+      # reason the Surface Pro install (2026-11-26) got past npm and then died
+      # on a missing hakster.cmd.
+      $global:LASTEXITCODE = $null
+      $arr = @($npmPre) + @($NpmArgs)
+      & $npmExe @arr 2>&1 | Out-File -FilePath $npmLog -Append -Encoding utf8
+      if ($null -eq $LASTEXITCODE) {
+        Say ("! npm could not be started (" + $npmExe + ")")
+        return 1
+      }
+      return $LASTEXITCODE
+    } catch {
+      Say ("! npm could not be started (" + $npmExe + "): " + $_.Exception.Message)
+      return 1
+    } finally { $ErrorActionPreference = $prevEap }
+  }
+  function Show-NpmFailure($exitCode) {
+    Say ("! npm exited $exitCode")
+    try { Say ('  npm ' + ((& $npmExe @($npmPre + @('--version')) 2>$null) | Select-Object -Last 1) + ' via ' + $npmLabel) } catch { Say ('  npm via ' + $npmLabel) }
+    try { Say ('  node ' + ((& node --version 2>$null) | Select-Object -Last 1)) } catch { }
+    Say '  the last lines npm printed:'
+    if (Test-Path $npmLog) {
+      Get-Content $npmLog -Tail 14 -ErrorAction SilentlyContinue | ForEach-Object { Say ("    " + $_) }
+    } else {
+      Say '    (npm printed nothing this script could capture)'
+    }
+  }
+
   Push-Location $cliDir
   try {
-    $packed = (& npm pack --silent --pack-destination $Tmp . 2>$null) | Select-Object -Last 1
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      $global:LASTEXITCODE = $null
+      $packArr = @($npmPre) + @('pack', '--silent', '--pack-destination', $Tmp, '.')
+      $packed = (& $npmExe @packArr 2>$null) | Select-Object -Last 1
+    } catch { $packed = '' } finally { $ErrorActionPreference = $prevEap }
     if (-not $packed -or -not $packed.EndsWith('.tgz')) { Fail 'could not pack the CLI for install' }
     $pkgPath = Join-Path $Tmp $packed
     if (-not (Test-Path $pkgPath)) { Fail 'could not pack the CLI for install' }
 
     # Pack first, install the tarball: a directory install is a link back into
     # the temp folder, which the cleanup would then delete.
-    & npm install -g $pkgPath --prefix $NpmPrefix --no-audit --no-fund 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail 'npm could not install the CLI' }
+    $installCode = Invoke-Npm @('install', '-g', $pkgPath, '--prefix', $NpmPrefix, '--no-audit', '--no-fund')
+    if ($installCode -ne 0 -or -not (Test-Path (Join-Path $NpmPrefix 'hakster.cmd'))) {
+      # A prefix left half-written or locked by an earlier attempt is the usual
+      # Windows cause; --force rewrites it instead of refusing.
+      Say '.. npm did not finish into the prefix - trying once more with --force'
+      $installCode = Invoke-Npm @('install', '-g', $pkgPath, '--prefix', $NpmPrefix, '--no-audit', '--no-fund', '--force')
+    }
+    if ($installCode -ne 0 -or -not (Test-Path (Join-Path $NpmPrefix 'hakster.cmd'))) {
+      # Windows' global shim step is the fragile part, not the app itself: a plain
+      # install beside the prefix succeeds where the shim step refuses, so the CLI
+      # goes there and the two launchers are written here. Verified layout: the
+      # app in node_modules\hakster-cli with its dependencies hoisted beside it.
+      Say '.. using the plain install path (no npm global shim), then writing the launcher'
+      $installCode = Invoke-Npm @('install', '--prefix', $NpmPrefix, '--no-audit', '--no-fund', '--no-save', $pkgPath)
+      $appDir = Join-Path $NpmPrefix 'node_modules\hakster-cli'
+      $depsOk = (Test-Path (Join-Path $NpmPrefix 'node_modules\commander\package.json')) -or (Test-Path (Join-Path $appDir 'node_modules\commander\package.json'))
+      if ((Test-Path (Join-Path $appDir 'index.js')) -and $depsOk) {
+        $cmdShim = Join-Path $NpmPrefix 'hakster.cmd'
+        $cmdLines = @(
+          '@ECHO off',
+          'SETLOCAL',
+          'node "%~dp0node_modules\hakster-cli\index.js" %*'
+        )
+        Set-Content -Path $cmdShim -Value $cmdLines -Encoding ASCII
+        $psShim = Join-Path $NpmPrefix 'hakster.ps1'
+        $psLines = @(
+          '#!/usr/bin/env pwsh',
+          '$basedir = Split-Path $MyInvocation.MyCommand.Definition -Parent',
+          '& node "$basedir\node_modules\hakster-cli\index.js" @args',
+          'exit $LASTEXITCODE'
+        )
+        Set-Content -Path $psShim -Value $psLines -Encoding ASCII
+        $installCode = 0
+        Say ("OK the CLI is installed from the plain path (" + $cmdShim + ")")
+      }
+    }
+    if ($installCode -ne 0 -or -not (Test-Path (Join-Path $NpmPrefix 'hakster.cmd'))) {
+      Show-NpmFailure $installCode
+      Fail 'npm could not install the CLI'
+    }
   } finally { Pop-Location }
 
   $HaksterCmd = Join-Path $NpmPrefix 'hakster.cmd'
@@ -276,8 +437,8 @@
     Say "OK Bun is already here ($bunFound) - using it"
   } else {
     Say '.. installing Bun for the full TUI (one time)'
-    & npm install --prefix $bunDir --omit=dev --no-audit --no-fund "bun@$BunVersion" 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $bunExe)) { Say "OK Bun installed in $bunDir" }
+    $bunCode = Invoke-Npm @('install', '--prefix', $bunDir, '--omit=dev', '--no-audit', '--no-fund', "bun@$BunVersion")
+    if ($bunCode -eq 0 -and (Test-Path $bunExe)) { Say "OK Bun installed in $bunDir" }
     else {
       # npm is the quiet path; Bun's own installer is the one that always works.
       # This is the vendor's documented Windows install, and it is announced
@@ -285,9 +446,17 @@
       # machine must come up with the dashboard, "check if users have whats
       # needed if not install").
       Say '! npm could not install Bun - using Bun''s own installer (one time, announced here first)'
-      try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -Command "irm bun.sh/install.ps1 | iex" 2>$null | Out-Null
-      } catch { }
+      # powershell.exe ships with every Windows; pwsh is the 7 host when the
+      # installer itself was started from one. Neither name is guaranteed, so
+      # the host is looked up instead of invoked bare (that is the same "not
+      # recognized as a cmdlet" trap).
+      $psHost = Get-Command powershell -ErrorAction SilentlyContinue
+      if (-not $psHost) { $psHost = Get-Command pwsh -ErrorAction SilentlyContinue }
+      if ($psHost -and $psHost.Source) {
+        try {
+          & ([string]$psHost.Source) -NoProfile -ExecutionPolicy Bypass -Command "irm bun.sh/install.ps1 | iex" 2>$null | Out-Null
+        } catch { }
+      }
       $bunFound = Find-Bun
       if ($bunFound) {
         Say "OK Bun installed ($bunFound) - the dashboard TUI will open"

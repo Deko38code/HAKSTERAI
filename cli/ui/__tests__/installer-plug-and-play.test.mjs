@@ -100,7 +100,7 @@ test('the Linux/macOS installer verifies every download against the published ch
   // The archive URL once read node-...-linux-x64.tar.tar.xz; the platform tag
   // must carry the bare extension (xz|gz), not "tar.xz".
   assert.doesNotMatch(src, /\.tar\.tar\./, 'no doubled archive extension in the download URL');
-  assert.match(src, /npm pack/, 'the CLI must be installed from a packed tarball, never a link into the temp dir');
+  assert.match(src, /pack --silent --pack-destination/, 'the CLI must be installed from a packed tarball, never a link into the temp dir');
   const commands = src.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
   assert.doesNotMatch(commands, /npm install -g \./, 'a directory install links back into the temp dir and breaks on cleanup');
 });
@@ -109,8 +109,19 @@ test('the Windows installer verifies its download and installs per-user', () => 
   const src = readFileSync(path.join(repoRoot, 'install.ps1'), 'utf8');
   assert.match(src, /SHASUMS256\.txt/);
   assert.match(src, /Get-FileHash .*SHA256/, 'the Node zip must be hashed and compared');
-  assert.match(src, /npm pack/, 'pack then install the tarball');
-  assert.match(src, /--prefix \$NpmPrefix/, 'Windows installs into a per-user prefix, no admin');
+  assert.match(src, /'pack', '--silent', '--pack-destination'/, 'pack then install the tarball');
+  assert.match(src, /'-g', \$pkgPath, '--prefix', \$NpmPrefix/, 'Windows installs into a per-user prefix, no admin');
+  // Owner, 2026-11-26: the Surface Pro install died with "The term 'npm' is not
+  // recognized as the name of a cmdlet" one line after node reported OK. A name
+  // Get-Command can find is not proof npm runs, so the command must be proven by
+  // running it, with node's own npm-cli.js as the shim-free fallback, and a
+  // native call that never started must not be reported as exit 0.
+  assert.match(src, /function Get-NpmCommand/, 'npm is resolved by running it, not by name');
+  assert.match(src, /function Test-NpmRuns/, 'each candidate is proven with --version');
+  assert.match(src, /node_modules\\npm\\bin\\npm-cli\.js/, 'node + npm-cli.js is the no-shim fallback');
+  assert.match(src, /cmd \/c npm/, 'cmd.exe is the PATHEXT/policy-proof fallback');
+  assert.match(src, /\$global:LASTEXITCODE = \$null/, 'a native call that never starts must not keep a stale 0');
+  assert.match(src, /could not be started/, 'a command that never started says so, never "npm exited 0"');
   assert.match(src, /win-x64/, 'x64 Windows');
   assert.match(src, /win-arm64/, 'ARM64 Windows');
 });
