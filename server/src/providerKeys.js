@@ -75,7 +75,7 @@ const DEFAULT_REGISTRY = {
       lanes: [],
       basis: 'recorded-lane',
       usageSource: 'junkalot data/mred-usage.jsonl (read only, over ssh)',
-      note: "Junkalot's own key, held on Parrot as OLLAMA_CLOUD_KEY_2 (plus its _PRIMARY variant) — the same variable name as ours but a different account. Its billing usage is read back here; nothing is written into that project.",
+      note: "Junkalot's own key, held on Parrot as OLLAMA_CLOUD_KEY_2 — the same variable name as ours but a different account (verified 2026-11-26 by SHA-256 comparison: the values differ). OLLAMA_CLOUD_KEY_2_PRIMARY is a 0/1 flag, not a key: set to 1 it puts her keyed lane first in her coach. Its billing usage is read back here; nothing is written into that project.",
       createdAt: '2026-11-26',
     },
     {
