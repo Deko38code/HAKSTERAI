@@ -15,6 +15,23 @@ import { discoverScripts, snapshotBeforeRun } from '../utils/scripts.js';
 const MAX_LINES = 400;
 const TIMEOUT_MS = 120000;
 
+/* Windows runs `npm` as `npm.cmd`, and Node refuses to spawn a `.cmd`/`.bat`
+ * without a shell (EINVAL since the 2024 CVE fix). So on Windows the argv goes
+ * through cmd.exe — quoted, because a checkout can sit under
+ * `C:\Users\De ke\…` and an unquoted space would split the command. Every
+ * other platform gets the argv exactly as `discoverScripts()` returned it.
+ * Owner, 2026-11-26: "/menu on msi install all need to work on install" — the
+ * live-scripts page spawned bare `npm`, which is not a file on Windows. */
+function winQuote(a) {
+  const s = String(a);
+  return /[\s"&|<>^()]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function spawnSpec(run) {
+  if (process.platform !== 'win32') return { cmd: run[0], args: run.slice(1), shell: false };
+  return { cmd: winQuote(run[0]), args: run.slice(1).map(winQuote), shell: true };
+}
+
 export function useScriptRunner() {
   const [scripts] = useState(() => {
     try {
@@ -59,7 +76,8 @@ export function useScriptRunner() {
 
     let child;
     try {
-      child = spawn(entry.run[0], entry.run.slice(1), { cwd: entry.cwd, env: process.env });
+      const spec = spawnSpec(entry.run);
+      child = spawn(spec.cmd, spec.args, { cwd: entry.cwd, env: process.env, shell: spec.shell, windowsHide: true });
     } catch (e) {
       setRun({ status: 'failed', script: entry, lines: [`spawn failed: ${(e && e.message) || e}`], startedAt, endedAt: Date.now(), exit: null });
       return true;

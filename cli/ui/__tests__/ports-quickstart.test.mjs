@@ -125,9 +125,10 @@ test('App.jsx wires the digits to the starter and puts PORTS in the menu', () =>
   assert.match(app, /pushSection\('PORTS · press 1-0 to start one'/, 'the menu needs its PORTS block');
   assert.match(app, /'port' in row\.action/, 'enter on a port row must run the same start');
   // The refusals live in the module, so a source edit cannot quietly turn a
-  // start into a restart.
-  assert.ok(!/startPortByNumber[\s\S]{0,4000}pm2[\s\S]{0,80}restart/.test(app),
-    'the quick-start path must never call pm2 restart');
+  // start into a restart. Checked as an actual argument, not as text near the
+  // call — a comment two blocks later must not trip it (§50.1).
+  assert.ok(!/args:\s*\[[^\]]*'restart'/.test(app), 'the quick-start path must never build `pm2 restart`');
+  assert.ok(!/'restart'/.test(app), 'restart is never a command argument in the TUI');
 });
 
 test('a row colour is honoured by the popout renderer', () => {
@@ -148,4 +149,39 @@ test('the shipped TUI bundle carries the quick start', () => {
       `ui-fb.mjs is stale — run npm run build:ui so the shipped TUI carries ${marker}`,
     );
   }
+});
+
+test('a machine without pm2 refuses instead of spawning a missing binary', () => {
+  // Owner, 2026-11-26 (Surface Pro): "/menu on msi install all need to work on
+  // install". A paid install on Windows or macOS hosts none of our services, so
+  // `pm2` is not a file there — pressing 1-0 must say that in one line, not
+  // spawn it and report the ENOENT as a failed start.
+  const cinevault = quickStartEntry(2, [], { ok: true, ports: [], procs: {}, at: Date.now() });
+  const refused = startPlan(cinevault, { pm2: false });
+  assert.equal(refused.cmd, undefined, 'a box without pm2 must not produce a command');
+  assert.match(refused.skip, /pm2 is not installed on this machine/);
+  assert.match(refused.skip, /\/ports/, 'the refusal points at what IS listening');
+
+  // "not measured yet" keeps the original behaviour — it never guesses.
+  const unmeasured = startPlan(cinevault, { pm2: undefined });
+  assert.equal(unmeasured.cmd, 'pm2');
+  assert.equal(startPlan(cinevault).cmd, 'pm2', 'no host argument behaves as before');
+
+  // A measured `true` starts exactly as it always did.
+  assert.deepEqual(startPlan(cinevault, { pm2: true }), { cmd: 'pm2', args: ['start', 'cinevault'] });
+});
+
+test('the shell command and the TUI both use the shared scanner, never bare `ss`', () => {
+  // `ss` is a Linux tool: on Windows the command printed "(ss unavailable)".
+  const launcher = read('cli/index.js');
+  assert.ok(!/execFile\('ss'/.test(launcher), 'cli/index.js still shells out to ss');
+  assert.match(launcher, /require\('\.\/src\/listening-ports'\)\.scanPorts/);
+  assert.ok(!launcher.includes('(ss unavailable)'), 'the command still blames ss');
+
+  const app = read('cli/ui/src/App.jsx');
+  assert.match(app, /startPlan\(entry, \{ pm2: pm2Here \}\)/, 'the TUI no longer passes the measured pm2 state');
+  const runner = read('cli/ui/src/hooks/useScriptRunner.js');
+  assert.match(runner, /process\.platform !== 'win32'/, 'the script runner has no platform branch');
+  assert.match(runner, /shell: true/, 'live scripts still spawn bare npm on Windows');
+  assert.match(app, /USERPROFILE/, '/attach still resolves HOME only, so `~` fails on Windows');
 });
