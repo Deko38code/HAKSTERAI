@@ -152,6 +152,17 @@ test('the Ink fallback no longer claims a Linux-only tool', () => {
   const ink = read('ui.mjs');
   assert.ok(!ink.includes('ss not readable'), 'the fallback still blames ss on Windows');
   assert.ok(ink.includes('no port tool'));
+  // The /ports failure line used to read "ss unavailable — port scan could not
+  // run", which is the exact symptom reported from the Surface Pro ("says scan
+  // univalible ss not readable"). The scan is platform-aware now, so the line
+  // must name the backend that actually failed rather than assuming `ss` — a
+  // test that only checked for one misspelling never caught it (§50.1).
+  assert.ok(!/ss unavailable/.test(ink), 'the /ports line still names ss on every platform');
+  assert.ok(ink.includes('port scan could not run'), 'the /ports failure line is still reported');
+  assert.ok(
+    /\$\{scan\.backend \|\| "port tool"\} unavailable/.test(ink),
+    'the /ports failure line names the backend that failed'
+  );
 });
 
 // ── the dashboard's native renderer must be installed, not just named ──────

@@ -2382,7 +2382,7 @@ function App() {
         const svc = serviceStates(scan);
         const up = svc.filter((s) => s.up).length;
         const lines = [];
-        if (!scan.ok) lines.push("ss unavailable — port scan could not run");
+        if (!scan.ok) lines.push(`${scan.backend || "port tool"} unavailable — port scan could not run`);
         lines.push(`Tracked services online ${up}/${svc.length}`);
         for (const s2 of svc) {
           lines.push(`${s2.up ? "●" : "○"} :${s2.port} ${s2.name}${s2.proc ? ` (${s2.proc})` : ""}  ${s2.proto}://localhost:${s2.port}${s2.up ? "" : "  down"}`);
