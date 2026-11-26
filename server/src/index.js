@@ -2647,6 +2647,22 @@ function requireOwner(req, res, next) {
   return next();
 }
 
+// ── Owner gate, forbidden-only — for routes a stranger must not be able to
+// map. (§34: never give the public a clue about admin access.) `requireOwner`
+// keeps its 401 because the dashboard's dead-key re-auth path branches on 401;
+// this variant answers 403 to EVERY non-owner, signed out included, so a probe
+// reads "forbidden" and never learns that signing in would help.
+function requireOwnerForbidden(req, res, next) {
+  const user = getUserByApiKey(req);
+  if (!user || !isOwnerUser(user)) return res.status(403).json(OWNER_REQUIRED);
+  if (user.role !== 'admin') {
+    try { getDb().prepare('UPDATE users SET role = ?, plan = ?, updated_at = unixepoch() WHERE id = ?').run('admin', 'enterprise', user.id); } catch {}
+    user.role = 'admin'; user.plan = 'enterprise';
+  }
+  req.user = user;
+  return next();
+}
+
 // ── Signed-in gate for the public chat surface ──
 // Traffic reaching this server through the Cloudflare/ngrok tunnels carries
 // an X-Forwarded-For header with the real client IP; direct localhost callers
@@ -4411,7 +4427,7 @@ app.get('/api/agent/memory', (req, res) => {
 // `cluster:*` keyed rows (owner, 2026-11-26: "always update mem clusters in
 // admin to with all top memorys"). Read-only, owner-only, additive: the keyed
 // table stays the lookup layer and nothing here is ever written back.
-app.get('/api/agent/memory-banks', requireOwner, async (req, res) => {
+app.get('/api/agent/memory-banks', requireOwnerForbidden, async (req, res) => {
   try {
     const autolearn = require('./agent/autolearn');
     const topN = Math.max(1, Math.min(parseInt(req.query.top, 10) || 5, 20));

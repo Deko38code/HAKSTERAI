@@ -41,11 +41,48 @@ const end = src.indexOf(endAnchor, start);
 if (end === -1) throw new Error('could not find the end of the memory-banks endpoint');
 const block = src.slice(start, end);
 
-check('the route is declared owner-gated', /app\.get\('\/api\/agent\/memory-banks',\s*requireOwner/.test(block));
+check('the route is declared owner-gated', /app\.get\('\/api\/agent\/memory-banks',\s*requireOwnerForbidden/.test(block));
+
+// ── The gate itself: a stranger gets 403, never 401 ───────────────────
+// Owner, 2026-11-26: "bank should be 403". A signed-out probe of an
+// owner-only data route must read "forbidden" — 401 would tell an anonymous
+// caller that signing in is what stands between them and the data (§34).
+// Exercised from the real function body, not matched as text.
+const gateStart = src.indexOf('function requireOwnerForbidden(');
+check('a forbidden-only owner gate exists', gateStart !== -1);
+const gateEnd = src.indexOf('\n}', gateStart);
+const gateBody = src.slice(gateStart, gateEnd + 2);
+
+function runGate(user) {
+  const res = {
+    code: null, body: null,
+    status(c) { this.code = c; return this; },
+    json(b) { this.body = b; return this; },
+  };
+  const fn = new Function('getUserByApiKey', 'isOwnerUser', 'getDb', 'OWNER_REQUIRED',
+    `${gateBody}\nreturn requireOwnerForbidden;`)(
+    () => user,
+    (u) => Boolean(u && u.email === 'owner@example.com'),
+    () => ({ prepare: () => ({ run() {} }) }),
+    { error: 'Owner access required.' },
+  );
+  let nexted = false;
+  fn({ headers: {} }, res, () => { nexted = true; });
+  return { code: res.code, nexted, body: res.body };
+}
+
+const signedOut = runGate(null);
+check('a signed-out probe reads 403, not 401', signedOut.code === 403 && signedOut.nexted === false);
+check('the refusal names no owner account and no sign-in step',
+  !/@|sign in|sign-in/i.test(JSON.stringify(signedOut.body || {})));
+const nonOwner = runGate({ id: 7, email: 'client@example.com', role: 'user' });
+check('a signed-in non-owner also reads 403', nonOwner.code === 403 && nonOwner.nexted === false);
+const owner = runGate({ id: 1, email: 'owner@example.com', role: 'user' });
+check('the owner passes the gate', owner.nexted === true && owner.code === null);
 
 let handler = null;
 const app = { get: (u, _mw, fn) => { if (u === '/api/agent/memory-banks') handler = fn; } };
-const sandbox = new Function('app', 'requireOwner', 'require', `${block}\nreturn true;`);
+const sandbox = new Function('app', 'requireOwnerForbidden', 'require', `${block}\nreturn true;`);
 
 // ── Fake banks: one big, one small, one empty ─────────────────────────
 const SECTIONS = ['User Preferences', 'Errors Encountered', 'Recon & Targets'];
