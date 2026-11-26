@@ -3553,6 +3553,10 @@ program
       }
       if (hint) console.error(`${C.yellow}  likely cause: ${hint}${C.reset}`);
       if (crashLog) console.error(`${C.dim}  full log: ${crashLog}${C.reset}`);
+      // One command from here, not a hunt: the doctor block answers the five
+      // questions this crash cannot (which Bun, which renderer, where, whether
+      // the bundle loads, which server) on the machine that failed (§10, §13).
+      console.error(`${C.dim}  next: run "hakster doctor" — one block names what is missing.${C.reset}`);
       console.error(`${C.dim}  running the simpler Ink TUI so the CLI still works.${C.reset}`);
       fallbackInk(null);
     };

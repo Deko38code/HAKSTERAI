@@ -122,3 +122,16 @@ test('a known cause is named instead of leaving the operator to decode a stack',
   assert.ok(/libopentui/.test(hintBlock), 'native-library hint removed');
   assert.ok(/Windows Terminal/.test(hintBlock), 'raw-mode/console-host hint removed');
 });
+
+test('the crash report hands the operator one command, not a hunt', () => {
+  // "TUI exited" with a log path still leaves a paid user needing to know what
+  // to do next. `hakster doctor` answers the questions the crash cannot — which
+  // Bun, which renderer, where it lives, whether the bundle loads, which server
+  // — on the machine that failed (Surface Pro, 2026-11-26).
+  const died = src.slice(src.indexOf('const dashboardDied'));
+  assert.ok(/hakster doctor/.test(died), 'the crash report does not point at "hakster doctor"');
+  assert.ok(
+    /next: run "hakster doctor"/.test(died),
+    'the doctor pointer is not the actionable "next:" line',
+  );
+});
