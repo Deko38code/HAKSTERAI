@@ -17,12 +17,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-if (!process.env.HAKSTER_API_KEY) {
+if (!process.env.HAKSTER_API_KEY || !process.env.HAKSTER_API_URL) {
   try {
     const cfgPath = path.join(os.homedir(), '.hakster', 'config.json');
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    if (cfg && typeof cfg.apiKey === 'string' && cfg.apiKey) {
+    if (!process.env.HAKSTER_API_KEY && cfg && typeof cfg.apiKey === 'string' && cfg.apiKey) {
       process.env.HAKSTER_API_KEY = cfg.apiKey;
+    }
+    // The server this install was pointed at. Same reason as index.js: the
+    // bundle's fallback is loopback, which is only right on the box running the
+    // server. Read here so a direct `bun tui-entry.mjs` launch resolves the
+    // same target as `hakster tui` (Surface Pro, 2026-11-26 — "fetch failed").
+    const server = String((cfg && cfg.server) || process.env.HAKSTER_SERVER || '').replace(/\/+$/, '');
+    if (server && !process.env.HAKSTER_API_URL) process.env.HAKSTER_API_URL = server;
+    if (server && !process.env.HAKSTER_URL) {
+      const ws = server.replace(/^http/i, (m) => (m.toLowerCase() === 'https' ? 'wss' : 'ws'));
+      process.env.HAKSTER_URL = `${ws}/ws`;
     }
   } catch {
     /* no config: run as before, unsigned — the caller sees the reduced tool set */

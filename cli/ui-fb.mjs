@@ -7140,12 +7140,16 @@ function useAgentStream({
               error: userAbortRef.current ? "run cancelled" : "timed out"
             };
           }
+          const transport = isTransportError(e);
           return {
             ok: false,
             aborted: false,
-            transport: isTransportError(e),
+            transport,
             ...ctx,
-            error: e && e.message || "request failed"
+            // A transport failure is about the address, not the turn: name it,
+            // so an unreachable server reads "cannot reach http://…" instead of
+            // a bare "fetch failed" the operator cannot act on (§10, §13).
+            error: transport ? `cannot reach ${api} (${e && e.message || "fetch failed"})` : e && e.message || "request failed"
           };
         } finally {
           clearTimeout(timeout);
@@ -7167,7 +7171,7 @@ function useAgentStream({
           if (!res.transport) return res;
           if (!reconnectUntil) reconnectUntil = Date.now() + RECONNECT_WINDOW_MS;
           if (Date.now() >= reconnectUntil) {
-            return { ...res, error: "server did not come back \u2014 turn not sent" };
+            return { ...res, error: `server did not come back \u2014 ${api} did not answer` };
           }
           setStatusBoth("reconnecting");
           if (!announced) {
@@ -7181,7 +7185,7 @@ function useAgentStream({
             isCancelled: () => userAbortRef.current
           });
           if (userAbortRef.current) return { ...res, aborted: true, error: "run cancelled" };
-          if (!back) return { ...res, error: "server did not come back \u2014 turn not sent" };
+          if (!back) return { ...res, error: `server did not come back \u2014 ${api} did not answer` };
           append({ id: nextId("sys"), role: "system", tone: "notice", text: "reconnected \u2014 resending the turn" });
           pushActivity("sys", "reconnected \xB7 resending");
           setStatusBoth("connecting");

@@ -194,6 +194,26 @@ const _cfgDefaults = (() => { try { return loadConfig(); } catch { return {}; } 
 if (!process.env.HAKSTER_API_KEY && _cfgDefaults && _cfgDefaults.apiKey) {
   process.env.HAKSTER_API_KEY = _cfgDefaults.apiKey;
 }
+// The server both TUIs talk to. `hakster config set server <url>` (and the
+// installers) write it to config.json, but the TUI bundles resolve their API
+// base from HAKSTER_API_URL and fall back to a loopback default that only works
+// on a box running the server itself. Owner, 2026-11-26, Surface Pro: "saying
+// fetch failed and only shows input bar" — the install had written
+// `server: https://haksterai.com`, and the TUI still dialled 127.0.0.1:3579
+// where nothing listens, so every panel fetch failed and only the input bar
+// survived. Derived here, once, so both renderers and the Bun/Node lanes
+// inherit one target. An explicit env var still wins, and a config with no
+// `server` leaves the old defaults exactly as they were.
+const _CFG_SERVER = String((_cfgDefaults && _cfgDefaults.server) || process.env.HAKSTER_SERVER || '').replace(/\/+$/, '');
+if (_CFG_SERVER) {
+  if (!process.env.HAKSTER_API_URL) process.env.HAKSTER_API_URL = _CFG_SERVER;
+  if (!process.env.HAKSTER_URL) {
+    // ws(s)://…/ws — the http default on the same host and path, so the
+    // socket and the API can never point at two different servers.
+    const ws = _CFG_SERVER.replace(/^http/i, (m) => (m.toLowerCase() === 'https' ? 'wss' : 'ws'));
+    process.env.HAKSTER_URL = `${ws}/ws`;
+  }
+}
 const DEFAULT_AI_PROVIDER = process.env.HAKSTER_PROVIDER || process.env.DEFAULT_PROVIDER || _cfgDefaults.provider || 'ollama';
 // Start on the owner's Claude DeepSeek config (Ollama "claude" integration),
 // not a GLM default — owner, 2026-11-16. HAKSTER_MODEL still wins; /model still
@@ -219,7 +239,12 @@ function _isHaksterApi(url) {
     const u = new URL(url);
     if (!u.pathname.startsWith('/api/')) return false;
     if (_NON_HAKSTER_PORTS.has(u.port)) return false;
-    return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.port === '3579';
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.port === '3579') return true;
+    // A remote install (Windows, 2026-11-26) answers on its configured origin.
+    // That is our own API too, so the key has to ride along or every call is
+    // refused as anonymous. Only the exact origin from config.json qualifies —
+    // never "any non-loopback host".
+    return !!_CFG_SERVER && u.origin === new URL(_CFG_SERVER).origin;
   } catch {
     return false;
   }
