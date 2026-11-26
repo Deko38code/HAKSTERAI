@@ -3162,13 +3162,20 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
       const own = keys.filter((k) => k && k.client !== "junkalot.co").sort((a, b) => (Number((b.month || {}).requests) || 0) - (Number((a.month || {}).requests) || 0));
       const jk = data.keyLedger.junkalotKey;
       const money = data.ownerMeter;
+      const acctCount = /* @__PURE__ */ new Map();
+      for (const k of keys) {
+        const a = k && k.account;
+        if (a) acctCount.set(a, (acctCount.get(a) || 0) + 1);
+      }
+      const acctTag = (k) => k && k.account && acctCount.get(k.account) > 1 ? ` \xB7 ${k.account}` : "";
+      const jkKey = keys.filter((k) => k && k.client === "junkalot.co")[0] || null;
       return /* @__PURE__ */ jsxs11(Fragment5, { children: [
         line("Billing \xB7 HAKSTERAI-FLASH \xB7 one id per model key", "green"),
         own.length ? own.slice(0, 3).map((k) => /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
-          line(`  ${k.id}${k.label ? ` \xB7 ${k.label}` : ""}  30d ${fmtNum(k.month && k.month.requests)} req \xB7 in ${fmtNum(k.month && k.month.inTokens)} \xB7 out ${fmtNum(k.month && k.month.outTokens)}`),
+          line(`  ${k.id}${k.label ? ` \xB7 ${k.label}` : ""}${acctTag(k)}  30d ${fmtNum(k.month && k.month.requests)} req \xB7 in ${fmtNum(k.month && k.month.inTokens)} \xB7 out ${fmtNum(k.month && k.month.outTokens)}`),
           line(`     all-time ${fmtNum(k.all && k.all.requests)} req \xB7 ${fmtNum(k.all && k.all.inTokens || 0)} in / ${fmtNum(k.all && k.all.outTokens || 0)} out${k.lanes && k.lanes.length ? ` \xB7 lanes ${k.lanes.map((l) => l.lane).slice(0, 2).join(", ")}` : ""}`, "gray")
         ] }, k.id)) : line("  no key has recorded a call yet", "gray"),
-        line(`  key-junkalot-1 \xB7 Junkalot Coach \xB7 ${jk ? `${fmtNum(jk.month.requests)} turns 30d` : "reading her rows\u2026"} \xB7 wired to our admin profit meter`, "white"),
+        line(`  ${jkKey ? jkKey.id : "key-junkalot-1"} \xB7 ${jkKey && jkKey.label || "Junkalot Coach"}${acctTag(jkKey)} \xB7 ${jk ? `${fmtNum(jk.month.requests)} turns 30d` : "reading her rows\u2026"} \xB7 wired to our admin profit meter`, "white"),
         money ? line(`  metered $${Number(money.monthMeterUsd || 0).toFixed(2)} 30d \xB7 $${Number(money.meterUsd || 0).toFixed(2)} all-time at $${Number(money.rateInPerMTok || 0).toFixed(2)} in / $${Number(money.rateOutPerMTok || 0).toFixed(2)} out per Mtok \xB7 meter, not an invoice`, "gray") : null,
         /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) })
       ] });

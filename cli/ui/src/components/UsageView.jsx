@@ -192,16 +192,27 @@ export default function UsageView({ width = 80, height = 24, usage = null, refre
           .sort((a, b) => (Number((b.month || {}).requests) || 0) - (Number((a.month || {}).requests) || 0));
         const jk = data.keyLedger.junkalotKey;
         const money = data.ownerMeter;
+        // Same account, different name: when two key ids share an account (ours and
+        // Junkalot's both live on OLLAMA_CLOUD_KEY_2), the account tag is printed on
+        // every row that shares it, so the label — never a guess — is what tells
+        // their usage apart. A unique account prints nothing extra.
+        const acctCount = new Map();
+        for (const k of keys) {
+          const a = k && k.account;
+          if (a) acctCount.set(a, (acctCount.get(a) || 0) + 1);
+        }
+        const acctTag = (k) => (k && k.account && acctCount.get(k.account) > 1 ? ` · ${k.account}` : '');
+        const jkKey = keys.filter((k) => k && k.client === 'junkalot.co')[0] || null;
         return (
           <>
             {line('Billing · HAKSTERAI-FLASH · one id per model key', 'green')}
             {own.length ? own.slice(0, 3).map((k) => (
               <box key={k.id} style={{ width: inner, flexDirection: 'column', flexShrink: 0 }}>
-                {line(`  ${k.id}${k.label ? ` · ${k.label}` : ''}  30d ${fmtNum(k.month && k.month.requests)} req · in ${fmtNum(k.month && k.month.inTokens)} · out ${fmtNum(k.month && k.month.outTokens)}`)}
+                {line(`  ${k.id}${k.label ? ` · ${k.label}` : ''}${acctTag(k)}  30d ${fmtNum(k.month && k.month.requests)} req · in ${fmtNum(k.month && k.month.inTokens)} · out ${fmtNum(k.month && k.month.outTokens)}`)}
                 {line(`     all-time ${fmtNum(k.all && k.all.requests)} req · ${fmtNum((k.all && k.all.inTokens) || 0)} in / ${fmtNum((k.all && k.all.outTokens) || 0)} out${k.lanes && k.lanes.length ? ` · lanes ${k.lanes.map((l) => l.lane).slice(0, 2).join(', ')}` : ''}`, 'gray')}
               </box>
             )) : line('  no key has recorded a call yet', 'gray')}
-            {line(`  key-junkalot-1 · Junkalot Coach · ${jk ? `${fmtNum(jk.month.requests)} turns 30d` : 'reading her rows…'} · wired to our admin profit meter`, 'white')}
+            {line(`  ${jkKey ? jkKey.id : 'key-junkalot-1'} · ${(jkKey && jkKey.label) || 'Junkalot Coach'}${acctTag(jkKey)} · ${jk ? `${fmtNum(jk.month.requests)} turns 30d` : 'reading her rows…'} · wired to our admin profit meter`, 'white')}
             {money ? line(`  metered $${Number(money.monthMeterUsd || 0).toFixed(2)} 30d · $${Number(money.meterUsd || 0).toFixed(2)} all-time at $${Number(money.rateInPerMTok || 0).toFixed(2)} in / $${Number(money.rateOutPerMTok || 0).toFixed(2)} out per Mtok · meter, not an invoice`, 'gray') : null}
             <Row w={inner}><text> </text></Row>
           </>

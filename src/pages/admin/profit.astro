@@ -489,6 +489,12 @@ import Layout from '../../layouts/Layout.astro';
             var klMid = ' · ';
             var own = kl.keys.filter(function (k) { return k && k.client !== 'junkalot.co'; });
             var jkKey = kl.keys.filter(function (k) { return k && k.client === 'junkalot.co'; })[0] || null;
+            // Same account, different name: our key and Junkalot's both sit on
+            // OLLAMA_CLOUD_KEY_2, so the account is printed on every row that shares
+            // it and the label is what tells their usage apart (owner, 2026-11-26).
+            var acctCount = {};
+            kl.keys.forEach(function (k) { if (k && k.account) acctCount[k.account] = (acctCount[k.account] || 0) + 1; });
+            var acctTag = function (k) { return k && k.account && acctCount[k.account] > 1 ? klMid + k.account : ''; };
             var jkRows = kl.junkalotKey;
             var out = '<h3>' + own.length + ' key' + (own.length === 1 ? '' : 's') + ' ours ' +
               '<span class="pl-badge ' + (Number(kl.rows) > 0 ? 'live' : 'off') + '">' +
@@ -496,7 +502,7 @@ import Layout from '../../layouts/Layout.astro';
             out += own.length
               ? own.map(function (k) {
                   var m = k.month || {}, a = k.all || {};
-                  return row(k.id + ' · ' + (k.label || ''),
+                  return row(k.id + ' · ' + (k.label || '') + acctTag(k),
                     (Number(m.requests) > 0 || Number(a.requests) > 0)
                       ? '30d ' + compact(m.requests) + ' req' + klMid + compact(m.inTokens) + ' in / ' + compact(m.outTokens) + ' out' +
                         klMid + 'all-time ' + compact(a.requests) + ' req' + (k.envVar ? klMid + k.envVar : '')
@@ -505,7 +511,7 @@ import Layout from '../../layouts/Layout.astro';
               : '<p class="pl-empty">The key registry has no key of ours yet.</p>';
             if (jkKey) {
               out += '<h3 style="margin-top:14px;">Client key &middot; wired back to this meter</h3>' +
-                row(jkKey.id + ' · ' + (jkKey.label || ''), jkRows
+                row(jkKey.id + ' · ' + (jkKey.label || '') + acctTag(jkKey), jkRows
                   ? compact(jkRows.month.requests) + ' turns 30d' + klMid + compact(jkRows.month.inTokens) + ' in / ' + compact(jkRows.month.outTokens) + ' out' +
                     (jkRows.all && jkRows.all.lastAt ? klMid + 'last ' + String(jkRows.all.lastAt).slice(0, 16).replace('T', ' ') : '')
                   : 'her recorded rows have not been read yet — no figure is shown rather than a guess');
