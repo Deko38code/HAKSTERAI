@@ -105,6 +105,18 @@ test('a write of any method is stateful even outside /api', async () => {
   assert.equal(r.node, 'primary');
 });
 
+test('the whole /miniforge tree is served by the primary only', async () => {
+  // 2026-11-26: only /miniforge/app was pinned, so GET /miniforge/api/version
+  // still alternated 5/5 between the Dell's JSON and the standby's stale page
+  // (the standby runs no miniforge on :8100). Pin the tree, not one path.
+  for (const p of ['/miniforge', '/miniforge/', '/miniforge/app', '/miniforge/api/version']) {
+    for (let i = 0; i < 4; i += 1) {
+      const r = await get(routerPort, p);
+      assert.equal(r.node, 'primary', `${p} must never be shared`);
+    }
+  }
+});
+
 test('static pages are served by both boxes', async () => {
   const seen = new Set();
   for (let i = 0; i < 6; i += 1) {

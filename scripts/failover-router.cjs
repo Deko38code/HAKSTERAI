@@ -66,11 +66,16 @@ const PROBE_TIMEOUT_MS = 2500;
 const UPSTREAM_TIMEOUT_MS = 30000;
 
 // Paths that must never be shared: they read or write account state.
-// /miniforge/app is the signed-in bot app the login lands on. Its page is a
-// single file on each box's own disk and nothing syncs it, so sharing it handed
-// half the traffic the standby's stale build (2026-11-26: the Nov 3 Pandemonium
-// page, 5 of 10 loads). Only the primary serves it while both boxes are alive;
-// a real failover still reaches the peer, as it always did.
+// The whole /miniforge tree, not just /miniforge/app. It is the signed-in bot
+// app the login lands on: each box's haksterAi proxies it to that box's own
+// 127.0.0.1:8100, and nothing syncs that miniforge tree between boxes. Sharing
+// it handed half the traffic the standby's stale build (2026-11-26: the Nov 3
+// Pandemonium page, 5 of 10 loads). Measured again later that day, /miniforge
+// itself was still split: GET /miniforge/api/version answered 5 of 10 with the
+// Dell's 365-byte JSON and 5 of 10 with the standby's 302,731-byte stale page,
+// because the standby runs no miniforge at all (:8100 refused) and fell back to
+// its old dist page. Only the primary serves the tree while both boxes are
+// alive; a real failover still reaches the peer, as it always did.
 // 2026-11-26: /cli/ and the installers join this list for the same reason
 // /miniforge/app did. The router round-robins stateless GETs, but the standby
 // only carries the CLI tree the §41 sync last pushed — and while that sync is
@@ -79,7 +84,7 @@ const UPSTREAM_TIMEOUT_MS = 30000;
 // alternating). /cli/authorize also mints and redeems device codes against the
 // Dell's own database. Only the primary serves these while both boxes are
 // alive; a real failover still reaches the peer, exactly as /miniforge/app does.
-const STATEFUL_PREFIX = ['/api/', '/admin', '/login', '/auth', '/callback', '/oauth', '/logout', '/miniforge/app', '/cli/', '/install.sh', '/install.ps1'];
+const STATEFUL_PREFIX = ['/api/', '/admin', '/login', '/auth', '/callback', '/oauth', '/logout', '/miniforge', '/cli/', '/install.sh', '/install.ps1'];
 // Long-lived streams: no socket timeout, keep the pipe open.
 const STREAM_PREFIX = ['/api/agent/run', '/api/tui', '/api/stream', '/api/events'];
 
