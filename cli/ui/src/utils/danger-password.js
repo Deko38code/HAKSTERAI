@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { haksterDir } from '../../../src/home-dir.js';
 
 /* Where the approval password comes from.
  *
@@ -14,7 +15,7 @@ import path from 'node:path';
  * startup would keep accepting a password the operator has since rotated away.
  */
 
-const CONFIG_DIR = path.join(os.homedir(), '.hakster');
+const CONFIG_DIR = haksterDir();
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
 /** The configured approval password, or null when none is set. */

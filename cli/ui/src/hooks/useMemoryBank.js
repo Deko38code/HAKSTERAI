@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { haksterDir } from '../../../src/home-dir.js';
 
 /* useMemoryBank — the memory banks the server's autolearn writes, read
  * in-process.
@@ -19,7 +20,7 @@ import path from 'node:path';
  * If the directory or a bank is missing the fields stay null and the panel
  * shows '—'; nothing is guessed and nothing throws into the render path.
  */
-const BANK_DIR = path.join(os.homedir(), '.hakster', 'memories', 'banks');
+const BANK_DIR = path.join(haksterDir(), 'memories', 'banks');
 
 export function readMemoryBanks(dir = BANK_DIR) {
   let files;

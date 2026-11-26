@@ -418,6 +418,54 @@ var require_inline_ad_layout = __commonJS({
   }
 });
 
+// ../src/home-dir.js
+var require_home_dir = __commonJS({
+  "../src/home-dir.js"(exports, module) {
+    "use strict";
+    var fs11 = __require("fs");
+    var os2 = __require("os");
+    var path9 = __require("path");
+    function pathFor(platform) {
+      return platform === "win32" ? path9.win32 : path9;
+    }
+    function driveOf(p) {
+      const m = /^([A-Za-z]):/.exec(String(p || ""));
+      return m ? m[1].toUpperCase() : "";
+    }
+    function systemRoot(env) {
+      const sd = String(env && env.SystemDrive || "").trim();
+      if (/^[A-Za-z]:/.test(sd)) return sd.slice(0, 2) + "\\";
+      return "C:\\";
+    }
+    function homeDir(env = process.env, platform = process.platform, opts = {}) {
+      const P = pathFor(platform);
+      const override = String(env && env.HAKSTER_HOME || "").trim();
+      if (override) return P.resolve(override);
+      const raw = opts.homedir !== void 0 ? opts.homedir : os2.homedir();
+      const home = String(raw || "");
+      if (platform !== "win32") return home;
+      const root2 = systemRoot(env);
+      const want = driveOf(root2);
+      const user = String(env && env.USERNAME || P.basename(home) || "user");
+      if (!home || !P.isAbsolute(home)) return P.join(root2, "Users", user);
+      if (driveOf(home) === want) return home;
+      const exists = opts.exists || ((p) => {
+        try {
+          return fs11.existsSync(p);
+        } catch {
+          return false;
+        }
+      });
+      if (exists(P.join(home, ".hakster"))) return home;
+      return P.join(root2, "Users", user);
+    }
+    function haksterDir4(env = process.env, platform = process.platform, opts = {}) {
+      return pathFor(platform).join(homeDir(env, platform, opts), ".hakster");
+    }
+    module.exports = { homeDir, haksterDir: haksterDir4, driveOf, systemRoot };
+  }
+});
+
 // ../src/kitty-graphics.js
 var require_kitty_graphics = __commonJS({
   "../src/kitty-graphics.js"(exports, module) {
@@ -537,10 +585,11 @@ var require_live_image = __commonJS({
   "../src/live-image.js"(exports, module) {
     "use strict";
     var fs11 = __require("fs");
-    var os6 = __require("os");
+    var os2 = __require("os");
     var path9 = __require("path");
+    var { haksterDir: haksterDir4 } = require_home_dir();
     var crypto = __require("crypto");
-    var CACHE_DIR = path9.join(os6.homedir(), ".hakster", "cache", "live");
+    var CACHE_DIR = path9.join(haksterDir4(), "cache", "live");
     var MAX_BYTES = 12 * 1024 * 1024;
     var FETCH_TIMEOUT_MS = 12e3;
     var EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
@@ -660,8 +709,8 @@ var require_usage_ids = __commonJS({
     "use strict";
     var fs11 = __require("fs");
     var path9 = __require("path");
-    var os6 = __require("os");
-    var HOME = process.env.HOME || os6.homedir() || "/home/ghost";
+    var os2 = __require("os");
+    var HOME = process.env.HOME || os2.homedir() || "/home/ghost";
     var REPO = (() => {
       try {
         if (typeof __dirname === "string" && __dirname) return path9.resolve(__dirname, "..", "..");
@@ -850,8 +899,9 @@ var require_updater = __commonJS({
   "../src/updater.js"(exports, module) {
     "use strict";
     var fs11 = __require("fs");
-    var os6 = __require("os");
+    var os2 = __require("os");
     var path9 = __require("path");
+    var { haksterDir: haksterDir4 } = require_home_dir();
     var crypto = __require("crypto");
     var { spawn: spawn2 } = __require("child_process");
     var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path9.join(__dirname, "..") : "");
@@ -898,7 +948,7 @@ var require_updater = __commonJS({
       const v = String(version || "");
       return !!v && v !== "0.0.0";
     }
-    var UPDATES_DIR = path9.join(os6.homedir(), ".hakster", "updates");
+    var UPDATES_DIR = path9.join(haksterDir4(), "updates");
     var STAGED_DIR = path9.join(UPDATES_DIR, "staged");
     var TARBALL = path9.join(UPDATES_DIR, "latest.tar.gz");
     var PENDING_FILE = path9.join(UPDATES_DIR, "pending.json");
@@ -947,7 +997,7 @@ var require_updater = __commonJS({
       return fs11.existsSync(path9.join(cliDirOf2(explicitDir), "..", ".git"));
     }
     function serverUrl() {
-      const cfg = readJson(path9.join(os6.homedir(), ".hakster", "config.json"), {});
+      const cfg = readJson(path9.join(haksterDir4(), "config.json"), {});
       return String(cfg.server || process.env.HAKSTER_SERVER || "").replace(/\/+$/, "");
     }
     function cmpVersion(a, b) {
@@ -1280,9 +1330,10 @@ var require_prefs = __commonJS({
   "../src/prefs.js"(exports, module) {
     "use strict";
     var fs11 = __require("fs");
-    var os6 = __require("os");
+    var os2 = __require("os");
     var path9 = __require("path");
-    var PREFS_DIR = path9.join(os6.homedir(), ".hakster");
+    var { haksterDir: haksterDir4 } = require_home_dir();
+    var PREFS_DIR = haksterDir4();
     var PREFS_FILE = path9.join(PREFS_DIR, "cli-prefs.json");
     var LEGACY_FILE = path9.join(PREFS_DIR, "tui-prefs.json");
     var DEFAULTS = {
@@ -1597,12 +1648,13 @@ var require_ladder = __commonJS({
 var require_input_history = __commonJS({
   "../src/input-history.js"(exports, module) {
     var fs11 = __require("fs");
-    var os6 = __require("os");
+    var os2 = __require("os");
     var path9 = __require("path");
+    var { haksterDir: haksterDir4 } = require_home_dir();
     var MAX_KEEP = 500;
     var MAX_RECALL = 200;
     function historyPath() {
-      return path9.join(process.env.HAKSTER_HOME || path9.join(os6.homedir(), ".hakster"), "history");
+      return path9.join(haksterDir4(), "history");
     }
     var TERMINAL_JUNK = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\x1b|rgb:|VTE\(|[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋]|;\d+\$y|\[\?/;
     var BOX_ONLY = /^[\s│┃|]+|[\s│┃|]+$/;
@@ -2039,9 +2091,9 @@ import { TextAttributes as TextAttributes3 } from "@opentui/core";
 
 // src/utils/danger-password.js
 import fs from "node:fs";
-import os from "node:os";
+var import_home_dir = __toESM(require_home_dir());
 import path from "node:path";
-var CONFIG_DIR = path.join(os.homedir(), ".hakster");
+var CONFIG_DIR = (0, import_home_dir.haksterDir)();
 var CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 function getDangerPassword() {
   if (process.env.HAKSTER_DANGER_PASSWORD) return process.env.HAKSTER_DANGER_PASSWORD;
@@ -3538,13 +3590,13 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
 // src/hooks/useServerUsage.js
 import { useCallback as useCallback2, useEffect as useEffect7, useRef as useRef5, useState as useState7 } from "react";
 import fs3 from "node:fs";
-import os2 from "node:os";
+var import_home_dir2 = __toESM(require_home_dir());
 import path2 from "node:path";
 var DEFAULT_API = process.env.HAKSTER_API_URL || "http://localhost:3579";
 function configuredServer() {
   if (process.env.HAKSTER_API_URL) return String(process.env.HAKSTER_API_URL).replace(/\/+$/, "");
   try {
-    const cfg = JSON.parse(fs3.readFileSync(path2.join(os2.homedir(), ".hakster", "config.json"), "utf8"));
+    const cfg = JSON.parse(fs3.readFileSync(path2.join((0, import_home_dir2.haksterDir)(), "config.json"), "utf8"));
     if (cfg && typeof cfg.server === "string" && cfg.server) return cfg.server.replace(/\/+$/, "");
   } catch {
   }
@@ -4783,9 +4835,9 @@ import React21 from "react";
 import { TextAttributes as TextAttributes16 } from "@opentui/core";
 
 // ../smartness.mjs
-var import_listening_ports = __toESM(require_listening_ports(), 1);
 import fs6 from "node:fs";
-import os3 from "node:os";
+var import_home_dir3 = __toESM(require_home_dir(), 1);
+var import_listening_ports = __toESM(require_listening_ports(), 1);
 import path4 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var CLI_DIR = path4.dirname(fileURLToPath2(import.meta.url));
@@ -4800,7 +4852,7 @@ var DEFAULT_SCORE = 98;
 var HEALTH_WINDOW_MS = 9e4;
 function anchorScore() {
   try {
-    const file = path4.join(os3.homedir(), ".hakster", "perf_history.json");
+    const file = path4.join(import_home_dir3.default.haksterDir(), "perf_history.json");
     const rows = JSON.parse(fs6.readFileSync(file, "utf8"));
     const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
     const n = Number(last && (last.smartnessEnd ?? last.smartnessPeak));
@@ -4810,7 +4862,7 @@ function anchorScore() {
     return DEFAULT_SCORE;
   }
 }
-function anchorPoints(file = path4.join(os3.homedir(), ".hakster", "perf_history.json")) {
+function anchorPoints(file = path4.join(import_home_dir3.default.haksterDir(), "perf_history.json")) {
   try {
     const rows = JSON.parse(fs6.readFileSync(file, "utf8"));
     const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
@@ -7435,7 +7487,7 @@ var useServerWatch_default = useServerWatch;
 
 // src/hooks/useHostStats.js
 import { useEffect as useEffect14, useRef as useRef11, useState as useState14 } from "react";
-import os4 from "node:os";
+import os from "node:os";
 import fs7 from "node:fs";
 import path5 from "node:path";
 var readText = (p) => {
@@ -7446,7 +7498,7 @@ var readText = (p) => {
   }
 };
 function osCpuTimes() {
-  const cpus = os4.cpus() || [];
+  const cpus = os.cpus() || [];
   if (!cpus.length) return null;
   let idle = 0;
   let total = 0;
@@ -7484,7 +7536,7 @@ function meminfo() {
 function diskRoot() {
   if (process.platform === "win32") {
     try {
-      return path5.parse(os4.homedir()).root || "C:\\";
+      return path5.parse(os.homedir()).root || "C:\\";
     } catch {
       return "C:\\";
     }
@@ -7522,7 +7574,7 @@ function useHostStats(intervalMs = 1e3) {
   const pubRef = useRef11("");
   const tickRef = useRef11(0);
   useEffect14(() => {
-    const cores = Math.max(1, (os4.cpus() || []).length);
+    const cores = Math.max(1, (os.cpus() || []).length);
     const sample = () => {
       const tick = tickRef.current += 1;
       const now = cpuTimes();
@@ -7541,11 +7593,11 @@ function useHostStats(intervalMs = 1e3) {
       if (tick === 1 || tick % 5 === 0) memRef.current = meminfo();
       if (tick === 1 || tick % 10 === 0) diskRef.current = disk();
       const mi = memRef.current || {};
-      const la = typeof os4.loadavg === "function" ? os4.loadavg() : null;
+      const la = typeof os.loadavg === "function" ? os.loadavg() : null;
       const loadKnown = process.platform !== "win32" && !!la && Number.isFinite(la[0]);
       const swapKnown = mi.SwapTotal != null;
-      const memTotal = mi.MemTotal || os4.totalmem();
-      const memAvail = mi.MemAvailable != null ? mi.MemAvailable : os4.freemem();
+      const memTotal = mi.MemTotal || os.totalmem();
+      const memAvail = mi.MemAvailable != null ? mi.MemAvailable : os.freemem();
       const swapTotal = mi.SwapTotal || 0;
       const swapFree = mi.SwapFree || 0;
       const d = diskRef.current;
@@ -7564,7 +7616,7 @@ function useHostStats(intervalMs = 1e3) {
         diskPct: d ? d.pct : null,
         diskFreeGb: d ? Math.round(d.free / 1e9 * 10) / 10 : null,
         diskTotalGb: d ? d.total / 1e9 : null,
-        uptimeS: Math.round(os4.uptime())
+        uptimeS: Math.round(os.uptime())
       };
       const key = shown(next);
       if (key === pubRef.current) return;
@@ -7749,9 +7801,9 @@ function useDebugStats({ enabled = false, api = "http://localhost:3579", refresh
 // src/hooks/useMemoryBank.js
 import { useEffect as useEffect16, useState as useState16 } from "react";
 import fs8 from "node:fs";
-import os5 from "node:os";
+var import_home_dir4 = __toESM(require_home_dir());
 import path6 from "node:path";
-var BANK_DIR = path6.join(os5.homedir(), ".hakster", "memories", "banks");
+var BANK_DIR = path6.join((0, import_home_dir4.haksterDir)(), "memories", "banks");
 function readMemoryBanks(dir = BANK_DIR) {
   let files;
   try {

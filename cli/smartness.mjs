@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import homeDirPkg from './src/home-dir.js';
 import { fileURLToPath } from 'node:url';
 import listeningPorts from './src/listening-ports.js';
 
@@ -43,7 +44,7 @@ const HEALTH_WINDOW_MS = 90000;
 // score, floored at 50. Missing/unreadable history falls back to the default.
 export function anchorScore() {
   try {
-    const file = path.join(os.homedir(), '.hakster', 'perf_history.json');
+    const file = path.join(homeDirPkg.haksterDir(), 'perf_history.json');
     const rows = JSON.parse(fs.readFileSync(file, 'utf8'));
     const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
     const n = Number(last && (last.smartnessEnd ?? last.smartnessPeak));
@@ -61,7 +62,7 @@ export function anchorScore() {
 // already happened read as lost (owner, 2026-11-25: "make sure autolearn meter
 // with brain emoji is working with learning etc"). `file` is injectable so a
 // test can read a fixture instead of the operator's real history.
-export function anchorPoints(file = path.join(os.homedir(), '.hakster', 'perf_history.json')) {
+export function anchorPoints(file = path.join(homeDirPkg.haksterDir(), 'perf_history.json')) {
   try {
     const rows = JSON.parse(fs.readFileSync(file, 'utf8'));
     const last = Array.isArray(rows) ? rows[rows.length - 1] : null;
@@ -312,6 +313,7 @@ export const INSTALL_FILES = [
   'cli/src/updater.js',
   'cli/src/prefs.js',
   'cli/src/listening-ports.js',
+  'cli/src/home-dir.js',
   'cli/src/models/ladder.js',
   'cli/src/self-config-guard.js',
 ];

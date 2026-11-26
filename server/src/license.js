@@ -19,9 +19,37 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 
+/* Our own folder, resolved the same way the CLI resolves it (cli/src/home-dir.js).
+ *
+ * Owner, 2026-11-26: "need to make sure file on windows go to c drive". The
+ * installer sets HAKSTER_HOME to the folder it wrote into; without it the real
+ * home is used, and on Windows a home that is not on the system drive falls back
+ * to the system-drive profile rather than putting our files on another drive.
+ *
+ * Written out here instead of required from home-dir.js because this file ships
+ * verbatim inside the installed package and must depend on nothing but Node's
+ * own modules (ui/__tests__/license-copy.test.mjs pins both rules).
+ */
+function haksterHome() {
+  const override = String(process.env.HAKSTER_HOME || '').trim();
+  if (override) return path.resolve(override);
+  const home = String(os.homedir() || '');
+  if (process.platform !== 'win32') return home;
+  const sysDrive = /^[A-Za-z]:/.test(String(process.env.SystemDrive || ''))
+    ? String(process.env.SystemDrive).slice(0, 2)
+    : 'C:';
+  const sysRoot = sysDrive + '\\';
+  const onSystemDrive = !!home && path.isAbsolute(home) && home.slice(0, 2).toUpperCase() === sysDrive.toUpperCase();
+  if (onSystemDrive) return home;
+  try {
+    if (fs.existsSync(path.join(home, '.hakster'))) return home; // never split a working install
+  } catch {}
+  return path.join(sysRoot, 'Users', String(process.env.USERNAME || 'user'));
+}
+
 const LICENSE_SERVER = 'https://haksterai.com/api/auth/me';
-const CLI_CONFIG_FILE = path.join(os.homedir(), '.hakster', 'config.json');
-const CACHE_FILE = path.join(os.homedir(), '.hakster', 'license.json');
+const CLI_CONFIG_FILE = path.join(haksterHome(), '.hakster', 'config.json');
+const CACHE_FILE = path.join(haksterHome(), '.hakster', 'license.json');
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 const TRIAL_DURATION = 3 * 24 * 60 * 60 * 1000; // 3-day trial
 
@@ -90,7 +118,7 @@ function fetchAccountStatus(apiKey) {
 
 // Check if user has a local trial active (used pre-signup and for free-plan accounts)
 function checkTrial() {
-  const trialFile = path.join(os.homedir(), '.hakster', '.trial');
+  const trialFile = path.join(haksterHome(), '.hakster', '.trial');
   try {
     const trialStart = parseInt(fs.readFileSync(trialFile, 'utf8'));
     const elapsed = Date.now() - trialStart;
@@ -105,7 +133,7 @@ function checkTrial() {
 
 // Start a new trial
 function startTrial() {
-  const trialFile = path.join(os.homedir(), '.hakster', '.trial');
+  const trialFile = path.join(haksterHome(), '.hakster', '.trial');
   const dir = path.dirname(trialFile);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(trialFile, Date.now().toString());

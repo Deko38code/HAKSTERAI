@@ -17,9 +17,10 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 const crypto = require('crypto');
 
-const CACHE_DIR = path.join(os.homedir(), '.hakster', 'cache', 'live');
+const CACHE_DIR = path.join(haksterDir(), 'cache', 'live');
 const MAX_BYTES = 12 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 12000;
 

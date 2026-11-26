@@ -25,6 +25,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { homeDir } = require('./home-dir');
 const { spawnSync } = require('child_process');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
@@ -32,7 +33,7 @@ const TEMPLATE = path.join(ASSETS, 'guake-hakster.conf');
 const BACKDROP = path.join(ASSETS, 'haksterai-backdrop.png');
 
 function home() {
-  return process.env.HAKSTER_HOME || os.homedir();
+  return homeDir();
 }
 
 function markerPath() {

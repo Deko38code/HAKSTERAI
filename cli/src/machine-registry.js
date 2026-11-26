@@ -28,6 +28,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 const crypto = require('crypto');
 
 const STAMP_TTL_MS = 6 * 60 * 60 * 1000; // re-announce at most every 6 h
@@ -35,7 +36,7 @@ const STAMP_TTL_MS = 6 * 60 * 60 * 1000; // re-announce at most every 6 h
 function configDir() {
   // HAKSTER_MACHINE_REG_DIR exists so a test can keep its stamp out of the
   // operator's real ~/.hakster; production always uses the config dir.
-  return process.env.HAKSTER_MACHINE_REG_DIR || path.join(os.homedir(), '.hakster');
+  return process.env.HAKSTER_MACHINE_REG_DIR || haksterDir();
 }
 
 function stampPath() {

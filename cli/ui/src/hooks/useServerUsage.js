@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { haksterDir } from '../../../src/home-dir.js';
 
 /* useServerUsage — this ACCOUNT's usage, as the server records it.
  *
@@ -23,7 +24,7 @@ const DEFAULT_API = process.env.HAKSTER_API_URL || 'http://localhost:3579';
 function configuredServer() {
   if (process.env.HAKSTER_API_URL) return String(process.env.HAKSTER_API_URL).replace(/\/+$/, '');
   try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.hakster', 'config.json'), 'utf8'));
+    const cfg = JSON.parse(fs.readFileSync(path.join(haksterDir(), 'config.json'), 'utf8'));
     if (cfg && typeof cfg.server === 'string' && cfg.server) return cfg.server.replace(/\/+$/, '');
   } catch { /* fall through */ }
   return DEFAULT_API;

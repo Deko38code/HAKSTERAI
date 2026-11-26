@@ -18,6 +18,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
@@ -81,7 +82,7 @@ function versionKnown(version) {
   const v = String(version || '');
   return !!v && v !== '0.0.0';
 }
-const UPDATES_DIR = path.join(os.homedir(), '.hakster', 'updates');
+const UPDATES_DIR = path.join(haksterDir(), 'updates');
 const STAGED_DIR = path.join(UPDATES_DIR, 'staged');
 const TARBALL = path.join(UPDATES_DIR, 'latest.tar.gz');
 const PENDING_FILE = path.join(UPDATES_DIR, 'pending.json');
@@ -141,7 +142,7 @@ function isSourceCheckout(explicitDir) {
 }
 
 function serverUrl() {
-  const cfg = readJson(path.join(os.homedir(), '.hakster', 'config.json'), {});
+  const cfg = readJson(path.join(haksterDir(), 'config.json'), {});
   return String(cfg.server || process.env.HAKSTER_SERVER || '').replace(/\/+$/, '');
 }
 

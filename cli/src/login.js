@@ -20,9 +20,10 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 const { spawn } = require('child_process');
 
-const CONFIG_DIR = path.join(os.homedir(), '.hakster');
+const CONFIG_DIR = haksterDir();
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
 function loadConfig() {

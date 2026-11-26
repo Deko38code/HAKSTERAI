@@ -14,6 +14,7 @@ if (process.env.NO_COLOR && process.env.FORCE_COLOR) { delete process.env.NO_COL
 const { Command } = require('commander');
 const fs = require('fs');
 const path = require('path');
+const { haksterDir } = require('./src/home-dir');
 const os = require('os');
 const http = require('http');
 const https = require('https');
@@ -111,7 +112,7 @@ try {
 } catch (e) { /* non-blocking */ }
 
 // ── Config ───────────────────────────────────────────────────────────────
-const CONFIG_DIR = path.join(os.homedir(), '.hakster');
+const CONFIG_DIR = haksterDir();
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
 function loadConfig() {
@@ -2466,7 +2467,7 @@ program
       // leaving real memories stuck in raw_memories.json indefinitely since nothing
       // else ever consolidated them. Safe to call unconditionally — it's a no-op when
       // there's nothing pending.
-      try { autolearn.consolidateMemories(path.join(os.homedir(), '.hakster')); } catch {}
+      try { autolearn.consolidateMemories(haksterDir()); } catch {}
       console.log(`\n${C.green}  session ended. 👻${C.reset}`);
       process.exit(0);
     });

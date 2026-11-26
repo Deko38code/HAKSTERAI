@@ -30,6 +30,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 const { spawnSync } = require('child_process');
 
 const PACKAGE_NAME = '@anthropic-ai/claude-code';
@@ -53,7 +54,7 @@ function claudeCodeSpec() {
 /** Where our own copy lives. Private to this user's home; never global. */
 function managedPrefix() {
   const override = String(process.env.HAKSTER_CLAUDE_PREFIX || '').trim();
-  return override ? path.resolve(override) : path.join(os.homedir(), '.hakster', 'claude-code');
+  return override ? path.resolve(override) : path.join(haksterDir(), 'claude-code');
 }
 
 function isUsableFile(file) {

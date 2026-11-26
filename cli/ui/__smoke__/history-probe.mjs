@@ -11,8 +11,12 @@ import path from 'node:path';
 process.env.HAKSTER_NO_INTRO = '1';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hist-'));
-fs.mkdirSync(tmp, { recursive: true });
-const histFile = path.join(tmp, 'history');
+// HAKSTER_HOME is the home ROOT (cli/src/home-dir.js), so our files live in
+// `<tmp>/.hakster` — writing history straight into `tmp` would put it where the
+// CLI no longer looks and the probe would pass against a file nobody reads.
+const ourDir = path.join(tmp, '.hakster');
+fs.mkdirSync(ourDir, { recursive: true });
+const histFile = path.join(ourDir, 'history');
 const SEED = ['list the disks', 'restart the tunnel', 'check pm2 status'];
 fs.writeFileSync(histFile, SEED.join('\n') + '\n');
 process.env.HAKSTER_HOME = tmp;

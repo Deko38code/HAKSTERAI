@@ -13,8 +13,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 
-const CONFIG_FILE = path.join(os.homedir(), '.hakster', 'config.json');
+const CONFIG_FILE = path.join(haksterDir(), 'config.json');
 const API = 'https://api.shodan.io';
 const TIMEOUT_MS = 15000;
 

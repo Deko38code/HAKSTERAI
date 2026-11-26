@@ -14,8 +14,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 
-const PREFS_DIR = path.join(os.homedir(), '.hakster');
+const PREFS_DIR = haksterDir();
 const PREFS_FILE = path.join(PREFS_DIR, 'cli-prefs.json');
 const LEGACY_FILE = path.join(PREFS_DIR, 'tui-prefs.json');
 

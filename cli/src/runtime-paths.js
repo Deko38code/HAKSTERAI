@@ -15,11 +15,12 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { homeDir, haksterDir } = require('./home-dir');
 
 /** Where our installer puts the runtimes it had to bring. */
 function runtimeRoot(env = process.env) {
   const override = String(env.HAKSTER_RUNTIME || '').trim();
-  return override ? path.resolve(override) : path.join(os.homedir(), '.hakster', 'runtime');
+  return override ? path.resolve(override) : path.join(haksterDir(), 'runtime');
 }
 
 function isExecutableFile(file) {
@@ -61,7 +62,7 @@ function findOnPath(bin, env = process.env) {
  */
 function wellKnownBun(env = process.env, platform = process.platform) {
   if (platform !== 'win32') return [];
-  const home = os.homedir();
+  const home = homeDir();
   const localAppData = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
   const appData = env.APPDATA || path.join(home, 'AppData', 'Roaming');
   const programFiles = env.ProgramFiles || 'C:\\Program Files';

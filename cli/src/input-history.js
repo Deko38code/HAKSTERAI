@@ -19,12 +19,13 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 
 const MAX_KEEP = 500;   // on disk, same cap the server's saveToHistory uses
 const MAX_RECALL = 200; // lines loaded into the composer at start
 
 function historyPath() {
-  return path.join(process.env.HAKSTER_HOME || path.join(os.homedir(), '.hakster'), 'history');
+  return path.join(haksterDir(), 'history');
 }
 
 /* Control characters, OSC/DCS colour replies, and the box-drawing runes a

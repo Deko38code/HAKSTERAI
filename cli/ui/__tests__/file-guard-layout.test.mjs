@@ -29,7 +29,7 @@ function fakeTree(files) {
   // package.json must be real JSON too: resolving a sibling `.js` import makes
   // Node read the fixture's package scope, and an empty file is not valid JSON
   // (ERR_INVALID_PACKAGE_CONFIG), which would fail before any guard logic ran.
-  const IMPORTED = new Set(['cli/src/listening-ports.js', 'cli/package.json']);
+  const IMPORTED = new Set(['cli/src/listening-ports.js', 'cli/src/home-dir.js', 'cli/package.json']);
   for (const rel of files) {
     if (rel === 'cli/smartness.mjs') continue; // the real module is already there
     const p = path.join(root, rel);

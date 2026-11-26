@@ -32,6 +32,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 const { spawn } = require('child_process');
 const {
   findClaudeOnPath,
@@ -44,7 +45,7 @@ const DISPLAY_MODEL = 'HAKSTERAI-FLASH';
 
 function loadCliConfig() {
   try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.hakster', 'config.json'), 'utf8'));
+    const cfg = JSON.parse(fs.readFileSync(path.join(haksterDir(), 'config.json'), 'utf8'));
     return cfg && typeof cfg === 'object' ? cfg : {};
   } catch {
     return {};
@@ -253,7 +254,7 @@ async function runManagedClaude(args) {
 
   // Isolated config dir: no Anthropic login is read, refreshed or written here,
   // and the machine's real ~/.claude is left untouched.
-  const cfgDir = path.join(os.homedir(), '.hakster-claude');
+  const cfgDir = path.join(haksterDir(), '.hakster-claude');
   try {
     fs.mkdirSync(cfgDir, { recursive: true, mode: 0o700 });
     fs.chmodSync(cfgDir, 0o700);

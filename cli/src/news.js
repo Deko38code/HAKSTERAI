@@ -20,8 +20,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { haksterDir } = require('./home-dir');
 
-const NEWS_DIR = path.join(os.homedir(), '.hakster');
+const NEWS_DIR = haksterDir();
 const NEWS_CACHE = path.join(NEWS_DIR, 'news-cache.json');
 const FEEDS_FILE = path.join(NEWS_DIR, 'feeds.json');
 const CACHE_TTL_MS = 10 * 60 * 1000;

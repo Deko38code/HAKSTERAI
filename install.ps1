@@ -33,8 +33,8 @@
   $Origin = '__ORIGIN__'
   $NodeVersion = if ($env:HAKSTER_NODE_VERSION) { $env:HAKSTER_NODE_VERSION } else { 'v24.22.3' }
   $BunVersion = if ($env:HAKSTER_BUN_VERSION) { $env:HAKSTER_BUN_VERSION } else { '1.4.5' }
-  $Runtime = Join-Path $HOME '.hakster\runtime'
-  $NpmPrefix = Join-Path $HOME '.hakster\npm'
+  # $Runtime / $NpmPrefix are set by the install-root block below, which decides
+  # the folder once and prints it.
   $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("hakster-cli-install-" + [Guid]::NewGuid().ToString('n').Substring(0, 8))
 
   function Say($msg) { Write-Host $msg }
@@ -43,6 +43,50 @@
     Write-Host '  Nothing was installed.'
     throw $msg
   }
+
+  # ── where our files go ─────────────────────────────────────────────────────
+  # Owner, 2026-11-26: "need to make sure file on windows go to c drive". Every
+  # file this install writes lives under ONE folder on the system drive. $HOME is
+  # %USERPROFILE%, normally C:\Users\<you> — but a redirected profile, or a
+  # PowerShell whose HOME was pointed elsewhere, can resolve onto another drive,
+  # and then the install lands where the operator will never look. So the answer
+  # is resolved once, here, printed, and handed to the CLI as HAKSTER_HOME so both
+  # sides agree (§10, §13, §50.1):
+  #   HAKSTER_HOME (explicit) -> %USERPROFILE% -> $HOME -> <SystemDrive>\Users\<user>
+  # A home that already carries `.hakster` is kept exactly where it is — an
+  # existing install is never moved or split by an installer (§49).
+  function Get-SystemDrive { if ($env:SystemDrive) { return $env:SystemDrive.TrimEnd('\') } ; return 'C:' }
+  function Get-DriveOf([string]$p) { if ($p -match '^(?<d>[A-Za-z]):') { return $Matches['d'].ToUpper() + ':' } ; return '' }
+  $sysDrive = Get-SystemDrive
+  $userName = if ($env:USERNAME) { $env:USERNAME } else { 'user' }
+  $sysProfile = Join-Path ($sysDrive + '\') ('Users\' + $userName)
+  $InstallHome = ''
+  if ($env:HAKSTER_HOME) { $InstallHome = [string]$env:HAKSTER_HOME }
+  elseif ($env:USERPROFILE) { $InstallHome = [string]$env:USERPROFILE }
+  elseif ($HOME) { $InstallHome = [string]$HOME }
+  if (-not $InstallHome -or -not [IO.Path]::IsPathRooted($InstallHome)) { $InstallHome = $sysProfile }
+  $InstallHome = [IO.Path]::GetFullPath($InstallHome).TrimEnd('\')
+  if ((Get-DriveOf $InstallHome) -ne $sysDrive) {
+    if (Test-Path (Join-Path $InstallHome '.hakster')) {
+      Say "! our files are on $((Get-DriveOf $InstallHome)) ($InstallHome) - an existing install is there"
+      Say '  it is kept exactly where it is; to move it to the system drive, set HAKSTER_HOME first'
+    } else {
+      Say "! $InstallHome is not on $sysDrive - installing to $sysProfile instead"
+      $InstallHome = $sysProfile
+    }
+  }
+  $HaksterHome = Join-Path $InstallHome '.hakster'
+  $Runtime = Join-Path $HaksterHome 'runtime'
+  $NpmPrefix = Join-Path $HaksterHome 'npm'
+  # The CLI resolves its own files the same way (cli/src/home-dir.js reads this
+  # first), so an install and every later run look at the same folder.
+  $env:HAKSTER_HOME = $InstallHome
+  try {
+    if ([Environment]::GetEnvironmentVariable('HAKSTER_HOME', 'User') -ne $InstallHome) {
+      [Environment]::SetEnvironmentVariable('HAKSTER_HOME', $InstallHome, 'User')
+    }
+  } catch { }
+  Say "  files: $HaksterHome  (drive $(Get-DriveOf $HaksterHome))"
 
   # Mirrors cli/src/runtime-paths.js findBun(): the machine's own Bun wins, then
   # the one this installer brings. A fresh Bun install is usually missing from the
@@ -564,6 +608,7 @@
   try { $version = (& $HaksterCmd --version 2>$null | Select-Object -First 1) } catch { }
   Say ''
   if ($version) { Say "Installed: HaksterAI CLI $version" } else { Say 'Installed: HaksterAI CLI (version did not answer - check: hakster --version)' }
+  Say "  files: $HaksterHome  (drive $(Get-DriveOf $HaksterHome))"
   if ($version -and $latestVersion -and ($version -ne $latestVersion)) {
     Say "  the server advertises v$latestVersion - re-run this installer to pick it up"
   }

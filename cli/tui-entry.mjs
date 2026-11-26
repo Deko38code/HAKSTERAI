@@ -15,11 +15,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import homeDirPkg from './src/home-dir.js';
 import { fileURLToPath } from 'node:url';
 
 if (!process.env.HAKSTER_API_KEY || !process.env.HAKSTER_API_URL) {
   try {
-    const cfgPath = path.join(os.homedir(), '.hakster', 'config.json');
+    const cfgPath = path.join(homeDirPkg.haksterDir(), 'config.json');
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     if (!process.env.HAKSTER_API_KEY && cfg && typeof cfg.apiKey === 'string' && cfg.apiKey) {
       process.env.HAKSTER_API_KEY = cfg.apiKey;
