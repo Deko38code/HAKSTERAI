@@ -7,6 +7,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../.env'), override: true });
 
 const { initLicenseTables, createLicense, deactivateLicense } = require('./stripe-license');
+const { deriveJunkalotFromRates } = require('./profitWiring');
 
 
 const express = require('express');
@@ -11427,9 +11428,12 @@ app.get('/api/auth/google/callback', async (req, res) => {
       user: { id: user.id, username: user.username, displayName, name: displayName, email: user.email, role: user.role, plan: user.plan, picture, apiKey: user.api_key, referralCode: user.referral_code, tokenBalance: user.token_balance || 0 },
       apiKey: user.api_key,
     }));
-    // Owner/admin accounts bypass pricing — go straight to the terminal
+    // Every account lands on the site, which consumes google_auth and forwards to the
+    // app. Owner/admin/enterprise used to be sent straight to /terminal — the legacy
+    // Hakster Terminal, which carries no update applet. Owner, 2026-11-26: "its going
+    // to the old app when i logg in". /terminal stays one click away ("Open Terminal").
     if (isOwner || user.role === 'admin' || user.plan === 'enterprise') {
-      res.redirect(`/terminal?google_auth=${userData}`);
+      res.redirect(`/?google_auth=${userData}`);
     } else {
       res.redirect(`/?google_auth=${userData}#pricing`);
     }
@@ -12462,6 +12466,16 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
         }
       }
     } catch { ratesState = 'unavailable'; }
+
+    // Owner (2026-11-26): "makke sure all my stuff is wired to junkalot in haksterai.com dash profit
+    // section". The coach card used to depend on PhantomIDE's bridge alone, so a paywall answer from
+    // that separate project left the card reading NO DATA while Junkalot itself was healthy. Junkalot's
+    // own payload carries the client meter and the lane split, so it fills the card when the bridge does
+    // not — read-only, nothing written into Junkalot, and no rate invented (§16, §19.4, §26.1, §36.7).
+    if (!junkalot) {
+      const derived = deriveJunkalotFromRates(rates);
+      if (derived) junkalot = derived;
+    }
 
     // Junkalot's client value record: read over SSH, computed here, never written back.
     let junkalotValue = null;

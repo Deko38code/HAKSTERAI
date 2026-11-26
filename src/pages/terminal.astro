@@ -565,12 +565,13 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
       })();
 
       // ── Auth gate ────────────────────────────────────────────────
-      // /terminal is the OAuth landing page for owner/admin/enterprise accounts
-      // (the server deliberately bypasses pricing for them). This used to only
-      // check for a token, so the google_auth payload was never consumed - the
-      // session was never stored from it, and an interrupted purchase silently
-      // went nowhere. Owner accounts hit this path, which is why "it's me, my
-      // email" was the tell.
+      // /terminal used to be the OAuth landing page for owner/admin/enterprise
+      // accounts. It is not any more (owner, 2026-11-26: "its going to the old app
+      // when i logg in") — the server now lands everyone on the site, which forwards
+      // to the app. A sign-in payload that still arrives here is consumed and then
+      // forwarded to the app, because arriving with ?google_auth and no explicit
+      // redirect means "I just signed in", not "open the terminal". The terminal is
+      // opt-in via the "Open Terminal" link, which arrives with no google_auth.
       (function() {
         const params = new URLSearchParams(window.location.search);
         const authParam = params.get('google_auth');
@@ -594,7 +595,7 @@ const haksterBuildId = typeof __HAKSTER_BUILD_ID__ !== 'undefined' ? __HAKSTER_B
 
             if (pending) { window.location.replace('/#pricing'); return; }
             if (post && post !== '/terminal') { window.location.replace(post); return; }
-            window.history.replaceState({}, '', '/terminal');
+            window.location.replace('/miniforge/');
             return;
           }
           // Bad payload - drop it rather than looping
