@@ -108,9 +108,10 @@ function MatrixRain({ width, height, frame }) {
  * HaksterAI artwork that ships as assets/haksterai-hero.png. Kitty-class
  * terminals get that PNG; everywhere else the same picture is drawn from a
  * pre-computed 80x60 pixel grid (scripts/make-hero-art.mjs) as half-block
- * cells, so the actual logo appears in any truecolor terminal. The Matrix rain
- * is composited into the same cells — one row of spans per text row, so the
- * animation never costs a second full-screen pass.
+ * cells, so the actual logo appears in any truecolor terminal. Each row is one
+ * run of spans, so the picture never costs a second full-screen pass, and the
+ * cells carry only the artwork's own pixels — the rain falls around the
+ * picture, never through it (owner, 2026-11-26).
  */
 const _artCache = new Map();
 function loadHeroArt(imageFile) {
@@ -166,7 +167,6 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = '' }) 
     const o = (y * art.width + x) * 3;
     return rgbHex(art.px[o], art.px[o + 1], art.px[o + 2]);
   };
-  const { streams } = rainColumns(cols * 2, rows, frame);
   const out = [];
   for (let r = 0; r < rows; r += 1) {
     const parts = [];
@@ -177,23 +177,18 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = '' }) 
       run = null;
       runN = 0;
     };
+    // Every cell is the picture's own pixel. The Matrix rain used to be burned
+    // through these cells, which hid the artwork (owner, 2026-11-26: "clear our
+    // png logo hero in cli on startup to see it better"); the rain now falls
+    // around the picture instead of across it.
     for (let c = 0; c < cols; c += 1) {
-      const s = streams[c];
-      const dist = s ? s.head - r : 99;
-      if (s && dist >= 0 && dist < s.trail) {
+      const fg = pixel(c, r * 2);
+      const bg = pixel(c, r * 2 + 1);
+      if (run && run.fg === fg && run.bg === bg) runN += 1;
+      else {
         flush();
-        const glyph = RAIN_GLYPHS[rainHash(c, r, Math.floor(frame / 2)) % RAIN_GLYPHS.length];
-        const color = dist === 0 ? RAIN_COLORS.head : dist <= 2 ? RAIN_COLORS.near : RAIN_COLORS.tail;
-        parts.push(<span key={`r${parts.length}`} fg={color} bg={pixel(c, r * 2 + 1)}>{glyph}</span>);
-      } else {
-        const fg = pixel(c, r * 2);
-        const bg = pixel(c, r * 2 + 1);
-        if (run && run.fg === fg && run.bg === bg) runN += 1;
-        else {
-          flush();
-          run = { fg, bg };
-          runN = 1;
-        }
+        run = { fg, bg };
+        runN = 1;
       }
     }
     flush();
@@ -375,8 +370,12 @@ export default function DecodeSplash({ width = 80, height = 24, lines = [], onDo
       }}
     >
       {/* The Matrix rain sits behind everything; the content column above it is
-          absolutely placed so the rain never moves it. */}
-      <MatrixRain width={width} height={height} frame={frame} />
+          absolutely placed so the rain never moves it. When the hero PNG is
+          actually on screen it is the backdrop, so the rain is not painted over
+          it — the artwork reads clean (owner, 2026-11-26: "clear our png logo
+          hero in cli on startup to see it better"). Without the image the rain
+          stays exactly as it has always been. */}
+      {heroAsset ? null : <MatrixRain width={width} height={height} frame={frame} />}
       {showArt ? (
         <HeroBackdrop
           cols={artFit.cols}

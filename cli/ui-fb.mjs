@@ -3564,7 +3564,6 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = "" }) 
     const o = (y * art.width + x) * 3;
     return rgbHex(art.px[o], art.px[o + 1], art.px[o + 2]);
   };
-  const { streams } = rainColumns(cols * 2, rows, frame);
   const out = [];
   for (let r = 0; r < rows; r += 1) {
     const parts = [];
@@ -3576,22 +3575,13 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = "" }) 
       runN = 0;
     };
     for (let c = 0; c < cols; c += 1) {
-      const s = streams[c];
-      const dist = s ? s.head - r : 99;
-      if (s && dist >= 0 && dist < s.trail) {
+      const fg = pixel(c, r * 2);
+      const bg = pixel(c, r * 2 + 1);
+      if (run && run.fg === fg && run.bg === bg) runN += 1;
+      else {
         flush();
-        const glyph = RAIN_GLYPHS[rainHash(c, r, Math.floor(frame / 2)) % RAIN_GLYPHS.length];
-        const color = dist === 0 ? RAIN_COLORS.head : dist <= 2 ? RAIN_COLORS.near : RAIN_COLORS.tail;
-        parts.push(/* @__PURE__ */ jsx13("span", { fg: color, bg: pixel(c, r * 2 + 1), children: glyph }, `r${parts.length}`));
-      } else {
-        const fg = pixel(c, r * 2);
-        const bg = pixel(c, r * 2 + 1);
-        if (run && run.fg === fg && run.bg === bg) runN += 1;
-        else {
-          flush();
-          run = { fg, bg };
-          runN = 1;
-        }
+        run = { fg, bg };
+        runN = 1;
       }
     }
     flush();
@@ -3726,7 +3716,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
         overflow: "hidden"
       },
       children: [
-        /* @__PURE__ */ jsx13(MatrixRain, { width, height, frame }),
+        heroAsset ? null : /* @__PURE__ */ jsx13(MatrixRain, { width, height, frame }),
         showArt ? /* @__PURE__ */ jsx13(
           HeroBackdrop,
           {

@@ -91,3 +91,17 @@ test('the package ships the assets directory', () => {
     assert.ok(!tarball.includes(bad), `nothing excludes the artwork (${bad})`);
   }
 });
+
+test('the artwork is painted clean — the rain never burns through it', () => {
+  const src = fs.readFileSync(SPLASH, 'utf8');
+  const start = src.indexOf('function HeroBackdrop(');
+  const end = src.indexOf('/** Fit the art inside a box');
+  assert.ok(start > 0 && end > start, 'the HeroBackdrop renderer was found');
+  const body = src.slice(start, end);
+  assert.ok(body.includes('const fg = pixel(c, r * 2)'), 'every cell is the picture\'s own pixel');
+  assert.ok(!/RAIN_GLYPHS|RAIN_COLORS|rainColumns/.test(body),
+    'no rain glyph or colour is composited into the artwork');
+  // The PNG path clears the rain instead of painting text over the picture.
+  assert.ok(/\{heroAsset \? null : <MatrixRain/.test(src),
+    'the full-screen rain is skipped while the hero PNG is on screen');
+});
