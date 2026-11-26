@@ -423,7 +423,7 @@ var require_kitty_graphics = __commonJS({
   "../src/kitty-graphics.js"(exports, module) {
     "use strict";
     var fs11 = __require("fs");
-    var path8 = __require("path");
+    var path9 = __require("path");
     var CHUNK_BYTES = 4096;
     var LOGO_ID = 18507;
     function isSupported3(env = process.env, out = process.stdout) {
@@ -450,18 +450,18 @@ var require_kitty_graphics = __commonJS({
     }
     function logoPath(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path8.join(__dirname, "..");
-      return path8.join(root2, "assets", "haksterai-logo.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
+      return path9.join(root2, "assets", "haksterai-logo.png");
     }
     function heroPath2(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path8.join(__dirname, "..");
-      return path8.join(root2, "assets", "haksterai-hero.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
+      return path9.join(root2, "assets", "haksterai-hero.png");
     }
     function backdropPath(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path8.join(__dirname, "..");
-      return path8.join(root2, "assets", "haksterai-backdrop.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
+      return path9.join(root2, "assets", "haksterai-backdrop.png");
     }
     function splashPath2({ checkout = false, exists = null } = {}) {
       const has = typeof exists === "function" ? exists : (f) => {
@@ -538,9 +538,9 @@ var require_live_image = __commonJS({
     "use strict";
     var fs11 = __require("fs");
     var os6 = __require("os");
-    var path8 = __require("path");
+    var path9 = __require("path");
     var crypto = __require("crypto");
-    var CACHE_DIR = path8.join(os6.homedir(), ".hakster", "cache", "live");
+    var CACHE_DIR = path9.join(os6.homedir(), ".hakster", "cache", "live");
     var MAX_BYTES = 12 * 1024 * 1024;
     var FETCH_TIMEOUT_MS = 12e3;
     var EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
@@ -576,14 +576,14 @@ var require_live_image = __commonJS({
         const url = text.match(/https?:\/\/[^\s"'<>()\]]+/gi) || [];
         for (const u of url) {
           const ext = urlExt(u);
-          if (ext) return { kind: "url", ref: u.replace(/[.,;]+$/, ""), name: path8.basename(new URL(u.replace(/[.,;]+$/, "")).pathname) || `image.${ext}` };
+          if (ext) return { kind: "url", ref: u.replace(/[.,;]+$/, ""), name: path9.basename(new URL(u.replace(/[.,;]+$/, "")).pathname) || `image.${ext}` };
         }
         const paths = text.match(/(?:file:\/\/)?\/[^\s"'<>()\]]+\.(?:png|jpe?g|webp|gif|bmp)\b/gi) || [];
         for (const p of paths) {
           const file = p.replace(/^file:\/\//, "");
           try {
             if (fs11.existsSync(file) && fs11.statSync(file).size <= MAX_BYTES) {
-              return { kind: "file", ref: file, name: path8.basename(file) };
+              return { kind: "file", ref: file, name: path9.basename(file) };
             }
           } catch {
           }
@@ -592,7 +592,7 @@ var require_live_image = __commonJS({
       return null;
     }
     function cacheFile(ext) {
-      return path8.join(CACHE_DIR, `${crypto.createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex").slice(0, 24)}.${ext}`);
+      return path9.join(CACHE_DIR, `${crypto.createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex").slice(0, 24)}.${ext}`);
     }
     function writeCache(buffer, ext) {
       if (!fs11.existsSync(CACHE_DIR)) fs11.mkdirSync(CACHE_DIR, { recursive: true, mode: 448 });
@@ -659,18 +659,18 @@ var require_usage_ids = __commonJS({
   "../src/usage-ids.js"(exports, module) {
     "use strict";
     var fs11 = __require("fs");
-    var path8 = __require("path");
+    var path9 = __require("path");
     var os6 = __require("os");
     var HOME = process.env.HOME || os6.homedir() || "/home/ghost";
     var REPO = (() => {
       try {
-        if (typeof __dirname === "string" && __dirname) return path8.resolve(__dirname, "..", "..");
+        if (typeof __dirname === "string" && __dirname) return path9.resolve(__dirname, "..", "..");
       } catch {
       }
       const base = process.env.HAKSTER_REPO || process.cwd() || "";
-      return base ? path8.resolve(base) : "";
+      return base ? path9.resolve(base) : "";
     })();
-    var REGISTRY_FILE = process.env.PROVIDER_KEYS_FILE || (REPO ? path8.join(REPO, "server", "data", "provider-keys.json") : "");
+    var REGISTRY_FILE = process.env.PROVIDER_KEYS_FILE || (REPO ? path9.join(REPO, "server", "data", "provider-keys.json") : "");
     var USERS = Object.freeze({
       owner: Object.freeze({ user: "owner", label: "Owner" }),
       junkalot: Object.freeze({ user: "junkalot", label: "Junkalot \xB7 client" })
@@ -851,12 +851,12 @@ var require_updater = __commonJS({
     "use strict";
     var fs11 = __require("fs");
     var os6 = __require("os");
-    var path8 = __require("path");
+    var path9 = __require("path");
     var crypto = __require("crypto");
     var { spawn: spawn2 } = __require("child_process");
-    var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path8.join(__dirname, "..") : "");
+    var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path9.join(__dirname, "..") : "");
     function hasPkgVersion(dir) {
-      const pkg = readJson(path8.join(String(dir), "package.json"), null);
+      const pkg = readJson(path9.join(String(dir), "package.json"), null);
       return !!(pkg && pkg.version);
     }
     function cliDirOf2(explicit) {
@@ -864,44 +864,44 @@ var require_updater = __commonJS({
       const add = (dir) => {
         if (!dir) return;
         try {
-          const abs = path8.resolve(String(dir));
+          const abs = path9.resolve(String(dir));
           if (!candidates.includes(abs)) candidates.push(abs);
         } catch {
         }
       };
       if (explicit) {
         try {
-          const named = path8.resolve(String(explicit));
-          if (fs11.existsSync(path8.join(named, "package.json"))) return named;
+          const named = path9.resolve(String(explicit));
+          if (fs11.existsSync(path9.join(named, "package.json"))) return named;
         } catch {
         }
       }
       add(explicit);
       add(process.env.HAKSTER_CLI_DIR);
       try {
-        if (typeof __dirname === "string" && __dirname) add(path8.join(__dirname, ".."));
+        if (typeof __dirname === "string" && __dirname) add(path9.join(__dirname, ".."));
       } catch {
       }
       try {
         if (process.argv[1]) {
-          const entry = path8.dirname(path8.resolve(process.argv[1]));
+          const entry = path9.dirname(path9.resolve(process.argv[1]));
           add(entry);
-          if (path8.basename(entry) === "src") add(path8.dirname(entry));
+          if (path9.basename(entry) === "src") add(path9.dirname(entry));
         }
       } catch {
       }
       add(process.cwd());
       for (const dir of candidates) if (hasPkgVersion(dir)) return dir;
-      return candidates[0] || path8.resolve(process.cwd());
+      return candidates[0] || path9.resolve(process.cwd());
     }
     function versionKnown(version) {
       const v = String(version || "");
       return !!v && v !== "0.0.0";
     }
-    var UPDATES_DIR = path8.join(os6.homedir(), ".hakster", "updates");
-    var STAGED_DIR = path8.join(UPDATES_DIR, "staged");
-    var TARBALL = path8.join(UPDATES_DIR, "latest.tar.gz");
-    var PENDING_FILE = path8.join(UPDATES_DIR, "pending.json");
+    var UPDATES_DIR = path9.join(os6.homedir(), ".hakster", "updates");
+    var STAGED_DIR = path9.join(UPDATES_DIR, "staged");
+    var TARBALL = path9.join(UPDATES_DIR, "latest.tar.gz");
+    var PENDING_FILE = path9.join(UPDATES_DIR, "pending.json");
     var MAX_TARBALL = 32 * 1024 * 1024;
     function readJson(file, fallback) {
       try {
@@ -911,7 +911,7 @@ var require_updater = __commonJS({
       }
     }
     function writeJson(file, value) {
-      fs11.mkdirSync(path8.dirname(file), { recursive: true, mode: 448 });
+      fs11.mkdirSync(path9.dirname(file), { recursive: true, mode: 448 });
       const tmp = `${file}.tmp-${process.pid}`;
       fs11.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
 `, { mode: 384 });
@@ -925,7 +925,7 @@ var require_updater = __commonJS({
       }
     }
     function stampOf(dir) {
-      const stamp = readJson(path8.join(dir, ".build-stamp.json"), null);
+      const stamp = readJson(path9.join(dir, ".build-stamp.json"), null);
       if (!stamp) return null;
       const commits = parseInt(stamp.commits, 10);
       if (!Number.isFinite(commits) || commits <= 0) return null;
@@ -933,21 +933,21 @@ var require_updater = __commonJS({
     }
     function runningInfo(explicitDir) {
       const dir = cliDirOf2(explicitDir);
-      const pkg = readJson(path8.join(dir, "package.json"), {});
+      const pkg = readJson(path9.join(dir, "package.json"), {});
       const stamp = stampOf(dir);
       return {
         version: String(pkg.version || "0.0.0"),
-        bundleSha: sha256File(path8.join(dir, "ui-fb.mjs")),
+        bundleSha: sha256File(path9.join(dir, "ui-fb.mjs")),
         commit: stamp ? stamp.commit : "",
         commits: stamp ? stamp.commits : null,
         dir
       };
     }
     function isSourceCheckout3(explicitDir) {
-      return fs11.existsSync(path8.join(cliDirOf2(explicitDir), "..", ".git"));
+      return fs11.existsSync(path9.join(cliDirOf2(explicitDir), "..", ".git"));
     }
     function serverUrl() {
-      const cfg = readJson(path8.join(os6.homedir(), ".hakster", "config.json"), {});
+      const cfg = readJson(path9.join(os6.homedir(), ".hakster", "config.json"), {});
       return String(cfg.server || process.env.HAKSTER_SERVER || "").replace(/\/+$/, "");
     }
     function cmpVersion(a, b) {
@@ -998,7 +998,7 @@ var require_updater = __commonJS({
     function extractStaged() {
       fs11.mkdirSync(STAGED_DIR, { recursive: true, mode: 448 });
       try {
-        fs11.rmSync(path8.join(STAGED_DIR, "cli"), { recursive: true, force: true });
+        fs11.rmSync(path9.join(STAGED_DIR, "cli"), { recursive: true, force: true });
       } catch {
       }
       return new Promise((resolve) => {
@@ -1008,10 +1008,10 @@ var require_updater = __commonJS({
       });
     }
     function stagedInfo() {
-      const pkg = readJson(path8.join(STAGED_DIR, "cli", "package.json"), {});
+      const pkg = readJson(path9.join(STAGED_DIR, "cli", "package.json"), {});
       return {
         version: String(pkg.version || ""),
-        bundleSha: sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")),
+        bundleSha: sha256File(path9.join(STAGED_DIR, "cli", "ui-fb.mjs")),
         deps: JSON.stringify(pkg && pkg.dependencies || {})
       };
     }
@@ -1052,7 +1052,7 @@ var require_updater = __commonJS({
       if (!staged.version || !staged.bundleSha) {
         return { status: "error", reason: "staged package unreadable", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
       }
-      const stagedStamp = stampOf(path8.join(STAGED_DIR, "cli"));
+      const stagedStamp = stampOf(path9.join(STAGED_DIR, "cli"));
       const latestCommit = stagedStamp && stagedStamp.commit || (latest && latest.commit ? String(latest.commit) : "");
       const latestCommits = stagedStamp && stagedStamp.commits || (latest && Number.isFinite(parseInt(latest.commits, 10)) ? parseInt(latest.commits, 10) : null);
       const behind = Number.isFinite(running.commits) && Number.isFinite(latestCommits) && latestCommits > running.commits ? latestCommits - running.commits : 0;
@@ -1090,7 +1090,7 @@ var require_updater = __commonJS({
         latestCommits,
         behind,
         source: origin,
-        dir: path8.join(STAGED_DIR, "cli"),
+        dir: path9.join(STAGED_DIR, "cli"),
         state: blocked ? "blocked" : "staged",
         blocked
       };
@@ -1105,7 +1105,7 @@ var require_updater = __commonJS({
     function pendingInfo2(explicitDir) {
       const pending = readJson(PENDING_FILE, null);
       if (!pending || !pending.version) return null;
-      const ok = !!pending.bundleSha && sha256File(path8.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
+      const ok = !!pending.bundleSha && sha256File(path9.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
       const running = runningInfo(explicitDir);
       const runningKnown = versionKnown(running.version);
       return {
@@ -1154,20 +1154,20 @@ var require_updater = __commonJS({
       }
       if (isSourceCheckout3(target)) return { applied: false, reason: "source-checkout", version: pending.version };
       if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
-      const installedDeps = readJson(path8.join(target, "package.json"), {}).dependencies || {};
+      const installedDeps = readJson(path9.join(target, "package.json"), {}).dependencies || {};
       const staged = stagedInfo();
       if (!sameDeps(JSON.stringify(installedDeps), staged.deps)) {
         return { applied: false, reason: "dependencies changed \u2014 run npm install for the new version", version: pending.version };
       }
-      const backupDir = path8.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
-      const stagedCli = path8.join(STAGED_DIR, "cli");
-      const skipHeavy = (src) => !src.includes(`${path8.sep}node_modules`) && !src.includes(`${path8.sep}.git`);
+      const backupDir = path9.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
+      const stagedCli = path9.join(STAGED_DIR, "cli");
+      const skipHeavy = (src) => !src.includes(`${path9.sep}node_modules`) && !src.includes(`${path9.sep}.git`);
       try {
         fs11.cpSync(target, backupDir, { recursive: true, filter: skipHeavy });
         fs11.cpSync(stagedCli, target, {
           recursive: true,
           force: true,
-          filter: (src) => !src.includes(`${path8.sep}node_modules`) && !src.includes(`${path8.sep}.git`)
+          filter: (src) => !src.includes(`${path9.sep}node_modules`) && !src.includes(`${path9.sep}.git`)
         });
       } catch (e) {
         return { applied: false, reason: `copy failed: ${e && e.message || e}`, version: pending.version, backupDir };
@@ -1281,10 +1281,10 @@ var require_prefs = __commonJS({
     "use strict";
     var fs11 = __require("fs");
     var os6 = __require("os");
-    var path8 = __require("path");
-    var PREFS_DIR = path8.join(os6.homedir(), ".hakster");
-    var PREFS_FILE = path8.join(PREFS_DIR, "cli-prefs.json");
-    var LEGACY_FILE = path8.join(PREFS_DIR, "tui-prefs.json");
+    var path9 = __require("path");
+    var PREFS_DIR = path9.join(os6.homedir(), ".hakster");
+    var PREFS_FILE = path9.join(PREFS_DIR, "cli-prefs.json");
+    var LEGACY_FILE = path9.join(PREFS_DIR, "tui-prefs.json");
     var DEFAULTS = {
       model: "",
       // '' = the pinned primary model (§22)
@@ -1395,6 +1395,117 @@ var require_prefs = __commonJS({
   }
 });
 
+// ../src/listening-ports.js
+var require_listening_ports = __commonJS({
+  "../src/listening-ports.js"(exports, module) {
+    "use strict";
+    var { execFile: execFile2 } = __require("child_process");
+    function backendFor(platform = process.platform) {
+      if (platform === "win32") return "netstat";
+      if (platform === "darwin") return "netstat";
+      return "ss";
+    }
+    function argsFor(backend, platform = process.platform) {
+      if (backend === "netstat") return platform === "darwin" ? ["-an", "-p", "tcp"] : ["-ano"];
+      return ["-tlnp"];
+    }
+    function extractPort(address) {
+      const m = String(address == null ? "" : address).match(/([0-9]{1,5})\s*$/);
+      if (!m) return 0;
+      const port = Number(m[1]);
+      return port > 0 && port <= 65535 ? port : 0;
+    }
+    function parseSs(text) {
+      const ports = /* @__PURE__ */ new Set();
+      const procs = {};
+      for (const line of String(text || "").split("\n")) {
+        const m = line.match(/:([0-9]{2,5})\s+\S+\s+.*users:\(\("([^"]+)"/);
+        if (m) {
+          ports.add(Number(m[1]));
+          procs[m[1]] = m[2];
+          continue;
+        }
+        const m2 = line.match(/:([0-9]{2,5})\s+\S+/);
+        if (m2) ports.add(Number(m2[1]));
+      }
+      return { ports: [...ports].sort((a, b) => a - b), procs };
+    }
+    function parseNetstatWin(text) {
+      const ports = /* @__PURE__ */ new Set();
+      const procs = {};
+      for (const raw of String(text || "").split("\n")) {
+        const line = raw.trim();
+        if (!/^TCP/i.test(line)) continue;
+        const f = line.split(/\s+/);
+        if (f.length < 4) continue;
+        const local = f[1];
+        const state = (f[3] || "").toUpperCase();
+        if (state !== "LISTENING" && state !== "LISTEN") continue;
+        const port = extractPort(local);
+        if (!port) continue;
+        ports.add(port);
+        const pid = f[4] || "";
+        if (pid && /^[0-9]+$/.test(pid)) procs[port] = `pid ${pid}`;
+      }
+      return { ports: [...ports].sort((a, b) => a - b), procs };
+    }
+    function parseNetstatBsd(text) {
+      const ports = /* @__PURE__ */ new Set();
+      for (const raw of String(text || "").split("\n")) {
+        const line = raw.trim();
+        if (!/^tcp/i.test(line)) continue;
+        const f = line.split(/\s+/);
+        if (f.length < 6) continue;
+        if (String(f[5]).toUpperCase() !== "LISTEN") continue;
+        const port = extractPort(f[3]);
+        if (port) ports.add(port);
+      }
+      return { ports: [...ports].sort((a, b) => a - b), procs: {} };
+    }
+    function parse(backend, text, platform = process.platform) {
+      if (backend === "netstat") {
+        return platform === "darwin" ? parseNetstatBsd(text) : parseNetstatWin(text);
+      }
+      return parseSs(text);
+    }
+    function scanPorts2(timeoutMs = 4e3, platform = process.platform) {
+      return new Promise((resolve) => {
+        const backend = backendFor(platform);
+        const at = () => Date.now();
+        try {
+          execFile2(
+            backend,
+            argsFor(backend, platform),
+            { timeout: timeoutMs, maxBuffer: 1 << 20, windowsHide: true },
+            (err, stdout) => {
+              const text = String(stdout || "");
+              if (err && !text) {
+                const code = err.code || "";
+                const reason = code === "ENOENT" ? `${backend}-not-installed` : code === "ETIMEDOUT" ? "timeout" : "failed";
+                return resolve({ ok: false, ports: [], procs: {}, backend, reason, at: at() });
+              }
+              const parsed = parse(backend, text, platform);
+              resolve({ ok: true, ports: parsed.ports, procs: parsed.procs, backend, at: at() });
+            }
+          );
+        } catch {
+          return resolve({ ok: false, ports: [], procs: {}, backend, reason: "failed", at: at() });
+        }
+      });
+    }
+    module.exports = {
+      backendFor,
+      argsFor,
+      extractPort,
+      parse,
+      parseSs,
+      parseNetstatWin,
+      parseNetstatBsd,
+      scanPorts: scanPorts2
+    };
+  }
+});
+
 // ../src/models/ladder.js
 var require_ladder = __commonJS({
   "../src/models/ladder.js"(exports, module) {
@@ -1487,11 +1598,11 @@ var require_input_history = __commonJS({
   "../src/input-history.js"(exports, module) {
     var fs11 = __require("fs");
     var os6 = __require("os");
-    var path8 = __require("path");
+    var path9 = __require("path");
     var MAX_KEEP = 500;
     var MAX_RECALL = 200;
     function historyPath() {
-      return path8.join(process.env.HAKSTER_HOME || path8.join(os6.homedir(), ".hakster"), "history");
+      return path9.join(process.env.HAKSTER_HOME || path9.join(os6.homedir(), ".hakster"), "history");
     }
     var TERMINAL_JUNK = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\x1b|rgb:|VTE\(|[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋]|;\d+\$y|\[\?/;
     var BOX_ONLY = /^[\s│┃|]+|[\s│┃|]+$/;
@@ -1599,7 +1710,7 @@ var require_input_history = __commonJS({
       const value = String(line).replace(/\r/g, "").trim();
       try {
         const file = historyPath();
-        const dir = path8.dirname(file);
+        const dir = path9.dirname(file);
         if (!fs11.existsSync(dir)) fs11.mkdirSync(dir, { recursive: true });
         const existing = sanitizeLines(
           fs11.existsSync(file) ? fs11.readFileSync(file, "utf8").split("\n") : []
@@ -1807,8 +1918,8 @@ import { createRoot } from "@opentui/react";
 // src/App.jsx
 import React32, { useCallback as useCallback6, useEffect as useEffect19, useRef as useRef15, useState as useState19 } from "react";
 import fs10 from "node:fs";
-import path7 from "node:path";
-import { execFile as execFile2 } from "node:child_process";
+import path8 from "node:path";
+import { execFile } from "node:child_process";
 import { useKeyboard as useKeyboard8, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes23 } from "@opentui/core";
 
@@ -4672,11 +4783,11 @@ import React21 from "react";
 import { TextAttributes as TextAttributes16 } from "@opentui/core";
 
 // ../smartness.mjs
+var import_listening_ports = __toESM(require_listening_ports(), 1);
 import fs6 from "node:fs";
 import os3 from "node:os";
 import path4 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { execFile } from "node:child_process";
 var CLI_DIR = path4.dirname(fileURLToPath2(import.meta.url));
 var EXPECTED_SERVICES = [
   { port: 3579, name: "HAKSTER-AI", proto: "http" },
@@ -4845,25 +4956,7 @@ function barColor(kind, value) {
   return "#f85149";
 }
 function scanPorts(timeoutMs = 4e3) {
-  return new Promise((resolve) => {
-    execFile("ss", ["-tlnp"], { timeout: timeoutMs, maxBuffer: 1 << 20 }, (err, stdout) => {
-      const text = String(stdout || "");
-      const ports = /* @__PURE__ */ new Set();
-      const procs = {};
-      for (const line of text.split("\n")) {
-        const m = line.match(/:([0-9]{2,5})\s+\S+\s+.*users:\(\("([^"]+)"/);
-        if (m) {
-          ports.add(Number(m[1]));
-          procs[m[1]] = m[2];
-          continue;
-        }
-        const m2 = line.match(/:([0-9]{2,5})\s+\S+/);
-        if (m2) ports.add(Number(m2[1]));
-      }
-      if (err && !text) return resolve({ ok: false, ports: [], procs: {}, at: Date.now() });
-      resolve({ ok: true, ports: [...ports].sort((a, b) => a - b), procs, at: Date.now() });
-    });
-  });
+  return import_listening_ports.default.scanPorts(timeoutMs);
 }
 function serviceStates(scan) {
   const open = new Set(scan && scan.ports || []);
@@ -4908,6 +5001,7 @@ var INSTALL_FILES = [
   "cli/ui.mjs",
   "cli/src/updater.js",
   "cli/src/prefs.js",
+  "cli/src/listening-ports.js",
   "cli/src/models/ladder.js",
   "cli/src/self-config-guard.js"
 ];
@@ -7329,6 +7423,7 @@ var useServerWatch_default = useServerWatch;
 import { useEffect as useEffect14, useRef as useRef11, useState as useState14 } from "react";
 import os4 from "node:os";
 import fs7 from "node:fs";
+import path5 from "node:path";
 var readText = (p) => {
   try {
     return fs7.readFileSync(p, "utf8");
@@ -7336,14 +7431,33 @@ var readText = (p) => {
     return "";
   }
 };
+function osCpuTimes() {
+  const cpus = os4.cpus() || [];
+  if (!cpus.length) return null;
+  let idle = 0;
+  let total = 0;
+  for (const cpu of cpus) {
+    const t = cpu && cpu.times || {};
+    const user = Number(t.user) || 0;
+    const nice = Number(t.nice) || 0;
+    const sys = Number(t.sys) || 0;
+    const idl = Number(t.idle) || 0;
+    const irq = Number(t.irq) || 0;
+    idle += idl;
+    total += user + nice + sys + idl + irq;
+  }
+  return total > 0 ? { idle, total } : null;
+}
 function cpuTimes() {
   const line = (readText("/proc/stat").split("\n")[0] || "").trim();
-  if (!line.startsWith("cpu")) return null;
-  const n = line.split(/\s+/).slice(1).map(Number);
-  if (!n.length || n.some((x) => !Number.isFinite(x))) return null;
-  const idle = (n[3] || 0) + (n[4] || 0);
-  const total = n.reduce((a, b) => a + b, 0);
-  return { idle, total };
+  if (line.startsWith("cpu")) {
+    const n = line.split(/\s+/).slice(1).map(Number);
+    if (!n.length || n.some((x) => !Number.isFinite(x))) return osCpuTimes();
+    const idle = (n[3] || 0) + (n[4] || 0);
+    const total = n.reduce((a, b) => a + b, 0);
+    return { idle, total };
+  }
+  return osCpuTimes();
 }
 function meminfo() {
   const out = {};
@@ -7353,9 +7467,19 @@ function meminfo() {
   }
   return out;
 }
+function diskRoot() {
+  if (process.platform === "win32") {
+    try {
+      return path5.parse(os4.homedir()).root || "C:\\";
+    } catch {
+      return "C:\\";
+    }
+  }
+  return "/";
+}
 function disk() {
   try {
-    const s = fs7.statfsSync("/");
+    const s = fs7.statfsSync(diskRoot());
     const total = Number(s.blocks) * Number(s.bsize);
     const free = Number(s.bavail) * Number(s.bsize);
     if (!Number.isFinite(total) || total <= 0) return null;
@@ -7403,6 +7527,9 @@ function useHostStats(intervalMs = 1e3) {
       if (tick === 1 || tick % 5 === 0) memRef.current = meminfo();
       if (tick === 1 || tick % 10 === 0) diskRef.current = disk();
       const mi = memRef.current || {};
+      const la = typeof os4.loadavg === "function" ? os4.loadavg() : null;
+      const loadKnown = process.platform !== "win32" && !!la && Number.isFinite(la[0]);
+      const swapKnown = mi.SwapTotal != null;
       const memTotal = mi.MemTotal || os4.totalmem();
       const memAvail = mi.MemAvailable != null ? mi.MemAvailable : os4.freemem();
       const swapTotal = mi.SwapTotal || 0;
@@ -7411,7 +7538,9 @@ function useHostStats(intervalMs = 1e3) {
       const next = {
         cores,
         cpuPct,
-        load1: Math.round(((os4.loadavg() || [0])[0] || 0) * 100) / 100,
+        load1: loadKnown ? Math.round(la[0] * 100) / 100 : null,
+        loadKnown,
+        swapKnown,
         memPct: memTotal ? Math.max(0, Math.min(100, Math.round((1 - memAvail / memTotal) * 100))) : null,
         memUsedGb: memTotal ? Math.round((memTotal - memAvail) / 1e9 * 10) / 10 : null,
         memTotalGb: memTotal ? memTotal / 1e9 : null,
@@ -7607,8 +7736,8 @@ function useDebugStats({ enabled = false, api = "http://localhost:3579", refresh
 import { useEffect as useEffect16, useState as useState16 } from "react";
 import fs8 from "node:fs";
 import os5 from "node:os";
-import path5 from "node:path";
-var BANK_DIR = path5.join(os5.homedir(), ".hakster", "memories", "banks");
+import path6 from "node:path";
+var BANK_DIR = path6.join(os5.homedir(), ".hakster", "memories", "banks");
 function readMemoryBanks(dir = BANK_DIR) {
   let files;
   try {
@@ -7623,7 +7752,7 @@ function readMemoryBanks(dir = BANK_DIR) {
   for (const file of files) {
     let entries;
     try {
-      entries = JSON.parse(fs8.readFileSync(path5.join(dir, file), "utf8"));
+      entries = JSON.parse(fs8.readFileSync(path6.join(dir, file), "utf8"));
     } catch {
       continue;
     }
@@ -7667,7 +7796,7 @@ var import_updater2 = __toESM(require_updater());
 var import_prefs2 = __toESM(require_prefs());
 import { useEffect as useEffect17, useRef as useRef13, useState as useState17 } from "react";
 import fs9 from "node:fs";
-import path6 from "node:path";
+import path7 from "node:path";
 function readStartup() {
   try {
     const applied = (0, import_updater2.appliedNotice)();
@@ -7723,7 +7852,7 @@ function useCliUpdate(intervalMs = null, sessionVersion = "") {
       if (!sessionVersion) return null;
       if ((0, import_updater2.isSourceCheckout)()) return null;
       const diskVersion = String(
-        JSON.parse(fs9.readFileSync(path6.join((0, import_updater2.cliDirOf)(), "package.json"), "utf8")).version || ""
+        JSON.parse(fs9.readFileSync(path7.join((0, import_updater2.cliDirOf)(), "package.json"), "utf8")).version || ""
       );
       if (!diskVersion || diskVersion === sessionVersion) return null;
       const pa = diskVersion.split(".").map((n) => parseInt(n, 10) || 0);
@@ -7832,6 +7961,14 @@ import { useCallback as useCallback5, useEffect as useEffect18, useRef as useRef
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
 var TIMEOUT_MS = 12e4;
+function winQuote(a) {
+  const s = String(a);
+  return /[\s"&|<>^()]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function spawnSpec(run) {
+  if (process.platform !== "win32") return { cmd: run[0], args: run.slice(1), shell: false };
+  return { cmd: winQuote(run[0]), args: run.slice(1).map(winQuote), shell: true };
+}
 function useScriptRunner() {
   const [scripts] = useState18(() => {
     try {
@@ -7878,7 +8015,8 @@ function useScriptRunner() {
     setRun({ status: "running", script: entry, lines: [], startedAt, endedAt: 0, exit: null });
     let child;
     try {
-      child = spawn(entry.run[0], entry.run.slice(1), { cwd: entry.cwd, env: process.env });
+      const spec = spawnSpec(entry.run);
+      child = spawn(spec.cmd, spec.args, { cwd: entry.cwd, env: process.env, shell: spec.shell, windowsHide: true });
     } catch (e) {
       setRun({ status: "failed", script: entry, lines: [`spawn failed: ${e && e.message || e}`], startedAt, endedAt: Date.now(), exit: null });
       return true;
@@ -8074,13 +8212,16 @@ function quickStartEntry(n, services = [], scan = null) {
   if (!want) return null;
   return quickStartRows(services, scan).find((r) => r.n === want) || null;
 }
-function startPlan(entry) {
+function startPlan(entry, host = {}) {
   if (!entry) return { skip: "no such port number" };
   if (entry.up) {
     return { skip: `already online \u2014 not bouncing it (an update never drops a live session)` };
   }
   if (!entry.pm2) {
     return { skip: `no local start command \u2014 ${entry.name} runs on the Parrot box` };
+  }
+  if (host && host.pm2 === false) {
+    return { skip: `pm2 is not installed on this machine \u2014 this CLI does not host our services here \xB7 /ports shows what is listening` };
   }
   return { cmd: "pm2", args: ["start", String(entry.pm2)] };
 }
@@ -8134,8 +8275,8 @@ function writePrefs(patch) {
   }
 }
 var CRUSH_CONFIG_PATHS = [
-  path7.join(process.env.HOME || "/home/ghost", ".crush.json"),
-  path7.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
+  path8.join(process.env.HOME || "/home/ghost", ".crush.json"),
+  path8.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
 ];
 function readCrushModels() {
   for (const p of CRUSH_CONFIG_PATHS) {
@@ -8164,8 +8305,9 @@ var toolArgLine = (args) => {
 function readImageAttachment(file) {
   const raw = String(file || "").trim();
   if (!raw) throw new Error("no file given");
-  const abs = path7.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ""));
-  const mime = IMAGE_MIME[path7.extname(abs).toLowerCase()];
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const abs = path8.resolve(raw.replace(/^~(?=[\\/])/, home));
+  const mime = IMAGE_MIME[path8.extname(abs).toLowerCase()];
   if (!mime) throw new Error("not an image (png, jpg, webp, gif, bmp)");
   const st = fs10.statSync(abs);
   if (!st.isFile()) throw new Error("not a file");
@@ -8175,7 +8317,7 @@ function readImageAttachment(file) {
   const buf = fs10.readFileSync(abs);
   return {
     path: abs,
-    name: path7.basename(abs),
+    name: path8.basename(abs),
     bytes: buf.length,
     dataUrl: `data:${mime};base64,${buf.toString("base64")}`
   };
@@ -8395,6 +8537,13 @@ function App({ version = "0.1.0" }) {
   const peers = peersFromMcp(mcp);
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
+  const [pm2Here, setPm2Here] = useState19(null);
+  useEffect19(() => {
+    const finder = process.platform === "win32" ? "where" : "which";
+    execFile(finder, ["pm2"], { timeout: 4e3, windowsHide: true }, (err, stdout) => {
+      setPm2Here(!err && String(stdout || "").trim().length > 0);
+    });
+  }, []);
   const showNotice = useCallback6((text) => {
     setNotice(text);
     setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
@@ -8406,7 +8555,7 @@ function App({ version = "0.1.0" }) {
       showNotice(`\u25CC no port ${n} \u2014 /menu lists 1-0`);
       return;
     }
-    const plan = startPlan(entry);
+    const plan = startPlan(entry, { pm2: pm2Here });
     if (plan.skip) {
       showNotice(`\u25CB :${entry.port} ${entry.name} \u2014 ${plan.skip}`);
       return;
@@ -8414,12 +8563,12 @@ function App({ version = "0.1.0" }) {
     if (startingRef.current.has(entry.port)) return;
     startingRef.current.add(entry.port);
     showNotice(`\u25D4 starting :${entry.port} ${entry.name} \xB7 pm2 ${entry.pm2} \u2026`);
-    execFile2(plan.cmd, plan.args, { timeout: 2e4, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+    execFile(plan.cmd, plan.args, { timeout: 2e4, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
       const text = `${String(stdout || "")}${String(stderr || "")}`.trim();
       const lastLine2 = text.split("\n").map((l) => l.trim()).filter(Boolean).pop() || "";
       if (err) {
         startingRef.current.delete(entry.port);
-        showNotice(`\u2717 :${entry.port} ${entry.name} \u2014 pm2 start failed \xB7 ${lastLine2.slice(0, 70)}`);
+        showNotice(err.code === "ENOENT" ? `\u25CB :${entry.port} ${entry.name} \u2014 pm2 is not installed on this machine \xB7 /ports shows what is listening` : `\u2717 :${entry.port} ${entry.name} \u2014 pm2 start failed \xB7 ${lastLine2.slice(0, 70)}`);
         return;
       }
       scanPorts().then((next) => {
@@ -8428,7 +8577,7 @@ function App({ version = "0.1.0" }) {
         showNotice(up ? `\u25CF :${entry.port} ${entry.name} online` : `\u25CC :${entry.port} ${entry.name} \u2014 pm2 says started, port not listening yet${lastLine2 ? ` \xB7 ${lastLine2.slice(0, 50)}` : ""}`);
       }).catch(() => showNotice(`\u25CC :${entry.port} ${entry.name} \u2014 started; re-scan failed, check /ports`)).finally(() => startingRef.current.delete(entry.port));
     });
-  }, [services, scan, showNotice]);
+  }, [services, scan, showNotice, pm2Here]);
   useServerWatch_default({
     api: API,
     busy: agent.busy,

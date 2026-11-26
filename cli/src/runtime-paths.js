@@ -34,8 +34,8 @@ function isExecutableFile(file) {
   }
 }
 
-function names(bin) {
-  return process.platform === 'win32' ? [`${bin}.exe`, `${bin}.cmd`, `${bin}.bat`, bin] : [bin];
+function names(bin, platform = process.platform) {
+  return platform === 'win32' ? [`${bin}.exe`, `${bin}.cmd`, `${bin}.bat`, bin] : [bin];
 }
 
 /** `bin` on PATH, or null. Does not execute it. */
@@ -47,6 +47,36 @@ function findOnPath(bin, env = process.env) {
     }
   }
   return null;
+}
+
+/**
+ * Where Bun's own installers write on Windows.
+ *
+ * Owner, 2026-11-26 (Surface Pro): `hakster` opened the OLD Ink screen — input
+ * bar, no grids, no logo — because this function only looked at PATH and our
+ * own runtime folder. Bun was installed somewhere else on that machine, so the
+ * paid dashboard was skipped in silence. PATH in a PowerShell session is often
+ * stale after a fresh install, so these are checked directly, most likely
+ * first. Read-only: nothing here installs, moves or edits anything.
+ */
+function wellKnownBun(env = process.env, platform = process.platform) {
+  if (platform !== 'win32') return [];
+  const home = os.homedir();
+  const localAppData = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const appData = env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  const programFiles = env.ProgramFiles || 'C:\\Program Files';
+  const dirs = [
+    path.join(home, '.bun', 'bin'), // bun.sh/install.ps1 (the official one)
+    path.join(localAppData, 'Programs', 'bun'), // newer installer / winget
+    path.join(home, 'scoop', 'shims'), // scoop
+    path.join(appData, 'npm'), // npm install -g bun
+    path.join(programFiles, 'Bun'),
+  ];
+  const out = [];
+  for (const dir of dirs) {
+    for (const name of names('bun', platform)) out.push(path.join(dir, name));
+  }
+  return out;
 }
 
 /**
@@ -79,6 +109,11 @@ function findBun(env = process.env) {
       if (isExecutableFile(full)) return full;
     }
   }
+  // Windows installers that PATH may not reflect in this session (see
+  // wellKnownBun). Last, so a working PATH or our own runtime always wins.
+  for (const candidate of wellKnownBun(env)) {
+    if (isExecutableFile(candidate)) return candidate;
+  }
   return null;
 }
 
@@ -98,4 +133,4 @@ function findNode(env = process.env) {
   return null;
 }
 
-module.exports = { runtimeRoot, findOnPath, findBun, findNode, isExecutableFile };
+module.exports = { runtimeRoot, findOnPath, findBun, findNode, isExecutableFile, wellKnownBun };

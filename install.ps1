@@ -77,6 +77,8 @@
     Say '  OK bun on PATH - our TUI runs on it'
   } elseif (Test-Path (Join-Path $Runtime 'bun\node_modules\bun\bin\bun.exe')) {
     Say "  OK bun in $Runtime\bun - our TUI runs on it"
+  } elseif (Test-Path (Join-Path $HOME '.bun\bin\bun.exe')) {
+    Say "  OK bun in $HOME\.bun\bin - our TUI runs on it"
   } else {
     Say '  X  bun - installed below; without it the CLI uses its built-in Ink UI'
   }
@@ -243,15 +245,26 @@
   # ── Bun (the full TUI) ──────────────────────────────────────────────────
   $bunDir = Join-Path $Runtime 'bun'
   $bunExe = Join-Path $bunDir 'node_modules\bun\bin\bun.exe'
-  if (Get-Command bun -ErrorAction SilentlyContinue) {
-    Say 'OK Bun is already here - using it'
+  $officialBun = Join-Path $HOME '.bun\bin\bun.exe'
+  $bunOnPath = Get-Command bun -ErrorAction SilentlyContinue
+  if ($bunOnPath) {
+    Say "OK Bun is already here ($($bunOnPath.Source)) - using it"
   } elseif (Test-Path $bunExe) {
     Say "OK Bun already installed in $bunDir - using it"
+  } elseif (Test-Path $officialBun) {
+    # Bun's own installer writes here; a fresh install is often missing from
+    # PATH in the session the CLI is started from.
+    Say "OK Bun is already here ($officialBun) - using it"
   } else {
     Say '.. installing Bun for the full TUI (one time)'
     & npm install --prefix $bunDir --omit=dev --no-audit --no-fund "bun@$BunVersion" 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0 -and (Test-Path $bunExe)) { Say "OK Bun installed in $bunDir" }
-    else { Say '! Bun could not be installed - the CLI still runs with its built-in Ink UI' }
+    else {
+      Say '! Bun could not be installed by npm.'
+      Say '  Without Bun the CLI opens its simpler built-in Ink UI instead of the dashboard.'
+      Say '  To get the full dashboard, run this once and start the CLI again:'
+      Say '    irm bun.sh/install.ps1 | iex'
+    }
   }
 
   # Point the CLI at the server it came from.

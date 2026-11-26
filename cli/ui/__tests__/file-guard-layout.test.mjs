@@ -22,11 +22,20 @@ function fakeTree(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hakster-guard-'));
   fs.mkdirSync(path.join(root, 'cli'), { recursive: true });
   fs.copyFileSync(SRC, path.join(root, 'cli', 'smartness.mjs'));
+  // A file the guard actually IMPORTS has to be real code, not a placeholder:
+  // writing '' here produced ERR_MODULE_NOT_FOUND instead of testing the layout
+  // (2026-11-26 — smartness imports src/listening-ports.js for the services
+  // panel, so that module must exist in the fixture exactly as it ships).
+  // package.json must be real JSON too: resolving a sibling `.js` import makes
+  // Node read the fixture's package scope, and an empty file is not valid JSON
+  // (ERR_INVALID_PACKAGE_CONFIG), which would fail before any guard logic ran.
+  const IMPORTED = new Set(['cli/src/listening-ports.js', 'cli/package.json']);
   for (const rel of files) {
     if (rel === 'cli/smartness.mjs') continue; // the real module is already there
     const p = path.join(root, rel);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, '');
+    if (IMPORTED.has(rel)) fs.copyFileSync(path.join(CLI_DIR, rel.slice('cli/'.length)), p);
+    else fs.writeFileSync(p, '');
   }
   return root;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import os from 'node:os';
 import fs from 'node:fs';
+import path from 'node:path';
 
 /* useHostStats — the machine the CLI is running on, read in-process.
  *
@@ -17,6 +18,17 @@ import fs from 'node:fs';
  *
  * If a read fails the field is null and the caller shows '—'; nothing is
  * guessed, and a missing sample never throws into the render path.
+ *
+ * Windows (owner, 2026-11-26, Surface Pro): there is no /proc, `os.loadavg()`
+ * answers [0,0,0] on every call, and there is no portable swap API. So:
+ *   cpu%     os.cpus() cumulative-time deltas when /proc/stat is absent — the
+ *            same delta math, the same smoothing, a real reading on Windows
+ *   ram      os.totalmem()/os.freemem() (already the fallback below)
+ *   load1    null where loadavg is not real, never a fabricated 0 (§10)
+ *   swap     null with `swapKnown: false`, so the panel says 'n/a' instead of
+ *            claiming the machine has none
+ *   disk     the drive that holds the home directory, not '/'
+ * Nothing about the Linux readings changes: /proc is still preferred.
  *
  * Owner (2026-11-25): "make sure the cpu ram meters run smoothly in cli with
  * nice refresh rate but not make lagg". Three things make that work:
@@ -39,15 +51,39 @@ const readText = (p) => {
   }
 };
 
+// Cumulative per-core times from Node itself. Every platform exposes them, and
+// Windows has no /proc/stat, so this is the fallback that keeps the cpu meter
+// live there. Same shape as the /proc read: one idle counter and one total, so
+// the delta and the smoothing below are shared.
+function osCpuTimes() {
+  const cpus = os.cpus() || [];
+  if (!cpus.length) return null;
+  let idle = 0;
+  let total = 0;
+  for (const cpu of cpus) {
+    const t = (cpu && cpu.times) || {};
+    const user = Number(t.user) || 0;
+    const nice = Number(t.nice) || 0;
+    const sys = Number(t.sys) || 0;
+    const idl = Number(t.idle) || 0;
+    const irq = Number(t.irq) || 0;
+    idle += idl;
+    total += user + nice + sys + idl + irq;
+  }
+  return total > 0 ? { idle, total } : null;
+}
+
 function cpuTimes() {
   const line = (readText('/proc/stat').split('\n')[0] || '').trim();
-  if (!line.startsWith('cpu')) return null;
-  const n = line.split(/\s+/).slice(1).map(Number);
-  if (!n.length || n.some((x) => !Number.isFinite(x))) return null;
-  // idle + iowait count as idle time; everything else is work.
-  const idle = (n[3] || 0) + (n[4] || 0);
-  const total = n.reduce((a, b) => a + b, 0);
-  return { idle, total };
+  if (line.startsWith('cpu')) {
+    const n = line.split(/\s+/).slice(1).map(Number);
+    if (!n.length || n.some((x) => !Number.isFinite(x))) return osCpuTimes();
+    // idle + iowait count as idle time; everything else is work.
+    const idle = (n[3] || 0) + (n[4] || 0);
+    const total = n.reduce((a, b) => a + b, 0);
+    return { idle, total };
+  }
+  return osCpuTimes();
 }
 
 function meminfo() {
@@ -59,9 +95,23 @@ function meminfo() {
   return out;
 }
 
+// The filesystem a desktop operator means by "disk": '/' on Unix, the drive
+// holding the home directory on Windows (statfs('/') there is whatever drive
+// the process happens to sit on).
+function diskRoot() {
+  if (process.platform === 'win32') {
+    try {
+      return path.parse(os.homedir()).root || 'C:\\';
+    } catch {
+      return 'C:\\';
+    }
+  }
+  return '/';
+}
+
 function disk() {
   try {
-    const s = fs.statfsSync('/');
+    const s = fs.statfsSync(diskRoot());
     const total = Number(s.blocks) * Number(s.bsize);
     const free = Number(s.bavail) * Number(s.bsize);
     if (!Number.isFinite(total) || total <= 0) return null;
@@ -123,6 +173,14 @@ export default function useHostStats(intervalMs = 1000) {
       if (tick === 1 || tick % 10 === 0) diskRef.current = disk();
 
       const mi = memRef.current || {};
+      // Windows answers [0,0,0] to loadavg() on every call — a reading that
+      // would render as a real "load 0" on a busy machine. Where it is not a
+      // real kernel value, say unknown instead (§10).
+      const la = typeof os.loadavg === 'function' ? os.loadavg() : null;
+      const loadKnown = process.platform !== 'win32' && !!la && Number.isFinite(la[0]);
+      // Swap/pagefile is exposed through /proc/meminfo only. Elsewhere the
+      // figure is unknown — not zero.
+      const swapKnown = mi.SwapTotal != null;
       const memTotal = mi.MemTotal || os.totalmem();
       const memAvail = mi.MemAvailable != null ? mi.MemAvailable : os.freemem();
       const swapTotal = mi.SwapTotal || 0;
@@ -132,7 +190,9 @@ export default function useHostStats(intervalMs = 1000) {
       const next = {
         cores,
         cpuPct,
-        load1: Math.round(((os.loadavg() || [0])[0] || 0) * 100) / 100,
+        load1: loadKnown ? Math.round(la[0] * 100) / 100 : null,
+        loadKnown,
+        swapKnown,
         memPct: memTotal ? Math.max(0, Math.min(100, Math.round((1 - memAvail / memTotal) * 100))) : null,
         memUsedGb: memTotal ? Math.round(((memTotal - memAvail) / 1e9) * 10) / 10 : null,
         memTotalGb: memTotal ? memTotal / 1e9 : null,

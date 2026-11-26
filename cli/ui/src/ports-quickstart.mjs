@@ -85,15 +85,28 @@ export function quickStartEntry(n, services = [], scan = null) {
   return quickStartRows(services, scan).find((r) => r.n === want) || null;
 }
 
-/** What pressing a number may do. Never a restart.
+/** What pressing a number may do. Never a restart, and never a command that
+ *  cannot run on this machine.
+ *
+ *  `host` is what the caller measured about the box it is running on:
+ *    `{ pm2: true | false | undefined }` — is the process manager here?
+ *  `undefined` means "not measured yet" and behaves exactly as before; it never
+ *  guesses. A paid install on Windows or macOS has no pm2 and hosts none of our
+ *  services, so pressing 1-0 must say that in one line instead of spawning a
+ *  binary that is not there and reporting its ENOENT (owner, 2026-11-26:
+ *  "/menu on msi install all need to work on install").
+ *
  *  Returns `{ cmd, args }` to run, or `{ skip }` with the reason to say back. */
-export function startPlan(entry) {
+export function startPlan(entry, host = {}) {
   if (!entry) return { skip: 'no such port number' };
   if (entry.up) {
     return { skip: `already online — not bouncing it (an update never drops a live session)` };
   }
   if (!entry.pm2) {
     return { skip: `no local start command — ${entry.name} runs on the Parrot box` };
+  }
+  if (host && host.pm2 === false) {
+    return { skip: `pm2 is not installed on this machine — this CLI does not host our services here · /ports shows what is listening` };
   }
   return { cmd: 'pm2', args: ['start', String(entry.pm2)] };
 }

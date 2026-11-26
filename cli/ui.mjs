@@ -1725,7 +1725,7 @@ function SystemPanel({ meters, services, scanOk, cols = 80 }) {
       /* @__PURE__ */ jsx12(Text13, { key: "svc-label", color: "gray", dim: true, children: `services ${up}/${services.length}  ` }),
       scanOk
         ? /* @__PURE__ */ jsx12(Text13, { key: "svc-list", color: svcColor, children: svcLine })
-        : /* @__PURE__ */ jsx12(Text13, { key: "svc-scan", color: "yellow", children: "scan unavailable (ss not readable)" })
+        : /* @__PURE__ */ jsx12(Text13, { key: "svc-scan", color: "yellow", children: "scan unavailable (no port tool)" })
     ] })
   ] });
 }

@@ -175,7 +175,11 @@ const toolArgLine = (args) => {
 function readImageAttachment(file) {
   const raw = String(file || '').trim();
   if (!raw) throw new Error('no file given');
-  const abs = path.resolve(raw.replace(/^~(?=\/)/, process.env.HOME || ''));
+  // `~/` and `~\` both mean the home folder; Windows has no HOME, so the
+  // user profile is used when HOME is unset (owner, 2026-11-26: attach has to
+  // work on the Windows install, not only on Linux).
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const abs = path.resolve(raw.replace(/^~(?=[\\/])/, home));
   const mime = IMAGE_MIME[path.extname(abs).toLowerCase()];
   if (!mime) throw new Error('not an image (png, jpg, webp, gif, bmp)');
   const st = fs.statSync(abs);
@@ -577,6 +581,20 @@ export default function App({ version = '0.1.0' }) {
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
 
+  /* Does THIS machine run our services? A paid install on Windows/macOS does
+   * not: the services live on our box, not on the operator's laptop. Measured
+   * once at start (read-only `which`/`where`), so pressing a /menu number can
+   * say why it will not start instead of spawning a missing binary and showing
+   * its ENOENT. `null` = not measured yet, which keeps the old behaviour
+   * (owner, 2026-11-26: "/menu on msi install all need to work on install"). */
+  const [pm2Here, setPm2Here] = useState(null);
+  useEffect(() => {
+    const finder = process.platform === 'win32' ? 'where' : 'which';
+    execFile(finder, ['pm2'], { timeout: 4000, windowsHide: true }, (err, stdout) => {
+      setPm2Here(!err && String(stdout || '').trim().length > 0);
+    });
+  }, []);
+
   const showNotice = useCallback((text) => {
     setNotice(text);
     setTimeout(() => setNotice((cur) => (cur === text ? null : cur)), 6000);
@@ -598,7 +616,7 @@ export default function App({ version = '0.1.0' }) {
   const startPortByNumber = useCallback((n) => {
     const entry = quickStartEntry(n, services, scan);
     if (!entry) { showNotice(`◌ no port ${n} — /menu lists 1-0`); return; }
-    const plan = startPlan(entry);
+    const plan = startPlan(entry, { pm2: pm2Here });
     if (plan.skip) { showNotice(`○ :${entry.port} ${entry.name} — ${plan.skip}`); return; }
     if (startingRef.current.has(entry.port)) return;
     startingRef.current.add(entry.port);
@@ -608,7 +626,11 @@ export default function App({ version = '0.1.0' }) {
       const lastLine = text.split('\n').map((l) => l.trim()).filter(Boolean).pop() || '';
       if (err) {
         startingRef.current.delete(entry.port);
-        showNotice(`✗ :${entry.port} ${entry.name} — pm2 start failed · ${lastLine.slice(0, 70)}`);
+        // A missing pm2 is not a failed start: nothing was attempted. Say which
+        // it was, so the operator is never told a service failed to boot here.
+        showNotice(err.code === 'ENOENT'
+          ? `○ :${entry.port} ${entry.name} — pm2 is not installed on this machine · /ports shows what is listening`
+          : `✗ :${entry.port} ${entry.name} — pm2 start failed · ${lastLine.slice(0, 70)}`);
         return;
       }
       // Read the port table back: the scan is the evidence, not the exit code.
@@ -623,7 +645,7 @@ export default function App({ version = '0.1.0' }) {
         .catch(() => showNotice(`◌ :${entry.port} ${entry.name} — started; re-scan failed, check /ports`))
         .finally(() => startingRef.current.delete(entry.port));
     });
-  }, [services, scan, showNotice]);
+  }, [services, scan, showNotice, pm2Here]);
 
   /* A server restart is now named by its cause (owner, 2026-11-24: "if server
    * drops after updates"). The panels already recover on their own — the

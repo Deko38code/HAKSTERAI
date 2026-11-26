@@ -2633,7 +2633,6 @@ program
   .description('List every service and port (this host + the fleet) with live health')
   .action(async () => {
     const net = require('net');
-    const { execFile } = require('child_process');
 
     const SERVICES = [
       { host: '127.0.0.1',   port: 3579,  name: 'HAKSTER-AI server',      path: '/api/health' },
@@ -2693,22 +2692,18 @@ program
       5555: 'miniforge', 5556: 'miniforge-dev', 8081: 'cinevault', 8082: 'claude-code-proxy',
       11434: 'ollama', 5432: 'postgres', 3001: 'app 3001', 3002: 'app 3002', 8888: 'app 8888',
       9999: 'app 9999', 9050: 'tor-socks', 80: 'http', 22: 'ssh', 53: 'dns' };
-    const listening = await new Promise((resolve) => {
-      execFile('ss', ['-ltn'], { timeout: 4000 }, (err, stdout) => {
-        if (err) return resolve([]);
-        const ports = new Set();
-        for (const line of String(stdout).split('\n').slice(1)) {
-          const m = line.trim().split(/\s+/)[3];
-          if (!m) continue;
-          const port = Number(String(m).split(':').pop());
-          if (port) ports.add(port);
-        }
-        resolve([...ports].sort((a, b) => a - b));
-      });
-    });
+    // The platform's own tool through the one shared scanner — linux `ss`,
+    // Windows `netstat -ano`, macOS `netstat` (src/listening-ports.js).
+    // Owner, 2026-11-26: "/menu on msi install all need to work on install".
+    // `ss` is a Linux tool, so on Windows this command used to print a bare
+    // "unavailable" and list nothing; the scan now reports what the machine
+    // actually has, and a missing tool is named instead of disguised as an
+    // empty host.
+    const scan = await require('./src/listening-ports').scanPorts(4000);
+    const listening = scan.ok ? scan.ports : [];
     console.log(`\n${C.cyan}Listening on this host${C.reset}`);
     if (!listening.length) {
-      console.log(`  ${C.gray}(ss unavailable)${C.reset}`);
+      console.log(`  ${C.gray}(no reading — ${scan.reason || 'no port tool'} · scanned with ${scan.backend || 'unknown'})${C.reset}`);
     } else {
       for (const port of listening) {
         console.log(`  ${C.green}●${C.reset} ${String(port).padEnd(6)} ${labels[port] ? labels[port] : `${C.gray}unmapped${C.reset}`}`);
@@ -3159,10 +3154,27 @@ program
     const child = viaShell
       ? spawn(`"${bun}" "${entry}"`, { shell: true, stdio: 'inherit', env: { ...process.env, HAKSTER_TUI_VERSION: version } })
       : spawn(bun, [entry], { stdio: 'inherit', env: { ...process.env, HAKSTER_TUI_VERSION: version } });
-    child.on('exit', (code) => process.exit(code || 0));
-    child.on('error', (err) => {
-      fallbackInk(`Bun could not start (${err.message})`);
+    // The dashboard is the interface this account pays for. A crash must not
+    // look like a normal quit and must not leave a dead terminal: name what
+    // happened, give the command that prints the real error, and open the Ink
+    // TUI so the CLI still runs (owner, 2026-11-26, Surface Pro — "it shows
+    // input bar tui only" was a dashboard start that died without saying so).
+    let settled = false;
+    const dashboardDied = (why) => {
+      if (settled) return;
+      settled = true;
+      console.error(`${C.red}✗ dashboard TUI exited (${why}).${C.reset}`);
+      console.error(`${C.dim}  the full error: "${bun}" "${entry}"${C.reset}`);
+      console.error(`${C.dim}  running the simpler Ink TUI so the CLI still works.${C.reset}`);
+      fallbackInk(null);
+    };
+    child.on('exit', (code, signal) => {
+      if (code === 0) { settled = true; process.exit(0); }
+      // Ctrl-C / a normal stop is the operator leaving, not a failure.
+      if (signal === 'SIGINT' || signal === 'SIGTERM') { settled = true; process.exit(0); }
+      dashboardDied(signal ? `signal ${signal}` : `code ${code}`);
     });
+    child.on('error', (err) => dashboardDied(err.message));
   });
 
 // ── quake — the CLI in a Guake drop-down ─────────────────────────────────

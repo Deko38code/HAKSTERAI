@@ -7,14 +7,15 @@
  * The Ink TUI (`hakster ui`) is a separate process from the old REPL, so it
  * feeds these meters from the events it actually receives and seeds the score
  * from the last old-CLI session in ~/.hakster/perf_history.json. Nothing here
- * invents a number: with no events the bars sit at the seed, and with no `ss`
- * output the services line says "scan unavailable".
+ * invents a number: with no events the bars sit at the seed, and when the
+ * platform's own port tool cannot run the services line says "scan unavailable"
+ * and names the tool (src/listening-ports.js picks ss / netstat per platform).
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
+import listeningPorts from './src/listening-ports.js';
 
 // cli/ — this file and both TUI bundles (ui.mjs, ui-fb.mjs) live here, so the
 // repository root is one level up however this module was loaded.
@@ -232,23 +233,20 @@ export function barColor(kind, value) {
   return '#f85149';
 }
 
-// `ss -tlnp` once, bounded. Returns the listening ports and their processes.
+// Listening ports once, bounded — the platform's own tool, through
+// src/listening-ports.js (linux `ss`, Windows `netstat -ano`, macOS
+// `netstat -an -p tcp`). Owner, 2026-11-26 (Windows Surface Pro): "says scan
+// unavailable ss not readable" — the scanner used to be Linux-only, so the
+// panel was honest and the machine was Windows. Returns
+// `{ ok, ports, procs, backend, reason?, at }`; a missing tool is
+// `ok: false` with `reason: '<tool>-not-installed'`, never a fake reading.
 export function scanPorts(timeoutMs = 4000) {
-  return new Promise((resolve) => {
-    execFile('ss', ['-tlnp'], { timeout: timeoutMs, maxBuffer: 1 << 20 }, (err, stdout) => {
-      const text = String(stdout || '');
-      const ports = new Set();
-      const procs = {};
-      for (const line of text.split('\n')) {
-        const m = line.match(/:([0-9]{2,5})\s+\S+\s+.*users:\(\("([^"]+)"/);
-        if (m) { ports.add(Number(m[1])); procs[m[1]] = m[2]; continue; }
-        const m2 = line.match(/:([0-9]{2,5})\s+\S+/);
-        if (m2) ports.add(Number(m2[1]));
-      }
-      if (err && !text) return resolve({ ok: false, ports: [], procs: {}, at: Date.now() });
-      resolve({ ok: true, ports: [...ports].sort((a, b) => a - b), procs, at: Date.now() });
-    });
-  });
+  return listeningPorts.scanPorts(timeoutMs);
+}
+
+// The tool the current platform scans with — so a service line can name it.
+export function scanBackend() {
+  return listeningPorts.backendFor();
 }
 
 // Expected services with their live state, in the old panel's order.
@@ -313,6 +311,7 @@ export const INSTALL_FILES = [
   'cli/ui.mjs',
   'cli/src/updater.js',
   'cli/src/prefs.js',
+  'cli/src/listening-ports.js',
   'cli/src/models/ladder.js',
   'cli/src/self-config-guard.js',
 ];
