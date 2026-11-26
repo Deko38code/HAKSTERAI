@@ -280,6 +280,45 @@ function nativeLibrary(platform = process.platform, arch = process.arch, env = p
 }
 
 /**
+ * Run one probe script through the chosen Bun, with the script as a FILE.
+ *
+ * The text used to travel as `-e "<script>"` inside a shell string, which is
+ * only safe while it happens to contain nothing the shell reads. The native
+ * probe's regex carries escaped double quotes, so on the npm `.cmd` shim
+ * branch (shell: true — the normal Windows install) the shell answered
+ * `Syntax error: "(" unexpected`; the probe then reported a healthy renderer
+ * as broken and the launcher fell back to the old Ink screen: input bar, no
+ * grids, no spinner, no reply — the Surface Pro (owner, 2026-11-26). Measured
+ * on this box before the fix: shell branch exit 2, the same script as argv
+ * exit 0 / HAKSTER_NATIVE_OK.
+ *
+ * So the script is written to a temp .mjs (mode 600, removed in `finally`) and
+ * the Bun is handed a path: `bun <file>`, or `"bun.cmd" "<file>"` for a shim.
+ * No script text is ever parsed by a shell again, and `require()` still works
+ * inside it because Bun allows require from an ES module.
+ */
+function runProbeScript(bunPath, text, opts = {}) {
+  const { spawnSync } = require('child_process');
+  const os = require('os');
+  const file = path.join(os.tmpdir(),
+    `hakster-probe-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.mjs`);
+  const shim = /\.(cmd|bat)$/i.test(String(bunPath || ''));
+  const common = {
+    encoding: 'utf8', timeout: opts.timeoutMs, windowsHide: true,
+    env: opts.env || process.env,
+  };
+  if (opts.cwd) common.cwd = opts.cwd;
+  try {
+    fs.writeFileSync(file, text, { encoding: 'utf8', mode: 0o600 });
+    return shim
+      ? spawnSync(`"${bunPath}" "${file}"`, { ...common, shell: true })
+      : spawnSync(bunPath, [file], common);
+  } finally {
+    try { fs.unlinkSync(file); } catch { /* already gone */ }
+  }
+}
+
+/**
  * Does the dashboard bundle actually load under this Bun?
  *
  * The launcher can check files all day; only the chosen Bun knows whether the
@@ -291,16 +330,16 @@ function nativeLibrary(platform = process.platform, arch = process.arch, env = p
  * Bun named a reason, and null when nothing could be measured.
  */
 function probeBundle(bunPath, cliDir, opts = {}) {
-  const { spawnSync } = require('child_process');
   const timeout = opts.timeoutMs === undefined ? 20000 : opts.timeoutMs;
-  const script = "try{await import('./ui-fb.mjs');console.log('HAKSTER_PROBE_OK')}"
+  // An absolute file URL, because the script no longer runs from cliDir — it
+  // runs from a temp file (§ runProbeScript). A Windows path in JSON is all
+  // forward slashes in a URL, so nothing here can be re-parsed by a shell.
+  let entryUrl = path.join(cliDir, 'ui-fb.mjs');
+  try { entryUrl = require('url').pathToFileURL(entryUrl).href; } catch { /* older node: plain path */ }
+  const script = "try{await import(" + JSON.stringify(entryUrl) + ");console.log('HAKSTER_PROBE_OK')}"
     + "catch(e){console.error(String((e&&e.message)||e));process.exit(3)}";
-  const shim = /\.(cmd|bat)$/i.test(String(bunPath || ''));
-  const common = { cwd: cliDir, encoding: 'utf8', timeout, windowsHide: true, env: opts.env || process.env };
   try {
-    const r = shim
-      ? spawnSync(`"${bunPath}" -e "${script}"`, { ...common, shell: true })
-      : spawnSync(bunPath, ['-e', script], common);
+    const r = runProbeScript(bunPath, script, { timeoutMs: timeout, env: opts.env, cwd: cliDir });
     if (r && r.status === 0 && String(r.stdout || '').includes('HAKSTER_PROBE_OK')) return { ok: true, reason: '' };
     const line = String((r && (r.stderr || r.stdout)) || '').trim()
       .split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-3).join(' | ');
@@ -329,7 +368,6 @@ function probeBundle(bunPath, cliDir, opts = {}) {
  * said why, null when there was nothing to measure.
  */
 function probeNative(bunPath, libFile, opts = {}) {
-  const { spawnSync } = require('child_process');
   const timeout = opts.timeoutMs === undefined ? 15000 : opts.timeoutMs;
   if (!libFile) return { ok: null, reason: 'no native library was resolved for this platform' };
   // bun:ffi refuses an empty symbol map ("Expected at least one symbol"), so one
@@ -344,13 +382,9 @@ function probeNative(bunPath, libFile, opts = {}) {
     + "if(!/Symbol\\s+\"[^\"]*\"\\s+not found in/.test(m))throw e}"
     + "console.log('HAKSTER_NATIVE_OK')}"
     + "catch(e){console.error(String((e&&e.message)||e));process.exit(4)}";
-  const shim = /\.(cmd|bat)$/i.test(String(bunPath || ''));
   const env = { ...(opts.env || process.env), HAKSTER_NATIVE_PROBE: String(libFile) };
-  const common = { encoding: 'utf8', timeout, windowsHide: true, env };
   try {
-    const r = shim
-      ? spawnSync(`"${bunPath}" -e "${script}"`, { ...common, shell: true })
-      : spawnSync(bunPath, ['-e', script], common);
+    const r = runProbeScript(bunPath, script, { timeoutMs: timeout, env });
     if (r && r.status === 0 && String(r.stdout || '').includes('HAKSTER_NATIVE_OK')) return { ok: true, reason: '' };
     const line = String((r && (r.stderr || r.stdout)) || '').trim()
       .split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-3).join(' | ');
