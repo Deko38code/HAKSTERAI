@@ -5439,6 +5439,7 @@ var STUCK_PHRASES = {
 };
 var RESUME_PHRASE = "Back on task \xB7 continuing the checklist";
 var LOOP_PHRASE = "Loop detected \u2014 stop repeating and change the approach";
+var TWO_BIRDS_PHRASE = "Killing 2 birds 1 stone \u2014 step keeps running, update lands before the run ends";
 function isResume(from, to) {
   const a = String(from || "").toUpperCase();
   const b = String(to || "").toUpperCase();
@@ -5518,10 +5519,11 @@ function phraseAt(list, index) {
   const i = Math.max(0, Math.floor(Number(index) || 0)) % items.length;
   return items[i];
 }
-function phraseFor({ phase, tool, activity = "", index = 0, resumed = false, stalledMs = 0, loop = false } = {}) {
+function phraseFor({ phase, tool, activity = "", index = 0, resumed = false, stalledMs = 0, loop = false, steerPending = false } = {}) {
   const normalized = String(phase || "DEFAULT").toUpperCase();
   const info = PHASE_PHRASES[normalized] ? normalized : "DEFAULT";
   if (loop) return { text: LOOP_PHRASE, kind: "loop" };
+  if (steerPending) return { text: TWO_BIRDS_PHRASE, kind: "steer" };
   if (resumed) return { text: RESUME_PHRASE, kind: "resume" };
   const name = tool && (tool.name || tool.tool_name) ? String(tool.name || tool.tool_name) : "";
   if (name) {
@@ -5569,7 +5571,8 @@ function CrushStatus({
   queued = 0,
   progressAt = 0,
   trend = "steady",
-  loopAt = 0
+  loopAt = 0,
+  steerPending = false
 }) {
   const [frame, setFrame] = useState10(0);
   useEffect9(() => {
@@ -5603,7 +5606,8 @@ function CrushStatus({
     index: phraseIndex,
     resumed,
     stalledMs,
-    loop: looping
+    loop: looping,
+    steerPending
   });
   const heat = heatOf({ trend, stalledMs });
   const tint = heatColor(heat);
@@ -5621,7 +5625,7 @@ function CrushStatus({
     " ",
     /* @__PURE__ */ jsx25("span", { fg: tint, children: heatWord(heat) }),
     " \xB7 ",
-    /* @__PURE__ */ jsx25("span", { fg: phrase.kind === "stuck" || phrase.kind === "loop" ? "#f85149" : phrase.kind === "tool" ? "#3fb950" : "#a5b4c3", children: shown2 }),
+    /* @__PURE__ */ jsx25("span", { fg: phrase.kind === "stuck" || phrase.kind === "loop" ? "#f85149" : phrase.kind === "tool" ? "#3fb950" : phrase.kind === "steer" ? "#d29922" : "#a5b4c3", children: shown2 }),
     " ",
     /* @__PURE__ */ jsx25("span", { fg: gradColor, children: shimmer }),
     " ",
@@ -6547,6 +6551,7 @@ function useAgentStream({
   const [status, setStatus] = useState13("idle");
   const [error, setError] = useState13(null);
   const [elapsedMs, setElapsedMs] = useState13(0);
+  const [steersPending, setSteersPending] = useState13(0);
   const [activity, setActivity] = useState13([]);
   const progressAtRef = useRef9(0);
   const [loopAt, setLoopAt] = useState13(0);
@@ -6604,6 +6609,7 @@ function useAgentStream({
   const setStatusBoth = useCallback3((next) => {
     statusRef.current = next;
     setStatus(next);
+    if (next === "idle") setSteersPending(0);
   }, []);
   useEffect12(() => {
     const ticking = status === "connecting" || status === "reconnecting" || status === "thinking" || status === "streaming" || status === "approval";
@@ -6919,6 +6925,7 @@ function useAgentStream({
           case "steer": {
             const text2 = String(evt.content || "").trim();
             patch(assistantId, (m) => applySteer(m, text2, !!evt.supersede));
+            setSteersPending((n) => Math.max(0, n - 1));
             if (text2) {
               pushActivity("sys", evt.supersede ? "\u21B3 live steer \u2014 reply restarted with it" : "\u21B3 live steer applied \xB7 killing 2 birds 1 stone \u2014 answer kept, update delivered");
             }
@@ -6926,6 +6933,7 @@ function useAgentStream({
           }
           case "steer_undelivered": {
             const items = Array.isArray(evt.items) ? evt.items.map((t) => String(t)).filter(Boolean) : [];
+            setSteersPending(0);
             if (items.length) {
               pushActivity("sys", `\u21BA ${items.length} steer queued for the next run`);
               try {
@@ -7299,6 +7307,7 @@ function useAgentStream({
       });
       if (!res.ok) return false;
       const data = await res.json().catch(() => ({}));
+      if (data && data.ok === true) setSteersPending((n) => n + 1);
       return data && data.ok === true;
     } catch {
       return false;
@@ -7340,6 +7349,7 @@ function useAgentStream({
     activity,
     progressAtRef,
     loopAt,
+    steersPending,
     requests,
     tokens,
     contextUsed,
@@ -10228,7 +10238,8 @@ function App({ version = "0.1.0" }) {
             queued: steerQueue.length,
             progressAt: agent.progressAtRef?.current || 0,
             trend: agent.meters?.health?.trend || "steady",
-            loopAt: agent.loopAt || 0
+            loopAt: agent.loopAt || 0,
+            steerPending: steerQueue.length > 0 || Number(agent.steersPending || 0) > 0
           }
         ) }) : showRecap ? (
           // Idle: the same row states what the finished run did instead of

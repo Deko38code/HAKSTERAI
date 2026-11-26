@@ -2827,6 +2827,11 @@ export default function App({ version = '0.1.0' }) {
                 visible without moving a single panel. */}
             {showCrushStatus ? (
               <box style={{ flexShrink: 0 }}>
+                {/* `steerPending` is a message in flight on the live run, or one
+                    waiting in the queue — the state where one pass does two jobs:
+                    the step already running keeps going and the update still
+                    lands (owner, 2026-11-26: "add killing 2 birds 1 stone to
+                    thinking spinner"). */}
                 <CrushStatus
                   width={mainW}
                   phase={crushPhase}
@@ -2840,6 +2845,7 @@ export default function App({ version = '0.1.0' }) {
                   progressAt={agent.progressAtRef?.current || 0}
                   trend={agent.meters?.health?.trend || 'steady'}
                   loopAt={agent.loopAt || 0}
+                  steerPending={steerQueue.length > 0 || Number(agent.steersPending || 0) > 0}
                 />
               </box>
             ) : showRecap ? (

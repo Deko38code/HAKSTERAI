@@ -26,6 +26,7 @@ import {
   STUCK_MS,
   RESUME_PHRASE,
   LOOP_PHRASE,
+  TWO_BIRDS_PHRASE,
   heatColor,
   heatOf,
   heatWord,
@@ -146,4 +147,61 @@ test('the row and App are wired to the real clocks', () => {
   const hook = read('cli/ui/src/hooks/useAgentStream.js');
   assert.match(hook, /progressAtRef\.current = Date\.now\(\);/, 'the hook stamps every event');
   assert.ok(hook.includes('progressAtRef,'), 'and exposes the clock');
+});
+
+/* Owner, 2026-11-26: "add killing 2 birds 1 stone to thinking spinner".
+ *
+ * The phrase is our own for one action that settles two things at once, so it
+ * is pinned at the one moment the run really does it: an update the operator
+ * sent while the run was working keeps the step in flight going AND still lands
+ * before the run ends. It never shows otherwise (no decoration), and a proven
+ * loop still outranks it. */
+test('a pending steer prints "killing 2 birds 1 stone", and only then', () => {
+  assert.match(TWO_BIRDS_PHRASE, /^Killing 2 birds 1 stone/);
+  assert.match(TWO_BIRDS_PHRASE, /step keeps running/);
+  assert.match(TWO_BIRDS_PHRASE, /update lands before the run ends/);
+
+  // It wins over the tool line, a resume, the stall clock and the phase list:
+  // the one thing worth saying is that the message is on its way.
+  for (const ctx of [
+    { phase: 'ACT', tool: { name: 'exec_shell', args: { cmd: 'npm test' } }, stalledMs: STUCK_MS * 2 },
+    { phase: 'THINK', resumed: true },
+    { phase: 'PLAN', index: 3 },
+    { phase: 'OBSERVE' },
+  ]) {
+    const got = phraseFor({ ...ctx, steerPending: true });
+    assert.equal(got.text, TWO_BIRDS_PHRASE, `steer pending outranks ${ctx.phase}`);
+    assert.equal(got.kind, 'steer');
+  }
+
+  // A proven loop is a defect the server already caught — it keeps the row.
+  assert.equal(phraseFor({ phase: 'ACT', loop: true, steerPending: true }).text, LOOP_PHRASE);
+
+  // With nothing in flight the row is exactly what it was before.
+  for (const phase of ['THINK', 'PLAN', 'ACT', 'OBSERVE', 'REFLECT', 'CONSOLIDATE', 'DEFAULT']) {
+    const plain = phraseFor({ phase, index: 0 });
+    assert.notEqual(plain.text, TWO_BIRDS_PHRASE, `${phase} alone does not claim a steer`);
+    assert.notEqual(plain.kind, 'steer');
+  }
+});
+
+test('the phrase is wired to a steer that is really in flight', () => {
+  const row = read('cli/ui/src/components/CrushStatus.jsx');
+  assert.match(row, /steerPending = false/, 'the row takes the pending flag');
+  assert.match(row, /steerPending,/, 'and passes it to the phrase picker');
+  assert.match(row, /phrase\.kind === 'steer' \? '#d29922'/, 'a pending steer is drawn in the queue\'s own amber');
+
+  const app = read('cli/ui/src/App.jsx');
+  assert.match(
+    app,
+    /steerPending=\{steerQueue\.length > 0 \|\| Number\(agent\.steersPending \|\| 0\) > 0\}/,
+    'App counts both a queued message and one handed to the live run',
+  );
+
+  const hook = read('cli/ui/src/hooks/useAgentStream.js');
+  assert.match(hook, /const \[steersPending, setSteersPending\] = useState\(0\)/, 'the hook owns the count');
+  assert.match(hook, /if \(data && data\.ok === true\) setSteersPending\(\(n\) => n \+ 1\)/, 'only an accepted steer counts');
+  assert.match(hook, /setSteersPending\(\(n\) => Math\.max\(0, n - 1\)\)/, 'the run reading it clears it');
+  assert.match(hook, /if \(next === 'idle'\) setSteersPending\(0\)/, 'a closed run carries no inbound steer');
+  assert.ok(hook.includes('    steersPending,'), 'and the count reaches App');
 });

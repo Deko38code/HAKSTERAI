@@ -178,6 +178,11 @@ export function useAgentStream({
   const [status, setStatus] = useState('idle'); // idle | connecting | reconnecting | thinking | streaming | approval | error
   const [error, setError] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(0);
+  /* Steers handed to the live run and not yet read by it. Event-driven, never a
+   * timer: it goes up when the server accepts the message for this run and back
+   * down when the run reports it read it (or when the run ends), which is the
+   * window in which the thinking row says "killing 2 birds 1 stone". */
+  const [steersPending, setSteersPending] = useState(0);
 
   // ── Activity + usage ──────────────────────────────────────────────────────
   // HakTerm's right-hand column keeps a live ACTIVITY feed and a USAGE block
@@ -304,6 +309,10 @@ export function useAgentStream({
   const setStatusBoth = useCallback((next) => {
     statusRef.current = next;
     setStatus(next);
+    // A closed run carries no inbound steer: anything still undelivered comes
+    // back on `steer_undelivered` and the TUI queues it, so the row must stop
+    // claiming a message is in flight the moment the run is over.
+    if (next === 'idle') setSteersPending(0);
   }, []);
 
   // The elapsed timer is owned here, not by the caller: every consumer of this
@@ -756,6 +765,9 @@ export function useAgentStream({
             // exactly what the drain does — the answer already on screen
             // survives AND the update still reaches the model before the next
             // run starts — so the row says that instead of claiming a restart.
+            // The run read it: nothing is in flight any more, so the thinking
+            // row goes back to describing the work.
+            setSteersPending((n) => Math.max(0, n - 1));
             if (text) {
               pushActivity('sys', evt.supersede
                 ? '↳ live steer — reply restarted with it'
@@ -768,6 +780,7 @@ export function useAgentStream({
             // The run ended before it could read these. Hand them to the TUI's
             // queue instead of losing them with the run's inbox.
             const items = Array.isArray(evt.items) ? evt.items.map((t) => String(t)).filter(Boolean) : [];
+            setSteersPending(0);
             if (items.length) {
               pushActivity('sys', `\u21ba ${items.length} steer queued for the next run`);
               try { onSteerUndeliveredRef.current && onSteerUndeliveredRef.current(items); } catch { /* queueing is best-effort */ }
@@ -1284,6 +1297,7 @@ export function useAgentStream({
       });
       if (!res.ok) return false;
       const data = await res.json().catch(() => ({}));
+      if (data && data.ok === true) setSteersPending((n) => n + 1);
       return data && data.ok === true;
     } catch {
       return false;
@@ -1333,6 +1347,7 @@ export function useAgentStream({
     activity,
     progressAtRef,
     loopAt,
+    steersPending,
     requests,
     tokens,
     contextUsed,

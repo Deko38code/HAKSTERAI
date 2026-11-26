@@ -51,6 +51,7 @@ export default function CrushStatus({
   progressAt = 0,
   trend = 'steady',
   loopAt = 0,
+  steerPending = false,
 }) {
   const [frame, setFrame] = useState(0);
   // One commit here repaints the WHOLE screen: OpenTUI lays the frame out as a
@@ -109,6 +110,7 @@ export default function CrushStatus({
     resumed,
     stalledMs,
     loop: looping,
+    steerPending,
   });
 
   // The heat reading is the meter's measured trend plus this stall clock — the
@@ -136,7 +138,7 @@ export default function CrushStatus({
         {/* Warm/cool, from the measured trend and the stall clock. */}
         <span fg={tint}>{heatWord(heat)}</span>
         {' · '}
-        <span fg={phrase.kind === 'stuck' || phrase.kind === 'loop' ? '#f85149' : phrase.kind === 'tool' ? '#3fb950' : '#a5b4c3'}>
+        <span fg={phrase.kind === 'stuck' || phrase.kind === 'loop' ? '#f85149' : phrase.kind === 'tool' ? '#3fb950' : phrase.kind === 'steer' ? '#d29922' : '#a5b4c3'}>
           {shown}
         </span>
         {' '}

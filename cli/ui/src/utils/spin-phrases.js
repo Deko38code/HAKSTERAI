@@ -111,6 +111,15 @@ export const ON_FIRE_PHRASE = 'On fire · difficulty increased, pushing harder';
 /** A detected loop is stuck-ness the server already proved — say it at once. */
 export const LOOP_PHRASE = 'Loop detected — stop repeating and change the approach';
 
+/* Our own phrase for one action that settles two things at once, shown at the
+ * one moment the run actually does it: the operator sent an update while the
+ * run was working, so the step already in flight keeps going AND the message is
+ * drained at the boundary before the run ends (owner, 2026-11-26: "add killing
+ * 2 birds 1 stone to thinking spinner"; 2026-11-26: "fix our steer to not
+ * interupt you but you still grab message beore your run to kill 2 birds 1
+ * stone"). It is never decoration — it only shows while a steer is pending. */
+export const TWO_BIRDS_PHRASE = 'Killing 2 birds 1 stone — step keeps running, update lands before the run ends';
+
 /** True when `from` is reasoning after doing: the run has just resumed. */
 export function isResume(from, to) {
   const a = String(from || '').toUpperCase();
@@ -214,13 +223,18 @@ export function phraseAt(list, index) {
 /**
  * The phrase the row should print right now, and why.
  *
- * Priority: a proven loop → a resuming run → a tool in flight → a stalled run →
- * the phase's own warming/cooling phrases rotating.
+ * Priority: a proven loop → a pending steer (killing 2 birds 1 stone) → a
+ * resuming run → a tool in flight → a stalled run → the phase's own
+ * warming/cooling phrases rotating.
  */
-export function phraseFor({ phase, tool, activity = '', index = 0, resumed = false, stalledMs = 0, loop = false } = {}) {
+export function phraseFor({ phase, tool, activity = '', index = 0, resumed = false, stalledMs = 0, loop = false, steerPending = false } = {}) {
   const normalized = String(phase || 'DEFAULT').toUpperCase();
   const info = PHASE_PHRASES[normalized] ? normalized : 'DEFAULT';
   if (loop) return { text: LOOP_PHRASE, kind: 'loop' };
+  // An update waiting on this run is the operator's own input, and it is the one
+  // state where a single pass does two jobs — so the row names it, above the
+  // tool line, instead of describing the phase over a message that is in flight.
+  if (steerPending) return { text: TWO_BIRDS_PHRASE, kind: 'steer' };
   if (resumed) return { text: RESUME_PHRASE, kind: 'resume' };
   const name = tool && (tool.name || tool.tool_name) ? String(tool.name || tool.tool_name) : '';
   if (name) {
