@@ -4303,11 +4303,33 @@ app.get('/api/memory', (req, res) => {
 app.get('/api/agent/memory', (req, res) => {
   const { q, query, category, limit } = req.query;
   const needle = q || query;
-  if (needle) {
-    const results = searchMemories(needle, { category: category || null, limit: parseInt(limit) || 20 });
-    return res.json({ memories: results, results });
-  }
-  const memories = listMemories({ category: category || null, limit: parseInt(limit) || 100 });
+  const lim = parseInt(limit) || (needle ? 20 : 100);
+  let memories = needle
+    ? searchMemories(needle, { category: category || null, limit: lim })
+    : listMemories({ category: category || null, limit: lim });
+  // The per-section banks (autolearn.readBank) hold the long-term store — hundreds
+  // of observations the keyed table never sees. Search them too so recall_memory
+  // can reach ANY memory, not just the keyed rows. Additive: keyed results stay
+  // first, a bank failure can never break recall, and nothing is ever written.
+  try {
+    const autolearn = require('./agent/autolearn');
+    const bankLimit = needle ? lim : Math.min(lim, 60);
+    const hits = autolearn.searchBanks(process.cwd(), { query: needle || '', limit: bankLimit });
+    const mapped = hits
+      .filter((b) => !category || String(b.bank || '').toLowerCase().includes(String(category).toLowerCase()))
+      .map((b) => ({
+        category: `bank:${b.bank}`,
+        key: String(b.observation || '').slice(0, 48),
+        value: String(b.observation || ''),
+        source: 'bank',
+        bank: b.bank,
+        bankId: b.id,
+        score: b.score,
+        updated_at: b.timestamp ? Math.floor(new Date(b.timestamp).getTime() / 1000) : undefined,
+        access_count: 0,
+      }));
+    if (mapped.length) memories = memories.concat(mapped);
+  } catch (_) { /* banks are optional — never fail recall over them */ }
   res.json({ memories, results: memories });
 });
 

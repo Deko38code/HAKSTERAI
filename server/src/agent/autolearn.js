@@ -431,6 +431,54 @@ function pullMemoryBanks(cwd, opts = {}) {
   return out.trim();
 }
 
+// Full-text search across every bank, so recall_memory can reach any stored
+// observation — including the ones pullMemoryBanks() (3 per bank, 1500 chars)
+// never surfaces. Read-only: never writes, never evicts. Ranks by term overlap
+// (share of query terms present) with substring similarity as the tie-breaker,
+// and returns the matching entries with the bank they came from.
+function searchBanks(cwd, opts = {}) {
+  const query = String(opts.query || '').trim();
+  const limit = Math.max(1, Math.min(Number(opts.limit) || 20, 500));
+  const minScore = typeof opts.minScore === 'number' ? opts.minScore : 0.12;
+  const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+
+  const scan = (onlySection) => {
+    const sections = onlySection ? [onlySection] : MEMORY_SECTIONS;
+    const found = [];
+    for (const section of sections) {
+      const entries = readBank(cwd, section);
+      for (const e of entries) {
+        const obs = String((e && e.observation) || '');
+        if (!obs) continue;
+        const hay = obs.toLowerCase();
+        let hits = 0;
+        for (const t of terms) if (hay.includes(t)) hits++;
+        const overlap = terms.length ? hits / terms.length : 0;
+        const sim = query ? substringSimilarity(query, obs) : 0;
+        const score = Math.max(overlap, sim);
+        found.push({ ...e, bank: section, score });
+      }
+    }
+    return found;
+  };
+
+  // No query: newest observations across every bank, so "recall anything" works
+  // without a search phrase too.
+  if (!query) {
+    const all = scan(null);
+    all.sort((a, b) => String(b.timestamp || b.bankedAt || '').localeCompare(String(a.timestamp || a.bankedAt || '')));
+    return all.slice(0, limit);
+  }
+
+  const all = scan(null);
+  const matching = all.filter((e) => e.score >= minScore);
+  // A query that matches nothing verbatim still recalls the strongest partials
+  // rather than returning empty and looking broken.
+  const pool = matching.length ? matching : all;
+  pool.sort((a, b) => b.score - a.score || String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+  return pool.slice(0, limit);
+}
+
 function initMemory(cwd) {
   const haksterDir = HAKSTER_DIR;
   const memoriesDir = path.join(haksterDir, 'memories');
@@ -1130,6 +1178,7 @@ module.exports = {
   autoInit,
   readBank,
   pullMemoryBanks,
+  searchBanks,
   curateNewMemoriesWithCodex,
   bankPath,
   BANK_CAP,

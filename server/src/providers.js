@@ -4104,8 +4104,21 @@ async function executeAgentTool(name, args, cwd, provider, model, onStream, allo
           const results = args.query
             ? searchMemories(args.query, { limit: 10 })
             : listMemories({ limit: 20 });
-          if (results.length === 0) return 'No memories found.';
-          return results.map(m => `[${m.category}] ${m.key}: ${m.value} (updated ${new Date(m.updated_at * 1000).toISOString().split('T')[0]}, accessed ${m.access_count}x)`).join('\n');
+          const keyed = results.map(m => `[${m.category}] ${m.key}: ${m.value} (updated ${new Date(m.updated_at * 1000).toISOString().split('T')[0]}, accessed ${m.access_count}x)`);
+          // Always also search the per-section banks (autolearn.readBank) — they are
+          // the long-term store and reach far beyond the keyed table, so any memory
+          // is recallable. Read-only and additive; a bank failure never breaks recall.
+          let bankLines = [];
+          try {
+            const autolearn = require('./agent/autolearn');
+            const bankHits = autolearn.searchBanks(cwd, { query: args.query || '', limit: 20 });
+            bankLines = bankHits.map(b => `[bank:${b.bank}] ${String(b.observation).slice(0, 400)}${b.timestamp ? ` (${String(b.timestamp).slice(0, 10)})` : ''}`);
+          } catch (_) { /* banks optional */ }
+          if (keyed.length === 0 && bankLines.length === 0) return 'No memories found.';
+          const parts = [];
+          if (keyed.length) parts.push('## Keyed memories\n' + keyed.join('\n'));
+          if (bankLines.length) parts.push('## Bank memories\n' + bankLines.join('\n'));
+          return parts.join('\n\n');
         } catch (err) {
           return `Error recalling memory: ${err.message}`;
         }
