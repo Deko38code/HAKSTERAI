@@ -240,9 +240,12 @@ function railsChecklist(rails) {
   const optCount = items.filter((i) => i.optional).length;
   const countText = rails.pass + '/' + rails.total + (optCount ? ' required' : ' rails active');
   const count = (ok ? C.green : C.yellow) + countText + C.reset;
-  const out = ['', dot + '  ' + C.bold + C.white + 'CHECKLIST' + C.reset +
-    C.gray + '  \u00b7  ' + C.reset + count +
-    C.gray + '  \u00b7  ' + C.reset + C.gray + rails.ms + 'ms' + C.reset];
+  // Owner, 2026-11-26: "make the text green with all in checklist on startup" —
+  // the whole band reads green. A failure stays red and an unmeasured rail stays
+  // its own colour: painting a broken rail green would claim it works (§10, §50).
+  const out = ['', dot + '  ' + C.bold + C.green + 'CHECKLIST' + C.reset +
+    C.greenDim + '  \u00b7  ' + C.reset + count +
+    C.greenDim + '  \u00b7  ' + C.reset + C.greenDim + rails.ms + 'ms' + C.reset];
 
   // One tick per rail, in the order the check ran. Two columns when the
   // terminal has room, one when it does not, so the card never wraps.
@@ -253,9 +256,9 @@ function railsChecklist(rails) {
   const cell = (i) => {
     const tick = i.ok
       ? C.green + '\u2713' + C.reset
-      : i.optional ? C.gray + '\u25cb' + C.reset : C.red + '\u2717' + C.reset;
-    const label = i.ok ? C.gray + i.label + C.reset : C.white + i.label + C.reset;
-    const note = i.note ? C.gray + '  ' + i.note + C.reset : '';
+      : i.optional ? C.greenDim + '\u25cb' + C.reset : C.red + '\u2717' + C.reset;
+    const label = i.ok ? C.green + i.label + C.reset : C.white + i.label + C.reset;
+    const note = i.note ? C.greenDim + '  ' + i.note + C.reset : '';
     return { ansi: '  ' + tick + ' ' + label + note, len: itemW(i) };
   };
   const cols = (process.stdout.columns || 80) >= cellW * 2 + 6 ? 2 : 1;
@@ -275,7 +278,7 @@ function railsChecklist(rails) {
       C.gray + (i.detail ? '  \u00b7  ' + i.detail : '') + C.reset);
   }
   if (optionalOff.length) {
-    out.push('  ' + C.gray + 'optional off: ' + optionalOff.map((i) => i.label).join(', ') + C.reset);
+    out.push('  ' + C.greenDim + 'optional off: ' + optionalOff.map((i) => i.label).join(', ') + C.reset);
   }
   return out;
 }

@@ -166,3 +166,42 @@ test('the card renders the count beside the rail and counts only scored rails', 
     assert.ok(visible <= 120, 'rail row stays within the card: ' + visible + ' cols');
   }
 });
+
+/* The band reads green, and a green tick never hides a broken rail (§10, §50).
+ *
+ * Owner, 2026-11-26: "make the text green with all in checklist on startup".
+ */
+test('a clean band is green throughout — and a failure is never painted green', () => {
+  const logo = require(LOGO);
+  const GREEN = '\x1b[38;5;46m';
+  const RED = '\x1b[38;5;196m';
+  const RESET = '\x1b[0m';
+  const allPass = {
+    ok: true,
+    pass: 3,
+    total: 3,
+    ms: 3,
+    items: [
+      { id: 'a', label: 'model lock', ok: true, note: '3 paths' },
+      { id: 'b', label: 'memory bank', ok: true, note: '386 notes' },
+      { id: 'c', label: 'mcp belt', ok: true, note: '21 servers' },
+    ],
+  };
+  const text = logo.railsChecklist(allPass).join('\n');
+  assert.ok(text.includes(GREEN + 'CHECKLIST'), 'the band header is green');
+  assert.ok(text.includes(GREEN + '3/3 rails active'), 'the count is green when every rail passes');
+  for (const i of allPass.items) {
+    assert.ok(text.includes(GREEN + i.label + RESET), i.label + ' label is green');
+  }
+  assert.ok(!text.includes(RED), 'an all-pass band prints no red');
+
+  const withFail = JSON.parse(JSON.stringify(allPass));
+  Object.assign(withFail, { ok: false, pass: 2 });
+  withFail.items[2].ok = false;
+  withFail.items[2].detail = 'codex not installed';
+  const failText = logo.railsChecklist(withFail).join('\n');
+  assert.ok(!failText.includes(GREEN + 'mcp belt'), 'a failed rail is never labelled green');
+  assert.ok(failText.includes(RED + '✗'), 'a failed rail still gets its red tick');
+  assert.ok(failText.includes('2/3 rails active'), 'the count drops to the measured figure');
+  assert.ok(failText.includes('codex not installed'), 'the failure names its reason');
+});
