@@ -1264,7 +1264,34 @@ const TOOLS_CACHE_TTL = 10000; // dashboard counters should stay live
 // A short TTL cache keyed by the response-shaping query flags keeps rapid polling cheap
 // while `live=1` still forces a fresh read.
 const _dashboardCache = new Map();
-const DASHBOARD_CACHE_TTL = 5000;
+// 20 s, because the admin page polls this every 15 s: a 5 s TTL meant every poll
+// missed and paid the full recompute (measured 113 ms idle, 2 s while the box
+// swaps). At 20 s the 15 s poll hits the cache and the payload is never more
+// than one beat old.
+const DASHBOARD_CACHE_TTL = 20000;
+
+// Owner cards that read a spawned process or an outbound call (`stripe`,
+// `sensors`, a HEAD to haksterai.com, a log merge) took 450-610 ms each inside
+// the request on a healthy box and seconds while the disk stalled — the card sat
+// blank and every other admin call queued behind it. `swrState()` answers from
+// the last reading immediately and refreshes it out-of-band; only the very first
+// call, when nothing has been read yet, waits for a real read.
+const _swrCache = new Map();
+function swrState(key, ttlMs, load) {
+  const now = Date.now();
+  let e = _swrCache.get(key);
+  if (!e) { e = { at: 0, value: null, inflight: null }; _swrCache.set(key, e); }
+  const fresh = e.value !== null && (now - e.at) < ttlMs;
+  if (!fresh && !e.inflight) {
+    e.inflight = Promise.resolve()
+      .then(load)
+      .then((value) => { if (value !== undefined && value !== null) { e.value = value; e.at = Date.now(); } })
+      .catch(() => {})
+      .finally(() => { e.inflight = null; });
+  }
+  if (e.value !== null) return Promise.resolve(e.value);
+  return e.inflight.then(() => e.value);
+}
 
 // Services scan. `ss` is a process spawn, and a spawn on this box's swapping
 // spinner disk can take seconds — running it inside the request handler froze
@@ -8649,12 +8676,12 @@ app.post('/api/images/analyze', requireSignedIn, async (req, res) => {
 // every request. The response timestamps still report when each reading was
 // taken; nothing is presented as fresher than it is.
 const serverStatusCache = { cpu: { at: 0, value: null }, site: { at: 0, value: null }, siteProbing: false };
-async function cachedCpuSnapshot() {
-  const c = serverStatusCache.cpu;
-  if (c.value && Date.now() - c.at < 5000) return c.value;
-  const value = await systemSensors.cpuSnapshot(250);
-  serverStatusCache.cpu = { at: Date.now(), value };
-  return value;
+// The 250 ms /proc/stat sample used to be awaited inside the request, so on a
+// loaded box the whole host card waited for a timer that had itself been delayed
+// by the congestion (measured 443 ms idle, 1.7 s under load). It now answers with
+// the last sample and refreshes one in the background.
+function cachedCpuSnapshot() {
+  return swrState('server-status:cpu', 5000, () => systemSensors.cpuSnapshot(250));
 }
 app.get('/api/admin/server-status', requireOwner, async (_req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -8965,7 +8992,9 @@ app.get('/api/admin/stripe-cli', requireOwner, async (req, res) => {
   const db = getDb();
   try {
     const force = String(req.query.refresh || '') === '1';
-    const status = await stripeCli.status(force);
+    const status = force
+      ? await stripeCli.status(true)
+      : await swrState('admin:stripe-cli-status', 15000, () => stripeCli.status(false));
     if (force) {
       priceRefreshCache = { at: 0, catalog: null, inflight: null };
       await refreshPricesFromStripe().catch(() => null);
@@ -9104,7 +9133,7 @@ app.post('/api/admin/security-agents/ask', requireOwner, async (req, res) => {
 app.get('/api/admin/update-log', requireOwner, async (_req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   try {
-    res.json(await updateLog.getState(false));
+    res.json(await swrState('admin:update-log', 15000, () => updateLog.getState(false)));
   } catch (err) {
     res.status(200).json({ ok: false, rows: [], sources: [], error: String(err.message || err).slice(0, 200) });
   }
@@ -9203,7 +9232,7 @@ app.post('/api/admin/hosting-locks/arm', express.json({ limit: '8kb' }), require
 app.get('/api/admin/junkalot-update', requireOwner, async (_req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   try {
-    res.json(await junkalotUpdate.getState());
+    res.json(await swrState('admin:junkalot-update', 15000, () => junkalotUpdate.getState()));
   } catch (err) {
     res.status(200).json({
       ok: false,

@@ -1976,7 +1976,7 @@ import Layout from '../layouts/Layout.astro';
     async function loadDashboard() {
       const seq = ++dashboardSeq;
       try {
-        const res = await liveFetch('/api/dashboard?live=1&compact=1', { headers: authHeaders() });
+        const res = await liveFetch('/api/dashboard?compact=1', { headers: authHeaders() });
         if (res.status === 401 || res.status === 403) {
           // One sign-in, straight back here: a dead key used to land on '/' with no way
           // back, so the next click asked for the PIN and a sign-in again.
@@ -3873,7 +3873,7 @@ import Layout from '../layouts/Layout.astro';
       try {
         const [skillsRes, dashRes, provRes] = await Promise.all([
           liveFetch('/api/agent/skills'),
-          liveFetch('/api/dashboard?live=1&compact=0'),
+          liveFetch('/api/dashboard?compact=0'),
           liveFetch('/api/providers'),
         ]);
         stmSkills = (await skillsRes.json()).skills || [];
