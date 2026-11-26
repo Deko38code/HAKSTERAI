@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -150,6 +151,59 @@ test('the endpoint reports the commit, and the badge renders the count', () => {
   // The pinned staged wording is untouched — the count is added, not swapped in.
   assert.ok(app.includes('installs on restart'), 'staged wording stays staged');
   assert.ok(app.includes('✔ Update installed · Restart to update'), 'installed wording unchanged');
+});
+
+test('a stale stamp is refreshed before the package is packed', () => {
+  // /cli/pkg.tar.gz packs the tree as it sits on disk, and the shipped stamp is
+  // an installed copy's ONLY commit reading — it has no .git. Measured
+  // 2026-11-26: the packaged stamp said v0.3.83 / 324 commits while the tree was
+  // at v0.3.86 / 333, so a fresh install counted itself "0 commits behind" the
+  // build it had just received. ensureFresh must close that gap at pack time and
+  // must not churn a stamp that is already true.
+  delete require.cache[STAMP];
+  const helpers = require(STAMP);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hakster-stamp-refresh-'));
+  const cli = path.join(root, 'cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ version: '0.3.86' }));
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t',
+    GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
+  };
+  execFileSync('git', ['-C', root, 'init', '-q'], { env: gitEnv });
+  fs.writeFileSync(path.join(cli, 'file.txt'), 'x\n');
+  execFileSync('git', ['-C', root, 'add', '.'], { env: gitEnv });
+  execFileSync('git', ['-C', root, 'commit', '-qm', 'one'], { env: gitEnv });
+  const head = execFileSync('git', ['-C', root, 'rev-parse', '--short', 'HEAD'], { env: gitEnv }).toString().trim();
+
+  // A stamp left behind by an older build: right shape, wrong facts.
+  fs.writeFileSync(path.join(cli, '.build-stamp.json'), JSON.stringify({
+    version: '0.3.83', commit: 'deadbee', commits: 1, builtAt: '2026-11-26T01:18:44.840Z',
+  }));
+
+  const fresh = helpers.ensureFresh(root);
+  assert.ok(fresh, 'a repository can be read');
+  assert.equal(fresh.commit, head, 'the stamp is rewritten from this repository');
+  assert.equal(fresh.version, '0.3.86', 'the version comes from the package beside it');
+
+  const written = JSON.parse(fs.readFileSync(path.join(cli, '.build-stamp.json'), 'utf8'));
+  assert.equal(written.commit, head, 'the file on disk matches, so the package ships the truth');
+
+  // A stamp that is already true is left alone — packing must not churn it.
+  const again = helpers.ensureFresh(root);
+  assert.equal(again.builtAt, fresh.builtAt, 'a current stamp is not rewritten');
+});
+
+test('the package route refreshes the stamp before it builds the tarball', () => {
+  const route = fs.readFileSync(ROUTE, 'utf8');
+  assert.match(route, /cli-build-stamp\.cjs'\)\)\.ensureFresh\(root\)/, 'the pack route refreshes the stamp');
+  const iEnsure = route.indexOf('.ensureFresh(root)');
+  const iTar = route.indexOf("spawn('tar'");
+  assert.ok(iEnsure > 0 && iTar > iEnsure, 'refreshed before the tarball is built, not after');
+  // A stamp failure must never cost a user the download.
+  const around = route.slice(iEnsure, iTar);
+  assert.match(around, /catch\s*\{/, 'a stamp error is caught; the package still ships');
 });
 
 test('hakster update prints the same count as the header', () => {

@@ -104,7 +104,35 @@ function current(root = ROOT) {
   return readStamp(root);
 }
 
-module.exports = { fromGit, readStamp, writeStamp, current };
+/** Refresh the stamp only when it disagrees with the repository.
+ *
+ *  /cli/pkg.tar.gz packs the tree exactly as it sits on disk, so whatever
+ *  cli/.build-stamp.json holds is what every install receives — and an
+ *  installed copy has no .git, so that file is its only commit reading (§44.2).
+ *  Measured 2026-11-26: the packaged stamp said v0.3.83 / 324 commits while the
+ *  tree was at v0.3.86 / 333 (three version bumps after the last sync), so a
+ *  fresh install computed "0 commits behind" from a stamp older than the code
+ *  it had just received. The pack is the moment the stamp must be true.
+ *
+ *  Only a machine with its own work tree can write it; everywhere else the file
+ *  arrives by sync, unchanged. Returns the stamp in force, or null when there is
+ *  no reading at all.
+ */
+function ensureFresh(root = ROOT) {
+  const g = fromGit(root);
+  if (!g) return readStamp(root);
+  let version = '';
+  try {
+    version = String(JSON.parse(fs.readFileSync(path.join(root, 'cli', 'package.json'), 'utf8')).version || '');
+  } catch { /* version is informational only */ }
+  const onDisk = readStamp(root);
+  if (onDisk && onDisk.commit === g.commit && onDisk.commits === g.commits && onDisk.version === version && onDisk.builtAt) {
+    return onDisk; // already true — no write, no churn
+  }
+  return writeStamp(root);
+}
+
+module.exports = { fromGit, readStamp, writeStamp, ensureFresh, current };
 
 if (require.main === module) {
   const wantWrite = process.argv.includes('--write');

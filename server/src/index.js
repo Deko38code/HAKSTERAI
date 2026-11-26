@@ -13775,6 +13775,16 @@ if (fs.existsSync(distPath)) {
   });
   app.get('/cli/pkg.tar.gz', (req, res) => {
     const root = path.join(__dirname, '..', '..');
+    // The package ships cli/.build-stamp.json, and that stamp is the only commit
+    // reading an installed copy has — it has no .git (§44.2). Packing the tree as
+    // it sits on disk shipped a stamp three version bumps behind the code beside
+    // it on 2026-11-26, so installs counted themselves "0 commits behind" a build
+    // they had just received. Refresh it from this repository at pack time; a
+    // machine without a work tree writes nothing and the synced stamp stands.
+    // A failure here must never stop the download: the package is still correct.
+    try {
+      require(path.join(root, 'scripts', 'cli-build-stamp.cjs')).ensureFresh(root);
+    } catch { /* stamp stays as it is; the package is unaffected */ }
     res.type('application/gzip');
     res.set('cache-control', 'no-store');
     const tar = require('child_process').spawn('tar', [
