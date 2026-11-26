@@ -32,10 +32,10 @@ const tplEnd = src.indexOf('`;', tplBodyStart);
 if (tplEnd < 0) fail('CLI_AUTHORIZE_HTML terminator not found');
 const template = src.slice(tplBodyStart, tplEnd);
 
-const fnStart = src.indexOf('function cliAuthorizePage(req) {');
-if (fnStart < 0) fail('cliAuthorizePage not found');
+const fnStart = src.indexOf('function cliSiteOrigin(req) {');
+if (fnStart < 0) fail('cliSiteOrigin not found');
 const fnEnd = src.indexOf('\n}\n', fnStart);
-if (fnEnd < 0) fail('cliAuthorizePage end not found');
+if (fnEnd < 0) fail('cliSiteOrigin end not found');
 const fnSrc = src.slice(fnStart, fnEnd + 2);
 
 const sandbox = {
@@ -46,7 +46,11 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(fnSrc, sandbox);
-const cliAuthorizePage = sandbox.cliAuthorizePage;
+const cliSiteOrigin = sandbox.cliSiteOrigin;
+
+// cliAuthorizePage is now a thin wrapper; render through the same rule the
+// route uses, so what is tested is what ships.
+const cliAuthorizePage = (req) => template.split('__SITE_ORIGIN__').join(JSON.stringify(cliSiteOrigin(req)));
 
 // ── cases ────────────────────────────────────────────────────────────────
 const HAK = 'https://haksterai.com';
@@ -107,7 +111,36 @@ const unchanged = plain.includes('window.__HAKSTER_AUTHORIZE_SITE__ = "";')
 console.log(`${unchanged ? '✓' : '✗'} public-origin page keeps its original gating`);
 if (unchanged) pass += 1;
 
-console.log(`\n${pass}/${cases.length + 1} passed`);
-if (pass !== cases.length + 1) process.exit(1);
+// ── the CLI's printed link: /api/cli/device/start must carry browserUrl ───
+// Without it a loopback CLI prints a link it cannot work with, and the operator
+// has to swap the host by hand. The route and the page must use ONE rule.
+const startBlock = src.slice(src.indexOf("app.post('/api/cli/device/start'"), src.indexOf("app.post('/api/cli/device/approve'"));
+const wired = /browserUrl:\s*siteOrigin\s*\?/.test(startBlock)
+  && /const siteOrigin = cliSiteOrigin\(req\)/.test(startBlock)
+  && /verificationUrl:\s*`\$\{cliOrigin\(req\)\}\$\{authorizePath\}`/.test(startBlock);
+console.log(`${wired ? '✓' : '✗'} device/start offers browserUrl from the same cliSiteOrigin rule`);
+if (wired) pass += 1;
+
+// The value itself, per request shape the server actually sees.
+const originCases = [
+  ['loopback 127.0.0.1:3579', '127.0.0.1:3579', 'http://127.0.0.1:3579', HAK],
+  ['loopback localhost:3579', 'localhost:3579', 'http://localhost:3579', HAK],
+  ['standby 10.0.0.210:3581', '10.0.0.210:3581', 'http://10.0.0.210:3581', HAK],
+  ['public haksterai.com', 'haksterai.com', HAK, ''],
+  ['astro dev :4321', 'localhost:4321', 'http://localhost:4321', ''],
+];
+let originPass = 0;
+for (const [name, host, origin, expect] of originCases) {
+  Object.keys(sandbox.process.env).forEach((k) => delete sandbox.process.env[k]);
+  const got = cliSiteOrigin({ __origin: origin, get: () => host });
+  const ok = got === expect;
+  if (ok) originPass += 1;
+  console.log(`${ok ? '✓' : '✗'} cliSiteOrigin ${name} -> ${JSON.stringify(got)}`);
+}
+if (originPass === originCases.length) pass += 1;
+
+const total = cases.length + 1 + 1 + 1;
+console.log(`\n${pass}/${total} passed`);
+if (pass !== total) process.exit(1);
 
 function fail(msg) { console.error('✗ ' + msg); process.exit(1); }

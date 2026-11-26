@@ -103,12 +103,19 @@ async function login(opts = {}) {
     return { ok: false, reason: `cannot reach ${origin} (${(e && e.message) || e})` };
   }
 
+  // Where the BROWSER should open. A CLI pointed at a loopback/LAN server prints
+  // that address, but the operator's sign-in lives on the public site — a
+  // session is per-origin — so the server hands back the public link instead.
+  // An older server sends no browserUrl and the printed link is used, unchanged.
+  // Polling still goes to `origin`: same process, so the approval is seen here.
+  const link = String(start.browserUrl || start.verificationUrl || '').trim();
+
   say('');
   say(`  Open this link in your browser and press Allow:`);
-  say(`    ${start.verificationUrl}`);
+  say(`    ${link}`);
   say(`  The page must show code  ${start.userCode}  — if it does not, stop.`);
   say('');
-  if (opts.open !== false) openBrowser(start.verificationUrl);
+  if (opts.open !== false) openBrowser(link);
   say(`  Waiting for approval… (Ctrl+C stops this; nothing is changed)`);
 
   const deadline = Date.now() + Math.max(30, Number(start.expiresInSeconds) || 900) * 1000;

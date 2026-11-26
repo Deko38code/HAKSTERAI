@@ -13836,13 +13836,21 @@ app.post('/api/cli/device/start', (req, res) => {
     userId: null,
     usedAt: null,
   });
+  // The CLI polls the address it was configured with, but the BROWSER has to
+  // open the address where the operator's session lives. On a loopback/LAN
+  // server those differ, so hand back the public link; a CLI that knows about
+  // this field prints it instead, and one that does not still lands right
+  // because the page itself hands the code over.
+  const authorizePath = `/cli/authorize?user_code=${encodeURIComponent(userCode)}`;
+  const siteOrigin = cliSiteOrigin(req);
   res.set('cache-control', 'no-store');
   res.json({
     deviceCode,
     userCode,
     expiresInSeconds: Math.round(CLI_DEVICE_TTL_MS / 1000),
     intervalSeconds: 2,
-    verificationUrl: `${cliOrigin(req)}/cli/authorize?user_code=${encodeURIComponent(userCode)}`,
+    verificationUrl: `${cliOrigin(req)}${authorizePath}`,
+    browserUrl: siteOrigin ? `${siteOrigin}${authorizePath}` : '',
   });
 });
 
@@ -14065,14 +14073,21 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
 // The page now carries the public origin and hands the short code over to it.
 // The failover router pins /cli/ and /api/ to the primary, so the approval still
 // reaches the process that issued the code, and the CLI's poll picks it up.
-function cliAuthorizePage(req) {
+// The site origin the BROWSER should use, or '' when this request already comes
+// in on it (or the operator runs their own instance, where the address the CLI
+// printed is the right one). Shared by the page and by the device-code start
+// response so the link a CLI prints and the page it opens agree — one rule, not
+// two that can drift apart.
+function cliSiteOrigin(req) {
   const site = String(process.env.PUBLIC_URL || 'https://haksterai.com').replace(/\/+$/, '');
-  const here = cliOrigin(req);
   const host = String(req.get('host') || '').toLowerCase();
   const onPrivateHost = /^(localhost|127\.0\.0\.1|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(host)
     && !/:4321$/i.test(host); // astro dev keeps its own origin
-  const siteOrigin = (here === site || !onPrivateHost) ? '' : site;
-  return CLI_AUTHORIZE_HTML.split('__SITE_ORIGIN__').join(JSON.stringify(siteOrigin));
+  return (cliOrigin(req) === site || !onPrivateHost) ? '' : site;
+}
+
+function cliAuthorizePage(req) {
+  return CLI_AUTHORIZE_HTML.split('__SITE_ORIGIN__').join(JSON.stringify(cliSiteOrigin(req)));
 }
 
 app.get('/cli/authorize', (req, res) => {
