@@ -26,6 +26,51 @@ const CATEGORIES = [
 
 const VALID_CATEGORIES = new Set(CATEGORIES);
 
+// ── Keyed store → memory bank ─────────────────────────────────────────────
+// A memory saved here also lands in the bank the CLI header counts and that
+// every run recalls from (autolearn.pullMemoryBanks / buildMemoryFirstBlock).
+// Until 2026-11-26 a save reached only the keyed layer, so it never moved the
+// ◈ bar and never appeared in the per-task recall until a consolidation pass
+// happened to re-file it — the owner asked for the whole loop ("always add
+// memory to bank up top in tui to", "add memory recall before each task").
+const BANK_SECTION_BY_CATEGORY = {
+  preference: 'User Preferences',
+  fact: 'Project Facts',
+  decision: 'Conventions',
+  procedure: 'Playbooks & Workflows',
+  context: 'Project Facts',
+  relationship: 'Infrastructure & Network',
+  recap: 'Lessons & Anti-patterns',
+  general: 'Patterns',
+};
+
+// Only an actual credential SHAPE is refused a bank file (§9, §23, §31); prose
+// that merely mentions tokens or keys still banks. The keyed row is unaffected.
+const CREDENTIAL_SHAPED = /(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/;
+
+/**
+ * File one saved memory into its bank. Never throws: the keyed row is already
+ * written, and a bank that cannot be written must not fail the save.
+ * Exported so the behaviour can be probed without touching the database.
+ */
+function bankSavedMemory({ category, key, value, source, confidence, timestamp }) {
+  if (!key || typeof value !== 'string') return { banked: false, reason: 'invalid' };
+  const section = BANK_SECTION_BY_CATEGORY[category] || 'Patterns';
+  const observation = `${key}: ${value}`.slice(0, 700);
+  if (CREDENTIAL_SHAPED.test(observation)) return { banked: false, section, reason: 'credential-shaped' };
+  try {
+    // Lazy require: memory.js is loaded by the db layer's clients; the bank
+    // module stays out of that path until a save actually needs it.
+    const autolearn = require('./agent/autolearn');
+    autolearn.upsertKeyedObservation(null, section, key, observation,
+      [category, source, 'keyed'].filter(Boolean),
+      { timestamp, confidence });
+    return { banked: true, section };
+  } catch (err) {
+    return { banked: false, section, reason: err && err.message ? err.message : 'bank write failed' };
+  }
+}
+
 /**
  * Save a new memory or update an existing one by key.
  * If a memory with the same key exists, it updates the value and bumps updated_at.
@@ -45,14 +90,21 @@ function saveMemory({ category = 'general', key, value, source = 'agent', sessio
     db.prepare(
       `UPDATE memories SET value = ?, category = ?, source = ?, confidence = ?, updated_at = ?, session_id = COALESCE(?, session_id), expires_at = COALESCE(?, expires_at) WHERE key = ?`
     ).run(value, category, source, confidence, now, sessionId, expiresAt ? Math.floor(expiresAt / 1000) : null, key);
-    return db.prepare('SELECT * FROM memories WHERE key = ?').get(key);
+    const updated = db.prepare('SELECT * FROM memories WHERE key = ?').get(key);
+    // The bank copy is replaced for this key, never duplicated.
+    bankSavedMemory({ category, key, value, source, confidence, timestamp: new Date().toISOString() });
+    return updated;
   }
 
   db.prepare(
     `INSERT INTO memories (id, category, key, value, source, session_id, confidence, access_count, created_at, updated_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
   ).run(id, category, key, value, source, sessionId, confidence, now, now, expiresAt ? Math.floor(expiresAt / 1000) : null);
-  return db.prepare('SELECT * FROM memories WHERE id = ?').get(id);
+  const created = db.prepare('SELECT * FROM memories WHERE id = ?').get(id);
+  // One save feeds both layers: the lookup row above and the bank the header
+  // counts and the next task's recall reads.
+  bankSavedMemory({ category, key, value, source, confidence, timestamp: new Date().toISOString() });
+  return created;
 }
 
 /**
@@ -290,4 +342,6 @@ module.exports = {
   getMemoryStats,
   compactMemories,
   CATEGORIES,
+  bankSavedMemory,
+  BANK_SECTION_BY_CATEGORY,
 };

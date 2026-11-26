@@ -195,10 +195,16 @@ function readBank(cwd, section) {
 
 // Append deduped entries to a bank file, dedup by observation similarity, cap
 // to BANK_CAP (drop oldest). Returns the bank size after write.
-function persistBank(cwd, section, newEntries) {
+// opts.replacePrefix drops entries whose observation starts with that prefix
+// BEFORE appending — used by upsertKeyedObservation so an updated keyed memory
+// replaces its own older copy in the bank instead of leaving a stale fact that
+// the next task's recall would repeat (owner, 2026-11-26).
+function persistBank(cwd, section, newEntries, opts = {}) {
   if (!newEntries || newEntries.length === 0) return readBank(cwd, section).length;
   ensureDir(path.join(HAKSTER_DIR, 'memories', 'banks'));
-  const all = readBank(cwd, section).slice();
+  let all = readBank(cwd, section).slice();
+  const replacePrefix = typeof opts.replacePrefix === 'string' ? opts.replacePrefix : '';
+  if (replacePrefix) all = all.filter((e) => !String(e.observation || '').startsWith(replacePrefix));
   for (const entry of newEntries) {
     let dup = false;
     for (const e of all) {
@@ -226,6 +232,28 @@ function persistBank(cwd, section, newEntries) {
 function bankTypeForSection(section) {
   for (const [k, v] of Object.entries(MEMORY_SECTION_KEYS)) if (v === section) return k;
   return 'pattern';
+}
+
+// A memory saved into the keyed store (data/hakster.db, memory.saveMemory) is
+// also filed here so the ◈ header counts it and the next task's recall can use
+// it. The keyed store is the lookup layer; the banks are what recall reads
+// (pullMemoryBanks, buildMemoryFirstBlock) — a save used to reach only the
+// keyed layer, so it never moved the header and never showed up in the
+// per-task recall digest (owner, 2026-11-26: "always add memory to bank up top
+// in tui to" and "add memory recall before each task"). An update for the same
+// key replaces its own older copy rather than adding a second, stale one.
+function upsertKeyedObservation(cwd, section, key, observation, tags = [], opts = {}) {
+  if (!key || !observation || typeof observation !== 'string') return false;
+  const sec = MEMORY_SECTIONS.includes(section) ? section : 'Patterns';
+  persistBank(cwd, sec, [{
+    id: opts.id || generateId(),
+    timestamp: opts.timestamp || new Date().toISOString(),
+    tags: Array.isArray(tags) ? tags : [tags].filter(Boolean),
+    observation,
+    type: opts.type || bankTypeForSection(sec),
+    confidence: typeof opts.confidence === 'number' ? opts.confidence : 0.7,
+  }], { replacePrefix: `${key}:` });
+  return true;
 }
 
 // Hermes-style direct memory add: write an observation straight into a named
@@ -1174,6 +1202,7 @@ module.exports = {
   recordRecap,
   readRawMemories,
   addMemoryToBank,
+  upsertKeyedObservation,
   getRawMemoryCount,
   getMemoryStats,
   consolidateMemories,

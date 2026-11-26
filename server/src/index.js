@@ -4405,6 +4405,45 @@ app.get('/api/agent/memory', (req, res) => {
   res.json({ memories, results: memories });
 });
 
+// ── Memory clusters (the bank the ◈ header counts) ────────────────────
+// One card per bank with its live count and its strongest recent entries, so
+// the dashboard's cluster panel shows ALL top memories and not only the
+// `cluster:*` keyed rows (owner, 2026-11-26: "always update mem clusters in
+// admin to with all top memorys"). Read-only, owner-only, additive: the keyed
+// table stays the lookup layer and nothing here is ever written back.
+app.get('/api/agent/memory-banks', requireOwner, (req, res) => {
+  try {
+    const autolearn = require('./agent/autolearn');
+    const topN = Math.max(1, Math.min(parseInt(req.query.top, 10) || 5, 20));
+    const banks = [];
+    let total = 0;
+    for (const section of autolearn.MEMORY_SECTIONS) {
+      let entries = [];
+      try { entries = autolearn.readBank(process.cwd(), section) || []; } catch (_) { entries = []; }
+      total += entries.length;
+      const top = entries
+        .slice()
+        .sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))
+        .slice(0, topN)
+        .map((e) => ({
+          observation: String(e.observation || '').slice(0, 320),
+          type: e.type || 'pattern',
+          timestamp: e.timestamp || null,
+        }));
+      banks.push({
+        section,
+        slug: String(section).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+        count: entries.length,
+        top,
+      });
+    }
+    banks.sort((a, b) => b.count - a.count);
+    res.json({ total, cap: 300, banks });
+  } catch (err) {
+    res.status(500).json({ error: 'memory banks unavailable', detail: err && err.message });
+  }
+});
+
 // ── Skills list for the command palette / dashboard ──
 app.get('/api/agent/skills', (_req, res) => {
   try {

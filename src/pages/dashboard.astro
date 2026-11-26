@@ -912,6 +912,16 @@ import Layout from '../layouts/Layout.astro';
             <div class="text-xs text-[#64748b] text-center py-4 col-span-full">No clusters yet</div>
           </div>
         </div>
+
+        <div class="mt-6">
+          <div class="flex items-center justify-between mb-2 gap-2">
+            <div class="text-xs text-[#64748b] uppercase tracking-wider">🧠 Memory Clusters · all banks</div>
+            <span id="stm-bank-total" class="text-[10px] text-[#64748b] font-mono shrink-0">—</span>
+          </div>
+          <div id="stm-banks-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div class="text-xs text-[#64748b] text-center py-4 col-span-full">Loading banks…</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -3869,6 +3879,62 @@ import Layout from '../layouts/Layout.astro';
       }
     }
 
+    // The ◈ memory banks, shown here as clusters. "Saved Clusters" above is the
+    // keyed `cluster:*` rows; this is the long-term bank every run recalls from,
+    // so the panel shows ALL top memories and not only the saved clusters
+    // (owner, 2026-11-26: "always update mem clusters in admin to with all top
+    // memorys"). Read-only: this only reads.
+    async function loadMemoryClusters() {
+      const list = document.getElementById('stm-banks-list');
+      const totalEl = document.getElementById('stm-bank-total');
+      if (!list) return;
+      const render = (banks, total, cap) => {
+        const shown = banks.filter(b => b.count > 0);
+        if (totalEl) totalEl.textContent = (typeof total === 'number')
+          ? `${total}/${cap || 300} banked`
+          : `${shown.reduce((n, b) => n + b.count, 0)} shown`;
+        list.innerHTML = shown.length ? shown.map(b => `
+          <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3">
+            <div class="flex items-center justify-between mb-1 gap-2">
+              <span class="text-sm font-medium truncate">${escapeHtml(b.section)}</span>
+              <span class="text-[10px] font-mono text-[#00ff88] shrink-0">${escapeHtml(String(b.count))}</span>
+            </div>
+            ${(b.top || []).map(t => `<div class="text-[10px] text-[#64748b] leading-snug mt-1">• ${escapeHtml(String(t.observation || '').slice(0, 140))}</div>`).join('')}
+          </div>
+        `).join('') : '<div class="text-xs text-[#64748b] text-center py-4 col-span-full">No banked memories yet</div>';
+      };
+      // Primary: the dedicated banks route.
+      try {
+        const res = await liveFetch('/api/agent/memory-banks?top=4');
+        if (res.ok) {
+          const data = await res.json();
+          return render(data.banks || [], data.total, data.cap);
+        }
+      } catch { /* fall through to the older shape below */ }
+      // An older running server answers /api/agent/memory with the bank rows
+      // appended. Group those, so the panel still works before that build is
+      // picked up. Nothing is invented: only rows the server actually returned.
+      try {
+        const res = await liveFetch('/api/agent/memory?limit=60');
+        if (res.ok) {
+          const data = await res.json();
+          const byBank = new Map();
+          for (const m of data.memories || []) {
+            if (m.source !== 'bank') continue;
+            const section = m.bank || 'Bank';
+            if (!byBank.has(section)) byBank.set(section, { section, count: 0, top: [] });
+            const b = byBank.get(section);
+            b.count++;
+            if (b.top.length < 4) b.top.push({ observation: String(m.observation || m.value || '').slice(0, 320), timestamp: m.timestamp || null });
+          }
+          const banks = Array.from(byBank.values()).sort((a, b) => b.count - a.count);
+          if (banks.length) return render(banks, null, null);
+        }
+      } catch { /* the neutral line below is the honest state */ }
+      if (totalEl) totalEl.textContent = '';
+      list.innerHTML = '<div class="text-xs text-[#64748b] text-center py-4 col-span-full">Bank entries appear once the running server picks up this build — the banks themselves are already on disk.</div>';
+    }
+
     async function initSkillsToolsModels() {
       try {
         const [skillsRes, dashRes, provRes] = await Promise.all([
@@ -3931,6 +3997,7 @@ import Layout from '../layouts/Layout.astro';
       });
 
       loadStmClusters();
+      loadMemoryClusters();
     }
     initSkillsToolsModels();
   </script>
