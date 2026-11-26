@@ -370,20 +370,31 @@ import Layout from '../../layouts/Layout.astro';
         // Junkalot card
         var jk = document.getElementById('pl-junkalot');
         if (junk && (junk.turns || junk.tokens)) {
+          var jkSrc = junk.source === 'junkalot.co'
+            ? ' source junkalot.co'
+            : (junk.source ? ' source ' + esc(junk.source) : '');
           jk.innerHTML = '<h3>Junkalot · Mr Ed coach <span class="pl-badge live">LIVE</span></h3>' +
             row('Turns', compact(junk.turns)) +
             row('Tokens', compact(junk.tokens)) +
             row('Plan', junk.planUsdMonth ? money(Number(junk.planUsdMonth) * 100) + '/mo' : 'plan-covered') +
             row('Included in plan', junk.includedInPlan ? 'yes' : 'no') +
-            row('Metered cost', junk.metered ? money(Number(junk.estMarginalCostUsd || 0) * 100) : '$0 marginal', 'good') +
-            row('Newest turn', junk.newestAt ? new Date(junk.newestAt).toLocaleString() : '—') +
+            (junk.meterUsd30d != null
+              ? row('Metered (locked card)', money(Number(junk.meterUsd30d) * 100) +
+                  (junk.shareOfPlanPct != null ? ' · ' + pct(junk.shareOfPlanPct) + ' of plan' : ''), 'good')
+              : row('Metered cost', junk.metered ? money(Number(junk.estMarginalCostUsd || 0) * 100) : '$0 marginal', 'good')) +
+            (junk.overageUsd ? row('Overage', money(Number(junk.overageUsd) * 100)) : '') +
+            (junk.clientName ? row('Client record', esc(String(junk.clientName))) : '') +
+            (junk.model ? row('Model', esc(String(junk.model))) : '') +
+            (junk.newestAt ? row('Newest turn', new Date(junk.newestAt).toLocaleString()) : '') +
             (Array.isArray(junk.providers) && junk.providers.length
               ? '<h3 style="margin-top:14px;">Lanes used</h3>' + junk.providers.slice(0, 5).map(function (p) {
-                  return row(p.name || p.provider || 'lane', compact(p.calls || p.turns || 0) + ' turns');
+                  return row(p.name || p.provider || 'lane', compact(p.calls || p.turns || 0) + ' turns' +
+                    (p.meteredUsd ? ' · ' + money(Number(p.meteredUsd) * 100) : ''));
                 }).join('')
-              : '');
+              : '') +
+            '<p class="pl-empty" style="margin-top:10px;">Read live from junkalot.co' + jkSrc + '; nothing is written back into that project. Meter, not an invoice.</p>';
         } else {
-          jk.innerHTML = '<h3>Junkalot · Mr Ed coach <span class="pl-badge off">NO DATA</span></h3><p class="pl-empty">Junkalot\'s coach usage was not readable through PhantomIDE. Nothing was estimated in its place.</p>';
+          jk.innerHTML = '<h3>Junkalot · Mr Ed coach <span class="pl-badge off">NO DATA</span></h3><p class="pl-empty">Junkalot\'s coach usage could not be read from junkalot.co just now — the bridge key or the Parrot service is unavailable. Nothing was estimated in its place.</p>';
         }
 
         // Locked rate card, cloud quota, demand index and the per-client meter — read live from
