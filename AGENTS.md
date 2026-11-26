@@ -436,7 +436,7 @@ the server for a static deploy.
 ## Junkalot rulebook index — mapped
 
 Junkalot's index of the MASTERGUARD rules is `/home/ghost694/junkalot/RULEBOOK-INDEX.md` (on Parrot's
-master copy): every section of `/home/ghost/CLAUDE.md` (§1–§49) with what it means on that project and where
+master copy): every section of `/home/ghost/CLAUDE.md` (§1–§50) with what it means on that project and where
 this file mirrors it. It is a read-only pointer — HaksterAI never writes a rule, a rate, a key or usage into
 that project (§16) — and it is not a second rulebook: CLAUDE.md wins on any difference.
 
@@ -838,3 +838,31 @@ What it makes binding here:
 
 Evidence at adoption: both brain files backed up and hash-verified before this append; the working tree held
 only this change's files plus pre-existing untracked dirt, left untouched (§47.4).
+
+---
+
+## Section 50 Added — No Setbacks, No Fumbles (2026-11-26)
+
+_Appended 2026-11-26 at the owner's direction ("add rule no setbacks or fumbles please eveer no more").
+Nothing above this line was rewritten, reordered or removed — an appended entry, exactly as §35–§49 were.
+Backups taken and hash-verified before the edit: `CLAUDE.md.bak-20261126T012302Z` (102,304 B, sha256
+`b02d38f7…`), `AGENTS.md.bak-20261126T012302Z` (65,164 B, sha256 `60715b96…`)._
+
+`/home/ghost/CLAUDE.md` is now **§1–§50**. §50 is **"No Setbacks, No Fumbles — Ever, No More"**. §47 forbade
+setbacks; §50 forbids the fumble — the "done" with no reading behind it. What it makes binding here:
+
+1. **A change is finished only when a command showed it working on the surface the user meets** — the
+   installed copy, the served package, the public door, the running process — never the edited file or the
+   local build (§10, §13, §47.3).
+2. **Verify the delivery path, not just the source.** Source → bundle → package → served build → installed
+   copy drops changes silently: a bundled module (`cli/src/prefs.js` → `ui-fb.mjs`) is not edited until it is
+   rebuilt, and a served file is not updated until every backend answering for it carries it (§38.6, §41,
+   §42, §43).
+3. **Two strikes, then change the approach** — never a third variation of an attempt that already failed
+   (§49.1).
+4. **A fumble already made is reported plainly**, with what broke and what fixed it — no quietly tidy story
+   (§13).
+5. **Nothing regresses to look finished**, and nothing ends without an explicit outcome (VERIFIED /
+   PARTIALLY VERIFIED / BLOCKED / FAILED / NOT STARTED).
+6. **Applies to every project, agent and session** (§16), and moves no model, route, provider order, rate,
+   plan or allowance (§19.3, §22.4, §26). It is a standard of work, not a feature.
