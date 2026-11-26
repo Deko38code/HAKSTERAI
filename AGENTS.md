@@ -866,3 +866,20 @@ setbacks; §50 forbids the fumble — the "done" with no reading behind it. What
    PARTIALLY VERIFIED / BLOCKED / FAILED / NOT STARTED).
 6. **Applies to every project, agent and session** (§16), and moves no model, route, provider order, rate,
    plan or allowance (§19.3, §22.4, §26). It is a standard of work, not a feature.
+
+---
+
+## CLI Skins / Layout Menu — recorded direction (2026-11-26)
+
+_Appended 2026-11-26 at the owner's direction ("eventually we will build skins / menu for switching cli
+layout etc"; "add to our mds mem"). Backup before the append: `AGENTS.md.bak-20261126T024031Z` (67,049 B, sha256
+`a6825e11…`). Nothing above this line was rewritten, reordered or removed. A direction, not a numbered rule
+until the owner says so; master entry in `/home/ghost/CLAUDE.md` under the same date._
+
+- **Wanted:** switchable CLI skins plus a menu to pick a layout (startup card, transcript, panels), chosen at
+  runtime and remembered between sessions. The current card stays the default skin.
+- **Build on what exists:** theme the `frameBox()` bands in `cli/logo.js` and the callers in `cli/ui.js` —
+  never a parallel renderer, so width and narrow-terminal fallbacks keep holding.
+- **Still holds:** no model, route, provider, rate, plan or allowance moves (§19.3, §22.4, §26); the locked
+  config and the checklist rails stay truthful in every skin (§35, §38.1, §10).
+- **Status: NOT STARTED** — direction saved; working note in `cli-skins-menu-planned.md`.
