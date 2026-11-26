@@ -9,6 +9,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env'), ove
 const { initLicenseTables, createLicense, deactivateLicense } = require('./stripe-license');
 const { deriveJunkalotFromRates } = require('./profitWiring');
 const providerKeys = require('./providerKeys');
+const providerInstances = require('./providerInstances');
 
 
 const express = require('express');
@@ -2939,7 +2940,36 @@ function estimateUsageTokens(value) {
   return Math.max(0, Math.ceil(text.length / 4));
 }
 
+// One id per model key (owner 2026-11-26, §51): the measured call is attributed
+// to the key that served it, so per-client usage is provable per key rather than
+// guessed off one shared account. Recorded for EVERY caller — a CLI run, an
+// owner turn and a customer turn all count against their lane's key — because a
+// key's usage does not depend on who was signed in. Recording is accounting,
+// never billing (§19, §24): it charges nothing and changes no route. A lane with
+// no key id records nothing, and a ledger failure never breaks the served call
+// (§11).
+function recordLaneKeyUsage(usage) {
+  const lane = (usage && (usage.lane || usage.provider)) || null;
+  try {
+    providerKeys.recordKeyUsage({
+      keyId: providerKeys.keyIdByLane(lane),
+      client: 'haksterai.com',
+      provider: (usage && usage.provider) || null,
+      model: (usage && usage.model) || null,
+      lane,
+      requests: 1,
+      inTokens: (usage && usage.inputTokens) || 0,
+      outTokens: (usage && usage.outputTokens) || 0,
+      source: 'haksterai lane',
+    });
+  } catch (err) {
+    console.warn('[usage] key ledger write failed:', err.message);
+  }
+}
+
 function recordUserTokenUsage(user, usage) {
+  // Per-key first, so a run with no signed-in account still lands on its key.
+  recordLaneKeyUsage(usage);
   if (!user?.id) return;
   try {
     const db = getDb();
@@ -2960,22 +2990,6 @@ function recordUserTokenUsage(user, usage) {
       Math.max(0, Math.round(usage.toolCalls || 0)),
       usage.fastMode ? 1 : 0,
     );
-    // One id per model key (owner 2026-11-26): the same measured call, attributed
-    // to the key that served it, so per-client usage is provable per key rather
-    // than guessed off one shared account. Recording is accounting, never billing
-    // (§19, §24): it charges nothing and changes no route. A lane with no key id
-    // records nothing, and a ledger failure never breaks the served call (§11).
-    providerKeys.recordKeyUsage({
-      keyId: providerKeys.keyIdByLane(usage.provider),
-      client: 'haksterai.com',
-      provider: usage.provider || null,
-      model: usage.model || null,
-      lane: usage.provider || null,
-      requests: 1,
-      inTokens: usage.inputTokens || 0,
-      outTokens: usage.outputTokens || 0,
-      source: 'haksterai lane',
-    });
   } catch (err) {
     console.warn('[usage] token ledger write failed:', err.message);
   }
@@ -2999,28 +3013,58 @@ function attributeSessionToUser(db, sessionId, user, provider, model) {
   }
 }
 
-async function openAICompatStreamFetch(baseURL, payload, signal) {
+async function openAICompatStreamFetch(baseURL, payload, signal, opts = {}) {
   const apiBase = String(baseURL || '').replace(/\/$/, '').replace(/\/v1$/, '');
-  // Use undici dispatcher with long headersTimeout to avoid HeadersTimeoutError on slow cloud models.
-  // GLM-5.2:cloud can take 60-120s to send first byte on cold starts.
-  const { Agent, fetch: undiciFetch } = require('undici');
-  const dispatcher = new Agent({
-    headersTimeout: 600_000,   // 10 min — matches streamAbort timeout
-    bodyTimeout: 600_000,
-    connectTimeout: 30_000,
-  });
-  const resp = await undiciFetch(`${apiBase}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ollama',
-    },
-    body: JSON.stringify(payload),
-    signal,
-    dispatcher,
-  });
+  // ── Per-key instance (§29, §51) ──────────────────────────────────────
+  // The lane runs on ITS OWN instance: one keep-alive pool and one concurrency
+  // budget per key, so a warm keyed lane reuses its socket instead of paying a
+  // TLS handshake on every turn, and two keys never queue behind each other.
+  // A lane with no recorded key still runs — filed as unattributed (§10).
+  const lane = opts.lane || opts.provider || '';
+  const instance = providerInstances.forLane(lane);
+  let slot = null;
+  const startedAt = Date.now();
+  let settled = false;
+  const finish = (ok) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(watchdog);
+    try { providerInstances.note(instance, { ok, ms: Date.now() - startedAt, model: payload && payload.model }); } catch (_) {}
+    if (slot) { try { slot.release(); } catch (_) {} slot = null; }
+  };
+  // A stream that is created but never consumed must not hold this key's slot
+  // for ever; the watchdog releases it and reports the miss.
+  const watchdog = setTimeout(() => finish(false), 15 * 60 * 1000);
+  if (typeof watchdog.unref === 'function') watchdog.unref();
+  try {
+    slot = await providerInstances.acquire(instance.keyId);
+  } catch (queueErr) {
+    // Saturated instance: report and fall through rather than hang the turn.
+    finish(false);
+    throw queueErr;
+  }
+  const { fetch: undiciFetch } = require('undici');
+  // Long headersTimeout: GLM-5.2:cloud can take 60-120s to send first byte cold.
+  const dispatcher = providerInstances.dispatcherFor(instance.keyId);
+  let resp;
+  try {
+    resp = await undiciFetch(`${apiBase}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ollama',
+      },
+      body: JSON.stringify(payload),
+      signal,
+      dispatcher,
+    });
+  } catch (fetchErr) {
+    finish(false);
+    throw fetchErr;
+  }
   if (!resp.ok || !resp.body) {
     const text = await resp.text().catch(() => '');
+    finish(false);
     throw new Error(`${resp.status} ${resp.statusText}${text ? `: ${text.slice(0, 300)}` : ''}`);
   }
 
@@ -3028,19 +3072,29 @@ async function openAICompatStreamFetch(baseURL, payload, signal) {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const data = trimmed.slice(5).trim();
-        if (!data || data === '[DONE]') continue;
-        try { yield JSON.parse(data); } catch {}
+    let failed = false;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          try { yield JSON.parse(data); } catch {}
+        }
       }
+    } catch (streamErr) {
+      failed = true;
+      throw streamErr;
+    } finally {
+      // One release per stream, whichever way it ends (§49.5 — a leak here would
+      // slowly starve the key's own instance).
+      finish(!failed);
     }
   }
 
@@ -6166,7 +6220,15 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
   // plain text. It is never given `-m` for a model it does not serve: that
   // check lives in codexCliComplete itself (§46.2).
   if (cfg.type === 'codex-cli') {
+    // One instance per key (§29, §51): the codex lane takes a slot on ITS OWN
+    // instance, so its calls never share a concurrency budget with an HTTP key
+    // and its measured latency lands on its own row in `/api/usage`. A key that
+    // is saturated still runs the turn unisolated rather than failing a lane
+    // that works (§49.1) — the slot is isolation, never a gate.
+    const codexStartedAt = Date.now();
+    let codexSlot = null;
     try {
+      codexSlot = await providerInstances.acquire('codex-cli').catch(() => null);
       const codexLastUser = messages.filter(m => m.role === 'user').pop();
       const codexCtxTags = String(getMessageText(codexLastUser?.content) || '')
         .split(/\s+/).filter(w => w.length > 3).slice(0, 10);
@@ -6195,11 +6257,18 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         // metered API (§26.4). Tokens stay exact.
         cost: 0,
       })}\n\n`);
+      try {
+        providerInstances.note('codex-cli', { ok: true, ms: Date.now() - codexStartedAt, model: agentModel });
+      } catch (_) { /* accounting never breaks a served turn */ }
     } catch (err) {
+      try {
+        providerInstances.note('codex-cli', { ok: false, ms: Date.now() - codexStartedAt });
+      } catch (_) { /* accounting never breaks a served turn */ }
       console.error('[codex-cli] run failed:', err.message || err);
       res.write(`data: ${JSON.stringify({ type: 'error', error: (err.message || String(err)).slice(0, 500) })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'done', provider: 'codex-cli', model: agentModel })}\n\n`);
     } finally {
+      if (codexSlot) codexSlot.release();
       clearInterval(heartbeat);
       res.end();
     }
@@ -6950,7 +7019,7 @@ ${dirListing}
         stream = isAnthropicAgentProvider
           ? await anthropicAgentStream(streamPayload, streamAbort.signal)
           : cfg.type === 'openai-compat'
-          ? await openAICompatStreamFetch(cfg.baseURL, streamPayload, streamAbort.signal)
+          ? await openAICompatStreamFetch(cfg.baseURL, streamPayload, streamAbort.signal, { lane: provider })
           : await client.chat.completions.create(streamPayload, { signal: streamAbort.signal });
       } catch (streamErr) {
         clearTimeout(streamTimeout);
@@ -12253,6 +12322,10 @@ app.get('/api/usage', async (req, res) => {
         ...providerKeys.summarize(),
         junkalotKey: cached ? providerKeys.summarizeJunkalotRows(cached) : null,
         junkalotKeyReadAt: cached ? new Date(_junkalotUsageCache.at).toISOString() : null,
+        // One instance per key (§29, §51): what each key's own lane is doing on
+        // this box right now — in-flight, queued, warm pool, measured latency.
+        // Owner-only: it sits inside the same isOwnerUser gate as the ledger.
+        instances: providerInstances.status(),
       };
       // Warm the cache in the background so the next poll carries her row; this
       // request returns regardless of whether that read answers.
@@ -12751,6 +12824,9 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
       keyLedger = {
         ...providerKeys.summarize(),
         junkalotKey: providerKeys.summarizeJunkalotRows(junkalotUsageText),
+        // Per-key instances on this box (§29, §51) — owner admin only, inside
+        // requireOwner. Ids and figures, never a key value.
+        instances: providerInstances.status(),
       };
     } catch { keyLedger = null; }
 

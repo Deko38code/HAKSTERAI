@@ -199,6 +199,14 @@ export default function UsageView({ width = 80, height = 24, usage = null, refre
         const money = data.ownerMeter;
         const stale = !data.keyLedger; // server has not served the ledger yet
         const liveById = new Map(keys.map((k) => [k && k.id, k]));
+        // One instance per key (§29, §51): each key's own lane on our server —
+        // its own pool and concurrency slot. Reported only when the server says
+        // so; a key with no instance row prints nothing rather than a guess.
+        const instById = new Map(
+          (Array.isArray(data.keyLedger && data.keyLedger.instances) ? data.keyLedger.instances : [])
+            .filter((i) => i && i.keyId)
+            .map((i) => [i.keyId, i]),
+        );
         // Locked ids first (always present), then any registry id the server knows
         // about that this config did not already carry. Per user, per key: a client
         // key is not filtered out of the list — it is filed under its own user
@@ -261,6 +269,14 @@ export default function UsageView({ width = 80, height = 24, usage = null, refre
                     <box key={k.id} style={{ width: inner, flexDirection: 'column', flexShrink: 0 }}>
                       {line(`    ${name}  30d ${fmtNum(l.month && l.month.requests)} req · in ${fmtNum(l.month && l.month.inTokens)} · out ${fmtNum(l.month && l.month.outTokens)}`)}
                       {line(`       all-time ${fmtNum(l.all && l.all.requests)} req · ${fmtNum((l.all && l.all.inTokens) || 0)} in / ${fmtNum((l.all && l.all.outTokens) || 0)} out${l.usedLanes && l.usedLanes.length ? ` · lanes ${l.usedLanes.map((x) => x.lane).slice(0, 2).join(', ')}` : ''}`, 'gray')}
+                      {(() => {
+                        const inst = instById.get(k.id);
+                        if (!inst) return null;
+                        const avg = inst.avgLatencyMs != null ? `${fmtNum(inst.avgLatencyMs)}ms avg` : 'no call yet';
+                        const load = `${inst.inflight || 0}/${inst.maxConcurrency || 0} in flight${inst.queued ? ` · ${inst.queued} queued` : ''}`;
+                        const pool = inst.poolWarm ? 'pool warm' : 'pool cold';
+                        return line(`       ${inst.transport || 'http'} instance · ${load} · ${avg} · ${pool} · ${inst.health || 'idle'}`, inst.health === 'degraded' ? 'yellow' : 'gray');
+                      })()}
                     </box>
                   );
                 })}

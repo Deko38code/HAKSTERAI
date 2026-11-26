@@ -8,6 +8,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../.env'), override: true });
 const crypto = require('crypto');
 const firecrawlApi = require('./firecrawl-api');
+const providerInstances = require('./providerInstances');
 const { agentRunGate } = require('./agent/run-gate');
 
 // Approval mode — bypass confirmation prompts in FULL_AUTO / AUTO_EDIT
@@ -4557,9 +4558,19 @@ async function chatTimed(opts) {
   try {
     const result = await _chatUnmeasured(opts);
     noteLaneLatency((result && result.provider) || (opts && opts.provider), Date.now() - startedAt);
+    // Per-key instance health (§29, §51): the call is measured against the key
+    // that served it, so the owner screen reads a real latency, never a guess.
+    try {
+      providerInstances.note((result && result.provider) || (opts && opts.provider), {
+        ok: true, ms: Date.now() - startedAt, model: result && result.model,
+      });
+    } catch (_) { /* accounting never breaks a served call */ }
     return result;
   } catch (err) {
     noteLaneLatency(opts && opts.provider, Date.now() - startedAt);
+    try {
+      providerInstances.note(opts && opts.provider, { ok: false, ms: Date.now() - startedAt, model: opts && opts.model });
+    } catch (_) { /* accounting never breaks a served call */ }
     // Revoked or invalid key on the chosen lane: skip that lane and answer from
     // the next healthy one in the same call, so a dead key never reaches a user.
     if (opts && opts.provider && isAuthError(err)) {
@@ -4619,6 +4630,11 @@ async function* chatStreamTimed(opts) {
     throw err;
   } finally {
     if (finished) noteLaneLatency(servedBy, Date.now() - startedAt);
+    try {
+      providerInstances.note(servedBy || (opts && opts.provider), {
+        ok: finished, ms: Date.now() - startedAt, model: opts && opts.model,
+      });
+    } catch (_) { /* accounting never breaks a served call */ }
   }
 }
 

@@ -542,6 +542,22 @@ import Layout from '../../layouts/Layout.astro';
             // into ours (§29.6). A user with no recorded call still shows, at zero (§10).
             var byId = {};
             kl.keys.forEach(function (k) { if (k && k.id) byId[k.id] = k; });
+            // One instance per key (§29, §51): each key runs on its own lane on this
+            // box — its own keep-alive pool, its own concurrency slot, its own
+            // measured health. Rendered only when the server reports the row; a key
+            // with no instance row prints nothing rather than a guessed latency.
+            var instById = {};
+            (Array.isArray(kl.instances) ? kl.instances : []).forEach(function (i) {
+              if (i && i.keyId) instById[i.keyId] = i;
+            });
+            var instTag = function (id) {
+              var i = instById[id];
+              if (!i) return '';
+              var avg = i.avgLatencyMs != null ? compact(i.avgLatencyMs) + 'ms avg' : 'no call yet';
+              var load = (i.inflight || 0) + '/' + (i.maxConcurrency || 0) + ' in flight' + (i.queued ? ' / ' + i.queued + ' queued' : '');
+              return klMid + (i.transport || 'http') + ' instance ' + load + klMid + avg +
+                klMid + (i.poolWarm ? 'pool warm' : 'pool cold') + klMid + (i.health || 'idle');
+            };
             var groups = Array.isArray(kl.byUser) && kl.byUser.length
               ? kl.byUser
               : [{ user: 'owner', label: 'Owner', keys: kl.keys.filter(function (k) { return k && k.client !== 'junkalot.co'; }).map(function (k) { return k.id; }) }];
@@ -569,7 +585,7 @@ import Layout from '../../layouts/Layout.astro';
                     : ((Number(m.requests) > 0 || Number(a.requests) > 0)
                         ? '30d ' + compact(m.requests) + ' req' + klMid + compact(m.inTokens) + ' in / ' + compact(m.outTokens) + ' out' +
                           klMid + 'all-time ' + compact(a.requests) + ' req' + (k.envVar ? klMid + k.envVar : '')
-                        : 'no recorded call yet' + (k.envVar ? klMid + k.envVar : '')));
+                        : 'no recorded call yet' + (k.envVar ? klMid + k.envVar : '')) + instTag(k.id));
               }).join('');
             }).join('');
             out += '<p class="pl-empty" style="margin-top:10px;">Every key is counted from the calls this box recorded, per key id; a client key (Junkalot&rsquo;s) is read back from her own recorded turns, read only. Per user first, per key inside it — no figure is summed across users. Nothing is written into another project and nothing is billed. A client&rsquo;s own admin never renders this card (CLAUDE.md §16, §19, §25, §29, §30, §36).</p>';

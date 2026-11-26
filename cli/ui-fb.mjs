@@ -3355,6 +3355,9 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
       const money = data.ownerMeter;
       const stale = !data.keyLedger;
       const liveById = new Map(keys.map((k) => [k && k.id, k]));
+      const instById = new Map(
+        (Array.isArray(data.keyLedger && data.keyLedger.instances) ? data.keyLedger.instances : []).filter((i) => i && i.keyId).map((i) => [i.keyId, i])
+      );
       const ids = (0, import_usage_ids.listUsageIds)();
       for (const k of keys) {
         if (k && !ids.some((i) => i.id === k.id)) {
@@ -3394,7 +3397,15 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
             }
             return /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
               line(`    ${name}  30d ${fmtNum(l.month && l.month.requests)} req \xB7 in ${fmtNum(l.month && l.month.inTokens)} \xB7 out ${fmtNum(l.month && l.month.outTokens)}`),
-              line(`       all-time ${fmtNum(l.all && l.all.requests)} req \xB7 ${fmtNum(l.all && l.all.inTokens || 0)} in / ${fmtNum(l.all && l.all.outTokens || 0)} out${l.usedLanes && l.usedLanes.length ? ` \xB7 lanes ${l.usedLanes.map((x) => x.lane).slice(0, 2).join(", ")}` : ""}`, "gray")
+              line(`       all-time ${fmtNum(l.all && l.all.requests)} req \xB7 ${fmtNum(l.all && l.all.inTokens || 0)} in / ${fmtNum(l.all && l.all.outTokens || 0)} out${l.usedLanes && l.usedLanes.length ? ` \xB7 lanes ${l.usedLanes.map((x) => x.lane).slice(0, 2).join(", ")}` : ""}`, "gray"),
+              (() => {
+                const inst = instById.get(k.id);
+                if (!inst) return null;
+                const avg = inst.avgLatencyMs != null ? `${fmtNum(inst.avgLatencyMs)}ms avg` : "no call yet";
+                const load = `${inst.inflight || 0}/${inst.maxConcurrency || 0} in flight${inst.queued ? ` \xB7 ${inst.queued} queued` : ""}`;
+                const pool = inst.poolWarm ? "pool warm" : "pool cold";
+                return line(`       ${inst.transport || "http"} instance \xB7 ${load} \xB7 ${avg} \xB7 ${pool} \xB7 ${inst.health || "idle"}`, inst.health === "degraded" ? "yellow" : "gray");
+              })()
             ] }, k.id);
           })
         ] }, `u:${g.user}`)) : line("  no usage ids in the CLI config", "gray"),
