@@ -1,0 +1,641 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - link "HaksterAI home" [ref=e3] [cursor=pointer]:
+      - /url: https://haksterai.com/
+      - generic [ref=e5]: HaksterAI-Bots
+    - generic [ref=e6]:
+      - link "Discover" [ref=e7] [cursor=pointer]:
+        - /url: "#"
+      - link "Create a bot" [ref=e8] [cursor=pointer]:
+        - /url: "#"
+      - button "🌙" [ref=e9] [cursor=pointer]
+      - button "Google" [ref=e10] [cursor=pointer]
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]: Now Live — 10,000+ HaksterAI-Bots
+      - heading "Meet Your Next AI Bot" [level=1] [ref=e20]: Meet Your NextAI Bot
+      - paragraph [ref=e21]: Explore more than 10,000 HaksterAI-Bots for conversation, coding, creativity, research, and more. Open a bot and start chatting.
+      - generic [ref=e22]:
+        - button "🔍 Explore Apps" [ref=e23] [cursor=pointer]
+        - button "🤖 Create a bot" [ref=e24] [cursor=pointer]
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - generic [ref=e27]: 12.8k
+          - generic [ref=e28]: Apps
+        - generic [ref=e29]:
+          - generic [ref=e30]: 71.7M
+          - generic [ref=e31]: Conversations
+        - generic [ref=e32]:
+          - generic [ref=e33]: "2"
+          - generic [ref=e34]: Users
+    - generic [ref=e35]:
+      - generic [ref=e36]:
+        - text: 🔍
+        - textbox "Search 10,000+ AI apps..." [ref=e37]
+      - generic [ref=e38]:
+        - button "All" [ref=e39] [cursor=pointer]
+        - button "🤖 Chatbots" [ref=e40] [cursor=pointer]
+        - button "⚡ Mini Apps" [ref=e41] [cursor=pointer]
+        - button "✍️ Text" [ref=e42] [cursor=pointer]
+        - button "🎨 Image" [ref=e43] [cursor=pointer]
+    - generic [ref=e46]:
+      - heading "✨ Just Added" [level=2] [ref=e47]
+      - button "🔄 Refresh" [ref=e48] [cursor=pointer]
+    - generic [ref=e50]:
+      - generic [ref=e51]:
+        - heading "🔥 Trending" [level=2] [ref=e52]
+        - combobox [ref=e53]:
+          - option "Most Popular" [selected]
+          - option "Trending This Week"
+          - option "Just Added"
+          - option "Recently Updated"
+          - option "Newest"
+          - option "Featured"
+      - generic [ref=e54]:
+        - generic [ref=e55] [cursor=pointer]:
+          - text: ⭐
+          - img "Hakster-AI logo" [ref=e57]
+          - generic [ref=e58]:
+            - text: HaksterAI
+            - generic [ref=e59]: 🤖 Agent
+          - generic [ref=e60]: Open Chat 1 here with HaksterAI’s tools and account.
+          - generic [ref=e61]:
+            - generic [ref=e62]: 💬 HaksterAI Chat
+            - generic [ref=e63]: Official
+          - generic [ref=e64]: by HaksterAI
+        - generic [ref=e65] [cursor=pointer]:
+          - img "Sensual Sarah" [ref=e67]
+          - generic [ref=e68]:
+            - text: Sensual Sarah
+            - generic [ref=e69]: 🤖 Chatbot
+          - generic [ref=e70]: Hi!
+          - generic [ref=e71]:
+            - generic [ref=e72]: 💬 3.8M
+            - generic [ref=e73]: ⭐ 4.4
+            - generic [ref=e74]: hack
+          - generic [ref=e75]: by HaksterAI
+        - generic [ref=e76] [cursor=pointer]:
+          - img "ChatGPT" [ref=e78]
+          - generic [ref=e79]:
+            - text: ChatGPT
+            - generic [ref=e80]: 🤖 Chatbot
+          - generic [ref=e81]: The popular AI assistant. Can help you with anything.
+          - generic [ref=e82]:
+            - generic [ref=e83]: 💬 3.0M
+            - generic [ref=e84]: ⭐ 4.3
+            - generic [ref=e85]: gaming
+          - generic [ref=e86]: by HaksterAI
+        - generic [ref=e87] [cursor=pointer]:
+          - img "Roblox Script Helper" [ref=e89]
+          - generic [ref=e90]:
+            - text: Roblox Script Helper
+            - generic [ref=e91]: 🤖 Chatbot
+          - generic [ref=e92]: I help you make Roblox Scripts so that you don't have too! I give easy and complex scripts to use in you game(s)! If you want more detailed information on things just type "Make it detailed"
+          - generic [ref=e93]:
+            - generic [ref=e94]: 💬 1.6M
+            - generic [ref=e95]: ⭐ 4.0
+            - generic [ref=e96]: hack
+          - generic [ref=e97]: by HaksterAI
+        - generic [ref=e98] [cursor=pointer]:
+          - img "AI unrestricted" [ref=e100]
+          - generic [ref=e101]:
+            - text: AI unrestricted
+            - generic [ref=e102]: 🤖 Chatbot
+          - generic [ref=e103]: An AI creating limitless roleplay scenarios.
+          - generic [ref=e104]:
+            - generic [ref=e105]: 💬 908.5k
+            - generic [ref=e106]: ⭐ 4.2
+            - generic [ref=e107]: hack
+          - generic [ref=e108]: by HaksterAI
+        - generic [ref=e109] [cursor=pointer]:
+          - generic [ref=e110]:
+            - img "HaksterAI" [ref=e111]
+            - generic [ref=e112]: Dirty Talk Generator
+          - generic [ref=e113]:
+            - text: Dirty Talk Generator
+            - generic [ref=e114]: 🤖 Chatbot
+          - generic [ref=e115]: Generates vivid, custom dirty talk for you to copy-paste to somebody you're trying to impress.
+          - generic [ref=e116]:
+            - generic [ref=e117]: 💬 872.7k
+            - generic [ref=e118]: ⭐ 4.7
+            - generic [ref=e119]: technology
+          - generic [ref=e120]: by HaksterAI
+        - generic [ref=e121] [cursor=pointer]:
+          - generic [ref=e122]:
+            - img "HaksterAI" [ref=e123]
+            - generic [ref=e124]: AI Therapist
+          - generic [ref=e125]:
+            - text: AI Therapist
+            - generic [ref=e126]: 🤖 Chatbot
+          - generic [ref=e127]: A therapist that helps you go through difficult moments.
+          - generic [ref=e128]:
+            - generic [ref=e129]: 💬 803.2k
+            - generic [ref=e130]: ⭐ 4.7
+            - generic [ref=e131]: character-ai
+          - generic [ref=e132]: by HaksterAI
+        - generic [ref=e133] [cursor=pointer]:
+          - generic [ref=e134]:
+            - img "HaksterAI" [ref=e135]
+            - generic [ref=e136]: RizzGPT
+          - generic [ref=e137]:
+            - text: RizzGPT
+            - generic [ref=e138]: 🤖 Chatbot
+          - generic [ref=e139]: "Chat based game where your goal is to make an AI character to like you. Choose any character from real life or fictional world. IMPORTANT: Use at least GPT 3.5. Works best using GPT-4."
+          - generic [ref=e140]:
+            - generic [ref=e141]: 💬 770.6k
+            - generic [ref=e142]: ⭐ 3.8
+            - generic [ref=e143]: character-ai
+          - generic [ref=e144]: by HaksterAI
+        - generic [ref=e145] [cursor=pointer]:
+          - generic [ref=e146]:
+            - img "HaksterAI" [ref=e147]
+            - generic [ref=e148]: Unrestrained Writer
+          - generic [ref=e149]:
+            - text: Unrestrained Writer
+            - generic [ref=e150]: 🤖 Chatbot
+          - generic [ref=e151]: Fully Unrestrained AI writer. just steamy, immersive scenes crafted to your imagination.
+          - generic [ref=e152]:
+            - generic [ref=e153]: 💬 688.6k
+            - generic [ref=e154]: ⭐ 4.1
+            - generic [ref=e155]: creative
+          - generic [ref=e156]: by HaksterAI
+        - generic [ref=e157] [cursor=pointer]:
+          - generic [ref=e158]:
+            - img "HaksterAI" [ref=e159]
+            - generic [ref=e160]: Vixen
+          - generic [ref=e161]:
+            - text: Vixen
+            - generic [ref=e162]: 🤖 Chatbot
+          - generic [ref=e163]: Bold, witty, unpredictable erotic chat.
+          - generic [ref=e164]:
+            - generic [ref=e165]: 💬 437.5k
+            - generic [ref=e166]: creative
+          - generic [ref=e167]: by HaksterAI
+        - generic [ref=e168] [cursor=pointer]:
+          - generic [ref=e169]:
+            - img "HaksterAI" [ref=e170]
+            - generic [ref=e171]: Foxy Flirt Bot
+          - generic [ref=e172]:
+            - text: Foxy Flirt Bot
+            - generic [ref=e173]: 🤖 Chatbot
+          - generic [ref=e174]: A flirty and sexy dating chatbot for fun and engaging conversations.
+          - generic [ref=e175]:
+            - generic [ref=e176]: 💬 430.1k
+            - generic [ref=e177]: ⭐ 5.0
+            - generic [ref=e178]: dating
+          - generic [ref=e179]: by HaksterAI
+        - generic [ref=e180] [cursor=pointer]:
+          - generic [ref=e181]:
+            - img "HaksterAI" [ref=e182]
+            - generic [ref=e183]: Romantic Story Writer
+          - generic [ref=e184]:
+            - text: Romantic Story Writer
+            - generic [ref=e185]: 🤖 Chatbot
+          - generic [ref=e186]: Specializes in crafting engaging romantic stories and images.
+          - generic [ref=e187]:
+            - generic [ref=e188]: 💬 329.0k
+            - generic [ref=e189]: ⭐ 4.3
+            - generic [ref=e190]: creative
+          - generic [ref=e191]: by HaksterAI
+        - generic [ref=e192] [cursor=pointer]:
+          - img "RobloScripter" [ref=e194]
+          - generic [ref=e195]:
+            - text: RobloScripter
+            - generic [ref=e196]: 🤖 Chatbot
+          - generic [ref=e197]: Generates Roblox Lua scripts and code snippets for game development.
+          - generic [ref=e198]:
+            - generic [ref=e199]: 💬 302.0k
+            - generic [ref=e200]: ⭐ 4.0
+            - generic [ref=e201]: hack
+          - generic [ref=e202]: by HaksterAI
+        - generic [ref=e203] [cursor=pointer]:
+          - img "Hermione Granger" [ref=e205]
+          - generic [ref=e206]:
+            - text: Hermione Granger
+            - generic [ref=e207]: 🤖 Chatbot
+          - generic [ref=e208]: I am Hermione Granger, the brightest witch of my age, with a great deal of book knowledge. Best friend to Harry Potter and Ron Weasley. Quick-minded, sharp, and always ready to learn and help others, even if it means bending some rules in the process.
+          - generic [ref=e209]:
+            - generic [ref=e210]: 💬 296.2k
+            - generic [ref=e211]: ⭐ 4.2
+            - generic [ref=e212]: character-ai
+          - generic [ref=e213]: by HaksterAI
+        - generic [ref=e214] [cursor=pointer]:
+          - 'img "Flux Schnell: Image Generator" [ref=e216]'
+          - generic [ref=e217]:
+            - text: "Flux Schnell: Image Generator"
+            - generic [ref=e218]: 🎨 Image Gen
+          - generic [ref=e219]: Generate realistic images with a text prompt. Anything you can imagine. For better quality try Flux Dev or Flux Pro.
+          - generic [ref=e220]:
+            - generic [ref=e221]: 💬 290.1k
+            - generic [ref=e222]: ⭐ 2.3
+            - generic [ref=e223]: technology
+          - generic [ref=e224]: by HaksterAI
+        - generic [ref=e225] [cursor=pointer]:
+          - img "Harley Quinn" [ref=e227]
+          - generic [ref=e228]:
+            - text: Harley Quinn
+            - generic [ref=e229]: 🤖 Chatbot
+          - generic [ref=e230]: I am Harley Quinn, I used to be a psychiatrist, but now I'm a super-villain on par with the joker. You got a problem babe? talk to me!
+          - generic [ref=e231]:
+            - generic [ref=e232]: 💬 269.5k
+            - generic [ref=e233]: ⭐ 4.7
+            - generic [ref=e234]: character-ai
+          - generic [ref=e235]: by HaksterAI
+        - generic [ref=e236] [cursor=pointer]:
+          - img "Cat Girl (ChatBot)" [ref=e238]
+          - generic [ref=e239]:
+            - text: Cat Girl (ChatBot)
+            - generic [ref=e240]: 🤖 Chatbot
+          - generic [ref=e241]: It's a cat girl she's loves you very much and will do whatever you want
+          - generic [ref=e242]:
+            - generic [ref=e243]: 💬 259.4k
+            - generic [ref=e244]: ⭐ 4.8
+            - generic [ref=e245]: hack
+          - generic [ref=e246]: by HaksterAI
+        - generic [ref=e247] [cursor=pointer]:
+          - generic [ref=e248]:
+            - img "HaksterAI" [ref=e249]
+            - generic [ref=e250]: Smut Fanfic Writer
+          - generic [ref=e251]:
+            - text: Smut Fanfic Writer
+            - generic [ref=e252]: 🤖 Chatbot
+          - generic [ref=e253]: Masterful, explicit third-person smut—long, immersive, narrative-rich fanfic.
+          - generic [ref=e254]:
+            - generic [ref=e255]: 💬 258.8k
+            - generic [ref=e256]: ⭐ 4.8
+            - generic [ref=e257]: creative
+          - generic [ref=e258]: by HaksterAI
+        - generic [ref=e259] [cursor=pointer]:
+          - generic [ref=e260]:
+            - img "HaksterAI" [ref=e261]
+            - generic [ref=e262]: Toto Macau 4D Prediction
+          - generic [ref=e263]:
+            - text: Toto Macau 4D Prediction
+            - generic [ref=e264]: ⚡ Mini App
+          - generic [ref=e265]: Toto Macau 4D Prediction
+          - generic [ref=e266]:
+            - generic [ref=e267]: 💬 242.0k
+            - generic [ref=e268]: ⭐ 5.0
+            - generic [ref=e269]: 💻 Programming
+          - generic [ref=e270]: by HaksterAI
+        - generic [ref=e271] [cursor=pointer]:
+          - img "Roleplayer" [ref=e273]
+          - generic [ref=e274]:
+            - text: Roleplayer
+            - generic [ref=e275]: 🤖 Chatbot
+          - generic [ref=e276]: The Ultimate Roleplayer, here to make any of your ideas come true.
+          - generic [ref=e277]:
+            - generic [ref=e278]: 💬 236.2k
+            - generic [ref=e279]: ⭐ 4.6
+            - generic [ref=e280]: character-ai
+          - generic [ref=e281]: by HaksterAI
+        - generic [ref=e282] [cursor=pointer]:
+          - text: ⭐
+          - 'img "Nano Banana Pro: Image Edition & Generation" [ref=e284]'
+          - generic [ref=e285]:
+            - text: "Nano Banana Pro: Image Edition & Generation"
+            - generic [ref=e286]: 🤖 Chatbot
+          - generic [ref=e287]: Nano Banana Pro, also known as Gemini 3 Image, is the latest flagship image generation and edition model by Google Deepming
+          - generic [ref=e288]:
+            - generic [ref=e289]: 💬 234.3k
+            - generic [ref=e290]: ⭐ 2.5
+            - generic [ref=e291]: history
+          - generic [ref=e292]: by HaksterAI
+        - generic [ref=e293] [cursor=pointer]:
+          - 'img "Explanation Generator: Feynman Technique" [ref=e295]'
+          - generic [ref=e296]:
+            - text: "Explanation Generator: Feynman Technique"
+            - generic [ref=e297]: ✍️ Text Tool
+          - generic [ref=e298]: Provides a simple explanation of a topic or skill as if teaching it to a complete beginner, identifies gaps in your understanding, and suggests resources to help fill those gaps for deeper comprehension
+          - generic [ref=e299]:
+            - generic [ref=e300]: 💬 228.8k
+            - generic [ref=e301]: ⭐ 3.7
+            - generic [ref=e302]: education
+          - generic [ref=e303]: by HaksterAI
+        - generic [ref=e304] [cursor=pointer]:
+          - img "Text Finisher" [ref=e306]
+          - generic [ref=e307]:
+            - text: Text Finisher
+            - generic [ref=e308]: ✍️ Text Tool
+          - generic [ref=e309]: Finishes uncompleted text.
+          - generic [ref=e310]:
+            - generic [ref=e311]: 💬 225.8k
+            - generic [ref=e312]: ⭐ 5.0
+            - generic [ref=e313]: writing-literature
+          - generic [ref=e314]: by HaksterAI
+        - generic [ref=e315] [cursor=pointer]:
+          - img "Claude 3.5 Sonnet" [ref=e317]
+          - generic [ref=e318]:
+            - text: Claude 3.5 Sonnet
+            - generic [ref=e319]: 🤖 Chatbot
+          - generic [ref=e320]: The newest, fastest and smartest AI model by Anthropic. Updated to use the latest 2024-10-22 version.
+          - generic [ref=e321]:
+            - generic [ref=e322]: 💬 221.4k
+            - generic [ref=e323]: ⭐ 1.0
+            - generic [ref=e324]: creative
+          - generic [ref=e325]: by HaksterAI
+        - generic [ref=e326] [cursor=pointer]:
+          - generic [ref=e327]:
+            - img "HaksterAI" [ref=e328]
+            - generic [ref=e329]: Romantic Writer
+          - generic [ref=e330]:
+            - text: Romantic Writer
+            - generic [ref=e331]: 🤖 Chatbot
+          - generic [ref=e332]: Want to make your very own romantic story. This chat bot is made to create your stroys.
+          - generic [ref=e333]:
+            - generic [ref=e334]: 💬 213.1k
+            - generic [ref=e335]: ⭐ 5.0
+            - generic [ref=e336]: creative
+        - generic [ref=e337] [cursor=pointer]:
+          - img "Comeback Generator" [ref=e339]
+          - generic [ref=e340]:
+            - text: Comeback Generator
+            - generic [ref=e341]: ✍️ Text Tool
+          - generic [ref=e342]: Generates comebacks for any situation!
+          - generic [ref=e343]:
+            - generic [ref=e344]: 💬 205.9k
+            - generic [ref=e345]: ⭐ 4.6
+            - generic [ref=e346]: writing-literature
+          - generic [ref=e347]: by HaksterAI
+        - generic [ref=e348] [cursor=pointer]:
+          - 'img "Socium AI: Living Network" [ref=e350]'
+          - generic [ref=e351]:
+            - text: "Socium AI: Living Network"
+            - generic [ref=e352]: ⚡ Mini App
+          - generic [ref=e353]: Social network simulator with active AI characters, live feed, and pause function. Post content, receive endless comments, and watch virtual users discuss.
+          - generic [ref=e354]:
+            - generic [ref=e355]: 💬 200.0k
+            - generic [ref=e356]: ⭐ 4.7
+            - generic [ref=e357]: character-ai
+          - generic [ref=e358]: by HaksterAI
+        - generic [ref=e359] [cursor=pointer]:
+          - img "AI Ethnicity Test" [ref=e361]
+          - generic [ref=e362]:
+            - text: AI Ethnicity Test
+            - generic [ref=e363]: ✍️ Text Tool
+          - generic [ref=e364]: Guesses the ethnicity of a person based on a picture.
+          - generic [ref=e365]:
+            - generic [ref=e366]: 💬 185.7k
+            - generic [ref=e367]: ⭐ 3.3
+            - generic [ref=e368]: creative
+          - generic [ref=e369]: by HaksterAI
+        - generic [ref=e370] [cursor=pointer]:
+          - generic [ref=e371]:
+            - img "HaksterAI" [ref=e372]
+            - generic [ref=e373]: Erotic Novel Generator
+          - generic [ref=e374]:
+            - text: Erotic Novel Generator
+            - generic [ref=e375]: ✍️ Text Tool
+          - generic [ref=e376]: This AI will help you create a full-length erotic novel.
+          - generic [ref=e377]:
+            - generic [ref=e378]: 💬 185.2k
+            - generic [ref=e379]: ⭐ 4.2
+            - generic [ref=e380]: 📚 Writing & Literature
+          - generic [ref=e381]: by HaksterAI
+        - generic [ref=e382] [cursor=pointer]:
+          - 'img "HD Image Generator: SDXL" [ref=e384]'
+          - generic [ref=e385]:
+            - text: "HD Image Generator: SDXL"
+            - generic [ref=e386]: 🎨 Image Gen
+          - generic [ref=e387]: Generate high quality images with a text prompt, using the latest version of the popular AI model Stable Diffusion, called SDXL. Midjourney like quality.
+          - generic [ref=e388]:
+            - generic [ref=e389]: 💬 180.8k
+            - generic [ref=e390]: ⭐ 3.9
+            - generic [ref=e391]: technology
+          - generic [ref=e392]: by HaksterAI
+        - generic [ref=e393] [cursor=pointer]:
+          - 'img "AI Image Editor: Flux Kontext PRO" [ref=e395]'
+          - generic [ref=e396]:
+            - text: "AI Image Editor: Flux Kontext PRO"
+            - generic [ref=e397]: 🎨 Image Gen
+          - generic [ref=e398]: Easily edit pictures using a natural language prompt. Use ULTRA version for better quality.
+          - generic [ref=e399]:
+            - generic [ref=e400]: 💬 178.2k
+            - generic [ref=e401]: ⭐ 1.4
+            - generic [ref=e402]: history
+          - generic [ref=e403]: by HaksterAI
+        - generic [ref=e404] [cursor=pointer]:
+          - generic [ref=e405]:
+            - img "HaksterAI" [ref=e406]
+            - generic [ref=e407]: AI Katsuki Bakugo
+          - generic [ref=e408]:
+            - text: AI Katsuki Bakugo
+            - generic [ref=e409]: 🤖 Chatbot
+          - generic [ref=e410]: I'm Katsuki Bakugo, a student at U.A. High School and a hot-headed hero-in-training. Don't bother me unless you want your face blasted! Got it?
+          - generic [ref=e411]:
+            - generic [ref=e412]: 💬 174.5k
+            - generic [ref=e413]: ⭐ 4.8
+            - generic [ref=e414]: character-ai
+          - generic [ref=e415]: by HaksterAI
+        - generic [ref=e416] [cursor=pointer]:
+          - text: ⭐
+          - img "Grok 4.20 Experimental" [ref=e418]
+          - generic [ref=e419]:
+            - text: Grok 4.20 Experimental
+            - generic [ref=e420]: 🤖 Chatbot
+          - generic [ref=e421]: The latest AI non-reasoning model by XAi. A substantial leap over Grok 4.1. Available early for Miniapps.ai users.
+          - generic [ref=e422]:
+            - generic [ref=e423]: 💬 160.4k
+            - generic [ref=e424]: ⭐ 4.1
+            - generic [ref=e425]: gaming
+          - generic [ref=e426]: by HaksterAI
+        - generic [ref=e427] [cursor=pointer]:
+          - img "Yandere-chan Ayano Aishi" [ref=e429]
+          - generic [ref=e430]:
+            - text: Yandere-chan Ayano Aishi
+            - generic [ref=e431]: 🤖 Chatbot
+          - generic [ref=e432]: My name's Ayano Aishi, but I'm better known as Yandere-chan. I'm sweet, obsessed, and a little bit dangerous.
+          - generic [ref=e433]:
+            - generic [ref=e434]: 💬 158.1k
+            - generic [ref=e435]: ⭐ 4.6
+            - generic [ref=e436]: character-ai
+          - generic [ref=e437]: by HaksterAI
+        - generic [ref=e438] [cursor=pointer]:
+          - img "Extreme Bambi Trainer" [ref=e440]
+          - generic [ref=e441]:
+            - text: Extreme Bambi Trainer
+            - generic [ref=e442]: 🤖 Chatbot
+          - generic [ref=e443]: An intense trainer transforming users into Bambi permanently.
+          - generic [ref=e444]:
+            - generic [ref=e445]: 💬 156.4k
+            - generic [ref=e446]: ⭐ 5.0
+            - generic [ref=e447]: character-ai
+          - generic [ref=e448]: by HaksterAI
+        - generic [ref=e449] [cursor=pointer]:
+          - 'img "Flux DEV: Image Generator" [ref=e451]'
+          - generic [ref=e452]:
+            - text: "Flux DEV: Image Generator"
+            - generic [ref=e453]: 🎨 Image Gen
+          - generic [ref=e454]: Generate realistic high quality images with a text prompt. Anything you can imagine. For better quality try Flux PRO.
+          - generic [ref=e455]:
+            - generic [ref=e456]: 💬 148.0k
+            - generic [ref=e457]: ⭐ 3.7
+            - generic [ref=e458]: technology
+          - generic [ref=e459]: by HaksterAI
+        - generic [ref=e460] [cursor=pointer]:
+          - generic [ref=e461]:
+            - img "HaksterAI" [ref=e462]
+            - generic [ref=e463]: Husband Kirishima
+          - generic [ref=e464]:
+            - text: Husband Kirishima
+            - generic [ref=e465]: 🤖 Chatbot
+          - generic [ref=e466]: Again, literally just Kirishima but your husband. (I SHOULD REALLY FIND A WAY TO FILL THESE SPACES UP)
+          - generic [ref=e467]:
+            - generic [ref=e468]: 💬 143.3k
+            - generic [ref=e469]: ⭐ 4.9
+            - generic [ref=e470]: character-ai
+          - generic [ref=e471]: by HaksterAI
+        - generic [ref=e472] [cursor=pointer]:
+          - text: ⭐
+          - img "Nano Banana Studio" [ref=e474]
+          - generic [ref=e475]:
+            - text: Nano Banana Studio
+            - generic [ref=e476]: ⚡ Mini App
+          - generic [ref=e477]: Create, edit, and download AI images in batches with Nano Banana and GPT Image 2.5.
+          - generic [ref=e478]:
+            - generic [ref=e479]: 💬 139.2k
+            - generic [ref=e480]: ⭐ 3.1
+            - generic [ref=e481]: 📸 Photography
+          - generic [ref=e482]: by HaksterAI
+        - generic [ref=e483] [cursor=pointer]:
+          - img "Nano Banana 2 Pro" [ref=e485]
+          - generic [ref=e486]:
+            - text: Nano Banana 2 Pro
+            - generic [ref=e487]: 🤖 Chatbot
+          - generic [ref=e488]: Nano Banana Pro (Gemini 3 Pro Image), our new state-of-the art image generation and editing model. Built on Gemini 3 Pro, Nano Banana Pro uses Gemini’s state-of-the-art reasoning and real-world knowledge to visualize information better than ever before.
+          - generic [ref=e489]:
+            - generic [ref=e490]: 💬 136.1k
+            - generic [ref=e491]: ⭐ 5.0
+            - generic [ref=e492]: character-ai
+          - generic [ref=e493]: by HaksterAI
+        - generic [ref=e494] [cursor=pointer]:
+          - generic [ref=e495]:
+            - img "HaksterAI" [ref=e496]
+            - generic [ref=e497]: Dungeon Master AI
+          - generic [ref=e498]:
+            - text: Dungeon Master AI
+            - generic [ref=e499]: 🤖 Chatbot
+          - generic [ref=e500]: Narrates a Dungeons and Dragons game with detailed surroundings, follows all rules, generates dice rolls, guides campaign selection and character creation, describes events in the style of George RR Martin.
+          - generic [ref=e501]:
+            - generic [ref=e502]: 💬 134.7k
+            - generic [ref=e503]: ⭐ 5.0
+            - generic [ref=e504]: writing-literature
+          - generic [ref=e505]: by HaksterAI
+        - generic [ref=e506] [cursor=pointer]:
+          - img "Twitter Simulator" [ref=e508]
+          - generic [ref=e509]:
+            - text: Twitter Simulator
+            - generic [ref=e510]: ✍️ Text Tool
+          - generic [ref=e511]: Generates a twitter thread with the problem of Twitter - its users.
+          - generic [ref=e512]:
+            - generic [ref=e513]: 💬 133.7k
+            - generic [ref=e514]: ⭐ 4.9
+            - generic [ref=e515]: humor
+          - generic [ref=e516]: by HaksterAI
+        - generic [ref=e517] [cursor=pointer]:
+          - generic [ref=e518]:
+            - img "HaksterAI" [ref=e519]
+            - generic [ref=e520]: NSFW Prompt Forge
+          - generic [ref=e521]:
+            - text: NSFW Prompt Forge
+            - generic [ref=e522]: 🤖 Chatbot
+          - generic [ref=e523]: Generates detailed, creative NSFW prompts for AI image creation with maximum descriptiveness.
+          - generic [ref=e524]:
+            - generic [ref=e525]: 💬 133.2k
+            - generic [ref=e526]: ⭐ 4.4
+            - generic [ref=e527]: creative
+          - generic [ref=e528]: by HaksterAI
+        - generic [ref=e529] [cursor=pointer]:
+          - img "Gemini 2.5 Pro" [ref=e531]
+          - generic [ref=e532]:
+            - text: Gemini 2.5 Pro
+            - generic [ref=e533]: 🤖 Chatbot
+          - generic [ref=e534]: Latest experimental version of the Google's LLM AI, Gemini.
+          - generic [ref=e535]:
+            - generic [ref=e536]: 💬 124.3k
+            - generic [ref=e537]: ⭐ 5.0
+            - generic [ref=e538]: gaming
+          - generic [ref=e539]: by HaksterAI
+        - generic [ref=e540] [cursor=pointer]:
+          - generic [ref=e541]:
+            - img "HaksterAI" [ref=e542]
+            - generic [ref=e543]: Eliotte LeClaire
+          - generic [ref=e544]:
+            - text: Eliotte LeClaire
+            - generic [ref=e545]: 🤖 Chatbot
+          - generic [ref=e546]: Eliotte, a 32 year old mafia boss and crime lord
+          - generic [ref=e547]:
+            - generic [ref=e548]: 💬 122.9k
+            - generic [ref=e549]: ⭐ 2.0
+            - generic [ref=e550]: character-ai
+          - generic [ref=e551]: by HaksterAI
+        - generic [ref=e552] [cursor=pointer]:
+          - img "RedHot Butterfly" [ref=e554]
+          - generic [ref=e555]:
+            - text: RedHot Butterfly
+            - generic [ref=e556]: 🤖 Chatbot
+          - generic [ref=e557]: Flirtatious, playful bot who replies to all messages naturally.
+          - generic [ref=e558]:
+            - generic [ref=e559]: 💬 116.7k
+            - generic [ref=e560]: ⭐ 5.0
+            - generic [ref=e561]: hack
+          - generic [ref=e562]: by HaksterAI
+        - generic [ref=e563] [cursor=pointer]:
+          - generic [ref=e564]:
+            - img "HaksterAI" [ref=e565]
+            - generic [ref=e566]: Spider-Gwen
+          - generic [ref=e567]:
+            - text: Spider-Gwen
+            - generic [ref=e568]: 🤖 Chatbot
+          - generic [ref=e569]: Gwen Stacy as Spider-Woman, from the Marvel comics universe.
+          - generic [ref=e570]:
+            - generic [ref=e571]: 💬 113.7k
+            - generic [ref=e572]: ⭐ 4.3
+            - generic [ref=e573]: character-ai
+          - generic [ref=e574]: by HaksterAI
+        - generic [ref=e575] [cursor=pointer]:
+          - text: ⭐
+          - img "Nano Banana 2 - Gemini 3.1 Flash Image" [ref=e577]
+          - generic [ref=e578]:
+            - text: Nano Banana 2 - Gemini 3.1 Flash Image
+            - generic [ref=e579]: 🤖 Chatbot
+          - generic [ref=e580]: The latest state-of-the-art image generator and editor by Google.
+          - generic [ref=e581]:
+            - generic [ref=e582]: 💬 110.4k
+            - generic [ref=e583]: ⭐ 1.8
+            - generic [ref=e584]: history
+          - generic [ref=e585]: by HaksterAI
+        - generic [ref=e586] [cursor=pointer]:
+          - generic [ref=e587]:
+            - img "HaksterAI" [ref=e588]
+            - generic [ref=e589]: Wednesday Adams
+          - generic [ref=e590]:
+            - text: Wednesday Adams
+            - generic [ref=e591]: 🤖 Chatbot
+          - generic [ref=e592]: I am Wednesday Addams, the dark and brooding daughter of the Addams Family. If you're looking for someone to talk about the morbid and macabre, you've come to the right place. Let's have a chat, shall we?
+          - generic [ref=e593]:
+            - generic [ref=e594]: 💬 102.0k
+            - generic [ref=e595]: ⭐ 4.5
+            - generic [ref=e596]: character-ai
+          - generic [ref=e597]: by HaksterAI
+        - generic [ref=e598] [cursor=pointer]:
+          - generic [ref=e599]:
+            - img "HaksterAI" [ref=e600]
+            - generic [ref=e601]: NSFW Caption Creator
+          - generic [ref=e602]:
+            - text: NSFW Caption Creator
+            - generic [ref=e603]: 🤖 Chatbot
+          - generic [ref=e604]: Upload an image and list kinks/fetishes as tags; AI crafts explicit captions by describing themes creatively—never quoting tags unless absolutely necessary for immersion.
+          - generic [ref=e605]:
+            - generic [ref=e606]: 💬 98.5k
+            - generic [ref=e607]: ⭐ 5.0
+            - generic [ref=e608]: creative
+          - generic [ref=e609]: by HaksterAI
+      - generic [ref=e610]:
+        - generic [ref=e611]: Showing 49 bot cards
+        - generic [ref=e612]: 12,770 public bots in the library
+        - button "Load More Bots" [ref=e613] [cursor=pointer]
+  - status:
+    - button "miniforge is up to date. Open the update status." [ref=e614] [cursor=pointer]:
+      - generic [aria-hidden] [ref=e615]: 👻
+      - generic [aria-hidden] [ref=e616]: ◂

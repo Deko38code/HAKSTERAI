@@ -1,0 +1,58 @@
+- generic [active] [ref=f2e1]:
+  - navigation [ref=f2e2]:
+    - link "HaksterAI home" [ref=f2e3] [cursor=pointer]:
+      - /url: https://haksterai.com/
+      - generic [ref=f2e5]: HaksterAI-Bots
+    - generic [ref=f2e6]:
+      - link "Discover" [ref=f2e7] [cursor=pointer]:
+        - /url: "#"
+      - link "Create a bot" [ref=f2e8] [cursor=pointer]:
+        - /url: "#"
+      - button "🌙" [ref=f2e9] [cursor=pointer]
+      - button "Google" [ref=f2e10] [cursor=pointer]
+  - generic [ref=f2e16]:
+    - generic [ref=f2e17]:
+      - generic [ref=f2e18]: Now Live — 10,000+ HaksterAI-Bots
+      - heading "Meet Your Next AI Bot" [level=1] [ref=f2e20]: Meet Your NextAI Bot
+      - paragraph [ref=f2e21]: Explore more than 10,000 HaksterAI-Bots for conversation, coding, creativity, research, and more. Open a bot and start chatting.
+      - generic [ref=f2e22]:
+        - button "🔍 Explore Apps" [ref=f2e23] [cursor=pointer]
+        - button "🤖 Create a bot" [ref=f2e24] [cursor=pointer]
+      - generic [ref=f2e25]:
+        - generic [ref=f2e26]:
+          - generic [ref=f2e27]: 12.8k
+          - generic [ref=f2e28]: Apps
+        - generic [ref=f2e29]:
+          - generic [ref=f2e30]: 71.7M
+          - generic [ref=f2e31]: Conversations
+        - generic [ref=f2e32]:
+          - generic [ref=f2e33]: "2"
+          - generic [ref=f2e34]: Users
+    - generic [ref=f2e35]:
+      - generic [ref=f2e36]:
+        - text: 🔍
+        - textbox "Search 10,000+ AI apps..." [ref=f2e37]
+      - generic [ref=f2e38]:
+        - button "All" [ref=f2e39] [cursor=pointer]
+        - button "🤖 Chatbots" [ref=f2e40] [cursor=pointer]
+        - button "⚡ Mini Apps" [ref=f2e41] [cursor=pointer]
+        - button "✍️ Text" [ref=f2e42] [cursor=pointer]
+        - button "🎨 Image" [ref=f2e43] [cursor=pointer]
+    - generic [ref=f2e46]:
+      - heading "✨ Just Added" [level=2] [ref=f2e47]
+      - button "🔄 Refresh" [ref=f2e48] [cursor=pointer]
+    - generic [ref=f2e50]:
+      - generic [ref=f2e51]:
+        - heading "🔥 Trending" [level=2] [ref=f2e52]
+        - combobox [ref=f2e53]:
+          - option "Most Popular" [selected]
+          - option "Trending This Week"
+          - option "Just Added"
+          - option "Recently Updated"
+          - option "Newest"
+          - option "Featured"
+      - paragraph [ref=f2e57]: Loading bots…
+  - status:
+    - button "miniforge is up to date. Open the update status." [ref=f2e58] [cursor=pointer]:
+      - generic [aria-hidden] [ref=f2e59]: 👻
+      - generic [aria-hidden] [ref=f2e60]: ◂

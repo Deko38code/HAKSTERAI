@@ -1,0 +1,198 @@
+- generic [active] [ref=f14e1]:
+  - navigation [ref=f14e2]:
+    - link "HaksterAI home" [ref=f14e3] [cursor=pointer]:
+      - /url: https://haksterai.com/
+      - generic [ref=f14e5]: HaksterAI-Bots
+    - generic [ref=f14e6]:
+      - link "Discover" [ref=f14e7] [cursor=pointer]:
+        - /url: "#"
+      - link "Create a bot" [ref=f14e8] [cursor=pointer]:
+        - /url: "#"
+      - button "🌙" [ref=f14e9] [cursor=pointer]
+      - button "Google" [ref=f14e10] [cursor=pointer]
+  - generic [ref=f14e16]:
+    - generic [ref=f14e17]:
+      - generic [ref=f14e18]: Now Live — 10,000+ HaksterAI-Bots
+      - heading "Meet Your Next AI Bot" [level=1] [ref=f14e20]: Meet Your NextAI Bot
+      - paragraph [ref=f14e21]: Explore more than 10,000 HaksterAI-Bots for conversation, coding, creativity, research, and more. Open a bot and start chatting.
+      - generic [ref=f14e22]:
+        - button "🔍 Explore Apps" [ref=f14e23] [cursor=pointer]
+        - button "🤖 Create a bot" [ref=f14e24] [cursor=pointer]
+      - generic [ref=f14e25]:
+        - generic [ref=f14e26]:
+          - generic [ref=f14e27]: 12.8k
+          - generic [ref=f14e28]: Apps
+        - generic [ref=f14e29]:
+          - generic [ref=f14e30]: 71.7M
+          - generic [ref=f14e31]: Conversations
+        - generic [ref=f14e32]:
+          - generic [ref=f14e33]: "2"
+          - generic [ref=f14e34]: Users
+    - generic [ref=f14e35]:
+      - generic [ref=f14e36]:
+        - text: 🔍
+        - textbox "Search 10,000+ AI apps..." [ref=f14e37]
+      - generic [ref=f14e38]:
+        - button "All" [ref=f14e39] [cursor=pointer]
+        - button "🤖 Chatbots" [ref=f14e40] [cursor=pointer]
+        - button "⚡ Mini Apps" [ref=f14e41] [cursor=pointer]
+        - button "✍️ Text" [ref=f14e42] [cursor=pointer]
+        - button "🎨 Image" [ref=f14e43] [cursor=pointer]
+      - generic [ref=f14e44]:
+        - button "🔥 All Apps 12.8k" [ref=f14e45] [cursor=pointer]
+        - button "💀 Hack & Exploit 1.0k" [ref=f14e46] [cursor=pointer]
+        - button "🤖 Character AI 3.7k" [ref=f14e47] [cursor=pointer]
+        - button "⚡ Productivity 1.3k" [ref=f14e48] [cursor=pointer]
+        - button "🎭 Roleplay 784" [ref=f14e49] [cursor=pointer]
+        - button "🎨 Creative 544" [ref=f14e50] [cursor=pointer]
+        - button "✍️ Writing 481" [ref=f14e51] [cursor=pointer]
+        - button "📦 🤖 Character.AI 469" [ref=f14e52] [cursor=pointer]
+        - button "🎮 Gaming 416" [ref=f14e53] [cursor=pointer]
+        - button "💰 Finance & Business 358" [ref=f14e54] [cursor=pointer]
+        - button "📚 Education 280" [ref=f14e55] [cursor=pointer]
+        - button "💻 Technology 276" [ref=f14e56] [cursor=pointer]
+        - button "📦 🎮 Gaming 259" [ref=f14e57] [cursor=pointer]
+        - button "🏥 Health 223" [ref=f14e58] [cursor=pointer]
+        - button "😂 Humor 180" [ref=f14e59] [cursor=pointer]
+        - button "✈️ Travel 174" [ref=f14e60] [cursor=pointer]
+        - button "📦 🔬 Science & Technology 172" [ref=f14e61] [cursor=pointer]
+        - button "📦 🎭 Entertainment 166" [ref=f14e62] [cursor=pointer]
+        - button "🎵 Music 144" [ref=f14e63] [cursor=pointer]
+        - button "📦 💰 Finance & Business 132" [ref=f14e64] [cursor=pointer]
+        - button "📣 Marketing 112" [ref=f14e65] [cursor=pointer]
+        - button "📦 📚 Writing & Literature 102" [ref=f14e66] [cursor=pointer]
+        - button "📜 History 98" [ref=f14e67] [cursor=pointer]
+        - button "📦 Programming 92" [ref=f14e68] [cursor=pointer]
+        - button "📦 💻 Programming 90" [ref=f14e69] [cursor=pointer]
+        - button "📦 🌱 Personal Development 85" [ref=f14e70] [cursor=pointer]
+        - button "📦 Science Technology 83" [ref=f14e71] [cursor=pointer]
+        - button "📦 🎓 Education 72" [ref=f14e72] [cursor=pointer]
+        - button "🔬 Science 62" [ref=f14e73] [cursor=pointer]
+        - button "📦 Entertainment 61" [ref=f14e74] [cursor=pointer]
+        - button "⚖️ Legal 60" [ref=f14e75] [cursor=pointer]
+        - button "🤔 Philosophy 60" [ref=f14e76] [cursor=pointer]
+        - button "📦 ⏰ Productivity 60" [ref=f14e77] [cursor=pointer]
+        - button "📦 💬 Social Media 57" [ref=f14e78] [cursor=pointer]
+        - button "📦 💊 Health 54" [ref=f14e79] [cursor=pointer]
+        - button "💪 Fitness 53" [ref=f14e80] [cursor=pointer]
+        - button "💬 Social Media 48" [ref=f14e81] [cursor=pointer]
+        - button "💘 Dating 44" [ref=f14e82] [cursor=pointer]
+        - button "🌐 Language 43" [ref=f14e83] [cursor=pointer]
+        - button "📦 😂 Humor 43" [ref=f14e84] [cursor=pointer]
+        - button "📦 📸 Photography 40" [ref=f14e85] [cursor=pointer]
+        - button "📦 🎨 Art 36" [ref=f14e86] [cursor=pointer]
+        - button "📦 Personal Development 33" [ref=f14e87] [cursor=pointer]
+        - button "📦 ⚽ Sports 26" [ref=f14e88] [cursor=pointer]
+        - button "📦 🎵 Music 26" [ref=f14e89] [cursor=pointer]
+        - button "📦 Art 25" [ref=f14e90] [cursor=pointer]
+        - button "📦 🛍️ E Commerce 21" [ref=f14e91] [cursor=pointer]
+        - button "📦 📰 News & Media 18" [ref=f14e92] [cursor=pointer]
+        - button "📦 🗣️ Language & Translation 14" [ref=f14e93] [cursor=pointer]
+        - button "📦 E Commerce 13" [ref=f14e94] [cursor=pointer]
+        - button "📦 🏋️‍♂️ Fitness 13" [ref=f14e95] [cursor=pointer]
+        - button "🌟 Lifestyle 12" [ref=f14e96] [cursor=pointer]
+        - button "📦 Photography 12" [ref=f14e97] [cursor=pointer]
+        - button "📦 🔍 SEO 12" [ref=f14e98] [cursor=pointer]
+        - button "📦 🍽️ Food & Recipes 11" [ref=f14e99] [cursor=pointer]
+        - button "📦 📣 Marketing 11" [ref=f14e100] [cursor=pointer]
+        - button "📦 Sports 10" [ref=f14e101] [cursor=pointer]
+        - button "📦 🏠 Real Estate 10" [ref=f14e102] [cursor=pointer]
+        - button "📦 Language Translation 9" [ref=f14e103] [cursor=pointer]
+        - button "📦 Chatbot 6" [ref=f14e104] [cursor=pointer]
+        - button "📦 🌍 Travel 6" [ref=f14e105] [cursor=pointer]
+        - button "📦 Food Recipes 3" [ref=f14e106] [cursor=pointer]
+        - button "📦 News Media 3" [ref=f14e107] [cursor=pointer]
+        - button "📦 Seo 3" [ref=f14e108] [cursor=pointer]
+        - button "🏠 Real Estate 2" [ref=f14e109] [cursor=pointer]
+    - generic [ref=f14e110]:
+      - generic [ref=f14e111]:
+        - heading "✨ Just Added" [level=2] [ref=f14e112]
+        - button "🔄 Refresh" [ref=f14e113] [cursor=pointer]
+      - generic [ref=f14e114]:
+        - generic [ref=f14e115] [cursor=pointer]:
+          - img "Minecraft SkinForge 3D" [ref=f14e117]
+          - generic [ref=f14e118]: Minecraft SkinForge 3D
+          - generic [ref=f14e119]:
+            - generic [ref=f14e120]: ⚡ Mini App
+            - generic [ref=f14e121]: 💬 0
+        - generic [ref=f14e122] [cursor=pointer]:
+          - img "Young AI Character Chat" [ref=f14e124]
+          - generic [ref=f14e125]: Young AI Character Chat
+          - generic [ref=f14e126]:
+            - generic [ref=f14e127]: ⚡ Mini App
+            - generic [ref=f14e128]: 💬 0
+        - generic [ref=f14e129] [cursor=pointer]:
+          - 'img "قبل ان تبرد القهوة : اختر مصيرك" [ref=f14e131]'
+          - generic [ref=f14e132]: "قبل ان تبرد القهوة : اختر مصيرك"
+          - generic [ref=f14e133]:
+            - generic [ref=f14e134]: ⚡ Mini App
+            - generic [ref=f14e135]: 💬 0
+        - generic [ref=f14e136] [cursor=pointer]:
+          - img "Creator of PH paradise" [ref=f14e138]
+          - generic [ref=f14e139]: Creator of PH paradise
+          - generic [ref=f14e140]:
+            - generic [ref=f14e141]: ⚡ Mini App
+            - generic [ref=f14e142]: 💬 0
+        - generic [ref=f14e143] [cursor=pointer]:
+          - img "The Trap - Rise of the Block" [ref=f14e145]
+          - generic [ref=f14e146]: The Trap - Rise of the Block
+          - generic [ref=f14e147]:
+            - generic [ref=f14e148]: ⚡ Mini App
+            - generic [ref=f14e149]: 💬 0
+        - generic [ref=f14e150] [cursor=pointer]:
+          - img "Miya Interrogation Room RP" [ref=f14e152]
+          - generic [ref=f14e153]: Miya Interrogation Room RP
+          - generic [ref=f14e154]:
+            - generic [ref=f14e155]: ⚡ Mini App
+            - generic [ref=f14e156]: 💬 15
+        - generic [ref=f14e157] [cursor=pointer]:
+          - img "Sawalif - Saudi Chatbot" [ref=f14e159]
+          - generic [ref=f14e160]: Sawalif - Saudi Chatbot
+          - generic [ref=f14e161]:
+            - generic [ref=f14e162]: ⚡ Mini App
+            - generic [ref=f14e163]: 💬 0
+        - generic [ref=f14e164] [cursor=pointer]:
+          - img "PHONO HUB (THE ONLY)" [ref=f14e166]
+          - generic [ref=f14e167]: PHONO HUB (THE ONLY)
+          - generic [ref=f14e168]:
+            - generic [ref=f14e169]: ⚡ Mini App
+            - generic [ref=f14e170]: 💬 282
+        - generic [ref=f14e171] [cursor=pointer]:
+          - img "Neon Colour + Number Predictor Pro" [ref=f14e173]
+          - generic [ref=f14e174]: Neon Colour + Number Predictor Pro
+          - generic [ref=f14e175]:
+            - generic [ref=f14e176]: ⚡ Mini App
+            - generic [ref=f14e177]: 💬 3
+        - generic [ref=f14e178] [cursor=pointer]:
+          - img "Behind the Name Davian" [ref=f14e180]
+          - generic [ref=f14e181]: Behind the Name Davian
+          - generic [ref=f14e182]:
+            - generic [ref=f14e183]: ⚡ Mini App
+            - generic [ref=f14e184]: 💬 3
+        - generic [ref=f14e185] [cursor=pointer]:
+          - img "Zweiwege Storyspiel" [ref=f14e187]
+          - generic [ref=f14e188]: Zweiwege Storyspiel
+          - generic [ref=f14e189]:
+            - generic [ref=f14e190]: ⚡ Mini App
+            - generic [ref=f14e191]: 💬 6
+        - generic [ref=f14e192] [cursor=pointer]:
+          - img "Prediksi Macau 5D StatLab" [ref=f14e194]
+          - generic [ref=f14e195]: Prediksi Macau 5D StatLab
+          - generic [ref=f14e196]:
+            - generic [ref=f14e197]: ⚡ Mini App
+            - generic [ref=f14e198]: 💬 0
+    - generic [ref=f14e199]:
+      - generic [ref=f14e200]:
+        - heading "🔥 Trending" [level=2] [ref=f14e201]
+        - combobox [ref=f14e202]:
+          - option "Most Popular" [selected]
+          - option "Trending This Week"
+          - option "Just Added"
+          - option "Recently Updated"
+          - option "Newest"
+          - option "Featured"
+      - paragraph [ref=f14e206]: Loading bots…
+  - status:
+    - button "miniforge is up to date. Open the update status." [ref=f14e207] [cursor=pointer]:
+      - generic [aria-hidden] [ref=f14e208]: 👻
+      - generic [aria-hidden] [ref=f14e209]: ◂

@@ -1,0 +1,121 @@
+- generic [ref=f5e4]:
+  - generic [ref=f5e7]:
+    - generic [ref=f5e10]:
+      - img "Google" [ref=f5e12]
+      - generic [ref=f5e13]: Sign in with Google
+    - generic [ref=f5e14]:
+      - generic [ref=f5e16]:
+        - heading "Sign in" [level=1] [ref=f5e17]
+        - paragraph [ref=f5e18]:
+          - text: to continue to
+          - button "haksterai.com" [ref=f5e19] [cursor=pointer]
+      - generic [ref=f5e22]:
+        - generic [ref=f5e25]:
+          - generic [ref=f5e30]:
+            - textbox "Email or phone" [active] [ref=f5e31]
+            - generic: Email or phone
+          - paragraph [ref=f5e32]:
+            - link "Forgot email?" [ref=f5e33] [cursor=pointer]:
+              - /url: /signin/v2/usernamerecovery?access_type=offline&app_domain=https://haksterai.com&client_id=123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com&continue=https://accounts.google.com/signin/oauth/legacy/consent?authuser%3Dunknown%26part%3DAJi8hANfIVwm25C8i5mBibVU5fQkUBP5fQ0NVIxk0rSR7uMLWN-3ucN1IQwyeFyycROteEf3mWwI2YVaBUjLB71nLjZ8dr-M-aRtn5_jnb2GqvIglqkuHTiIIcxwBCjJV3qf4cBqWQQjja-Fgpmg_H2S__aVKjHpc8j0sFYgAf9oWXXHpQleHsdq14KUDOIF6N-aLKljY5eDegCnOys7die01Ec4B27blRdRf989f8ooVrkafaVYEQNR_4aJN8NN_GhQbyvxENSSZocHLtYjFQosJmyCFJuo01qcDvhyCwiSS7YxmxYf-2P729bJa4qWlivyr5idp6HjiRuF9MUv9O7Hn69W-fptD8X5kD29A1LCXIprglud2rNveAYC_4vw9-MtiBaLYMJHMvbK7JuKHM4yZLRnIu1sAVNUOno_jegxVSZWilYtEtInhDUmbgW_sZslWF31xZTa_CwY8xGGBToo4Sav4A9RIA%26flowName%3DGeneralOAuthFlow%26as%3DS-953641765%253A1795651244485613%26client_id%3D123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com%23&dsh=S-953641765:1795651244485613&flowName=GeneralOAuthLite&o2v=1&opparams=%253F&prompt=select_account&rart=ANgoxcd6RgLfno_iLraD3wolt2oyxzNtpYwOcnvj3O8VQGCZQ5avR2MXZtBT3nV0RLkPKS2elbt3oaPGgJszlWfESLMd7P0u_KX3ymPFCd9AlTkRfcTOSwg&redirect_uri=https://haksterai.com/api/auth/google/callback&response_type=code&scope=openid+email+profile&service=lso&state=eyJub25jZSI6IjAzOTA4MDk2MTUzZDdhMzJmYWVmOTVkNzNiNDlmNDBlIiwicmVmIjoiIiwicmV0dXJuVG8iOiIifQ
+        - generic [ref=f5e35]:
+          - button "Next" [ref=f5e37]
+          - link "Create account" [ref=f5e39] [cursor=pointer]:
+            - /url: /lifecycle/flows/signup?access_type=offline&app_domain=https://haksterai.com&client_id=123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com&continue=https://accounts.google.com/signin/oauth/legacy/consent?authuser%3Dunknown%26part%3DAJi8hANfIVwm25C8i5mBibVU5fQkUBP5fQ0NVIxk0rSR7uMLWN-3ucN1IQwyeFyycROteEf3mWwI2YVaBUjLB71nLjZ8dr-M-aRtn5_jnb2GqvIglqkuHTiIIcxwBCjJV3qf4cBqWQQjja-Fgpmg_H2S__aVKjHpc8j0sFYgAf9oWXXHpQleHsdq14KUDOIF6N-aLKljY5eDegCnOys7die01Ec4B27blRdRf989f8ooVrkafaVYEQNR_4aJN8NN_GhQbyvxENSSZocHLtYjFQosJmyCFJuo01qcDvhyCwiSS7YxmxYf-2P729bJa4qWlivyr5idp6HjiRuF9MUv9O7Hn69W-fptD8X5kD29A1LCXIprglud2rNveAYC_4vw9-MtiBaLYMJHMvbK7JuKHM4yZLRnIu1sAVNUOno_jegxVSZWilYtEtInhDUmbgW_sZslWF31xZTa_CwY8xGGBToo4Sav4A9RIA%26flowName%3DGeneralOAuthFlow%26as%3DS-953641765%253A1795651244485613%26client_id%3D123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com%23&dsh=S-953641765:1795651244485613&flowEntry=SignUp&flowName=GlifWebSignIn&o2v=1&opparams=%253F&prompt=select_account&rart=ANgoxcd6RgLfno_iLraD3wolt2oyxzNtpYwOcnvj3O8VQGCZQ5avR2MXZtBT3nV0RLkPKS2elbt3oaPGgJszlWfESLMd7P0u_KX3ymPFCd9AlTkRfcTOSwg&redirect_uri=https://haksterai.com/api/auth/google/callback&response_type=code&scope=openid+email+profile&service=lso&signInUrl=https://accounts.google.com/signin/oauth?access_type%3Doffline%26app_domain%3Dhttps://haksterai.com%26client_id%3D123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com%26continue%3Dhttps://accounts.google.com/signin/oauth/legacy/consent?authuser%253Dunknown%2526part%253DAJi8hANfIVwm25C8i5mBibVU5fQkUBP5fQ0NVIxk0rSR7uMLWN-3ucN1IQwyeFyycROteEf3mWwI2YVaBUjLB71nLjZ8dr-M-aRtn5_jnb2GqvIglqkuHTiIIcxwBCjJV3qf4cBqWQQjja-Fgpmg_H2S__aVKjHpc8j0sFYgAf9oWXXHpQleHsdq14KUDOIF6N-aLKljY5eDegCnOys7die01Ec4B27blRdRf989f8ooVrkafaVYEQNR_4aJN8NN_GhQbyvxENSSZocHLtYjFQosJmyCFJuo01qcDvhyCwiSS7YxmxYf-2P729bJa4qWlivyr5idp6HjiRuF9MUv9O7Hn69W-fptD8X5kD29A1LCXIprglud2rNveAYC_4vw9-MtiBaLYMJHMvbK7JuKHM4yZLRnIu1sAVNUOno_jegxVSZWilYtEtInhDUmbgW_sZslWF31xZTa_CwY8xGGBToo4Sav4A9RIA%2526flowName%253DGeneralOAuthFlow%2526as%253DS-953641765%25253A1795651244485613%2526client_id%253D123781743512-uo9kgak6rnu04eubu40oh551v3lk2dm5.apps.googleusercontent.com%2523%26dsh%3DS-953641765:1795651244485613%26flowName%3DGeneralOAuthLite%26o2v%3D1%26opparams%3D%25253F%26prompt%3Dselect_account%26rart%3DANgoxcd6RgLfno_iLraD3wolt2oyxzNtpYwOcnvj3O8VQGCZQ5avR2MXZtBT3nV0RLkPKS2elbt3oaPGgJszlWfESLMd7P0u_KX3ymPFCd9AlTkRfcTOSwg%26redirect_uri%3Dhttps://haksterai.com/api/auth/google/callback%26response_type%3Dcode%26scope%3Dopenid%2Bemail%2Bprofile%26service%3Dlso%26state%3DeyJub25jZSI6IjAzOTA4MDk2MTUzZDdhMzJmYWVmOTVkNzNiNDlmNDBlIiwicmVmIjoiIiwicmV0dXJuVG8iOiIifQ&state=eyJub25jZSI6IjAzOTA4MDk2MTUzZDdhMzJmYWVmOTVkNzNiNDlmNDBlIiwicmVmIjoiIiwicmV0dXJuVG8iOiIifQ
+  - contentinfo [ref=f5e40]:
+    - combobox [ref=f5e43] [cursor=pointer]:
+      - option "Afrikaans"
+      - option "azərbaycan"
+      - option "bosanski"
+      - option "català"
+      - option "Čeština"
+      - option "Cymraeg"
+      - option "Dansk"
+      - option "Deutsch"
+      - option "eesti"
+      - option "English (United Kingdom)"
+      - option "English (United States)" [selected]
+      - option "Español (España)"
+      - option "Español (Latinoamérica)"
+      - option "euskara"
+      - option "Filipino"
+      - option "Français (Canada)"
+      - option "Français (France)"
+      - option "Gaeilge"
+      - option "galego"
+      - option "Hrvatski"
+      - option "Indonesia"
+      - option "isiZulu"
+      - option "íslenska"
+      - option "Italiano"
+      - option "Kiswahili"
+      - option "latviešu"
+      - option "lietuvių"
+      - option "magyar"
+      - option "Melayu"
+      - option "Nederlands"
+      - option "norsk"
+      - option "o‘zbek"
+      - option "polski"
+      - option "Português (Brasil)"
+      - option "Português (Portugal)"
+      - option "română"
+      - option "shqip"
+      - option "Slovenčina"
+      - option "slovenščina"
+      - option "srpski (latinica)"
+      - option "Suomi"
+      - option "Svenska"
+      - option "Tiếng Việt"
+      - option "Türkçe"
+      - option "Ελληνικά"
+      - option "беларуская"
+      - option "български"
+      - option "кыргызча"
+      - option "қазақ тілі"
+      - option "македонски"
+      - option "монгол"
+      - option "Русский"
+      - option "српски (ћирилица)"
+      - option "Українська"
+      - option "ქართული"
+      - option "հայերեն"
+      - option "‫עברית‬‎"
+      - option "‫اردو‬‎"
+      - option "‫العربية‬‎"
+      - option "‫فارسی‬‎"
+      - option "አማርኛ"
+      - option "नेपाली"
+      - option "मराठी"
+      - option "हिन्दी"
+      - option "অসমীয়া"
+      - option "বাংলা"
+      - option "ਪੰਜਾਬੀ"
+      - option "ગુજરાતી"
+      - option "ଓଡ଼ିଆ"
+      - option "தமிழ்"
+      - option "తెలుగు"
+      - option "ಕನ್ನಡ"
+      - option "മലയാളം"
+      - option "සිංහල"
+      - option "ไทย"
+      - option "ລາວ"
+      - option "မြန်မာ"
+      - option "ខ្មែរ"
+      - option "한국어"
+      - option "中文（香港）"
+      - option "日本語"
+      - option "简体中文"
+      - option "繁體中文"
+    - list [ref=f5e44]:
+      - listitem [ref=f5e45]:
+        - link "Open Google Account Help Center (external, opens in a new window)" [ref=f5e46] [cursor=pointer]:
+          - /url: https://support.google.com/accounts?hl=en-US&p=account_iph
+          - text: Help
+      - listitem [ref=f5e47]:
+        - link "Privacy Policy (external, opens in a new window)" [ref=f5e48] [cursor=pointer]:
+          - /url: https://accounts.google.com/TOS?loc=US&hl=en-US&privacy=true
+          - text: Privacy
+      - listitem [ref=f5e49]:
+        - link "Google Terms of Service (external, opens in a new window)" [ref=f5e50] [cursor=pointer]:
+          - /url: https://accounts.google.com/TOS?loc=US&hl=en-US
+          - text: Terms

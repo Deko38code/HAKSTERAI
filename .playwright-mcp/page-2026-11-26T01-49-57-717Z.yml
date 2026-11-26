@@ -1,0 +1,225 @@
+- generic [active] [ref=f1e1]:
+  - banner [ref=f1e2]:
+    - navigation [ref=f1e3]:
+      - link "HaksterAI home" [ref=f1e4] [cursor=pointer]:
+        - /url: /
+        - img "HaksterAI logo" [ref=f1e5]
+        - generic [ref=f1e6]:
+          - generic [ref=f1e7]: haksterAi
+          - generic [ref=f1e8]: a part of PhantomIDE
+      - link "💬 Chat" [ref=f1e10] [cursor=pointer]:
+        - /url: /miniforge/
+        - generic [ref=f1e11]: 💬
+        - text: Chat
+      - generic [ref=f1e12]:
+        - link "🔑 Passkey" [ref=f1e13] [cursor=pointer]:
+          - /url: /passkey
+          - generic [ref=f1e14]: 🔑
+          - text: Passkey
+        - link "GitHub" [ref=f1e15] [cursor=pointer]:
+          - /url: https://github.com
+  - button "Fullscreen"
+  - main [ref=f1e20]:
+    - generic [ref=f1e22]:
+      - generic [ref=f1e23]:
+        - img "Hakster-AI — Hack smarter. AI stronger." [ref=f1e24]
+        - generic [ref=f1e25]:
+          - generic [ref=f1e29]: hakster
+          - generic [ref=f1e30]: v0.3.83 · always running
+        - heading "The agent that gets it done." [level=1] [ref=f1e31]: The agent thatgets it done.
+        - paragraph [ref=f1e32]: haksterAi is always running — reasoning through problems, executing tasks end-to-end, and telling you when the job's done. The top-tier autonomous agent for your terminal.
+      - generic [ref=f1e33]:
+        - button "Sign in with Google" [ref=f1e34] [cursor=pointer]
+        - button "Log in with Telegram" [ref=f1e40] [cursor=pointer]
+        - link "↓ Get haksterAi" [ref=f1e43] [cursor=pointer]:
+          - /url: "#install"
+          - generic [ref=f1e44]: ↓
+          - text: Get haksterAi
+        - link "⌨️ Terminal" [ref=f1e45] [cursor=pointer]:
+          - /url: /terminal
+          - generic [ref=f1e46]: ⌨️
+          - text: Terminal
+        - link "Read the docs →" [ref=f1e47] [cursor=pointer]:
+          - /url: "#docs"
+      - generic [ref=f1e48]:
+        - generic [ref=f1e49]: terminal — haksterAi
+        - generic [ref=f1e54]: ❯
+    - generic [ref=f1e59]:
+      - generic [ref=f1e60]:
+        - paragraph [ref=f1e61]: Hakster CLI · Paid Pro
+        - heading "Install in your terminal" [level=2] [ref=f1e62]
+        - paragraph [ref=f1e63]: Install the CLI, then sign in with the HaksterAI account that has Pro access. The install does not change your account or plan.
+      - generic [ref=f1e64]:
+        - generic [ref=f1e65]:
+          - generic [ref=f1e66]: Quick install · macOS / Linux
+          - code [ref=f1e68]: curl -fsSL https://haksterai.com/install.sh | bash
+        - generic [ref=f1e69]:
+          - generic [ref=f1e70]: Quick install · Windows 10 / 11
+          - code [ref=f1e72]: irm https://haksterai.com/install.ps1 | iex
+        - generic [ref=f1e73]:
+          - generic [ref=f1e74]: Install the released package with npm · any OS
+          - code [ref=f1e76]: curl -fsSL https://haksterai.com/cli/pkg.tar.gz | tar xz -C ~/.local/share cd ~/.local/share/cli npm install npm link
+        - generic [ref=f1e77]:
+          - generic [ref=f1e78]: Install from source with npm
+          - code [ref=f1e80]: git clone --depth 1 https://github.com/Deko38code/haksterAi.git ~/.local/share/haksterai-cli cd ~/.local/share/haksterai-cli/cli npm install npm link
+      - paragraph [ref=f1e81]:
+        - text: The quick installers check what your machine has and bring anything missing (Node.js, Bun), so no manual setup is needed. The npm package install needs Node.js 20+ but no Git; Git is only required for the source install. After installation, run
+        - code [ref=f1e82]: hakster --help
+        - text: to see CLI commands.
+    - generic [ref=f1e84]:
+      - generic [ref=f1e85]:
+        - generic [ref=f1e86]:
+          - paragraph [ref=f1e87]: The bot catalog
+          - heading "Meet the bots" [level=2] [ref=f1e88]
+          - paragraph [ref=f1e89]: Every name you already know, running inside one console — no API keys, no per-token billing. Pick a bot, talk to it, keep the thread.
+        - link "Browse all 10,000+ bots →" [ref=f1e90] [cursor=pointer]:
+          - /url: /miniforge/app/
+      - generic [ref=f1e91]:
+        - link "Open ChatGPT" [ref=f1e92] [cursor=pointer]:
+          - /url: /miniforge/app/?ompBot=chatgpt
+          - img "ChatGPT card in the HaksterAI bot catalog" [ref=f1e93]
+          - generic [ref=f1e94]:
+            - paragraph [ref=f1e95]: The general-purpose workhorse, 3M conversations deep.
+            - generic [ref=f1e96]: Open bot →
+        - link "Open Claude 3.5 Sonnet" [ref=f1e97] [cursor=pointer]:
+          - /url: /miniforge/app/?ompBot=claude-3-5-sonnet
+          - img "Claude 3.5 Sonnet card in the HaksterAI bot catalog" [ref=f1e98]
+          - generic [ref=f1e99]:
+            - paragraph [ref=f1e100]: Writing and code that reads like a human wrote it.
+            - generic [ref=f1e101]: Open bot →
+        - link "Open Gemini 2.5 Pro" [ref=f1e102] [cursor=pointer]:
+          - /url: /miniforge/app/?ompBot=gemini-experimental-2-5
+          - img "Gemini 2.5 Pro card in the HaksterAI bot catalog" [ref=f1e103]
+          - generic [ref=f1e104]:
+            - paragraph [ref=f1e105]: Google's long-context model, handy for big pasted documents.
+            - generic [ref=f1e106]: Open bot →
+        - link "Open Grok 4" [ref=f1e107] [cursor=pointer]:
+          - /url: /miniforge/app/?ompBot=grok-4
+          - img "Grok 4 card in the HaksterAI bot catalog" [ref=f1e108]
+          - generic [ref=f1e109]:
+            - paragraph [ref=f1e110]: xAI's model, current-events aware and blunt about it.
+            - generic [ref=f1e111]: Open bot →
+        - link "Open DeepSeek R1" [ref=f1e112] [cursor=pointer]:
+          - /url: /miniforge/app/?ompBot=deepseek-r1
+          - img "DeepSeek R1 card in the HaksterAI bot catalog" [ref=f1e113]
+          - generic [ref=f1e114]:
+            - paragraph [ref=f1e115]: Open reasoning model. Same class of answer, a fraction of the bill.
+            - generic [ref=f1e116]: Open bot →
+        - link "Open PenTest Forge" [ref=f1e117] [cursor=pointer]:
+          - /url: /miniforge/app/?ompBot=pentest-forge
+          - img "PenTest Forge card in the HaksterAI bot catalog" [ref=f1e118]
+          - generic [ref=f1e119]:
+            - paragraph [ref=f1e120]: "Ethical-hacking academy: 18 modules, live terminal, tool lab."
+            - generic [ref=f1e121]: Open bot →
+        - link "Open Flux Schnell" [ref=f1e122] [cursor=pointer]:
+          - /url: /miniforge/app/?ompBot=flux-schnell-image-generator
+          - img "Flux Schnell card in the HaksterAI bot catalog" [ref=f1e123]
+          - generic [ref=f1e124]:
+            - paragraph [ref=f1e125]: Text prompt to realistic image in a couple of seconds.
+            - generic [ref=f1e126]: Open bot →
+        - link "Open Text Finisher" [ref=f1e127] [cursor=pointer]:
+          - /url: /miniforge/app/?ompBot=finisher
+          - img "Text Finisher card in the HaksterAI bot catalog" [ref=f1e128]
+          - generic [ref=f1e129]:
+            - paragraph [ref=f1e130]: Paste a half-written paragraph, get it carried to the end.
+            - generic [ref=f1e131]: Open bot →
+      - generic [ref=f1e133]:
+        - generic [ref=f1e134]:
+          - heading "Why it stays cheap" [level=3] [ref=f1e135]
+          - paragraph [ref=f1e136]: Most of these bots don't call the expensive closed APIs. They run on open models through our own endpoint — DeepSeek above all — so a conversation costs us cents instead of dollars, and the catalog runs without a per-token meter attached to your account. Big-model names are still there when the job needs one; the default route is the cheap one, on purpose.
+        - generic [ref=f1e137]:
+          - generic [ref=f1e138]: $ default engine DeepSeek
+          - generic [ref=f1e139]: $ routing our own endpoint
+          - generic [ref=f1e140]: $ per-token meter off
+    - complementary "Shared sponsored ads popup" [ref=f1e141]:
+      - generic [ref=f1e142]:
+        - generic [ref=f1e143]: Sponsored ads · Phantom IDE + HaksterAI
+        - button "Expand sponsored ad" [ref=f1e144] [cursor=pointer]: +
+    - generic [ref=f1e147]:
+      - generic [ref=f1e148]:
+        - generic [ref=f1e149]: 🎁 REFERRAL PROGRAM
+        - heading "Invite friends. Both get free tokens." [level=2] [ref=f1e151]
+        - paragraph [ref=f1e152]:
+          - text: Share your personal link. When a friend signs in with Google through it,
+          - generic [ref=f1e153]: they get 2,500 tokens
+          - text: instantly, and
+          - generic [ref=f1e154]: you get 10,000 tokens
+          - text: per signup — stackable, no caps.
+        - generic [ref=f1e155]: Tokens spend on agent runs, image generation, and terminal time.
+      - generic [ref=f1e157]:
+        - generic [ref=f1e158]:
+          - generic [ref=f1e159]: 💬
+          - generic [ref=f1e160]:
+            - generic [ref=f1e161]: 1. Sign in with Google
+            - generic [ref=f1e162]: Your referral link is generated automatically.
+        - generic [ref=f1e163]:
+          - generic [ref=f1e164]: 📤
+          - generic [ref=f1e165]:
+            - generic [ref=f1e166]: 2. Share your link
+            - generic [ref=f1e167]: Post it anywhere — Telegram, X, Discord.
+        - link "🔐 Sign in & get my link" [ref=f1e168] [cursor=pointer]:
+          - /url: /api/auth/google/redirect
+          - generic [ref=f1e169]: 🔐
+          - text: Sign in & get my link
+    - generic [ref=f1e170]:
+      - generic [ref=f1e171]:
+        - generic [ref=f1e172]:
+          - generic [ref=f1e173]: 🛒 MARKETPLACE
+          - heading "Plans, catalog sites, and the site market" [level=2] [ref=f1e175]
+          - paragraph [ref=f1e176]: The same cards the HaksterAI bot shows in Telegram. Prices are read live from Stripe, so what you see here is exactly what checkout charges.
+        - link "Open the full marketplace →" [ref=f1e177] [cursor=pointer]:
+          - /url: /marketplace
+      - generic [ref=f1e178]: Loading live prices…
+      - paragraph [ref=f1e180]:
+        - text: Already subscribed?
+        - link "Manage or cancel your plan in the billing portal →" [ref=f1e181] [cursor=pointer]:
+          - /url: https://billing.stripe.com/p/login/fZu3cv4lqaqncMIauIbMQ00
+      - generic [ref=f1e182]:
+        - generic [ref=f1e183]:
+          - generic [ref=f1e184]: Our catalog
+          - heading "Choose any site from our catalog, fully built" [level=3] [ref=f1e185]
+          - paragraph [ref=f1e186]: Pick a build we have already designed and we finish it for you — real pages, your brand, your domain, launched. One payment — a lifetime subscription, no renewals.
+          - generic [ref=f1e187]:
+            - generic [ref=f1e188]:
+              - strong [ref=f1e189]: $999
+              - text: lifetime subscription
+            - generic [ref=f1e190]: Fully built
+            - generic [ref=f1e191]: Published + verified
+          - list [ref=f1e192]:
+            - listitem [ref=f1e193]: Loading catalog…
+          - link "Request this build →" [ref=f1e194] [cursor=pointer]:
+            - /url: https://rmt.haksterai.com/apps/sites/topreels-3230f40cc3/index.html#site-market
+          - paragraph [ref=f1e195]: Builds are confirmed by the owner before work starts — nothing is charged by this page.
+        - generic [ref=f1e196]:
+          - generic [ref=f1e197]: Site market
+          - heading "Buy or bid on a live site" [level=3] [ref=f1e198]
+          - generic [ref=f1e199]: Loading live listings…
+          - link "Open the site market →" [ref=f1e200] [cursor=pointer]:
+            - /url: https://rmt.haksterai.com/apps/sites/topreels-3230f40cc3/index.html#site-market
+  - contentinfo [ref=f1e201]:
+    - generic [ref=f1e202]:
+      - generic [ref=f1e203]:
+        - generic [ref=f1e204]: haksterAi
+        - generic [ref=f1e206]:
+          - link "💬 Chat" [ref=f1e207] [cursor=pointer]:
+            - /url: /miniforge/
+          - link "GitHub" [ref=f1e208] [cursor=pointer]:
+            - /url: https://github.com
+        - paragraph [ref=f1e209]: © 2026 haksterAi. Built for the terminal.
+      - generic [ref=f1e210]:
+        - paragraph [ref=f1e211]:
+          - generic [ref=f1e212]: © 2026 haksterAi.
+          - generic [aria-hidden] [ref=f1e213]: "|"
+          - link "Built and powered by Phantom IDE. Visit phantomide.com." [ref=f1e214] [cursor=pointer]:
+            - /url: https://phantomide.com/
+            - generic [aria-hidden] [ref=f1e215]: 👻
+            - generic [ref=f1e216]: Built and powered by
+            - generic [ref=f1e217]: PHANTOM IDE
+            - generic [ref=f1e218]: phantomide.com ↗
+        - paragraph [ref=f1e219]:
+          - text: HaksterAI — Powered by
+          - link "PhantomIDE.com" [ref=f1e220] [cursor=pointer]:
+            - /url: https://phantomide.com
+  - status:
+    - button "Update held — a CLI session is attached — open for details" [ref=f1e221] [cursor=pointer]:
+      - generic [aria-hidden] [ref=f1e223]: ◂

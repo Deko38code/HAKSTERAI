@@ -1,0 +1,58 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - link "HaksterAI home" [ref=e3] [cursor=pointer]:
+      - /url: https://haksterai.com/
+      - generic [ref=e5]: HaksterAI-Bots
+    - generic [ref=e6]:
+      - link "Discover" [ref=e7] [cursor=pointer]:
+        - /url: "#"
+      - link "Create a bot" [ref=e8] [cursor=pointer]:
+        - /url: "#"
+      - button "🌙" [ref=e9] [cursor=pointer]
+      - button "Google" [ref=e10] [cursor=pointer]
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]: Now Live — 10,000+ HaksterAI-Bots
+      - heading "Meet Your Next AI Bot" [level=1] [ref=e20]: Meet Your NextAI Bot
+      - paragraph [ref=e21]: Explore more than 10,000 HaksterAI-Bots for conversation, coding, creativity, research, and more. Open a bot and start chatting.
+      - generic [ref=e22]:
+        - button "🔍 Explore Apps" [ref=e23] [cursor=pointer]
+        - button "🤖 Create a bot" [ref=e24] [cursor=pointer]
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - generic [ref=e27]: —
+          - generic [ref=e28]: Apps
+        - generic [ref=e29]:
+          - generic [ref=e30]: —
+          - generic [ref=e31]: Conversations
+        - generic [ref=e32]:
+          - generic [ref=e33]: —
+          - generic [ref=e34]: Users
+    - generic [ref=e35]:
+      - generic [ref=e36]:
+        - text: 🔍
+        - textbox "Search 10,000+ AI apps..." [ref=e37]
+      - generic [ref=e38]:
+        - button "All" [ref=e39] [cursor=pointer]
+        - button "🤖 Chatbots" [ref=e40] [cursor=pointer]
+        - button "⚡ Mini Apps" [ref=e41] [cursor=pointer]
+        - button "✍️ Text" [ref=e42] [cursor=pointer]
+        - button "🎨 Image" [ref=e43] [cursor=pointer]
+    - generic [ref=e46]:
+      - heading "✨ Just Added" [level=2] [ref=e47]
+      - button "🔄 Refresh" [ref=e48] [cursor=pointer]
+    - generic [ref=e50]:
+      - generic [ref=e51]:
+        - heading "🔥 Trending" [level=2] [ref=e52]
+        - combobox [ref=e53]:
+          - option "Most Popular" [selected]
+          - option "Trending This Week"
+          - option "Just Added"
+          - option "Recently Updated"
+          - option "Newest"
+          - option "Featured"
+      - paragraph [ref=e57]: Loading bots…
+  - status:
+    - button "miniforge is up to date. Open the update status." [ref=e58] [cursor=pointer]:
+      - generic [aria-hidden] [ref=e59]: 👻
+      - generic [aria-hidden] [ref=e60]: ◂
