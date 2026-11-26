@@ -179,9 +179,15 @@ test('the Windows installer installs the renderer for this machine', () => {
   assert.ok(/@opentui\/core-win32-\$otArch/.test(ps1), 'install.ps1 no longer names the renderer from the architecture');
   assert.ok(/OSArchitecture/.test(ps1), 'the architecture is no longer read from the runtime');
   assert.ok(/Arm64/.test(ps1), 'an ARM64 Surface is no longer handled');
-  assert.ok(/Get-Content \$otCore -Raw \| ConvertFrom-Json/.test(ps1), 'the renderer version is no longer matched to the installed @opentui/core');
-  assert.ok(/Test-Path \(Join-Path \$p 'package\.json'\)/.test(ps1), 'the installer no longer checks whether the renderer is already present');
-  assert.ok(/npm install -g /.test(ps1), 'a failed renderer install no longer gives the exact command');
+  assert.ok(/Get-Content \$otCore -Raw \| ConvertFrom-Json/.test(ps1), 'the renderer version is no longer read from the installed @opentui/core');
+  // Presence is not proof: a 0.3.4 stub beside a 0.9.9 core is exactly the
+  // "input bar, no panels" Surface Pro copy, so the installer compares the two
+  // versions and repairs a mismatch instead of reporting it as installed.
+  assert.ok(/\$otHave -eq \$otVer/.test(ps1), 'the installer no longer compares the renderer version with @opentui/core');
+  assert.ok(/would not load, so it is replaced/.test(ps1), 'a version-mismatched renderer is no longer repaired');
+  assert.ok(/@\('install', '--prefix', \$otAppDir/.test(ps1), "the renderer is no longer installed into the CLI's own directory");
+  assert.ok(/the CLI app went missing during the renderer step/.test(ps1), 'a reify that removes the app is no longer repaired');
+  assert.ok(/npm install --no-save --no-package-lock/.test(ps1), 'a failed renderer install no longer gives the exact command');
 });
 
 test('the Linux/macOS installer does the same, musl included', () => {
@@ -191,6 +197,7 @@ test('the Linux/macOS installer does the same, musl included', () => {
   assert.ok(/aarch64\|arm64\) OT_ARCH=arm64/.test(sh), 'arm64 is no longer mapped');
   assert.ok(/npm install -g --prefix/.test(sh), 'the renderer is no longer installed where the CLI resolves from');
   assert.ok(/dashboard renderer could not be installed/.test(sh), 'a failed renderer install is no longer reported');
+  assert.ok(/\[ "\$OT_HAVE" = "\$OT_VER" \]/.test(sh), 'install.sh no longer compares the renderer version with @opentui/core');
 });
 
 // ── the renderer version, and the Bun that renderer needs ─────────────────

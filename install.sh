@@ -296,22 +296,40 @@ if [ -n "$OT_OS" ] && [ -n "$OT_ARCH" ]; then
   done
   if [ -z "$OT_ROOT" ]; then
     say "⚠ could not tell where the CLI was installed — the dashboard renderer was not checked"
-  elif [ -f "$OT_ROOT/$OT_NAME/package.json" ]; then
-    say "✓ dashboard renderer present ($OT_NAME)"
   else
     OT_VER=""
     if [ -f "$OT_ROOT/@opentui/core/package.json" ] && command -v node >/dev/null 2>&1; then
       OT_VER=$(node -e "try{process.stdout.write(String(require('$OT_ROOT/@opentui/core/package.json').version))}catch(e){}" 2>/dev/null || true)
     fi
-    OT_SPEC="$OT_NAME"; [ -n "$OT_VER" ] && OT_SPEC="$OT_NAME@$OT_VER"
-    say "… installing the dashboard renderer for this machine ($OT_SPEC)"
-    if npm install -g --prefix "$(dirname "$OT_ROOT")" --no-audit --no-fund "$OT_SPEC" >/dev/null 2>&1 \
-       && [ -f "$OT_ROOT/$OT_NAME/package.json" ]; then
-      say "✓ dashboard renderer installed ($OT_NAME)"
+    # Present is not the same as usable: the renderer must carry the same version
+    # as the @opentui/core that loads it. A copy updated without its renderer (core
+    # 0.9.9 beside a 0.3.4 stub) loads a native library the core cannot use, so the
+    # dashboard dies at the first frame. Compare the two, then repair a mismatch
+    # instead of reporting presence as success (§10, §13).
+    OT_HAVE=""
+    if [ -f "$OT_ROOT/$OT_NAME/package.json" ] && command -v node >/dev/null 2>&1; then
+      OT_HAVE=$(node -e "try{process.stdout.write(String(require('$OT_ROOT/$OT_NAME/package.json').version))}catch(e){}" 2>/dev/null || true)
+    fi
+    if [ -n "$OT_HAVE" ] && { [ -z "$OT_VER" ] || [ "$OT_HAVE" = "$OT_VER" ]; }; then
+      say "✓ dashboard renderer present ($OT_NAME $OT_HAVE)"
     else
-      say "⚠ the dashboard renderer could not be installed — the CLI still runs, with its built-in Ink UI"
-      say "  To get the full dashboard, run this once and start the CLI again:"
-      say "    npm install -g --prefix \"$(dirname \"$OT_ROOT\")\" $OT_SPEC"
+      if [ -n "$OT_HAVE" ] && [ -n "$OT_VER" ]; then
+        say "… the dashboard renderer is $OT_HAVE but @opentui/core is $OT_VER — it would not load, so it is replaced"
+      fi
+      OT_SPEC="$OT_NAME"; [ -n "$OT_VER" ] && OT_SPEC="$OT_NAME@$OT_VER"
+      say "… installing the dashboard renderer for this machine ($OT_SPEC)"
+      npm install -g --prefix "$(dirname "$OT_ROOT")" --no-audit --no-fund "$OT_SPEC" >/dev/null 2>&1 || true
+      OT_HAVE=""
+      if [ -f "$OT_ROOT/$OT_NAME/package.json" ] && command -v node >/dev/null 2>&1; then
+        OT_HAVE=$(node -e "try{process.stdout.write(String(require('$OT_ROOT/$OT_NAME/package.json').version))}catch(e){}" 2>/dev/null || true)
+      fi
+      if [ -n "$OT_HAVE" ] && { [ -z "$OT_VER" ] || [ "$OT_HAVE" = "$OT_VER" ]; }; then
+        say "✓ dashboard renderer installed ($OT_NAME $OT_HAVE)"
+      else
+        say "⚠ the dashboard renderer could not be installed — the CLI still runs, with its built-in Ink UI"
+        say "  To get the full dashboard, run this once and start the CLI again:"
+        say "    npm install -g --prefix \"$(dirname \"$OT_ROOT\")\" $OT_SPEC"
+      fi
     fi
   fi
 fi

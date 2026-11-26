@@ -432,9 +432,14 @@
   # per-OS/CPU package npm publishes as an OPTIONAL dependency. A prefix install
   # or an npm config that skips optional packages leaves the dashboard dying the
   # instant it opens, with nothing useful on screen (Surface Pro, 2026-11-26).
-  # The name comes from the machine's real architecture, never a guess, and it is
-  # installed only when the lookup below finds it absent — nothing here replaces
-  # a package that is already there.
+  # The name comes from the machine's real architecture, never a guess.
+  #
+  # Present is not the same as usable: the renderer must carry the SAME version
+  # as the @opentui/core that loads it. A copy updated without its renderer (core
+  # 0.9.9 beside a 0.3.4 stub) loads a native library the core cannot use, so the
+  # dashboard dies at the first frame — the Surface Pro's "input bar, no panels"
+  # (owner, 2026-11-26). This block compares versions and repairs a mismatch
+  # instead of reporting presence as success (§10, §13, §50.1).
   $otArch = 'x64'
   try {
     if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { $otArch = 'arm64' }
@@ -442,32 +447,62 @@
     if ("$env:PROCESSOR_ARCHITECTURE" -match 'ARM64') { $otArch = 'arm64' }
   }
   $otName = "@opentui/core-win32-$otArch"
+  $otAppDir = Join-Path $NpmPrefix 'node_modules\hakster-cli'
   $otHere = @(
-    (Join-Path $NpmPrefix ("node_modules\@opentui\core-win32-" + $otArch)),
-    (Join-Path $NpmPrefix ("node_modules\hakster-cli\node_modules\@opentui\core-win32-" + $otArch))
+    (Join-Path $otAppDir ("node_modules\@opentui\core-win32-" + $otArch)),
+    (Join-Path $NpmPrefix ("node_modules\@opentui\core-win32-" + $otArch))
   )
-  $otPresent = $false
-  foreach ($p in $otHere) { if (Test-Path (Join-Path $p 'package.json')) { $otPresent = $true } }
-  if ($otPresent) {
-    Say "OK the dashboard renderer for this machine is installed ($otName)"
+  function Get-PkgVersion([string]$Dir) {
+    $f = Join-Path $Dir 'package.json'
+    if (-not (Test-Path $f)) { return '' }
+    try { return [string]((Get-Content $f -Raw | ConvertFrom-Json).version) } catch { return '' }
+  }
+  $otCore = Join-Path $NpmPrefix 'node_modules\@opentui\core\package.json'
+  if (-not (Test-Path $otCore)) { $otCore = Join-Path $otAppDir 'node_modules\@opentui\core\package.json' }
+  $otVer = ''
+  if (Test-Path $otCore) {
+    try { $otVer = [string]((Get-Content $otCore -Raw | ConvertFrom-Json).version) } catch { $otVer = '' }
+  }
+  $otHave = ''
+  foreach ($p in $otHere) { $v = Get-PkgVersion $p; if ($v) { $otHave = $v; break } }
+  $otMatches = $otHave -and ((-not $otVer) -or ($otHave -eq $otVer))
+  if ($otMatches) {
+    Say "OK the dashboard renderer for this machine is installed ($otName $otHave)"
   } else {
-    $otCore = Join-Path $NpmPrefix 'node_modules\@opentui\core\package.json'
-    $otVer = ''
-    if (Test-Path $otCore) {
-      try { $otVer = [string]((Get-Content $otCore -Raw | ConvertFrom-Json).version) } catch { $otVer = '' }
+    if ($otHave -and $otVer) {
+      Say ".. the dashboard renderer is $otHave but @opentui/core is $otVer - it would not load, so it is replaced"
     }
     if ($otVer) { $otSpec = "$otName@$otVer" } else { $otSpec = $otName }
     Say ".. installing the dashboard renderer for this machine ($otSpec)"
-    $otCode = Invoke-Npm @('install', '--prefix', $NpmPrefix, '--no-audit', '--no-fund', '--no-save', $otSpec)
-    $otPresent = $false
-    foreach ($p in $otHere) { if (Test-Path (Join-Path $p 'package.json')) { $otPresent = $true } }
-    if ($otCode -eq 0 -and $otPresent) {
-      Say "OK dashboard renderer installed ($otName)"
+    # Installed into the CLI's own directory: that is where it resolves from, and
+    # it is exactly what the launcher prints as the fix (`cd <app> ; npm install
+    # ...`). A `npm install -g` can land in a prefix this copy is not read from
+    # (cli/index.js nativeFix, 2026-11-26), and a prefix-level install on Windows
+    # can reify a tree the app does not resolve through.
+    if (Test-Path (Join-Path $otAppDir 'package.json')) {
+      $null = Invoke-Npm @('install', '--prefix', $otAppDir, '--no-audit', '--no-fund', '--no-save', '--no-package-lock', $otSpec)
+    }
+    $otHave = ''
+    foreach ($p in $otHere) { $v = Get-PkgVersion $p; if ($v) { $otHave = $v; break } }
+    if (-not ($otHave -and ((-not $otVer) -or ($otHave -eq $otVer)))) {
+      $null = Invoke-Npm @('install', '--prefix', $NpmPrefix, '--no-audit', '--no-fund', '--no-save', $otSpec)
+      $otHave = ''
+      foreach ($p in $otHere) { $v = Get-PkgVersion $p; if ($v) { $otHave = $v; break } }
+    }
+    if ($otHave -and ((-not $otVer) -or ($otHave -eq $otVer))) {
+      Say "OK dashboard renderer installed ($otName $otHave)"
     } else {
       Say '! the dashboard renderer could not be installed - the CLI still runs, with its built-in Ink UI.'
       Say '  To get the full dashboard, run this once and start the CLI again:'
-      Say ("    npm install --prefix `"" + $NpmPrefix + "`" --no-save " + $otSpec)
+      Say ("    cd `"" + $otAppDir + "`" ; npm install --no-save --no-package-lock " + $otSpec)
     }
+  }
+  # The renderer step must never cost the install itself: if a reify removed the
+  # app, it is put back from the package that was just packed (§49.1, §50.5).
+  if (-not (Test-Path (Join-Path $otAppDir 'index.js'))) {
+    Say '.. the CLI app went missing during the renderer step - restoring it'
+    $null = Invoke-Npm @('install', '-g', $pkgPath, '--prefix', $NpmPrefix, '--no-audit', '--no-fund')
+    if (-not (Test-Path (Join-Path $otAppDir 'index.js'))) { Say '! the CLI app is still missing - run the installer again' }
   }
 
   # ── Bun (the full TUI) ──────────────────────────────────────────────────
