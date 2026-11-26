@@ -595,6 +595,22 @@ program
   .description('HAKSTER-AI CLI — manage files, sessions, and agent interactions from the terminal')
   .version(pkg.version);
 
+// ── Every start puts this box in the admin, under the account it signs in as ──
+// The admin's device list only ever heard from the web client, so a CLI box was
+// invisible there on any plan (owner, 2026-11-26: "make sure you add my box in
+// admin to my enterprise plan owner"). Fire-and-forget and bounded: the CLI
+// starts exactly as before, an offline or unsigned machine registers nothing,
+// and the key travels in a header only, never in output or argv (§23, §31).
+program.hook('preAction', () => {
+  try {
+    const cfg = loadConfig();
+    if (!cfg.server || !cfg.apiKey) return;
+    const { registerMachine } = require('./src/machine-registry');
+    registerMachine({ server: cfg.server, apiKey: cfg.apiKey, version: pkg.version, timeoutMs: 2500 })
+      .catch(() => { /* registration is bookkeeping, never a reason to fail a command */ });
+  } catch { /* older tree / no config: nothing to register */ }
+});
+
 // ── update: check now, download and stage; the next launch applies it ──────
 program
   .command('update')
@@ -3096,7 +3112,7 @@ program
       // alternate screen; the TUI is not running React DevTools, so use the
       // production build and keep the screen clean.
       process.env.NODE_ENV = process.env.NODE_ENV || 'production';
-      import('./ui.mjs').then(mod => {
+      const openInk = () => import('./ui.mjs').then(mod => {
         try { mod.start(); }
         catch (err) { console.error(err); process.exit(1); }
       }).catch(err => {
@@ -3104,6 +3120,31 @@ program
         console.error(err && err.message ? err.message : err);
         process.exit(1);
       });
+      // A fallback install is the one that most needs the newest build, because
+      // the fix for whatever sent it here ships in that build — and cli/ui.mjs is
+      // a frozen bundle with no updater of its own. Without this, a machine that
+      // lands on the fallback never checks, never stages and never applies, so it
+      // is stuck on the old code for good (found 2026-11-26 on the Surface Pro:
+      // "it shows input bar tui only", while the fix that opens the dashboard was
+      // already published). Bounded and best-effort: an offline machine opens the
+      // TUI unchanged, and the apply refuses a source checkout exactly like every
+      // other path (§43.4). The restart is the operator's keystroke, never ours
+      // (§45.1) — this path only installs and says so.
+      (async () => {
+        let updater = null;
+        try { updater = require('./src/updater'); } catch { /* older tree */ }
+        if (!updater || typeof updater.checkForUpdate !== 'function') return;
+        process.stdout.write(`${C.dim}· checking for a newer build…${C.reset}\r`);
+        const res = await updater.checkForUpdate({ timeoutMs: 5000 });
+        process.stdout.write(`${' '.repeat(34)}\r`);
+        if (!res || res.status !== 'staged') return;
+        const applied = typeof updater.applyPending === 'function' ? updater.applyPending() : null;
+        if (applied && applied.applied) {
+          console.log(`${C.green}✔ Update installed · v${applied.version}${C.reset} ${C.dim}— restart the CLI to see it${C.reset}`);
+        } else if (applied && applied.reason && applied.reason !== 'current') {
+          console.log(`${C.dim}⬆ v${res.version} is staged — re-run the installer to apply it here.${C.reset}`);
+        }
+      })().catch(() => { /* offline or no updater: open as it is */ }).finally(openInk);
     };
 
     if (process.versions.bun) {

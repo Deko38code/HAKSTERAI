@@ -134,7 +134,12 @@ test('the launcher consults the Windows locations before falling back', () => {
 
 test('the Windows installer recognises an existing Bun and says what to do', () => {
   const ps1 = fs.readFileSync(path.join(CLI_DIR, '..', 'install.ps1'), 'utf8');
-  assert.ok(/\.bun\\bin\\bun\.exe/.test(ps1), 'install.ps1 no longer knows about bun.sh/install.ps1');
+  // The locator covers every place a Windows Bun lands (PATH, our runtime, .bun,
+  // scoop, winget, npm -g, Program Files). Assert the capability, not one spelling:
+  // bun.sh/install.ps1 writes %USERPROFILE%\.bun\bin, and that must be covered.
+  assert.ok(/function Find-Bun/i.test(ps1), 'install.ps1 has no Bun locator');
+  assert.ok(/\.bun\\bin/.test(ps1), 'install.ps1 no longer checks %USERPROFILE%\\.bun\\bin');
+  assert.ok(/bun\.exe/.test(ps1), 'install.ps1 no longer looks for bun.exe');
   assert.ok(/irm bun\.sh\/install\.ps1/.test(ps1), 'install.ps1 no longer gives the fallback command');
 });
 

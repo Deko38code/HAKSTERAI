@@ -44,6 +44,33 @@
     throw $msg
   }
 
+  # Mirrors cli/src/runtime-paths.js findBun(): the machine's own Bun wins, then
+  # the one this installer brings. A fresh Bun install is usually missing from the
+  # PATH of the session the CLI is later started from, so the well-known Windows
+  # locations are checked directly — without that, an install says "no Bun" on a
+  # machine that has one and the operator is sent to the dashboard-less Ink UI
+  # (Surface Pro, 2026-11-26). Read-only: this never installs or edits anything.
+  function Find-Bun {
+    $onPath = Get-Command bun -ErrorAction SilentlyContinue
+    if ($onPath) { return [string]$onPath.Source }
+    $dirs = @(
+      (Join-Path $Runtime 'bun\node_modules\bun\bin'),
+      (Join-Path $Runtime 'bun\node_modules\.bin'),
+      (Join-Path $HOME '.bun\bin'),
+      (Join-Path $HOME 'scoop\shims')
+    )
+    if ($env:LOCALAPPDATA) { $dirs += (Join-Path $env:LOCALAPPDATA 'Programs\bun') }
+    if ($env:APPDATA) { $dirs += (Join-Path $env:APPDATA 'npm') }
+    if ($env:ProgramFiles) { $dirs += (Join-Path $env:ProgramFiles 'Bun') }
+    foreach ($d in $dirs) {
+      foreach ($n in @('bun.exe', 'bun.cmd', 'bun.bat')) {
+        $full = Join-Path $d $n
+        if (Test-Path $full) { return $full }
+      }
+    }
+    return ''
+  }
+
   New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
   Say "HaksterAI CLI - from $Origin"
 
@@ -73,12 +100,9 @@
   } else {
     Say '  X  node - a Node 20+ runtime comes with this install (one time, about 32 MB)'
   }
-  if (Get-Command bun -ErrorAction SilentlyContinue) {
-    Say '  OK bun on PATH - our TUI runs on it'
-  } elseif (Test-Path (Join-Path $Runtime 'bun\node_modules\bun\bin\bun.exe')) {
-    Say "  OK bun in $Runtime\bun - our TUI runs on it"
-  } elseif (Test-Path (Join-Path $HOME '.bun\bin\bun.exe')) {
-    Say "  OK bun in $HOME\.bun\bin - our TUI runs on it"
+  $bunFound = Find-Bun
+  if ($bunFound) {
+    Say "  OK bun ($bunFound) - our TUI runs on it"
   } else {
     Say '  X  bun - installed below; without it the CLI uses its built-in Ink UI'
   }
@@ -245,25 +269,34 @@
   # ── Bun (the full TUI) ──────────────────────────────────────────────────
   $bunDir = Join-Path $Runtime 'bun'
   $bunExe = Join-Path $bunDir 'node_modules\bun\bin\bun.exe'
-  $officialBun = Join-Path $HOME '.bun\bin\bun.exe'
-  $bunOnPath = Get-Command bun -ErrorAction SilentlyContinue
-  if ($bunOnPath) {
-    Say "OK Bun is already here ($($bunOnPath.Source)) - using it"
-  } elseif (Test-Path $bunExe) {
-    Say "OK Bun already installed in $bunDir - using it"
-  } elseif (Test-Path $officialBun) {
-    # Bun's own installer writes here; a fresh install is often missing from
-    # PATH in the session the CLI is started from.
-    Say "OK Bun is already here ($officialBun) - using it"
+  $bunFound = Find-Bun
+  if ($bunFound) {
+    # Bun's own installer writes to ~\.bun\bin, which is often missing from PATH
+    # in the session the CLI is started from — Find-Bun already covers it.
+    Say "OK Bun is already here ($bunFound) - using it"
   } else {
     Say '.. installing Bun for the full TUI (one time)'
     & npm install --prefix $bunDir --omit=dev --no-audit --no-fund "bun@$BunVersion" 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0 -and (Test-Path $bunExe)) { Say "OK Bun installed in $bunDir" }
     else {
-      Say '! Bun could not be installed by npm.'
-      Say '  Without Bun the CLI opens its simpler built-in Ink UI instead of the dashboard.'
-      Say '  To get the full dashboard, run this once and start the CLI again:'
-      Say '    irm bun.sh/install.ps1 | iex'
+      # npm is the quiet path; Bun's own installer is the one that always works.
+      # This is the vendor's documented Windows install, and it is announced
+      # before it runs — never a silent download (owner, 2026-11-26: a paid
+      # machine must come up with the dashboard, "check if users have whats
+      # needed if not install").
+      Say '! npm could not install Bun - using Bun''s own installer (one time, announced here first)'
+      try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -Command "irm bun.sh/install.ps1 | iex" 2>$null | Out-Null
+      } catch { }
+      $bunFound = Find-Bun
+      if ($bunFound) {
+        Say "OK Bun installed ($bunFound) - the dashboard TUI will open"
+      } else {
+        Say '! Bun could not be installed automatically.'
+        Say '  Without Bun the CLI opens its simpler built-in Ink UI instead of the dashboard.'
+        Say '  To get the full dashboard, run this once and start the CLI again:'
+        Say '    irm bun.sh/install.ps1 | iex'
+      }
     }
   }
 
