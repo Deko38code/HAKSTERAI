@@ -3157,12 +3157,22 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
     line(`Tokens all time  in ${fmtNum(data.tokenUsage && data.tokenUsage.inputTokens)} \xB7 out ${fmtNum(data.tokenUsage && data.tokenUsage.outputTokens)} \xB7 tool calls ${fmtNum(data.tokenUsage && data.tokenUsage.toolCalls)} \xB7 last ${since(data.tokenUsage && data.tokenUsage.lastUsedAt)}`, "gray"),
     line(`Token balance ${fmtNum(data.tokenBalance)} \xB7 live: ${rate} \xB7 updated ${updated}`, "gray"),
     /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) }),
-    data.ownerMeter ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
-      line(`Billing meter (owner view)  $${Number(data.ownerMeter.monthMeterUsd || 0).toFixed(2)} this ${data.ownerMeter.windowDays || 30}d \xB7 all-time $${Number(data.ownerMeter.meterUsd || 0).toFixed(2)}`, "green"),
-      line(`   at $${Number(data.ownerMeter.rateInPerMTok || 0).toFixed(2)} in / $${Number(data.ownerMeter.rateOutPerMTok || 0).toFixed(2)} out per Mtok \xB7 ${clip(`source ${data.ownerMeter.source || "junkalot.co"}${data.ownerMeter.live ? " \xB7 live" : " \xB7 stale"}`, inner - 6)}`, "gray"),
-      line(`   ${data.ownerMeter.shareOfPlanPct == null ? "no monthly plan price" : `${Number(data.ownerMeter.shareOfPlanPct).toFixed(2)}% of $${Number(data.ownerMeter.planUsdMonth || 0).toFixed(0)} plan`}${Number(data.ownerMeter.overageUsd) > 0 ? ` \xB7 over by $${Number(data.ownerMeter.overageUsd).toFixed(2)}` : ""} \xB7 meter, not an invoice`, "gray"),
-      /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) })
-    ] }) : null,
+    data.keyLedger ? (() => {
+      const keys = Array.isArray(data.keyLedger.keys) ? data.keyLedger.keys : [];
+      const own = keys.filter((k) => k && k.client !== "junkalot.co").sort((a, b) => (Number((b.month || {}).requests) || 0) - (Number((a.month || {}).requests) || 0));
+      const jk = data.keyLedger.junkalotKey;
+      const money = data.ownerMeter;
+      return /* @__PURE__ */ jsxs11(Fragment5, { children: [
+        line("Billing \xB7 HAKSTERAI-FLASH \xB7 one id per model key", "green"),
+        own.length ? own.slice(0, 3).map((k) => /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
+          line(`  ${k.id}${k.label ? ` \xB7 ${k.label}` : ""}  30d ${fmtNum(k.month && k.month.requests)} req \xB7 in ${fmtNum(k.month && k.month.inTokens)} \xB7 out ${fmtNum(k.month && k.month.outTokens)}`),
+          line(`     all-time ${fmtNum(k.all && k.all.requests)} req \xB7 ${fmtNum(k.all && k.all.inTokens || 0)} in / ${fmtNum(k.all && k.all.outTokens || 0)} out${k.lanes && k.lanes.length ? ` \xB7 lanes ${k.lanes.map((l) => l.lane).slice(0, 2).join(", ")}` : ""}`, "gray")
+        ] }, k.id)) : line("  no key has recorded a call yet", "gray"),
+        line(`  key-junkalot-1 \xB7 Junkalot Coach \xB7 ${jk ? `${fmtNum(jk.month.requests)} turns 30d` : "reading her rows\u2026"} \xB7 wired to our admin profit meter`, "white"),
+        money ? line(`  metered $${Number(money.monthMeterUsd || 0).toFixed(2)} 30d \xB7 $${Number(money.meterUsd || 0).toFixed(2)} all-time at $${Number(money.rateInPerMTok || 0).toFixed(2)} in / $${Number(money.rateOutPerMTok || 0).toFixed(2)} out per Mtok \xB7 meter, not an invoice`, "gray") : null,
+        /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) })
+      ] });
+    })() : null,
     Array.isArray(data.tokenWiring && data.tokenWiring.recent) && data.tokenWiring.recent.length ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
       line("Recent calls", "green"),
       data.tokenWiring.recent.slice(0, Math.max(0, Math.min(5, height - 16))).map((r, i) => /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: clip(`${new Date(Number(r.created_at) * 1e3).toISOString().slice(5, 16).replace("T", " ")}  ${String(r.endpoint || "").padEnd(16)} ${String(r.model || r.provider || "").slice(0, 18).padEnd(18)} in ${fmtNum(r.input_tokens)} out ${fmtNum(r.output_tokens)}`, inner) }) }, `recent:${i}`))

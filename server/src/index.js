@@ -8,6 +8,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env'), ove
 
 const { initLicenseTables, createLicense, deactivateLicense } = require('./stripe-license');
 const { deriveJunkalotFromRates } = require('./profitWiring');
+const providerKeys = require('./providerKeys');
 
 
 const express = require('express');
@@ -2959,6 +2960,22 @@ function recordUserTokenUsage(user, usage) {
       Math.max(0, Math.round(usage.toolCalls || 0)),
       usage.fastMode ? 1 : 0,
     );
+    // One id per model key (owner 2026-11-26): the same measured call, attributed
+    // to the key that served it, so per-client usage is provable per key rather
+    // than guessed off one shared account. Recording is accounting, never billing
+    // (§19, §24): it charges nothing and changes no route. A lane with no key id
+    // records nothing, and a ledger failure never breaks the served call (§11).
+    providerKeys.recordKeyUsage({
+      keyId: providerKeys.keyIdByLane(usage.provider),
+      client: 'haksterai.com',
+      provider: usage.provider || null,
+      model: usage.model || null,
+      lane: usage.provider || null,
+      requests: 1,
+      inTokens: usage.inputTokens || 0,
+      outTokens: usage.outputTokens || 0,
+      source: 'haksterai lane',
+    });
   } catch (err) {
     console.warn('[usage] token ledger write failed:', err.message);
   }
@@ -12220,6 +12237,28 @@ app.get('/api/usage', async (req, res) => {
       }
     } catch { ownerMeter = null; }
   }
+  // Owner view: one id per model key, usage measured per key (owner 2026-11-26:
+  // "we will gie each ollama key id so we know how many request usage tokens").
+  // Our own lane's key is counted from this box's key ledger; Junkalot's key is
+  // read back from her own recorded turns when that read is already cached — it
+  // is never awaited here, so a usage poll can never wait on SSH. Nothing is
+  // billed and nothing is written into another project (§16, §19, §25).
+  let keyLedger = null;
+  if (isOwnerUser(user)) {
+    try {
+      const cached = _junkalotUsageCache && _junkalotUsageCache.text && Date.now() - _junkalotUsageCache.at < 30 * 60 * 1000
+        ? _junkalotUsageCache.text
+        : null;
+      keyLedger = {
+        ...providerKeys.summarize(),
+        junkalotKey: cached ? providerKeys.summarizeJunkalotRows(cached) : null,
+        junkalotKeyReadAt: cached ? new Date(_junkalotUsageCache.at).toISOString() : null,
+      };
+      // Warm the cache in the background so the next poll carries her row; this
+      // request returns regardless of whether that read answers.
+      if (!cached) readJunkalotUsageText().catch(() => {});
+    } catch { keyLedger = null; }
+  }
   res.json({
     plan: user.plan,
     used: user.usage_count || 0,    limit: Number.isFinite(effectiveCallLimit(user)) ? effectiveCallLimit(user) : -1, // -1 = unlimited
@@ -12244,6 +12283,7 @@ app.get('/api/usage', async (req, res) => {
     limitEnabled: USAGE_LIMIT_ENABLED,
     resetAt: user.usage_reset_at || null,
     ...(ownerMeter ? { ownerMeter } : {}),
+    ...(keyLedger ? { keyLedger } : {}),
   });
 });
 
@@ -12696,11 +12736,23 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
 
     // Junkalot's client value record: read over SSH, computed here, never written back.
     let junkalotValue = null;
+    let junkalotUsageText = '';
     try {
       const terms = readJunkalotValueTerms();
-      const usageText = await readJunkalotUsageText();
-      junkalotValue = computeJunkalotValue(usageText, terms, new Date());
+      junkalotUsageText = await readJunkalotUsageText();
+      junkalotValue = computeJunkalotValue(junkalotUsageText, terms, new Date());
     } catch { junkalotValue = null; }
+
+    // One id per model key: ours counted on this box, hers folded onto her key id
+    // from her own recorded turns. Read-only accounting; nothing is written into
+    // Junkalot and nothing is billed (§16, §19, §24, §36).
+    let keyLedger = null;
+    try {
+      keyLedger = {
+        ...providerKeys.summarize(),
+        junkalotKey: providerKeys.summarizeJunkalotRows(junkalotUsageText),
+      };
+    } catch { keyLedger = null; }
 
     // Every HaksterAI account valued at that same locked card. Null when the
     // card is unavailable: a billing figure is never computed from a rate that
@@ -12748,6 +12800,7 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
       junkalot,
       junkalotValue,
       userMeter,
+      keyLedger,
       bridge: bridgeState,
       note: 'Usage is recorded, never billed. Nothing here charges an account or changes a plan, a model or a route.',
     });

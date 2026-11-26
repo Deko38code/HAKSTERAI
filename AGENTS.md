@@ -961,3 +961,48 @@ capture path, not just a document:
 Nothing here moves a model, route, provider order, rate, plan or allowance (§19.3, §22.4, §26), and
 nothing is written into Junkalot, PhantomIDE or another project (§16). CLI version **0.3.94**,
 `ui-fb.mjs` rebuilt from source (§50.2 — a bundled module is not edited until it is rebuilt).
+
+---
+
+## Section 51 Added — Our Billing Lives In Our CLI, And Her Key Is Wired Back To Our Meter (2026-11-26)
+
+_Appended 2026-11-26 at the owner's direction ("make that ours … gie each ollama key id … add our name our
+usage in our cli … billing usage wired back to our admin profit meter in haksterai never display our
+profits in junkalot.co admin"; "swap data for our in my cli"). Nothing above this line was rewritten,
+reordered or removed. Backups taken and hash-verified identical before the append:
+`AGENTS.md.bak-20261126T042419Z` (73,643 B, sha256 `ddc6cdb1…`); master-rulebook backup
+`CLAUDE.md.bak-20261126T042419Z` (113,464 B, sha256 `bdb599dc…`)._
+
+`/home/ghost/CLAUDE.md` is now **§1–§51**. §51 is **"Our Billing Lives In Our CLI, And Her Key Is Wired
+Back To Our Meter"**. What it makes binding here:
+
+1. **The CLI's billing block is ours.** `/usage` (the `/menu` entry) renders
+   `Billing · HAKSTERAI-FLASH · one id per model key` from our own key ledger — `server/src/providerKeys.js`
+   → `data/key-usage.jsonl` — served owner-only as `/api/usage`'s `keyLedger` block. The dollar line is our
+   account metered at the locked card, labelled "meter, not an invoice"; her site is no longer the label on
+   our numbers.
+2. **One id per key, never a key value.** `data/provider-keys.json` holds id, label, client, env-var
+   **name**, lanes, basis and at most a 16-char SHA-256 prefix. A key added later is data: a new seeded id
+   is merged in by name, never overwritten (§26.5). No secret is ever stored here (§9, §23, §31).
+3. **Her key runs off our setup and its usage is wired back to our meter.** `key-junkalot-1` is folded from
+   her recorded turns (`mred-usage.jsonl` on Parrot, read only over SSH) and shown in **our** admin profit
+   meter — `/api/admin/profit-live` → `keyLedger.junkalotKey`, and the **Model keys** card on
+   `/admin/profit`. Nothing is written into Junkalot (§16, §36).
+4. **Never on her admin.** No key id, per-key figure, our usage, meter, rate or profit on junkalot.co in
+   any tab or payload (§30, §36 stand).
+5. **Records, never bills.** No charge, plan, allowance, route, model or provider change (§19.3, §22.4,
+   §26); a key with no rows reads zero rather than a guess (§10, §13).
+6. **Honest attribution.** Keyed lanes count against their key id (`deepseek-key2` →
+   `key-haksterai-1` on `OLLAMA_CLOUD_KEY_2`); our relay lanes (`ollama`, `deepseek`, `claude-cli`) are one
+   account bucket because the relay's upstream key is not visible from this box, and the row says so.
+7. **A usage poll never waits on SSH** — `/api/usage` folds her key only from the warm cache and warms it
+   in the background; the admin card may await the read.
+8. **HaksterAI only, and nothing moves the setup** (§16, §19.3, §22.4, §26).
+
+Verified at adoption 2026-11-26: five seeded keys read; lane mapping `deepseek-key2` → `key-haksterai-1`,
+`ollama`/`deepseek`/`claude-cli` → `key-haksterai-relay`, `groq6` → null; two fixture rows summarised
+(today 1 turn / 1,200 in / 300 out); `node --check` clean on `server/src/index.js`,
+`server/src/providerKeys.js` and the extracted `/admin/profit` script; `cli` suite **312/312**;
+`ui-fb.mjs` rebuilt at 430.3 kB carrying the new block (§50.2); CLI **0.3.97**. The live server keeps its
+running code until its next natural restart (§37, §45): the `keyLedger` blocks and the per-key recording
+call are **pending a restart**, reported as pending rather than live.

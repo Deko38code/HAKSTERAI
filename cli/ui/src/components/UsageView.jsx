@@ -176,17 +176,37 @@ export default function UsageView({ width = 80, height = 24, usage = null, refre
       {line(`Token balance ${fmtNum(data.tokenBalance)} · live: ${rate} · updated ${updated}`, 'gray')}
       <Row w={inner}><text> </text></Row>
 
-      {/* Owner accounts only: the server adds this block to its own response
-          (a client's /api/usage has no such key at all), valued at the locked
-          rate card read live from junkalot.co. Meter, not an invoice. */}
-      {data.ownerMeter ? (
-        <>
-          {line(`Billing meter (owner view)  $${Number(data.ownerMeter.monthMeterUsd || 0).toFixed(2)} this ${data.ownerMeter.windowDays || 30}d · all-time $${Number(data.ownerMeter.meterUsd || 0).toFixed(2)}`, 'green')}
-          {line(`   at $${Number(data.ownerMeter.rateInPerMTok || 0).toFixed(2)} in / $${Number(data.ownerMeter.rateOutPerMTok || 0).toFixed(2)} out per Mtok · ${clip(`source ${data.ownerMeter.source || 'junkalot.co'}${data.ownerMeter.live ? ' · live' : ' · stale'}`, inner - 6)}`, 'gray')}
-          {line(`   ${data.ownerMeter.shareOfPlanPct == null ? 'no monthly plan price' : `${Number(data.ownerMeter.shareOfPlanPct).toFixed(2)}% of $${Number(data.ownerMeter.planUsdMonth || 0).toFixed(0)} plan`}${Number(data.ownerMeter.overageUsd) > 0 ? ` · over by $${Number(data.ownerMeter.overageUsd).toFixed(2)}` : ''} · meter, not an invoice`, 'gray')}
-          <Row w={inner}><text> </text></Row>
-        </>
-      ) : null}
+      {/* Billing · ours (owner 2026-11-26: "swap data for our in my cli").
+          One id per model key: our own key's requests and tokens are counted on
+          this box from recorded calls, and Junkalot's key is read back from her
+          own recorded turns and wired to the admin profit meter — never rendered
+          on junkalot.co (§16, §25, §30, §36). The dollar figure, when the server
+          supplies one, is our account metered at the locked rate card: a meter,
+          never an invoice (§19, §24). An unmeasured key reads zero and says so. */}
+      {data.keyLedger ? (() => {
+        const keys = Array.isArray(data.keyLedger.keys) ? data.keyLedger.keys : [];
+        const own = keys
+          .filter((k) => k && k.client !== 'junkalot.co')
+          // The key that actually carried the latest usage reads first; a key with
+          // no recorded call still shows, at zero, rather than being hidden (§10).
+          .sort((a, b) => (Number((b.month || {}).requests) || 0) - (Number((a.month || {}).requests) || 0));
+        const jk = data.keyLedger.junkalotKey;
+        const money = data.ownerMeter;
+        return (
+          <>
+            {line('Billing · HAKSTERAI-FLASH · one id per model key', 'green')}
+            {own.length ? own.slice(0, 3).map((k) => (
+              <box key={k.id} style={{ width: inner, flexDirection: 'column', flexShrink: 0 }}>
+                {line(`  ${k.id}${k.label ? ` · ${k.label}` : ''}  30d ${fmtNum(k.month && k.month.requests)} req · in ${fmtNum(k.month && k.month.inTokens)} · out ${fmtNum(k.month && k.month.outTokens)}`)}
+                {line(`     all-time ${fmtNum(k.all && k.all.requests)} req · ${fmtNum((k.all && k.all.inTokens) || 0)} in / ${fmtNum((k.all && k.all.outTokens) || 0)} out${k.lanes && k.lanes.length ? ` · lanes ${k.lanes.map((l) => l.lane).slice(0, 2).join(', ')}` : ''}`, 'gray')}
+              </box>
+            )) : line('  no key has recorded a call yet', 'gray')}
+            {line(`  key-junkalot-1 · Junkalot Coach · ${jk ? `${fmtNum(jk.month.requests)} turns 30d` : 'reading her rows…'} · wired to our admin profit meter`, 'white')}
+            {money ? line(`  metered $${Number(money.monthMeterUsd || 0).toFixed(2)} 30d · $${Number(money.meterUsd || 0).toFixed(2)} all-time at $${Number(money.rateInPerMTok || 0).toFixed(2)} in / $${Number(money.rateOutPerMTok || 0).toFixed(2)} out per Mtok · meter, not an invoice`, 'gray') : null}
+            <Row w={inner}><text> </text></Row>
+          </>
+        );
+      })() : null}
 
       {/* The last measured calls, so a figure can be traced to its row. */}
       {Array.isArray(data.tokenWiring && data.tokenWiring.recent) && data.tokenWiring.recent.length ? (
