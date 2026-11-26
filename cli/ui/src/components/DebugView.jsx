@@ -95,6 +95,8 @@ export default function DebugView({
   terminal = {},
 }) {
   const w = Math.max(24, Number(width) || 72);
+  // The CLI build this box serves, reported by /api/version (owner, 2026-11-26).
+  const cliInfo = version && version.cli ? version.cli : null;
   const labelW = 13;
   const render = stats && stats.render ? stats.render : null;
   const lag = stats && stats.lag ? stats.lag : null;
@@ -169,6 +171,19 @@ export default function DebugView({
       ) : null}
       <Row width={w} labelW={labelW} label="web build" value={version && version.build ? version.build : '—'} />
       <Row width={w} labelW={labelW} label="server build" value={srv && srv.build ? srv.build : '—'} />
+      {/* The CLI build this box serves — the one an installer receives and a
+        * running CLI compares itself against (owner, 2026-11-26: "shows in
+        * server cli when its installed"). Read from /api/version's `cli`
+        * field, which is built from the same file /cli/latest.json publishes,
+        * so the two can never disagree (§39.3, §13). */}
+      <Row
+        width={w}
+        labelW={labelW}
+        label="cli build"
+        value={cliInfo && cliInfo.version
+          ? `v${cliInfo.version}${cliInfo.bundleSha256 ? ' · ' + String(cliInfo.bundleSha256).slice(0, 8) : ''}`
+          : '—'}
+      />
       <Row
         width={w}
         labelW={labelW}

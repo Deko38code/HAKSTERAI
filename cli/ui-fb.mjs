@@ -5552,6 +5552,7 @@ function DebugView({
   terminal = {}
 }) {
   const w = Math.max(24, Number(width) || 72);
+  const cliInfo = version && version.cli ? version.cli : null;
   const labelW = 13;
   const render = stats && stats.render ? stats.render : null;
   const lag = stats && stats.lag ? stats.lag : null;
@@ -5611,6 +5612,15 @@ function DebugView({
     versionErr ? /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "error", value: versionErr, color: "red" }) : null,
     /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "web build", value: version && version.build ? version.build : "\u2014" }),
     /* @__PURE__ */ jsx28(Row3, { width: w, labelW, label: "server build", value: srv && srv.build ? srv.build : "\u2014" }),
+    /* @__PURE__ */ jsx28(
+      Row3,
+      {
+        width: w,
+        labelW,
+        label: "cli build",
+        value: cliInfo && cliInfo.version ? `v${cliInfo.version}${cliInfo.bundleSha256 ? " \xB7 " + String(cliInfo.bundleSha256).slice(0, 8) : ""}` : "\u2014"
+      }
+    ),
     /* @__PURE__ */ jsx28(
       Row3,
       {

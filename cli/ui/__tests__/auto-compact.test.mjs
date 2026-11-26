@@ -99,8 +99,12 @@ test('one version source: package.json → /cli/latest.json → the site badge',
   // The endpoint computes from the file on every request — never a copy.
   const server = read('server/src/index.js');
   assert.match(server, /app\.get\('\/cli\/latest\.json'/);
-  assert.match(server, /readFileSync\(path\.join\(cliRoot, 'package\.json'\)/);
-  assert.match(server, /version: String\(pkg\.version \|\| ''\)/);
+  assert.match(server, /res\.json\(require\('\.\/cliBuild'\)\.cliBuildInfo\(\)\)/);
+  // …computed from the file in the shared module, so /api/version and the site
+  // badge read exactly the same values (§39.3).
+  const cliBuild = read('server/src/cliBuild.js');
+  assert.match(cliBuild, /readFileSync\(pkgPath, 'utf8'\)/);
+  assert.match(cliBuild, /version: String\(pkg\.version \|\| ''\)/);
 
   // The site badge reads that file at build time…
   const hero = read('src/components/Hero.astro');

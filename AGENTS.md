@@ -436,7 +436,7 @@ the server for a static deploy.
 ## Junkalot rulebook index — mapped
 
 Junkalot's index of the MASTERGUARD rules is `/home/ghost694/junkalot/RULEBOOK-INDEX.md` (on Parrot's
-master copy): every section of `/home/ghost/CLAUDE.md` (§1–§39) with what it means on that project and where
+master copy): every section of `/home/ghost/CLAUDE.md` (§1–§49) with what it means on that project and where
 this file mirrors it. It is a read-only pointer — HaksterAI never writes a rule, a rate, a key or usage into
 that project (§16) — and it is not a second rulebook: CLAUDE.md wins on any difference.
 
@@ -801,3 +801,40 @@ And Before It Lands"**. What it makes binding here:
 Verified at adoption: a throwaway repo with the real hook installed refused a `ghp_…`-shaped fixture
 (`1 hard`, exit 1, no commit object created) and committed cleanly once the line became
 `process.env.GITHUB_TOKEN`; `--staged` clean at HEAD; no active allow-list exemptions.
+
+---
+
+## Section 49 Added — Never Break What Works, And Never Run Destructive Git (2026-11-26)
+
+_Appended 2026-11-26 at the owner's direction ("add rule to never break or git again"). Nothing above this
+line was rewritten, reordered or removed. Backups taken and hash-verified before the edit:
+`CLAUDE.md.bak-20261126T011212Z` (98,480 B, sha256 `9476efe4…`), `AGENTS.md.bak-20261126T011212Z`
+(62,446 B, sha256 `899dc420…`)._
+
+`/home/ghost/CLAUDE.md` is now **§1–§49**. §49 is **"Never Break What Works, And Never Run Destructive Git"**.
+What it makes binding here:
+
+1. **Never break a working thing to fix a neighbouring thing.** Smallest patch for the reported failure;
+   no refactor, reconfigure, disable or restart of a healthy service, route, panel or file as a side effect.
+   If it cannot be done without risking something that works, stop and report (§2.8, §11).
+2. **Git is append-forward, never destructive.** Allowed: inspect, stage **by filename**, commit a verified
+   scoped change, push when asked. Never without an approval naming the exact command and target:
+   `reset --hard`, `reset` that drops staged work, `clean -fd`/`-fdx`, `push --force`,
+   `rebase`, `checkout -- .` / `restore .`, `stash drop`/`clear`, branch delete, tag rewrite,
+   `filter-branch`/`filter-repo`, any history rewrite. `--no-verify` only for a confirmed false positive
+   (§48.8).
+3. **A git mistake is fixed forward, never by rewriting** — a new commit that says what it corrects; a value
+   that reached history is rotated and the owner decides the scrub (§8, §23.2, §31.5).
+4. **Unrelated dirt is left exactly as it was** — not committed, stashed, cleaned or reverted; stage by name
+   and say what was left alone (§8.4, §47.4).
+5. **Verified means nothing regressed** — narrowest check before and after, with the reading shown: tests no
+   fewer passing, services answering, page still serving our build, both boxes on the same commit (§13, §41,
+   §47.2–§47.3). A change that removes working behaviour does not ship.
+6. **A restart is not a fix** — never bounce or kill a process to make a number look better (§0, §37, §45).
+7. **Config and brain files are never fixed in passing** — report drift read-only; never edit `~/.claude/**`,
+   `~/.ollama/**`, dotfiles, tunnels, the pm2 registry or a brain file to diagnose (§0, §17, §22).
+8. **HaksterAI scope** — this repository and its two boxes; nothing here authorises a write into Junkalot,
+   PhantomIDE or another project (§16).
+
+Evidence at adoption: both brain files backed up and hash-verified before this append; the working tree held
+only this change's files plus pre-existing untracked dirt, left untouched (§47.4).

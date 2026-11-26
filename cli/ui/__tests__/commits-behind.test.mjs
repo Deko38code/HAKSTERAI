@@ -24,6 +24,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const UPDATER = require.resolve('../../src/updater.js');
 const STAMP = require.resolve('../../../scripts/cli-build-stamp.cjs');
 const ROUTE = path.join(here, '..', '..', '..', 'server', 'src', 'index.js');
+// The reading itself lives in the shared module both /cli/latest.json and
+// /api/version serve from, so the two answers cannot drift (§39.3).
+const CLI_BUILD = path.join(here, '..', '..', '..', 'server', 'src', 'cliBuild.js');
 const APP = path.join(here, '..', 'src', 'App.jsx');
 const REAL_HOME = process.env.HOME;
 
@@ -124,9 +127,22 @@ test('a directory that is merely INSIDE a repository has no reading of its own',
 
 test('the endpoint reports the commit, and the badge renders the count', () => {
   const route = fs.readFileSync(ROUTE, 'utf8');
-  assert.ok(route.includes("cli-build-stamp.cjs"), 'the endpoint reads the build stamp');
-  assert.ok(/commit: build \? build\.commit/.test(route), 'latest.json carries commit');
-  assert.ok(/commits: build \? build\.commits/.test(route), 'latest.json carries commits');
+  const cliBuild = fs.readFileSync(CLI_BUILD, 'utf8');
+  assert.ok(route.includes("require('./cliBuild').cliBuildInfo()"), 'the endpoint serves the shared reading');
+  assert.ok(cliBuild.includes('cli-build-stamp.cjs'), 'the reading comes from the build stamp');
+  assert.ok(/commit: build \? build\.commit/.test(cliBuild), 'latest.json carries commit');
+  assert.ok(/commits: build \? build\.commits/.test(cliBuild), 'latest.json carries commits');
+  // "shows in server cli when its installed" (owner, 2026-11-26): the server
+  // reports the CLI build it serves on /api/version, so the dashboard and the
+  // applet can show it without a second endpoint.
+  assert.ok(/res\.json\(\{ build: buildIdCache\.id, server: serverBuildInfo, cli: cliInfo,/.test(route),
+    '/api/version reports the CLI build it serves');
+  // The SERVER view shows the CLI build this box serves, bound from the same
+  // /api/version payload (owner, 2026-11-26: "shows in server cli when its installed").
+  const dbg = fs.readFileSync(path.join(here, '..', 'src', 'components', 'DebugView.jsx'), 'utf8');
+  assert.ok(dbg.includes("const cliInfo = version && version.cli ? version.cli : null;"),
+    'DebugView reads the CLI build from /api/version');
+  assert.ok(dbg.includes('label="cli build"'), 'the SERVER view renders a cli build row');
   const app = fs.readFileSync(APP, 'utf8');
   assert.ok(app.includes('updateBehindText'), 'the badge builds a behind-text');
   assert.ok(/\$\{updateBehind\} commit\$\{updateBehind === 1 \? '' : 's'\} behind/.test(app),

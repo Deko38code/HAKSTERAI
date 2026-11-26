@@ -3215,8 +3215,18 @@ app.get('/api/version', (_req, res) => {
     } catch (e) {
       serverBuildInfo = { error: e.message };
     }
+    // The CLI half of the same question (owner, 2026-11-26: "shows in server cli
+    // when its installed"). This is the build an installer receives and a
+    // running CLI compares itself against — read from cliBuild.js, the same
+    // source /cli/latest.json publishes, so the two can never disagree.
+    let cliInfo = null;
+    try {
+      cliInfo = require('./cliBuild').cliBuildInfo();
+    } catch (e) {
+      cliInfo = { error: e.message };
+    }
     res.set('cache-control', 'no-store');
-    res.json({ build: buildIdCache.id, server: serverBuildInfo, checkedAt: new Date().toISOString() });
+    res.json({ build: buildIdCache.id, server: serverBuildInfo, cli: cliInfo, checkedAt: new Date().toISOString() });
   } catch (e) {
     console.error('[api/version] build id unavailable:', e);
     res.status(500).json({ error: 'build id unavailable' });
@@ -13692,28 +13702,11 @@ if (fs.existsSync(distPath)) {
   // fetches the tarball when they differ. Public like the package itself.
   app.get('/cli/latest.json', (_req, res) => {
     try {
-      const cliRoot = path.join(__dirname, '..', '..', 'cli');
-      const pkg = JSON.parse(fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8'));
-      const bundlePath = path.join(cliRoot, 'ui-fb.mjs');
-      const stat = fs.existsSync(bundlePath) ? fs.statSync(bundlePath) : null;
-      // Which commit this package was built from, so a running CLI can say how
-      // many commits behind it is before it installs (owner, 2026-11-26: "i
-      // want our cli to say in tui how many commits is behind before installs
-      // like hermes"). Git first — on the primary it is always current — and
-      // the synced stamp second, because the standby slot has no .git.
-      let build = null;
-      try {
-        build = require('../../scripts/cli-build-stamp.cjs').current(path.join(cliRoot, '..'));
-      } catch { /* the count is informational; never fail the route over it */ }
+      // One implementation, in cliBuild.js: the version, bundle hash and commit
+      // an installer verifies against, cached by the files' own mtime so a fresh
+      // build is published immediately (§39.3, §42.2).
       res.set('cache-control', 'no-store');
-      res.json({
-        version: String(pkg.version || ''),
-        bundleSha256: stat ? crypto.createHash('sha256').update(fs.readFileSync(bundlePath)).digest('hex') : '',
-        builtAt: stat ? stat.mtime.toISOString() : null,
-        commit: build ? build.commit : '',
-        commits: build ? build.commits : null,
-        package: '/cli/pkg.tar.gz',
-      });
+      res.json(require('./cliBuild').cliBuildInfo());
     } catch (e) {
       res.status(500).json({ error: 'CLI metadata unavailable' });
     }
