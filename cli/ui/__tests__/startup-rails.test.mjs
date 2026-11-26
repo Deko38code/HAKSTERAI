@@ -142,7 +142,11 @@ test('mcp escalates when a config will not parse', () => {
   assert.match(item.detail, /unreadable/);
 });
 
-test('the card renders the count beside the rail and counts only scored rails', () => {
+test('the card renders the count beside the rail: the whole belt when all are up', () => {
+  // Owner, 2026-11-26: "the gaurdrail check in cli on dell is not passing all
+  // 8/8" — eight green ticks under a "5/5 required" header. Every rail that
+  // measured OK is counted now, so a clean belt reads 8/8 and a missing
+  // optional rail still drops back to the scored figure (§10, §50).
   const logo = require(LOGO);
   const rails = {
     ok: true,
@@ -158,13 +162,23 @@ test('the card renders the count beside the rail and counts only scored rails', 
   const text = logo.railsChecklist(rails).join('\n');
   assert.match(text, /386 notes/, 'the measured memory count is on the rail');
   assert.match(text, /21 servers/, 'the measured MCP count is on the rail');
-  assert.match(text, /1\/1 required/, 'optional rails are listed but not scored');
-  assert.ok(!/1\/1 rails active/.test(text), 'the header never claims 3 ticks as 1 rail');
+  assert.match(text, /3\/3 rails active/, 'a clean belt counts every measured rail');
+  assert.ok(!/3\/3 required/.test(text), 'a clean belt never says "required"');
+  assert.ok(!/1\/1 required/.test(text), 'the header is not the scored-only figure');
   // No wrapping: every rendered row stays inside a sane terminal width.
   for (const line of logo.railsChecklist(rails)) {
     const visible = line.replace(/\x1b\[[0-9;]*m/g, '').length;
     assert.ok(visible <= 120, 'rail row stays within the card: ' + visible + ' cols');
   }
+
+  // One optional rail off: the header must not claim the whole belt.
+  const optOff = JSON.parse(JSON.stringify(rails));
+  optOff.items[2].ok = false;
+  optOff.ok = true;
+  const offText = logo.railsChecklist(optOff).join('\n');
+  assert.match(offText, /1\/1 required/, 'an optional rail off drops back to the scored figure');
+  assert.ok(!/3\/3 rails active/.test(offText), 'the header never claims 3 of 3 with one rail off');
+  assert.match(offText, /optional off: mcp belt/, 'the rail that is off is named');
 });
 
 /* The band reads green, and a green tick never hides a broken rail (§10, §50).

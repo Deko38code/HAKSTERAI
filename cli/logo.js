@@ -238,7 +238,17 @@ function railsChecklist(rails) {
   // Optional rails are listed but not scored, so the count says "required"
   // whenever the ticks outnumber the score (§10: never claim more than is true).
   const optCount = items.filter((i) => i.optional).length;
-  const countText = rails.pass + '/' + rails.total + (optCount ? ' required' : ' rails active');
+  // Owner, 2026-11-26: "the gaurdrail check in cli on dell is not passing all
+  // 8/8" — every rail was green while the header said "5/5 required", because
+  // the three optional rails were listed but never counted. When every measured
+  // rail is up, required and optional alike, the count is the whole belt
+  // (8/8 rails active). While an optional rail is off the count drops back to
+  // the scored rails and says "required", so the header still never claims more
+  // than was measured (§10, §50).
+  const allUp = items.every((i) => i.ok);
+  const countText = allUp
+    ? items.length + '/' + items.length + ' rails active'
+    : rails.pass + '/' + rails.total + (optCount ? ' required' : ' rails active');
   const count = (ok ? C.green : C.yellow) + countText + C.reset;
   // Owner, 2026-11-26: "make the text green with all in checklist on startup" —
   // the whole band reads green. A failure stays red and an unmeasured rail stays
