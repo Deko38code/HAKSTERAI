@@ -231,6 +231,13 @@ test('the launcher refuses a Bun older than the renderer requires', () => {
   assert.ok(/install Bun from bun\.sh/.test(launcher), 'an old Bun no longer names its own fix');
 });
 
+test('a renderer left behind by an update is caught, not loaded', () => {
+  const launcher = read('index.js');
+  assert.ok(/const installedVersion = \(name\) =>/.test(launcher), 'the launcher no longer reads an installed package version');
+  assert.ok(/it is \$\{platV\} but @opentui\/core is \$\{coreV\}/.test(launcher), 'a core/renderer version mismatch is no longer named');
+  assert.ok(/this copy was updated without its renderer/.test(launcher), 'the mismatch no longer says why it happened');
+});
+
 test('the launcher names the exact fix instead of "reinstall the CLI"', () => {
   const src = read('index.js');
   assert.ok(!/reinstall the CLI so npm fetches it/.test(src), 'the launcher still gives the vague instruction');

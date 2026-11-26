@@ -3248,6 +3248,22 @@ program
       }
       return false;
     };
+    // The version of an installed package, or ''. A renderer package must be the
+    // SAME version as the @opentui/core it serves: an update that moved core but
+    // could not reinstall the optional platform package leaves the dashboard
+    // loading a mismatched native library, which dies at its first frame with
+    // nothing useful on screen (the same class of failure as a missing package,
+    // and reported the same way — Surface Pro, 2026-11-26).
+    const installedVersion = (name) => {
+      const fsmod = require('fs');
+      for (const dir of (require.resolve.paths(name) || [])) {
+        const file = path.join(dir, name, 'package.json');
+        if (fsmod.existsSync(file)) {
+          try { return String(JSON.parse(fsmod.readFileSync(file, 'utf8')).version || ''); } catch { return ''; }
+        }
+      }
+      return '';
+    };
     // The packages that can satisfy the dashboard's renderer on this OS/CPU.
     // Linux lists musl first, exactly as before; the others have one name.
     const platformPackages = () => (process.platform === 'linux'
@@ -3284,11 +3300,21 @@ program
     };
     const nativeGap = () => {
       const want = platformPackages();
-      for (const mod of want) { if (installed(mod)) return null; }
-      if (!installed('@opentui/core')) {
-        return { what: '@opentui/core', why: 'the OpenTUI runtime is not installed with this copy', fix: nativeFix(want[0]) };
+      const have = want.find((mod) => installed(mod));
+      if (!have) {
+        if (!installed('@opentui/core')) {
+          return { what: '@opentui/core', why: 'the OpenTUI runtime is not installed with this copy', fix: nativeFix(want[0]) };
+        }
+        return { what: want[0], why: 'npm skipped its optional platform package for this OS/CPU', fix: nativeFix(want[0]) };
       }
-      return { what: want[0], why: 'npm skipped its optional platform package for this OS/CPU', fix: nativeFix(want[0]) };
+      // Present is not the same as matching: the native package must carry the
+      // same version as the core that loads it.
+      const coreV = installedVersion('@opentui/core');
+      const platV = installedVersion(have);
+      if (coreV && platV && coreV !== platV) {
+        return { what: have, why: `it is ${platV} but @opentui/core is ${coreV} — this copy was updated without its renderer`, fix: nativeFix(have) };
+      }
+      return null;
     };
     const gap = nativeGap();
     if (gap) {
