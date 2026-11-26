@@ -94,9 +94,10 @@
   # locations are checked directly — without that, an install says "no Bun" on a
   # machine that has one and the operator is sent to the dashboard-less Ink UI
   # (Surface Pro, 2026-11-26). Read-only: this never installs or edits anything.
-  function Find-Bun {
+  function Bun-Candidates {
+    $out = @()
     $onPath = Get-Command bun -ErrorAction SilentlyContinue
-    if ($onPath) { return [string]$onPath.Source }
+    if ($onPath -and $onPath.Source) { $out += [string]$onPath.Source }
     $dirs = @(
       (Join-Path $Runtime 'bun\node_modules\bun\bin'),
       (Join-Path $Runtime 'bun\node_modules\.bin'),
@@ -109,10 +110,60 @@
     foreach ($d in $dirs) {
       foreach ($n in @('bun.exe', 'bun.cmd', 'bun.bat')) {
         $full = Join-Path $d $n
-        if (Test-Path $full) { return $full }
+        if (Test-Path $full) { $out += $full }
       }
     }
+    return $out
+  }
+  function Find-Bun {
+    $all = @(Bun-Candidates)
+    if ($all.Count -gt 0) { return [string]$all[0] }
     return ''
+  }
+
+  # A Bun that answers is not automatically a Bun the dashboard can use: the
+  # renderer (@opentui/core 0.9.x) declares bun >= 1.3.14, and an older one loads
+  # the bundle and then dies inside the native library. This used to print
+  # "Bun is already here" for ANY version, so a machine with an early Bun on PATH
+  # kept the input-only Ink screen after a successful install while every step
+  # reported success (Surface Pro, 2026-11-26). Measured here, never assumed — and
+  # an unusable one never shadows the supported Bun this installer brings (the
+  # launcher measures every candidate the same way).
+  $MinBun = @(1, 3, 14)
+  function Get-BunVersion([string]$exe) {
+    if (-not $exe) { return $null }
+    try {
+      $raw = & $exe --version 2>$null | Select-Object -First 1
+      if ("$raw" -match '(\d+)\.(\d+)\.(\d+)') {
+        return @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+      }
+    } catch { }
+    return $null
+  }
+  function Test-BunUsable($v) {
+    if (-not $v) { return $false }
+    for ($i = 0; $i -lt $MinBun.Count; $i++) {
+      if ($v[$i] -ne $MinBun[$i]) { return ($v[$i] -gt $MinBun[$i]) }
+    }
+    return $true
+  }
+  function Format-BunVersion($v) { if ($v) { return ($v -join '.') } ; return 'an unknown version' }
+
+  # The first Bun that can actually run the dashboard, plus what was refused.
+  # The launcher measures every candidate the same way
+  # (cli/src/runtime-paths.js findSupportedBun), so this reports the answer the
+  # CLI itself will take — an old PATH Bun can never make the installer claim
+  # the machine is ready when the dashboard would be skipped.
+  function Find-UsableBun {
+    $skipped = @()
+    foreach ($cand in @(Bun-Candidates)) {
+      $v = Get-BunVersion $cand
+      if (Test-BunUsable $v) {
+        return [pscustomobject]@{ Path = [string]$cand; Version = $v; Skipped = $skipped }
+      }
+      if ($v) { $skipped += ("$cand ($($v -join '.'))") }
+    }
+    return [pscustomobject]@{ Path = ''; Version = $null; Skipped = $skipped }
   }
 
   # npm on Windows ships as several shims (npm, npm.cmd, npm.ps1), and a name
@@ -203,9 +254,11 @@
   } else {
     Say '  X  node - a Node 20+ runtime comes with this install (one time, about 32 MB)'
   }
-  $bunFound = Find-Bun
-  if ($bunFound) {
-    Say "  OK bun ($bunFound) - our TUI runs on it"
+  $bunPick = Find-UsableBun
+  if ($bunPick.Path) {
+    Say ("  OK bun " + (Format-BunVersion $bunPick.Version) + " ($($bunPick.Path)) - our TUI runs on it")
+  } elseif ($bunPick.Skipped.Count -gt 0) {
+    Say ("  !  bun " + $bunPick.Skipped[0] + " is older than the dashboard's " + ($MinBun -join '.') + " - " + $BunVersion + " comes with this install")
   } else {
     Say '  X  bun - installed below; without it the CLI uses its built-in Ink UI'
   }
@@ -562,15 +615,22 @@
   # ── Bun (the full TUI) ──────────────────────────────────────────────────
   $bunDir = Join-Path $Runtime 'bun'
   $bunExe = Join-Path $bunDir 'node_modules\bun\bin\bun.exe'
-  $bunFound = Find-Bun
-  if ($bunFound) {
+  $bunPick = Find-UsableBun
+  if ($bunPick.Path) {
     # Bun's own installer writes to ~\.bun\bin, which is often missing from PATH
-    # in the session the CLI is started from — Find-Bun already covers it.
-    Say "OK Bun is already here ($bunFound) - using it"
+    # in the session the CLI is started from — Bun-Candidates already covers it.
+    Say ("OK Bun " + (Format-BunVersion $bunPick.Version) + " is already here ($($bunPick.Path)) - using it")
   } else {
-    Say '.. installing Bun for the full TUI (one time)'
+    if ($bunPick.Skipped.Count -gt 0) {
+      Say ("! Bun " + $bunPick.Skipped[0] + " is older than the dashboard's " + ($MinBun -join '.') + " - installing " + $BunVersion + " beside the CLI")
+    } else {
+      Say '.. installing Bun for the full TUI (one time)'
+    }
     $bunCode = Invoke-Npm @('install', '--prefix', $bunDir, '--omit=dev', '--no-audit', '--no-fund', "bun@$BunVersion")
-    if ($bunCode -eq 0 -and (Test-Path $bunExe)) { Say "OK Bun installed in $bunDir" }
+    if ($bunCode -eq 0 -and (Test-Path $bunExe)) {
+      $newBunVer = Get-BunVersion $bunExe
+      Say ("OK Bun " + (Format-BunVersion $newBunVer) + " installed in $bunDir")
+    }
     else {
       # npm is the quiet path; Bun's own installer is the one that always works.
       # This is the vendor's documented Windows install, and it is announced
@@ -589,9 +649,9 @@
           & ([string]$psHost.Source) -NoProfile -ExecutionPolicy Bypass -Command "irm bun.sh/install.ps1 | iex" 2>$null | Out-Null
         } catch { }
       }
-      $bunFound = Find-Bun
-      if ($bunFound) {
-        Say "OK Bun installed ($bunFound) - the dashboard TUI will open"
+      $bunPick = Find-UsableBun
+      if ($bunPick.Path) {
+        Say ("OK Bun " + (Format-BunVersion $bunPick.Version) + " installed ($($bunPick.Path)) - the dashboard TUI will open")
       } else {
         Say '! Bun could not be installed automatically.'
         Say '  Without Bun the CLI opens its simpler built-in Ink UI instead of the dashboard.'

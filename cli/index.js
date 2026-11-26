@@ -57,7 +57,7 @@ const _rawArgs = process.argv.slice(2);
 const _firstCommand = _rawArgs.find((arg) => !arg.startsWith('-')) || '';
 // Signing in and out, and asking who you are, must work before a license is
 // held — that is the whole point of them (owner, 2026-11-23).
-const _setupOnlyCommand = ['init', 'config', 'help', 'login', 'logout', 'whoami'].includes(_firstCommand);
+const _setupOnlyCommand = ['init', 'config', 'help', 'login', 'logout', 'whoami', 'doctor'].includes(_firstCommand);
 const _helpOrVersion = _rawArgs.includes('--help') || _rawArgs.includes('-h') || _rawArgs.includes('--version') || _rawArgs.includes('-V');
 const _skipLicenseGate = _helpOrVersion || _setupOnlyCommand;
 
@@ -761,6 +761,44 @@ program
     console.log((me.cli && me.cli.included)
       ? `${C.green}✓ the CLI is included on this plan${C.reset}`
       : `${C.yellow}⚠ the CLI is not included on this plan${C.reset} ${C.gray}— upgrade at ${me.server}${(me.cli && me.cli.upgrade) || '/plans/'}${C.reset}`);
+  });
+
+// ── doctor: why the dashboard did or did not open, in one block ───────────
+// Owner, 2026-11-26 (Surface Pro): the paid CLI showed an input bar and no
+// grids while every step reported success. The decision spans the Bun locator,
+// the renderer's Bun floor, the optional @opentui platform package and the lane
+// the launcher picks — so one command answers it, read-only, on any OS (§11).
+program
+  .command('doctor')
+  .description('Show what the CLI can run here, and why the dashboard does or does not open')
+  .option('--json', 'Print one machine-readable object')
+  .action((opts) => {
+    const doctor = require('./src/doctor');
+    if (opts.json) {
+      const which = doctor.lane();
+      const renderer = doctor.rendererState();
+      const cfg = doctor.configState();
+      console.log(JSON.stringify({
+        version: pkg.version,
+        platform: process.platform,
+        arch: process.arch,
+        node: process.version,
+        cliDir: doctor.CLI_DIR,
+        haksterHome: process.env.HAKSTER_HOME || null,
+        bunFloor: doctor.minBun(),
+        renderer: { core: renderer.core, package: renderer.pkg, installed: renderer.have, ok: renderer.ok, why: renderer.why || null },
+        lane: which.lane,
+        laneReason: which.why,
+        server: cfg.server || null,
+        signedIn: cfg.signedIn,
+      }));
+      return;
+    }
+    for (const line of doctor.report()) {
+      // One fact per line, never a secret: doctor.report() prints whether a key
+      // is held, never the key (§9, §23).
+      console.log(line);
+    }
   });
 
 // ── news: live AI + hacking headlines with real links ──────────────────────
@@ -3140,8 +3178,25 @@ program
     // One CLI, two renderers: the OpenTUI dashboard (ui-fb.mjs, needs Bun) is
     // the default; the Ink chat TUI (ui.mjs) is the fallback so `hakster` opens
     // a TUI on every machine instead of printing an install error.
+    // Where the dashboard lane's decisions are recorded. Ink takes the alternate
+    // screen a moment after this prints and wipes the line, so the reason is
+    // also written here and `hakster doctor` reads it back — a paid box reported
+    // "input bar only" with no way to see why it had been downgraded (Surface
+    // Pro, 2026-11-26).
+    const dashboardLogFile = () => path.join(haksterDir(), 'logs', 'dashboard-tui.log');
+    const noteDashboard = (line) => {
+      try {
+        const file = dashboardLogFile();
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.appendFileSync(file, `${new Date().toISOString()}  ${line}\n`);
+      } catch { /* a log we cannot write must never block a start */ }
+    };
     const fallbackInk = (why) => {
-      if (why) console.error(`${C.dim}${why} — opening the Ink TUI instead.${C.reset}`);
+      if (why) {
+        console.error(`${C.yellow}${why}${C.reset}`);
+        console.error(`${C.dim}  opening the Ink TUI instead — "hakster doctor" shows the full picture.${C.reset}`);
+        noteDashboard(`ink-fallback  ${why}`);
+      }
       // React's development build prints key-prop warnings straight into the
       // alternate screen; the TUI is not running React DevTools, so use the
       // production build and keep the screen clean.
@@ -3221,14 +3276,37 @@ program
     const { spawn } = require('child_process');
     const path = require('path');
     const entry = path.join(__dirname, 'tui-entry.mjs');
-    // Bun on PATH wins; otherwise the one our installer brought into
-    // ~/.hakster/runtime/bun is used (owner, 2026-11-25: a clean machine gets
-    // the full TUI without installing anything by hand). Only when neither
-    // exists does this fall back to the Ink TUI — announced, never silent.
+    // The renderer the CLI ships is @opentui/core 0.9.x, whose own package.json
+    // declares `bun >= 1.3.14`. An older Bun loads the bundle, then fails inside
+    // the native library — which on Windows reads as "the dashboard opened and
+    // vanished" with nothing to act on. A Bun from bun.sh can be years old, so
+    // the version is measured before the screen is taken (§10, §13, §50.1).
+    const MIN_BUN = [1, 3, 14];
+    const olderThan = (v, min) => {
+      for (let i = 0; i < min.length; i += 1) {
+        if (v[i] !== min[i]) return v[i] < min[i];
+      }
+      return false;
+    };
+    // A Bun being present is not enough — it has to be new enough for the
+    // renderer. The machine's own Bun is tried first, but an OLD one must not
+    // shadow a supported one our installer brought: on a Windows box with an
+    // early Bun still on PATH the installer said "Bun is already here", this
+    // refused that Bun, and the paid dashboard was silently replaced by the
+    // input-only Ink screen while every step reported success (Surface Pro,
+    // 2026-11-26). So every candidate is measured and unusable ones are skipped.
     let bun = null;
-    try { bun = require('./src/runtime-paths').findBun(); } catch { /* older tree */ }
+    let bunPick = null;
+    try {
+      bunPick = require('./src/runtime-paths').findSupportedBun(MIN_BUN);
+      bun = bunPick && bunPick.path;
+    } catch { /* older tree */ }
     if (!bun) {
-      fallbackInk('Bun is not installed (run install.sh again, or install Bun from bun.sh to get the full dashboard)');
+      const stale = (bunPick && bunPick.skipped) || [];
+      fallbackInk(stale.length
+        ? `Bun ${stale[0].version.join('.')} (${stale[0].path}) is older than the dashboard's ${MIN_BUN.join('.')} — `
+          + 're-run the installer (or: irm bun.sh/install.ps1 | iex), then start the CLI again'
+        : 'Bun is not installed (re-run the installer, or install Bun from bun.sh to get the full dashboard)');
       return;
     }
     // The TUI cannot start without OpenTUI's per-platform native package
@@ -3323,14 +3401,9 @@ program
       return;
     }
 
-    // The renderer the CLI ships is @opentui/core 0.9.x, whose own package.json
-    // declares `bun >= 1.3.14`. An older Bun loads the bundle, then fails inside
-    // the native library — which on Windows reads as "the dashboard opened and
-    // vanished" with nothing to act on. A Bun from bun.sh can be years old, so
-    // the version is measured here, before the screen is taken, and an
-    // unsupported one is named with its own fix rather than crashing later
-    // (§10, §13, §50.1: the real cause, before the TUI starts).
-    const MIN_BUN = [1, 3, 14];
+    // The version is measured again here for the one case the selection above
+    // could not settle: a launcher (a .cmd shim) that would not answer
+    // --version. It is enforced with the same floor and the same message.
     const bunVersionOf = () => {
       const { spawnSync } = require('child_process');
       try {
@@ -3338,12 +3411,6 @@ program
         const m = String((r && r.stdout) || '').trim().match(/(\d+)\.(\d+)\.(\d+)/);
         return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
       } catch { return null; }
-    };
-    const olderThan = (v, min) => {
-      for (let i = 0; i < min.length; i += 1) {
-        if (v[i] !== min[i]) return v[i] < min[i];
-      }
-      return false;
     };
     const bunVer = bunVersionOf();
     if (bunVer && olderThan(bunVer, MIN_BUN)) {

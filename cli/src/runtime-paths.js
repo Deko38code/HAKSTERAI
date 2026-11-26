@@ -81,41 +81,103 @@ function wellKnownBun(env = process.env, platform = process.platform) {
 }
 
 /**
- * Bun: the machine's own first, then the one our installer brought.
- * Returns a path or null — never installs anything (§11: no auto-changes).
+ * Every Bun this machine could run, in the order they should be tried: PATH,
+ * then the one our installer brought, then the Windows locations its own
+ * installers write to. Answers paths only — never installs or runs anything
+ * (§11: no auto-changes).
  */
-function findBun(env = process.env) {
-  const onPath = findOnPath('bun', env);
-  if (onPath) return onPath;
+function bunCandidates(env = process.env) {
+  const out = [];
+  const add = (p) => { if (p && !out.includes(p)) out.push(p); };
+
+  add(findOnPath('bun', env));
 
   const root = runtimeRoot(env);
   // The bun package ships the real executable here on every platform (it is
   // named bun.exe even on Linux); on Windows this is preferred over npm's .cmd
   // shim, which needs a shell to start.
-  for (const name of names('bun')) {
-    const bundled = path.join(root, 'bun', 'node_modules', 'bun', 'bin', name);
-    if (isExecutableFile(bundled)) return bundled;
-  }
+  for (const name of names('bun')) add(path.join(root, 'bun', 'node_modules', 'bun', 'bin', name));
   // install.sh / install.ps1: npm install --prefix <root>/bun bun@<version>
-  for (const name of names('bun')) {
-    const installed = path.join(root, 'bun', 'node_modules', '.bin', name);
-    if (isExecutableFile(installed)) return installed;
-  }
+  for (const name of names('bun')) add(path.join(root, 'bun', 'node_modules', '.bin', name));
   // A bootstrapped Node tree can also carry one; checked newest-first.
   let dirs = [];
   try { dirs = fs.readdirSync(root).filter((d) => d.startsWith('node-')).sort().reverse(); } catch { /* none */ }
   for (const d of dirs) {
-    for (const name of names('bun')) {
-      const full = path.join(root, d, 'bin', name);
-      if (isExecutableFile(full)) return full;
-    }
+    for (const name of names('bun')) add(path.join(root, d, 'bin', name));
   }
   // Windows installers that PATH may not reflect in this session (see
   // wellKnownBun). Last, so a working PATH or our own runtime always wins.
-  for (const candidate of wellKnownBun(env)) {
-    if (isExecutableFile(candidate)) return candidate;
+  for (const candidate of wellKnownBun(env)) add(candidate);
+
+  return out.filter((p) => isExecutableFile(p));
+}
+
+/** Bun: the first place it can live. Returns a path or null. */
+function findBun(env = process.env) {
+  const found = bunCandidates(env);
+  return found.length ? found[0] : null;
+}
+
+/**
+ * `[major, minor, patch]` from `bun --version`, or null when it cannot answer.
+ *
+ * Being installed is not the same as being usable: the dashboard's renderer
+ * (@opentui/core 0.9.x) declares `bun >= 1.3.14`, and an older Bun loads the
+ * bundle and then dies inside the native library. A .cmd/.bat shim (Windows
+ * npm) only starts through a shell, so that case is run through one.
+ */
+function bunVersion(file, opts = {}) {
+  const { spawnSync } = require('child_process');
+  const timeout = opts.timeoutMs === undefined ? 5000 : opts.timeoutMs;
+  try {
+    const shim = /\.(cmd|bat)$/i.test(String(file || ''));
+    const common = { encoding: 'utf8', timeout, windowsHide: true };
+    const r = shim
+      ? spawnSync(`"${file}" --version`, { ...common, shell: true })
+      : spawnSync(file, ['--version'], common);
+    const m = String((r && r.stdout) || '').trim().match(/(\d+)\.(\d+)\.(\d+)/);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  } catch { return null; }
+}
+
+/** `v` is at least `min`, component by component. */
+function atLeast(v, min) {
+  for (let i = 0; i < min.length; i += 1) {
+    if (v[i] !== min[i]) return v[i] > min[i];
   }
-  return null;
+  return true;
+}
+
+/**
+ * The first Bun that can actually run the dashboard's renderer.
+ *
+ * The machine's own Bun is tried first — but an OLD one must not shadow a
+ * supported one our own installer brought. That is exactly what happened on a
+ * Windows box with an early Bun still on PATH: the installer said "Bun is
+ * already here", the launcher refused that Bun for being below the renderer's
+ * floor, and the paid dashboard was replaced by the input-only Ink screen while
+ * every step reported success (Surface Pro, 2026-11-26). So every candidate is
+ * measured and the unusable ones are skipped, with what was skipped reported.
+ *
+ * Returns { path, version, skipped }. `path` is null when nothing usable exists;
+ * `skipped` holds the Buns that were found and refused, for an honest message.
+ */
+function findSupportedBun(min, env = process.env, opts = {}) {
+  const skipped = [];
+  let unmeasurable = null;
+  for (const candidate of bunCandidates(env)) {
+    const v = bunVersion(candidate, opts);
+    if (!v) {
+      // A shim that will not answer --version cannot start the TUI either, but
+      // it is kept as a last resort rather than claimed usable up front.
+      if (!unmeasurable) unmeasurable = { path: candidate, version: null };
+      continue;
+    }
+    if (!atLeast(v, min)) { skipped.push({ path: candidate, version: v }); continue; }
+    return { path: candidate, version: v, skipped };
+  }
+  if (unmeasurable) return { path: unmeasurable.path, version: null, skipped };
+  return { path: null, version: null, skipped };
 }
 
 /** Node: PATH first, then the installer's runtime. Returns a path or null. */
@@ -134,4 +196,7 @@ function findNode(env = process.env) {
   return null;
 }
 
-module.exports = { runtimeRoot, findOnPath, findBun, findNode, isExecutableFile, wellKnownBun };
+module.exports = {
+  runtimeRoot, findOnPath, findBun, findNode, isExecutableFile, wellKnownBun,
+  bunCandidates, bunVersion, findSupportedBun, atLeast,
+};

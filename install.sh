@@ -29,6 +29,24 @@ set -eu
 ORIGIN="__ORIGIN__"
 NODE_VERSION="${HAKSTER_NODE_VERSION:-v24.22.3}"
 BUN_VERSION="${HAKSTER_BUN_VERSION:-1.4.5}"
+
+# The dashboard's renderer (@opentui/core 0.9.x) declares bun >= 1.3.14, and an
+# older Bun loads the bundle and then dies inside the native library. "Bun is
+# already here" used to be printed for ANY version, so a machine with an early
+# Bun still on PATH kept the input-only Ink screen after a successful install
+# while every step reported success (Surface Pro, 2026-11-26). Every Bun is
+# measured here, never assumed — and an unusable one never shadows the supported
+# Bun this installer brings.
+BUN_MIN="1.3.14"
+bun_version() { "$1" --version 2>/dev/null | head -1 | tr -dc '0-9.' | sed 's/^\.//'; }
+bun_usable() {
+  v=$(bun_version "$1")
+  [ -n "$v" ] || return 1
+  awk -v a="$v" -v b="$BUN_MIN" 'BEGIN{
+    n=split(a,A,"."); m=split(b,B,"."); k=(n>m?n:m);
+    for(i=1;i<=k;i++){ if((A[i]+0)>(B[i]+0)) exit 0; if((A[i]+0)<(B[i]+0)) exit 1 }
+    exit 0 }'
+}
 RUNTIME="$HOME/.hakster/runtime"
 TMP="${TMPDIR:-/tmp}/hakster-cli-install.$$"
 mkdir -p "$TMP"
@@ -106,10 +124,12 @@ elif command -v node >/dev/null 2>&1; then
 else
   say "  ✗ node — a Node 20+ runtime comes with this install (~31 MB, one time)"
 fi
-if command -v bun >/dev/null 2>&1; then
-  say "  ✓ bun on PATH — our TUI runs on it"
-elif [ -x "$RUNTIME/bun/node_modules/.bin/bun" ]; then
-  say "  ✓ bun in $RUNTIME/bun — our TUI runs on it"
+if command -v bun >/dev/null 2>&1 && bun_usable "$(command -v bun)"; then
+  say "  ✓ bun $(bun_version "$(command -v bun)") on PATH — our TUI runs on it"
+elif [ -x "$RUNTIME/bun/node_modules/.bin/bun" ] && bun_usable "$RUNTIME/bun/node_modules/.bin/bun"; then
+  say "  ✓ bun $(bun_version "$RUNTIME/bun/node_modules/.bin/bun") in $RUNTIME/bun — our TUI runs on it"
+elif command -v bun >/dev/null 2>&1; then
+  say "  ! bun $(bun_version "$(command -v bun)") on PATH is older than the dashboard's $BUN_MIN — $BUN_VERSION comes with this install"
 else
   say "  ✗ bun — installed below (~90 MB, one time); without it the CLI uses its built-in Ink UI"
 fi
@@ -336,14 +356,22 @@ fi
 
 # Bun runs our TUI. Installed next to the CLI when the machine has none, so a
 # clean machine gets the same screen as the owner's.
-if command -v bun >/dev/null 2>&1; then
-  say "✓ Bun $(bun --version 2>/dev/null || echo '') is already here — using it"
-elif [ -x "$RUNTIME/bun/node_modules/.bin/bun" ]; then
-  say "✓ Bun already installed in $RUNTIME/bun — using it"
+if command -v bun >/dev/null 2>&1 && bun_usable "$(command -v bun)"; then
+  say "✓ Bun $(bun_version "$(command -v bun)") is already here — using it"
+elif [ -x "$RUNTIME/bun/node_modules/.bin/bun" ] && bun_usable "$RUNTIME/bun/node_modules/.bin/bun"; then
+  say "✓ Bun $(bun_version "$RUNTIME/bun/node_modules/.bin/bun") already installed in $RUNTIME/bun — using it"
 else
-  say "… installing Bun for the full TUI (~90 MB, one time)"
+  if command -v bun >/dev/null 2>&1; then
+    say "! Bun $(bun_version "$(command -v bun)") at $(command -v bun) is older than the dashboard's $BUN_MIN — installing $BUN_VERSION beside the CLI"
+  else
+    say "… installing Bun for the full TUI (~90 MB, one time)"
+  fi
   if npm install --prefix "$RUNTIME/bun" --omit=dev --no-audit --no-fund "bun@$BUN_VERSION" >/dev/null 2>&1; then
-    say "✓ Bun installed in $RUNTIME/bun"
+    if [ -x "$RUNTIME/bun/node_modules/.bin/bun" ] && bun_usable "$RUNTIME/bun/node_modules/.bin/bun"; then
+      say "✓ Bun $(bun_version "$RUNTIME/bun/node_modules/.bin/bun") installed in $RUNTIME/bun"
+    else
+      say "✓ Bun installed in $RUNTIME/bun"
+    fi
   else
     say "⚠ Bun could not be installed — the CLI still runs with its built-in Ink UI"
   fi
