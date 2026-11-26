@@ -1,0 +1,71 @@
+{
+  "_note": "Projects the agent should recall from its memory bank. Data, not code: add a row to teach it a new project (§26.5). 'dir' is where the project lives — a path on a different box is recorded with 'host' and never scanned from here. Memory counts shown for a project come from the memory banks, not from this file.",
+  "projects": [
+    {
+      "name": "haksterAi",
+      "dir": "/home/ghost/haksterAi",
+      "aliases": ["hakster", "hakster-ai", "haksterai.com"],
+      "host": "dell"
+    },
+    {
+      "name": "CineVault",
+      "dir": "/home/ghost/cine-vault-live",
+      "aliases": ["cinevault", "cine-vault", "flixchill"],
+      "host": "dell"
+    },
+    {
+      "name": "PhantomIDE",
+      "dir": "/home/ghost/phantom-ide",
+      "aliases": ["phantomide", "phantom ide", "phantomide.com"],
+      "host": "parrot"
+    },
+    {
+      "name": "Junkalot.co",
+      "dir": "/home/ghost694/junkalot",
+      "aliases": ["junkalot", "junkalot.co", "junk alot", "mr ed"],
+      "host": "parrot"
+    },
+    {
+      "name": "Rent My Trailer",
+      "dir": "/home/ghost/rent-my-trailer",
+      "aliases": ["rentmytrailer", "rent my trailer", "rmt", "rentmytrailer.haksterai.com"],
+      "host": "dell"
+    },
+    {
+      "name": "Miniforge",
+      "dir": "/home/ghost/miniforge",
+      "aliases": ["miniforge"],
+      "host": "dell"
+    },
+    {
+      "name": "TopReels",
+      "dir": "/home/ghost/topreels",
+      "aliases": ["topreels", "top reels"],
+      "host": "dell"
+    },
+    {
+      "name": "MasterGuard",
+      "dir": "/home/ghost/masterguard",
+      "aliases": ["masterguard", "master guard"],
+      "host": "dell"
+    },
+    {
+      "name": "Movie Server",
+      "dir": "/home/ghost/movie-server",
+      "aliases": ["movie server", "movie-server", "vidsrc", "devsrc"],
+      "host": "parrot"
+    },
+    {
+      "name": "Kiro Gateway",
+      "dir": "/home/ghost/kiro-gateway",
+      "aliases": ["kiro", "kiro-gateway", "kiro gateway"],
+      "host": "parrot"
+    },
+    {
+      "name": "Bug Bounty",
+      "dir": "/home/ghost/bugbounty",
+      "aliases": ["bugbounty", "bug bounty", "bounties"],
+      "host": "parrot"
+    }
+  ]
+}

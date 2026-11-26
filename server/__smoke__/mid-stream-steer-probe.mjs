@@ -100,7 +100,13 @@ let hookBody = hookSrc.slice(hStart + "case 'steer': {".length, hEnd);
 const lastBreak = hookBody.lastIndexOf('break;');
 hookBody = hookBody.slice(0, lastBreak);
 
-const runHook = new Function('evt', 'patch', 'assistantId', 'append', 'nextId', 'pushActivity', 'applySteer', hookBody);
+// `setSteersPending` is the live-steer counter the TUI keeps: it must come back
+// down when the run reports it read the message (2026-11-26, "killing 2 birds 1
+// stone"), so the sandbox tracks it instead of leaving the handler to throw.
+let pendingSteers = 1;
+const setSteersPending = (fn) => { pendingSteers = typeof fn === 'function' ? fn(pendingSteers) : fn; };
+
+const runHook = new Function('evt', 'patch', 'assistantId', 'append', 'nextId', 'pushActivity', 'applySteer', 'setSteersPending', hookBody);
 
 const msg = { text: 'a b', rounds: [{ text: 'a b', thinking: '', tools: [] }] };
 const appended = [];
@@ -113,6 +119,7 @@ runHook(
   () => 'user-3',
   (kind, text) => activity.push([kind, text]),
   applySteer,
+  setSteersPending,
 );
 
 if (msg.text !== 'a b' || msg.rounds[0].text !== 'a b') fail('a boundary steer wiped the delivered answer');
@@ -124,6 +131,8 @@ const said = activity.map(([, t]) => String(t)).join(' | ');
 if (!/killing 2 birds 1 stone/.test(said)) fail('the applied-steer row no longer names the two things it did at once');
 if (!/answer kept/.test(said)) fail('the applied-steer row does not say the answer was kept');
 ok('TUI: the delivered answer survives, the operator line shows, the row names both wins');
+if (pendingSteers !== 0) fail(`the pending-steer counter was not cleared when the run read it (${pendingSteers})`);
+else ok('TUI: the pending-steer counter clears when the run reads the message');
 
 // A legacy supersede event must still retract cleanly (older servers).
 const msg2 = {
@@ -134,7 +143,7 @@ const msg2 = {
   ],
 };
 const patch2 = (id, fn) => { Object.assign(msg2, fn(msg2)); };
-runHook({ type: 'steer', content: 'no — use the other file', supersede: true }, patch2, 'ai-4', () => {}, () => 'u4', () => {}, applySteer);
+runHook({ type: 'steer', content: 'no — use the other file', supersede: true }, patch2, 'ai-4', () => {}, () => 'u4', () => {}, applySteer, setSteersPending);
 if (msg2.rounds.length !== 4) fail(`rounds were dropped or not appended (${msg2.rounds.length})`);
 if (msg2.rounds[0].text !== 'earlier answer ') fail('a completed round lost its text');
 if (msg2.rounds[1].text !== '') fail(`a superseded partial was not retracted (${JSON.stringify(msg2.rounds[1].text)})`);

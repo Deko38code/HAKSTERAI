@@ -203,6 +203,7 @@ smartRouter.onDispatch((task, backend, job) => {
 
 // ── Memory Engine v2 (importance-scored, entity-extracting) ──
 const memoryEngine = require('./memory-engine');
+const projectRecall = require('./project-recall');
 
 // ── Puppeteer (lazy-loaded) ──────────────────────────────────────────
 let _browser = null;
@@ -1274,8 +1275,13 @@ function buildSystemPrompt(clientContext) {
   if (lessons) prompt += '\n\n' + lessons;
 
   // ── Inject memory-engine v2 recall (importance-scored) ──
+  // recallForPrompt's signature is (query, cwd, opts). It was called with the
+  // WORKING DIRECTORY as the query and an options object as the cwd, so v2 recall
+  // scored every memory against a filesystem path and matched nothing. The query
+  // is now the operator's own message for this run (§40.4 memory-first).
   try {
-    const memFrag = memoryEngine.recallForPrompt(process.cwd(), { maxChars: 5000 });
+    const taskText = (_currentTaskAnchor && _currentTaskAnchor.content) ? String(_currentTaskAnchor.content) : '';
+    const memFrag = taskText ? memoryEngine.recallForPrompt(taskText, process.cwd(), { maxChars: 5000 }) : '';
     if (memFrag) prompt += '\n\n## Relevant Memories (v2)\n' + memFrag;
   } catch (e) { /* non-blocking */ }
 
@@ -8428,6 +8434,16 @@ async function agentLoop(userMessage, history, silent = false, opts = {}) {
   try {
     const bankDigest = autolearn.pullMemoryBanks(process.cwd(), { query: userMessage, maxChars: 1500 });
     if (bankDigest) history.push({ role: 'system', content: bankDigest });
+  } catch (_) { /* non-blocking */ }
+
+  // ── Past projects, recalled from the memory bank for THIS task ──
+  // Owner, 2026-11-26: "build where are agent uses are memory bank to recall past
+  // projects". Pushed fresh per task like the bank digest, because
+  // buildSystemPrompt() is memoised and would otherwise serve another task's
+  // recall. Silent when the message names no project we hold memory for.
+  try {
+    const pp = projectRecall.projectPromptBlock(userMessage, { limit: 3 });
+    if (pp.text) history.push({ role: 'system', content: pp.text });
   } catch (_) { /* non-blocking */ }
 
   // ── Stall guard: kickstart if no activity for 20 seconds ──

@@ -91,6 +91,7 @@ const stuckMonitor = require('./agent/stuckMonitor');
 // ── Autoflow: 6-phase loop + autolearn + approval modules ──
 const { AgentLoopPhase, loopPhaseTransitions, LOOP_GUARD, shouldConsolidate, shouldReflect, injectAgentsMd, injectLearnedLessons, trustEscalation, validatePhaseTransition, phaseName, kiroRoundBudget } = require('./agent/loop');
 const autolearn = require('./agent/autolearn');
+const projectRecall = require('./agent/project-recall');
 const taskState = require('./agent/task-state');
 // ── Multi-user run gate ───────────────────────────────────────────────────
 // One claude-cli turn costs ~635 MB on this box (247 MB for `claude -p` plus
@@ -6444,6 +6445,13 @@ Files in CWD (${workDir}):
 ${dirListing}
 === END MACHINE CONTEXT ===`;
 
+  // ── Non-owner accounts get the customer directive instead of the operator
+  // prompt. Declared HERE because the memory-first block below reads it: it used
+  // to be declared further down, so every run whose task matched a memory threw
+  // `ReferenceError: Cannot access 'customerDirective' before initialization`
+  // before it could send a single event (seen 6x in the pm2 log).
+  const customerDirective = customerDirectiveFor(user, sessionId);
+
   // ── Inject persistent memory context ──────────────────────────────
   const lastUserMsg = messages.filter(m => m.role === 'user').pop();
   const memoryContext = getMemoryContext(lastUserMsg?.content || '', { maxMemories: 15, maxChars: 3000 });
@@ -6454,6 +6462,25 @@ ${dirListing}
   const memoryFirst = buildMemoryFirstBlock(lastUserMsg?.content || '', { maxMistakes: 4, maxLessons: 4 });
   // Say it on the stream, with the block's own counts: a run that starts from
   // memory shows that it did, and an empty memory says nothing at all.
+  // What we already learned about the PROJECTS this task names — recalled from
+  // the memory bank and scored against the task (owner, 2026-11-26: "build where
+  // are agent uses are memory bank to recall past projects"). Silent when the
+  // task names no project we know.
+  let pastProjects = { text: '', count: 0, projects: [] };
+  if (!customerDirective) {
+    try { pastProjects = projectRecall.projectPromptBlock(lastUserMsg?.content || '', { limit: 3 }); }
+    catch (_) { pastProjects = { text: '', count: 0, projects: [] }; }
+  }
+  if (pastProjects.count > 0) {
+    try {
+      res.write(`data: ${JSON.stringify({
+        type: 'project_recall',
+        count: pastProjects.count,
+        projects: pastProjects.projects,
+        message: `🗂 recalled ${pastProjects.count} past project${pastProjects.count === 1 ? '' : 's'}: ${pastProjects.projects.join(', ')}`,
+      })}\n\n`);
+    } catch (_) { /* the run proceeds; the prompt still carries the block */ }
+  }
   if (!customerDirective && memoryFirst.count > 0) {
     try {
       res.write(`data: ${JSON.stringify({
@@ -6479,7 +6506,7 @@ ${dirListing}
   // Non-owner accounts get the customer directive instead of the operator
   // prompt: same tools list (web/memory/image) but no shell or editing claim,
   // no machine paths, no operator steering.
-  const customerDirective = customerDirectiveFor(user, sessionId);
+  // `customerDirective` is declared above (the memory-first block reads it).
   const dynamicPrompt = customerDirective ? customerDirective : fastMode
     ? [
         'You are haksterAI in fast Chat tab agent mode.',
@@ -6504,6 +6531,7 @@ ${dirListing}
   const systemContent = dynamicPrompt
     + (clientSystemContent ? '\n\n=== CLIENT DIRECTIVE ===\n' + clientSystemContent : '')
     + (!customerDirective && memoryFirst.text ? '\n\n' + memoryFirst.text : '')
+    + (!customerDirective && pastProjects.text ? '\n\n' + pastProjects.text : '')
     + (customerDirective ? '' : '\n\n' + machineContext)
     + (!customerDirective && memoryContext ? '\n\n' + memoryContext : '');
 
