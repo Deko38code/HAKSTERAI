@@ -3553,17 +3553,32 @@ function splashImage() {
 }
 var hex2 = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
 var rgbHex = (r, g, b) => `#${hex2(r)}${hex2(g)}${hex2(b)}`;
+var _gridCache = /* @__PURE__ */ new Map();
+function sampleArt(art, cols, rows) {
+  const pxRows = rows * 2;
+  const key = `${art.width}x${art.height}:${cols}x${rows}`;
+  const hit = _gridCache.get(key);
+  if (hit) return hit;
+  const stepX = art.width / cols;
+  const stepY = art.height / pxRows;
+  const out = new Array(cols * pxRows);
+  for (let py = 0; py < pxRows; py += 1) {
+    const y = Math.min(art.height - 1, Math.floor(py * stepY + stepY / 2));
+    for (let c = 0; c < cols; c += 1) {
+      const x = Math.min(art.width - 1, Math.floor(c * stepX + stepX / 2));
+      const o = (y * art.width + x) * 3;
+      out[py * cols + c] = rgbHex(art.px[o], art.px[o + 1], art.px[o + 2]);
+    }
+  }
+  const grid = { cols, pxRows, px: out };
+  _gridCache.set(key, grid);
+  if (_gridCache.size > 32) _gridCache.delete(_gridCache.keys().next().value);
+  return grid;
+}
 function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = "" }) {
   const art = loadHeroArt(imageFile || void 0);
   if (!art || cols < 8 || rows < 4) return null;
-  const stepX = art.width / cols;
-  const stepY = art.height / (rows * 2);
-  const pixel = (c, py) => {
-    const x = Math.min(art.width - 1, Math.floor(c * stepX + stepX / 2));
-    const y = Math.min(art.height - 1, Math.floor(py * stepY + stepY / 2));
-    const o = (y * art.width + x) * 3;
-    return rgbHex(art.px[o], art.px[o + 1], art.px[o + 2]);
-  };
+  const grid = sampleArt(art, cols, rows);
   const out = [];
   for (let r = 0; r < rows; r += 1) {
     const parts = [];
@@ -3575,8 +3590,8 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = "" }) 
       runN = 0;
     };
     for (let c = 0; c < cols; c += 1) {
-      const fg = pixel(c, r * 2);
-      const bg = pixel(c, r * 2 + 1);
+      const fg = grid.px[r * 2 * cols + c];
+      const bg = grid.px[(r * 2 + 1) * cols + c];
       if (run && run.fg === fg && run.bg === bg) runN += 1;
       else {
         flush();
@@ -3716,7 +3731,7 @@ function DecodeSplash({ width = 80, height = 24, lines = [], onDone, stepMs = 55
         overflow: "hidden"
       },
       children: [
-        heroAsset ? null : /* @__PURE__ */ jsx13(MatrixRain, { width, height, frame }),
+        /* @__PURE__ */ jsx13(MatrixRain, { width, height, frame }),
         showArt ? /* @__PURE__ */ jsx13(
           HeroBackdrop,
           {

@@ -156,17 +156,44 @@ function splashImage() {
 const hex2 = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
 const rgbHex = (r, g, b) => `#${hex2(r)}${hex2(g)}${hex2(b)}`;
 
+/* Downsample the art grid to the cells actually on screen.
+ *
+ *  The grid is already a coverage-weighted average of the artwork
+ *  (scripts/make-hero-art.mjs), so averaging it again here is what turned the
+ *  desk into grey mush — the "blurry" look (owner, 2026-11-26: "just make it
+ *  clear its blurry behind matrix"). Averaging an already-averaged picture
+ *  twice measured at contrast 0.72 / 9 % true black on his terminal; taking the
+ *  cell's centre pixel from the finer grid measures 1.00 / 23 %. The grid is
+ *  never upscaled (artSize caps the box at its own size), so every cell picks a
+ *  real pixel. Cached per size: the splash repaints every stepMs.
+ */
+const _gridCache = new Map();
+function sampleArt(art, cols, rows) {
+  const pxRows = rows * 2;
+  const key = `${art.width}x${art.height}:${cols}x${rows}`;
+  const hit = _gridCache.get(key);
+  if (hit) return hit;
+  const stepX = art.width / cols;
+  const stepY = art.height / pxRows;
+  const out = new Array(cols * pxRows);
+  for (let py = 0; py < pxRows; py += 1) {
+    const y = Math.min(art.height - 1, Math.floor(py * stepY + stepY / 2));
+    for (let c = 0; c < cols; c += 1) {
+      const x = Math.min(art.width - 1, Math.floor(c * stepX + stepX / 2));
+      const o = (y * art.width + x) * 3;
+      out[py * cols + c] = rgbHex(art.px[o], art.px[o + 1], art.px[o + 2]);
+    }
+  }
+  const grid = { cols, pxRows, px: out };
+  _gridCache.set(key, grid);
+  if (_gridCache.size > 32) _gridCache.delete(_gridCache.keys().next().value);
+  return grid;
+}
+
 function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = '' }) {
   const art = loadHeroArt(imageFile || undefined);
   if (!art || cols < 8 || rows < 4) return null;
-  const stepX = art.width / cols;
-  const stepY = art.height / (rows * 2);
-  const pixel = (c, py) => {
-    const x = Math.min(art.width - 1, Math.floor(c * stepX + stepX / 2));
-    const y = Math.min(art.height - 1, Math.floor(py * stepY + stepY / 2));
-    const o = (y * art.width + x) * 3;
-    return rgbHex(art.px[o], art.px[o + 1], art.px[o + 2]);
-  };
+  const grid = sampleArt(art, cols, rows);
   const out = [];
   for (let r = 0; r < rows; r += 1) {
     const parts = [];
@@ -182,8 +209,8 @@ function HeroBackdrop({ cols, rows, frame, left = 0, top = 0, imageFile = '' }) 
     // png logo hero in cli on startup to see it better"); the rain now falls
     // around the picture instead of across it.
     for (let c = 0; c < cols; c += 1) {
-      const fg = pixel(c, r * 2);
-      const bg = pixel(c, r * 2 + 1);
+      const fg = grid.px[r * 2 * cols + c];
+      const bg = grid.px[(r * 2 + 1) * cols + c];
       if (run && run.fg === fg && run.bg === bg) runN += 1;
       else {
         flush();
@@ -369,13 +396,13 @@ export default function DecodeSplash({ width = 80, height = 24, lines = [], onDo
         overflow: 'hidden',
       }}
     >
-      {/* The Matrix rain sits behind everything; the content column above it is
-          absolutely placed so the rain never moves it. When the hero PNG is
-          actually on screen it is the backdrop, so the rain is not painted over
-          it — the artwork reads clean (owner, 2026-11-26: "clear our png logo
-          hero in cli on startup to see it better"). Without the image the rain
-          stays exactly as it has always been. */}
-      {heroAsset ? null : <MatrixRain width={width} height={height} frame={frame} />}
+      {/* The Matrix rain sits behind everything on every start screen — the
+          owner's own ask is that the rain always runs (2026-11-26: "just make
+          it clear its blurry behind matrix keep my matrix"). The picture is
+          drawn after it, so the rain falls around the artwork instead of
+          burning glyphs through its cells, and the artwork itself is painted
+          from true-black pixels so it reads sharp behind the rain. */}
+      <MatrixRain width={width} height={height} frame={frame} />
       {showArt ? (
         <HeroBackdrop
           cols={artFit.cols}

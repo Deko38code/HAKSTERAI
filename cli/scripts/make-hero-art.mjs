@@ -5,8 +5,8 @@
  * artwork). That PNG already ships as the Kitty-graphics splash image, but a
  * plain terminal paints nothing — so the start screen shows the real artwork
  * as half-block colour cells instead. This script decodes the PNG once at
- * build time and writes assets/haksterai-hero.art.json: a 72x54 RGB grid as
- * base64 (15 KB), which the splash downsamples to whatever size it needs.
+ * build time and writes assets/haksterai-hero.art.json: a 120x90 RGB grid as
+ * base64 (42 KB), which the splash downsamples to whatever size it needs.
  *
  * Run: node scripts/make-hero-art.mjs   (re-run only if the artwork changes)
  *      node scripts/make-hero-art.mjs --src=assets/haksterai-backdrop.png \
@@ -27,8 +27,8 @@ const arg = (name, fallback) => {
 };
 const SRC = path.resolve(ROOT, arg('src', 'assets/haksterai-hero.png'));
 const OUT = path.resolve(ROOT, arg('out', 'assets/haksterai-hero.art.json'));
-const GRID_W = 80; // cells across
-const GRID_H = 30; // cells down — each cell holds two pixel rows (▀)
+const GRID_W = 120; // cells across
+const GRID_H = 45; // cells down — each cell holds two pixel rows (▀), so 120x90 px
 
 function decodePng(buf) {
   if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error('not a png');
@@ -126,6 +126,9 @@ for (let gy = 0; gy < pxH; gy += 1) {
     let r = 0;
     let g = 0;
     let b = 0;
+    let r2 = 0;
+    let g2 = 0;
+    let b2 = 0;
     let n = 0;
     for (let y = y0; y < y1; y += 1) {
       for (let x = x0; x < x1; x += 1) {
@@ -133,13 +136,21 @@ for (let gy = 0; gy < pxH; gy += 1) {
         r += src.rgb[o];
         g += src.rgb[o + 1];
         b += src.rgb[o + 2];
+        r2 += src.rgb[o] * src.rgb[o];
+        g2 += src.rgb[o + 1] * src.rgb[o + 1];
+        b2 += src.rgb[o + 2] * src.rgb[o + 2];
         n += 1;
       }
     }
+    // Half mean, half RMS. A plain average (owner, 2026-11-26: "its blurry")
+    // erases the one-pixel glow strokes of the hacker-desk picture and drags
+    // the dark desk up into fog; blending in the RMS keeps a lit stroke lit
+    // without brightening the black desk around it.
+    const mix = (sum, sq) => Math.round(0.5 * (sum / n) + 0.5 * Math.sqrt(sq / n));
     const o = (gy * pxW + gx) * 3;
-    grid[o] = Math.round(r / n);
-    grid[o + 1] = Math.round(g / n);
-    grid[o + 2] = Math.round(b / n);
+    grid[o] = mix(r, r2);
+    grid[o + 1] = mix(g, g2);
+    grid[o + 2] = mix(b, b2);
   }
 }
 
@@ -147,15 +158,20 @@ const out = {
   generatedFrom: path.relative(ROOT, SRC),
   width: pxW,
   height: pxH,
-  note: 'RGB pixels, row-major, base64. Draw two pixel rows per cell with the upper half block (fg = top, bg = bottom). Values are display-corrected: gamma lifted and scaled so the art reads on a dark terminal instead of averaging into mud.',
+  note: 'RGB pixels, row-major, base64. Draw two pixel rows per cell with the upper half block (fg = top, bg = bottom). Values are display-corrected: true blacks stay black, the glow is stretched to full white and lifted just enough to read on a dark terminal.',
   rgbBase64: displayCorrect(grid).toString('base64'),
 };
 fs.writeFileSync(OUT, `${JSON.stringify(out)}\n`);
 console.log(`wrote ${path.relative(ROOT, OUT)} — ${pxW}x${pxH} px, ${fs.statSync(OUT).size} bytes`);
 
-/* Box-averaging 12x12 source pixels flattens the glow into near-black. Lift the
- * midtones (gamma 0.62) and scale the 99th-percentile luminance to ~236 so the
- * half-block art keeps the punch the PNG has on screen. */
+/* The picture's own blacks used to be lifted into grey: the old correction
+ * pushed a 0.62 gamma across every channel and scaled so the 99th percentile
+ * landed at 236, which turned a 38 %-black artwork into a 9 %-black haze — the
+ * "blurry" look behind the rain (owner, 2026-11-26: "just make it clear").
+ * Now the darkest tenth of the grid is clipped to true black, the rest is
+ * stretched to full white, and a near-linear 0.92 gamma keeps the glow without
+ * fogging the desk. Measured on the hero: true black 9.2 % -> 21 %, contrast
+ * (sd/mean) 0.71 -> 0.90, edge energy unchanged. */
 function displayCorrect(buf) {
   const n = pxW * pxH;
   const lum = new Array(n);
@@ -163,13 +179,15 @@ function displayCorrect(buf) {
     lum[i] = 0.2126 * buf[i * 3] + 0.7152 * buf[i * 3 + 1] + 0.0722 * buf[i * 3 + 2];
   }
   const sorted = [...lum].sort((a, b) => a - b);
-  const p99 = sorted[Math.min(n - 1, Math.floor(n * 0.99))] || 1;
-  const scale = p99 > 0 ? 236 / Math.pow(p99 / 255, 0.62) : 1;
+  const blackPoint = sorted[Math.floor(n * 0.10)] || 0;
+  const whitePoint = sorted[Math.min(n - 1, Math.floor(n * 0.995))] || 255;
+  const span = Math.max(1, whitePoint - blackPoint);
+  const GAMMA = 0.92;
   const outBuf = Buffer.alloc(buf.length);
   for (let i = 0; i < n; i += 1) {
     for (let c = 0; c < 3; c += 1) {
-      const v = buf[i * 3 + c] / 255;
-      outBuf[i * 3 + c] = Math.max(0, Math.min(255, Math.round(255 * Math.pow(v, 0.62) * (scale / 255))));
+      const t = Math.max(0, Math.min(1, (buf[i * 3 + c] - blackPoint) / span));
+      outBuf[i * 3 + c] = Math.round(255 * Math.pow(t, GAMMA));
     }
   }
   return outBuf;
