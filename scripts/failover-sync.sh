@@ -235,8 +235,21 @@ scp -q -o BatchMode=yes scripts/failover-slot.sh "$STANDBY_SSH:~/hakster-standby
 # The standby's own router is kept current the same way. Copying it does not
 # change the running process: a router code change still needs its own restart,
 # which is a deliberate decision, never a side effect of a data sync.
+#
+# That gap is silent by nature — on 2026-11-26 the pinned-prefix fix reached the
+# standby's disk and the running router kept the old list, so half the public
+# loads still hit the stale page for ~2 h. The hash is therefore read either
+# side of the copy: when the file really changed, the run says a restart is
+# owed instead of leaving it to be discovered from the public door (§50.2).
+router_before=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+  'sha256sum ~/hakster-standby-router.cjs 2>/dev/null | cut -d" " -f1' 2>/dev/null || true)
 scp -q -o BatchMode=yes scripts/failover-router.cjs "$STANDBY_SSH:~/hakster-standby-router.cjs" \
   || { say "warning: could not update the standby's router file"; }
+router_after=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+  'sha256sum ~/hakster-standby-router.cjs 2>/dev/null | cut -d" " -f1' 2>/dev/null || true)
+if [ -n "$router_before" ] && [ -n "$router_after" ] && [ "$router_before" != "$router_after" ]; then
+  say "standby router file updated — restart hakster-router-lenovo there to load it (routing pins do not apply until it does)"
+fi
 
 # The bank merge helper travels the same way, so a standby can carry the primary's
 # memory banks by entry id without ever removing one of its own (§41).
