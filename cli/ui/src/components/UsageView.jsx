@@ -2,6 +2,10 @@ import React from 'react';
 import { TextAttributes } from '@opentui/core';
 import { BrandLine } from './HeroLogo.jsx';
 import { clip } from './LiveSidebar.jsx';
+// The usage ids are locked in our CLI config (§22.4 shape): one id per model key,
+// bundled here so /usage shows them even when the server has not restarted onto
+// the code that serves the key ledger (§45).
+import { ownUsageIds, accountTags, usageIdFor } from '../../../src/usage-ids.js';
 
 /* UsageView — this account's usage, the way Claude's /usage page reads.
  *
@@ -182,52 +186,80 @@ export default function UsageView({ width = 80, height = 24, usage = null, refre
           own recorded turns and wired to the admin profit meter — never rendered
           on junkalot.co (§16, §25, §30, §36). The dollar figure, when the server
           supplies one, is our account metered at the locked rate card: a meter,
-          never an invoice (§19, §24). An unmeasured key reads zero and says so. */}
-      {data.keyLedger ? (() => {
-        const keys = Array.isArray(data.keyLedger.keys) ? data.keyLedger.keys : [];
-        const own = keys
-          .filter((k) => k && k.client !== 'junkalot.co')
-          // The key that actually carried the latest usage reads first; a key with
-          // no recorded call still shows, at zero, rather than being hidden (§10).
-          .sort((a, b) => (Number((b.month || {}).requests) || 0) - (Number((a.month || {}).requests) || 0));
-        const jk = data.keyLedger.junkalotKey;
+          never an invoice (§19, §24). An unmeasured key reads zero and says so.
+
+          The ids are LOCKED in our CLI config (`cli/src/usage-ids.js`), so this
+          list is the floor: it renders even when the server has not restarted
+          onto the code that serves `keyLedger` (§45), and an id added later from
+          admin is merged on top rather than being dropped (§26.5). A locked id
+          with no measured call says exactly that — it never borrows a figure. */}
+      {(() => {
+        const keys = Array.isArray(data.keyLedger && data.keyLedger.keys) ? data.keyLedger.keys : [];
+        const jk = (data.keyLedger && data.keyLedger.junkalotKey) || null;
         const money = data.ownerMeter;
-        // Same account, different name: when two key ids share an account (ours and
-        // Junkalot's both live on OLLAMA_CLOUD_KEY_2), the account tag is printed on
-        // every row that shares it, so the label — never a guess — is what tells
-        // their usage apart. A unique account prints nothing extra.
-        const acctCount = new Map();
+        const stale = !data.keyLedger; // server has not served the ledger yet
+        const liveById = new Map(keys.map((k) => [k && k.id, k]));
+        // Locked ids first (always present), then any registry id the server knows
+        // about that this config did not already carry. Ids that measure nothing
+        // still show, at zero, rather than being hidden (§10).
+        const ids = ownUsageIds();
         for (const k of keys) {
-          const a = k && k.account;
-          if (a) acctCount.set(a, (acctCount.get(a) || 0) + 1);
+          if (k && k.client !== 'junkalot.co' && !ids.some((i) => i.id === k.id)) {
+            ids.push({ id: k.id, label: k.label || '', account: k.account || '', envVar: k.envVar || '', lanes: Array.isArray(k.lanes) ? k.lanes.map(String) : [] });
+          }
         }
-        const acctTag = (k) => (k && k.account && acctCount.get(k.account) > 1 ? ` · ${k.account}` : '');
+        // Same account, different name: when two ids share an account (ours and
+        // Junkalot's both live on OLLAMA_CLOUD_KEY_2), the account is printed on
+        // every row that shares it, so the label is what tells usage apart.
+        const tags = accountTags(ids.map((k) => ({ id: k.id, account: k.account || (liveById.get(k.id) || {}).account || '' })));
         const jkKey = keys.filter((k) => k && k.client === 'junkalot.co')[0] || null;
+        const show = ids.slice(0, 5);
         return (
           <>
-            {line('Billing · HAKSTERAI-FLASH · one id per model key', 'green')}
-            {own.length ? own.slice(0, 3).map((k) => (
-              <box key={k.id} style={{ width: inner, flexDirection: 'column', flexShrink: 0 }}>
-                {line(`  ${k.id}${k.label ? ` · ${k.label}` : ''}${acctTag(k)}  30d ${fmtNum(k.month && k.month.requests)} req · in ${fmtNum(k.month && k.month.inTokens)} · out ${fmtNum(k.month && k.month.outTokens)}`)}
-                {line(`     all-time ${fmtNum(k.all && k.all.requests)} req · ${fmtNum((k.all && k.all.inTokens) || 0)} in / ${fmtNum((k.all && k.all.outTokens) || 0)} out${k.lanes && k.lanes.length ? ` · lanes ${k.lanes.map((l) => l.lane).slice(0, 2).join(', ')}` : ''}`, 'gray')}
-              </box>
-            )) : line('  no key has recorded a call yet', 'gray')}
-            {line(`  ${jkKey ? jkKey.id : 'key-junkalot-1'} · ${(jkKey && jkKey.label) || 'Junkalot Coach'}${acctTag(jkKey)} · ${jk ? `${fmtNum(jk.month.requests)} turns 30d` : 'reading her rows…'} · wired to our admin profit meter`, 'white')}
+            {line('Billing · HAKSTERAI-FLASH · one id per model key · ids locked in CLI config', 'green')}
+            {show.length ? show.map((k) => {
+              const l = liveById.get(k.id) || null;
+              const tag = tags.get(k.id) ? ` · ${tags.get(k.id)}` : '';
+              const name = `${k.id}${k.label ? ` · ${k.label}` : ''}${tag}`;
+              if (!l) {
+                // No measured call for this id: state the lock and the lane it will
+                // count, never a figure (§10, §13).
+                const lane = k.lanes && k.lanes.length ? `lane ${k.lanes.join('/')}` : 'no lane bound yet';
+                return (
+                  <Row key={k.id} w={inner}>
+                    <text fg="gray">{clip(`  ${name}  ${stale ? 'locked · ledger reads after the server restart' : 'locked · no call recorded yet'} · ${lane}${k.envVar ? ` · ${k.envVar}` : ''}`, inner)}</text>
+                  </Row>
+                );
+              }
+              return (
+                <box key={k.id} style={{ width: inner, flexDirection: 'column', flexShrink: 0 }}>
+                  {line(`  ${name}  30d ${fmtNum(l.month && l.month.requests)} req · in ${fmtNum(l.month && l.month.inTokens)} · out ${fmtNum(l.month && l.month.outTokens)}`)}
+                  {line(`     all-time ${fmtNum(l.all && l.all.requests)} req · ${fmtNum((l.all && l.all.inTokens) || 0)} in / ${fmtNum((l.all && l.all.outTokens) || 0)} out${l.usedLanes && l.usedLanes.length ? ` · lanes ${l.usedLanes.map((x) => x.lane).slice(0, 2).join(', ')}` : ''}`, 'gray')}
+                </box>
+              );
+            }) : line('  no usage ids in the CLI config', 'gray')}
+            {line(`  ${jkKey ? jkKey.id : 'key-junkalot-1'} · ${(jkKey && jkKey.label) || 'Junkalot Coach'}${jkKey && tags.get(jkKey.id) ? ` · ${tags.get(jkKey.id)}` : ''} · ${jk ? `${fmtNum(jk.month && jk.month.requests)} turns 30d` : stale ? 'her rows read after the server restart' : 'reading her rows…'} · wired to our admin profit meter`, stale ? 'gray' : 'white')}
             {money ? line(`  metered $${Number(money.monthMeterUsd || 0).toFixed(2)} 30d · $${Number(money.meterUsd || 0).toFixed(2)} all-time at $${Number(money.rateInPerMTok || 0).toFixed(2)} in / $${Number(money.rateOutPerMTok || 0).toFixed(2)} out per Mtok · meter, not an invoice`, 'gray') : null}
             <Row w={inner}><text> </text></Row>
           </>
         );
-      })() : line('Billing · our key ledger is read by the server after its next restart — nothing is shown rather than her card in its place', 'gray')}
+      })()}
 
       {/* The last measured calls, so a figure can be traced to its row. */}
       {Array.isArray(data.tokenWiring && data.tokenWiring.recent) && data.tokenWiring.recent.length ? (
         <>
           {line('Recent calls', 'green')}
-          {data.tokenWiring.recent.slice(0, Math.max(0, Math.min(5, height - 16))).map((r, i) => (
-            <Row key={`recent:${i}`} w={inner}>
-              <text fg="gray">{clip(`${new Date(Number(r.created_at) * 1000).toISOString().slice(5, 16).replace('T', ' ')}  ${String(r.endpoint || '').padEnd(16)} ${String(r.model || r.provider || '').slice(0, 18).padEnd(18)} in ${fmtNum(r.input_tokens)} out ${fmtNum(r.output_tokens)}`, inner)}</text>
-            </Row>
-          ))}
+          {data.tokenWiring.recent.slice(0, Math.max(0, Math.min(5, height - 16))).map((r, i) => {
+            // Attribute each measured call to the usage id its lane counts against,
+            // so a figure can be traced to the key that ran it (§51.6). A lane with
+            // no id is stated as unattributed, never guessed onto a neighbour.
+            const id = usageIdFor(r.provider || r.lane) || 'unattributed';
+            return (
+              <Row key={`recent:${i}`} w={inner}>
+                <text fg="gray">{clip(`${new Date(Number(r.created_at) * 1000).toISOString().slice(5, 16).replace('T', ' ')}  ${String(id).padEnd(20)} ${String(r.model || r.provider || '').slice(0, 16).padEnd(16)} in ${fmtNum(r.input_tokens)} out ${fmtNum(r.output_tokens)}`, inner)}</text>
+              </Row>
+            );
+          })}
         </>
       ) : null}
       {line('r refresh · ] faster · [ slower · PgUp/PgDn scroll · esc back', 'gray')}

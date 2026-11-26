@@ -15,6 +15,7 @@
  *   provider     ollama  @ 127.0.0.1:11434      cli/src/models/ladder.js
  *   ladder       claude-cli → ollama → codex    cli/src/models/ladder.js
  *   prefs        model / provider               cli/src/prefs.js
+ *   usage ids    one id per model key           cli/src/usage-ids.js
  *   runtime cfg  server, apiKey, model          ~/.hakster/config.json
  *   env model    DEFAULT_MODEL / HAKSTER_MODEL  .env (this repo and cli/)
  *
@@ -44,6 +45,10 @@ const REPO = path.resolve(__dirname, '..', '..'); // <repo>/cli/src -> <repo>
 const PROTECTED_FILES = [
   { path: path.join(REPO, 'cli', 'src', 'models', 'ladder.js'), suffix: '/cli/src/models/ladder.js', aliases: ['models/ladder.js', 'ladder.js'], what: 'the model ladder (wire model, provider, lane order)' },
   { path: path.join(REPO, 'cli', 'src', 'prefs.js'), suffix: '/cli/src/prefs.js', aliases: ['src/prefs.js', 'prefs.js'], what: 'the CLI preferences store' },
+  // The usage ids are locked the same way (§22.4 shape): re-IDing a key would
+  // silently move historical usage onto a different name, so a tool write to
+  // this file is refused and the ids are pinned by usage-ids.test.mjs.
+  { path: path.join(REPO, 'cli', 'src', 'usage-ids.js'), suffix: '/cli/src/usage-ids.js', aliases: ['src/usage-ids.js', 'usage-ids.js'], what: 'the per-key usage ids (one id per model key)' },
   { path: path.join(HOME, '.hakster', 'config.json'), suffix: '/.hakster/config.json', aliases: ['.hakster/config.json'], what: 'the CLI runtime config (server, api key, model)' },
   { path: path.join(REPO, '.env'), suffix: '/haksterAi/.env', aliases: ['.env'], what: 'the server environment (model, provider, relay)' },
   { path: path.join(REPO, 'cli', '.env'), suffix: '/haksterAi/cli/.env', aliases: ['.env'], what: 'the CLI environment' },

@@ -12809,6 +12809,58 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
   }
 });
 
+// POST /api/admin/provider-keys — register one key id from the admin page.
+// Owner only, and the key VALUE never travels: the endpoint accepts the env-var
+// NAME the value lives in (§9, §23, §31). Adding a key is data, not a code
+// change (§26.5, §51.2). It records usage under that id; it never bills, and it
+// changes no model, route, provider order, rate or plan (§19.3, §22.4, §26).
+app.post('/api/admin/provider-keys', express.json({ limit: '8kb' }), requireOwner, (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const saved = providerKeys.upsertKey({
+      id: body.id,
+      label: body.label,
+      client: body.client,
+      account: body.account,
+      provider: body.provider,
+      envVar: body.envVar,
+      envOwner: body.envOwner,
+      lanes: body.lanes,
+      basis: body.basis,
+      usageSource: body.usageSource,
+      note: body.note,
+      fingerprintEnv: body.fingerprintEnv,
+    }, { replace: body.replace === true });
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    return res.json({
+      ok: true,
+      key: saved.key,
+      keys: saved.registry.keys.map((k) => ({
+        id: k.id,
+        label: k.label,
+        client: k.client,
+        account: k.account,
+        provider: k.provider,
+        envVar: k.envVar,
+        lanes: k.lanes,
+        basis: k.basis,
+        createdAt: k.createdAt,
+      })),
+      note: 'The key id is registered. Its value belongs in the env var named below, entered through /home/ghost/bin/secret-add — never sent to this endpoint.',
+    });
+  } catch (err) {
+    const code = err && err.code;
+    if (code === 'BAD_ID') {
+      return res.status(400).json({ ok: false, error: 'id must be lowercase letters, digits and dashes (2–63 chars)' });
+    }
+    if (code === 'EXISTS') {
+      return res.status(409).json({ ok: false, error: String(err.message || 'that id already exists') });
+    }
+    return res.status(503).json({ ok: false, error: 'Could not register the key id right now' });
+  }
+});
+
 // GET /api/usage/admin — owner view of usage across every account.
 // Read-only: it reports the counters reserveUsage writes; it never resets them.
 app.get('/api/usage/admin', requireOwner, (req, res) => {

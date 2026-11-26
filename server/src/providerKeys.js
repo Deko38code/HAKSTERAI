@@ -81,6 +81,30 @@ const DEFAULT_REGISTRY = {
       createdAt: '2026-11-26',
     },
     {
+      id: 'key-haksterai-codex',
+      label: 'HAKSTERAI-FLASH · Codex Pro (ours)',
+      client: 'haksterai.com',
+      account: 'codex-pro',
+      provider: 'codex-cli',
+      envVar: 'CODEX_AUTH_JSON (~/.codex/auth.json)',
+      lanes: ['codex-cli'],
+      basis: 'cli-auth',
+      note: 'Codex is lane 2 of the waterfall and rides the owner\'s Codex Pro subscription (~/.codex/auth.json), so there is no metered per-token key to store. It still gets its own usage id: every call that lane serves is recorded under it, so Codex usage is measured per key like every other lane, and reads zero when it served nothing.',
+      createdAt: '2026-11-26',
+    },
+    {
+      id: 'key-haksterai-codex-api',
+      label: 'Codex API · Nous (ours)',
+      client: 'haksterai.com',
+      account: 'codex-api',
+      provider: 'codex',
+      envVar: 'CODEX_API_KEY',
+      lanes: ['codex'],
+      basis: 'lane-attributed',
+      note: 'The metered Codex/Nous API lane (CODEX_API_KEY). It is not part of the waterfall, so it records only when that lane is called directly — a zero here means it was not used, never that usage was lost.',
+      createdAt: '2026-11-26',
+    },
+    {
       id: 'key-ollama-cloud2',
       label: 'Ollama Cloud 2 · spare',
       client: 'haksterai.com',
@@ -186,6 +210,61 @@ function listKeys() {
     fp: k.fingerprint ? k.fingerprint.slice(0, 6) : null,
     createdAt: k.createdAt,
   }));
+}
+
+/**
+ * Add or update one key id. This is the path the admin page and the CLI helper
+ * both use, so adding a key stays data rather than a code change (§26.5).
+ *
+ * It never accepts a key VALUE (§9, §23, §31): only the env-var NAME the value
+ * lives in. `fingerprintEnv` names a variable this process already holds, and
+ * the one-way prefix is computed here so the value never travels over HTTP or
+ * through a command line.
+ *
+ * @returns {object} the saved registry
+ */
+function upsertKey(input, opts = {}) {
+  const src = input || {};
+  const id = String(src.id || '').trim();
+  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(id)) {
+    const err = new Error('id must be lowercase letters, digits and dashes (2-63 chars)');
+    err.code = 'BAD_ID';
+    throw err;
+  }
+  const registry = loadRegistry();
+  const idx = registry.keys.findIndex((k) => k.id === id);
+  if (idx >= 0 && !opts.replace) {
+    const err = new Error(`${id} already exists — pass replace to update it`);
+    err.code = 'EXISTS';
+    throw err;
+  }
+  const prev = idx >= 0 ? registry.keys[idx] : null;
+  const lanes = Array.isArray(src.lanes)
+    ? src.lanes.map((l) => String(l).trim()).filter(Boolean).slice(0, 20)
+    : prev ? prev.lanes : [];
+  // The value is only ever read out of this process's own environment.
+  const fpEnv = String(src.fingerprintEnv || '').trim();
+  const fingerprint = fpEnv && process.env[fpEnv]
+    ? fingerprintKey(process.env[fpEnv])
+    : (prev ? prev.fingerprint : '');
+  const row = {
+    id,
+    label: String(src.label || (prev && prev.label) || id).slice(0, 80),
+    client: String(src.client || (prev && prev.client) || '').slice(0, 80),
+    account: String(src.account || (prev && prev.account) || '').slice(0, 60),
+    provider: String(src.provider || (prev && prev.provider) || '').slice(0, 60),
+    envVar: String(src.envVar || (prev && prev.envVar) || '').slice(0, 80),
+    envOwner: String(src.envOwner || (prev && prev.envOwner) || 'dell').slice(0, 40),
+    lanes,
+    basis: String(src.basis || (prev && prev.basis) || 'lane-attributed').slice(0, 40),
+    usageSource: String(src.usageSource || (prev && prev.usageSource) || '').slice(0, 160),
+    note: String(src.note || (prev && prev.note) || '').slice(0, 300),
+    fingerprint,
+    createdAt: (prev && prev.createdAt) || new Date().toISOString().slice(0, 10),
+  };
+  if (idx >= 0) registry.keys[idx] = row; else registry.keys.push(row);
+  saveRegistry(registry);
+  return { registry: loadRegistry(), key: row.id };
 }
 
 /** Which key id a lane belongs to, or null when the lane has no key recorded. */
@@ -315,7 +394,10 @@ function summarize(now = Date.now()) {
         week: b ? b.week : empty(),
         month: b ? b.month : empty(),
         all: b ? b.all : { ...empty(), firstAt: null, lastAt: null },
-        lanes: b ? [...b.lanes.values()].sort((x, y) => y.tokens - x.tokens) : [],
+        // `lanes` above is the CONFIGURED lane list (which lanes this id owns).
+        // These are the lanes that actually served a recorded call — kept under
+        // their own key so the configured list is never shadowed.
+        usedLanes: b ? [...b.lanes.values()].sort((x, y) => y.tokens - x.tokens) : [],
         measured: Boolean(b && b.all.requests),
       };
     }),
@@ -393,6 +475,7 @@ module.exports = {
   DEFAULT_REGISTRY,
   loadRegistry,
   saveRegistry,
+  upsertKey,
   fingerprintKey,
   listKeys,
   keyIdByLane,

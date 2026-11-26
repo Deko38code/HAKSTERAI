@@ -50,6 +50,19 @@ import Layout from '../../layouts/Layout.astro';
     .pl-session .since{font:700 15px/1.3 ui-monospace,monospace;color:#f1f5f9;font-variant-numeric:tabular-nums;}
     .pl-session .clock{font:700 22px/1.2 ui-monospace,monospace;color:#4ade80;font-variant-numeric:tabular-nums;letter-spacing:.02em;}
     .pl-session .who{font-size:12px;color:#94a3b8;overflow-wrap:anywhere;}
+    .pl-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 12px;margin-bottom:10px;}
+    .pl-form-grid label,.pl-form-full{display:flex;flex-direction:column;gap:4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#94a3b8;}
+    .pl-form-grid input,.pl-form-full input{background:#0b0b12;border:1px solid #1e1e2e;border-radius:8px;padding:8px 10px;color:#e2e8f0;font:13px/1.4 ui-monospace,monospace;min-width:0;width:100%;box-sizing:border-box;}
+    .pl-form-grid input:focus,.pl-form-full input:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 2px rgba(124,58,237,.25);}
+    .pl-form-full{margin-bottom:10px;}
+    .pl-form-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
+    .pl-form-actions button{border:1px solid #334155;background:#15151f;color:#e2e8f0;border-radius:9px;padding:8px 14px;font:600 12px ui-sans-serif,system-ui;cursor:pointer;}
+    .pl-form-actions button[type="submit"]{border-color:#166534;background:#052e16;color:#4ade80;}
+    .pl-form-actions button:hover{border-color:#7c3aed;}
+    .pl-form-hint{font-size:11.5px;line-height:1.6;color:#64748b;margin:10px 0 0;}
+    .pl-form-hint.good{color:#4ade80;}
+    .pl-form-hint.bad{color:#fca5a5;}
+    .pl-form-hint code{background:#0b0b12;border:1px solid #1e1e2e;border-radius:5px;padding:1px 5px;font:11px ui-monospace,monospace;color:#c4b5fd;}
     .pl-foot{margin-top:26px;border-top:1px solid #1e1e2e;padding-top:12px;font-size:11.5px;color:#64748b;line-height:1.7;}
     @media (max-width:480px){
       .pl-wrap{padding:18px 14px 90px;}
@@ -85,6 +98,30 @@ import Layout from '../../layouts/Layout.astro';
       <h2>Model keys &middot; one id per key, usage measured per key</h2>
       <div class="pl-card" id="pl-key-ledger">
         <p class="pl-empty">Reading the key ledger&hellip;</p>
+      </div>
+    </section>
+
+    <section class="pl-section">
+      <h2>Add a key id &middot; registering a key is data, never a secret</h2>
+      <div class="pl-card" id="pl-key-add">
+        <form id="pl-key-form" autocomplete="off">
+          <div class="pl-form-grid">
+            <label>Key id<input name="id" placeholder="key-haksterai-codex-2" pattern="[a-z0-9][a-z0-9\-]{1,62}" required></label>
+            <label>Label<input name="label" placeholder="Codex Pro 2 (ours)"></label>
+            <label>Client / owner<input name="client" placeholder="haksterai.com" value="haksterai.com"></label>
+            <label>Account<input name="account" placeholder="codex-pro"></label>
+            <label>Provider<input name="provider" placeholder="codex-cli"></label>
+            <label>Env var name<input name="envVar" placeholder="CODEX_AUTH_JSON (~/.codex/auth.json)"></label>
+            <label>Lanes (comma)<input name="lanes" placeholder="codex-cli"></label>
+            <label>Basis<input name="basis" placeholder="cli-auth"></label>
+          </div>
+          <label class="pl-form-full">Note<input name="note" placeholder="what this key is for"></label>
+          <div class="pl-form-actions">
+            <button type="button" id="pl-key-codex">Codex template</button>
+            <button type="submit">Register key id</button>
+          </div>
+          <p class="pl-form-hint" id="pl-key-msg" role="status" aria-live="polite">The key VALUE never goes through this form. Register the id here, then put the value in the env var it names with <code>/home/ghost/bin/secret-add</code>.</p>
+        </form>
       </div>
     </section>
 
@@ -672,6 +709,68 @@ import Layout from '../../layouts/Layout.astro';
           // 401/403 stops the session counter.
           if (/HTTP 40[13]/.test(String(e && e.message))) { stopSession(); }
         }
+      }
+
+      // ── Add a key id ────────────────────────────────────────────────────
+      // Owner (2026-11-26): "make keys for our codex from admin to make with
+      // ids". The form registers an id and the env-var NAME its value lives in;
+      // the value itself never travels over HTTP (§9, §23, §31). Usage then
+      // records under that id, so Codex usage is measured per id like every
+      // other key (§29, §51). Adding a key is data, never a code change (§26.5).
+      var keyForm = document.getElementById('pl-key-form');
+      var keyMsg = document.getElementById('pl-key-msg');
+      var codexBtn = document.getElementById('pl-key-codex');
+      function setKeyMsg(text, ok) {
+        if (!keyMsg) return;
+        keyMsg.textContent = text;
+        keyMsg.className = 'pl-form-hint ' + (ok === true ? 'good' : ok === false ? 'bad' : '');
+      }
+      if (codexBtn && keyForm) {
+        codexBtn.addEventListener('click', function () {
+          var f = keyForm.elements;
+          if (!f.id.value) f.id.value = 'key-haksterai-codex-2';
+          if (!f.label.value) f.label.value = 'Codex Pro 2 (ours)';
+          if (!f.account.value) f.account.value = 'codex-pro';
+          if (!f.provider.value) f.provider.value = 'codex-cli';
+          if (!f.envVar.value) f.envVar.value = 'CODEX_AUTH_JSON (~/.codex/auth.json)';
+          if (!f.lanes.value) f.lanes.value = 'codex-cli';
+          if (!f.basis.value) f.basis.value = 'cli-auth';
+          if (!f.note.value) f.note.value = 'Codex lane on a second Codex Pro login — usage measured per id like every other key.';
+        });
+      }
+      if (keyForm) {
+        keyForm.addEventListener('submit', function (ev) {
+          ev.preventDefault();
+          if (!token) { setKeyMsg('Owner sign-in required.', false); return; }
+          var f = keyForm.elements;
+          var body = {
+            id: String(f.id.value || '').trim(),
+            label: String(f.label.value || '').trim(),
+            client: String(f.client.value || '').trim() || 'haksterai.com',
+            account: String(f.account.value || '').trim(),
+            provider: String(f.provider.value || '').trim(),
+            envVar: String(f.envVar.value || '').trim(),
+            lanes: String(f.lanes.value || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean),
+            basis: String(f.basis.value || '').trim(),
+            note: String(f.note.value || '').trim(),
+          };
+          if (!body.id) { setKeyMsg('A key id is required.', false); return; }
+          setKeyMsg('Registering ' + body.id + '…', null);
+          fetch('/api/admin/provider-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': token },
+            body: JSON.stringify(body),
+          }).then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
+          }).then(function (res) {
+            if (!res.ok || !res.d.ok) throw new Error((res.d && res.d.error) || ('HTTP ' + res.status));
+            setKeyMsg('Registered ' + res.d.key + '. Put its value in ' + (body.envVar || 'the env var it names') + ' with /home/ghost/bin/secret-add — it shows on the next meter read.', true);
+            keyForm.reset();
+            load();
+          }).catch(function (err) {
+            setKeyMsg('Not registered: ' + (err && err.message ? err.message : 'unknown error'), false);
+          });
+        });
       }
 
       load();

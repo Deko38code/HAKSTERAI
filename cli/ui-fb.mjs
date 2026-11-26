@@ -654,6 +654,152 @@ var require_live_image = __commonJS({
   }
 });
 
+// ../src/usage-ids.js
+var require_usage_ids = __commonJS({
+  "../src/usage-ids.js"(exports, module) {
+    "use strict";
+    var fs11 = __require("fs");
+    var path8 = __require("path");
+    var os6 = __require("os");
+    var HOME = process.env.HOME || os6.homedir() || "/home/ghost";
+    var REPO = (() => {
+      try {
+        if (typeof __dirname === "string" && __dirname) return path8.resolve(__dirname, "..", "..");
+      } catch {
+      }
+      const base = process.env.HAKSTER_REPO || process.cwd() || "";
+      return base ? path8.resolve(base) : "";
+    })();
+    var REGISTRY_FILE = process.env.PROVIDER_KEYS_FILE || (REPO ? path8.join(REPO, "server", "data", "provider-keys.json") : "");
+    var LOCKED_USAGE_IDS = Object.freeze([
+      Object.freeze({
+        id: "key-haksterai-1",
+        label: "HAKSTERAI-FLASH (ours)",
+        client: "haksterai.com",
+        account: "ollama-cloud-2",
+        envVar: "OLLAMA_CLOUD_KEY_2",
+        lanes: Object.freeze(["deepseek-key2"])
+      }),
+      Object.freeze({
+        id: "key-haksterai-relay",
+        label: "HAKSTERAI-FLASH \xB7 relay (ours)",
+        client: "haksterai.com",
+        account: "",
+        envVar: "DEEPSEEK_BASE_URL",
+        lanes: Object.freeze(["ollama", "deepseek", "claude-cli"])
+      }),
+      Object.freeze({
+        id: "key-haksterai-codex",
+        label: "HAKSTERAI-FLASH \xB7 Codex Pro (ours)",
+        client: "haksterai.com",
+        account: "codex-pro",
+        envVar: "CODEX_AUTH_JSON (~/.codex/auth.json)",
+        lanes: Object.freeze(["codex-cli"])
+      }),
+      Object.freeze({
+        id: "key-haksterai-codex-api",
+        label: "Codex API \xB7 Nous (ours)",
+        client: "haksterai.com",
+        account: "codex-api",
+        envVar: "CODEX_API_KEY",
+        lanes: Object.freeze(["codex"])
+      }),
+      Object.freeze({
+        id: "key-junkalot-1",
+        label: "Junkalot Coach",
+        client: "junkalot.co",
+        account: "ollama-cloud-2",
+        envVar: "OLLAMA_CLOUD_KEY_2",
+        lanes: Object.freeze([])
+      })
+    ]);
+    var LANE_USAGE_ID = Object.freeze({
+      "deepseek-key2": "key-haksterai-1",
+      ollama: "key-haksterai-relay",
+      deepseek: "key-haksterai-relay",
+      "claude-cli": "key-haksterai-relay",
+      "codex-cli": "key-haksterai-codex",
+      codex: "key-haksterai-codex-api"
+    });
+    function usageIdFor2(lane) {
+      const key = String(lane == null ? "" : lane).trim();
+      if (!key) return null;
+      return LANE_USAGE_ID[key] || null;
+    }
+    function readRegistryKeys() {
+      if (!REGISTRY_FILE) return [];
+      try {
+        const raw = JSON.parse(fs11.readFileSync(REGISTRY_FILE, "utf8"));
+        return raw && Array.isArray(raw.keys) ? raw.keys : [];
+      } catch {
+        return [];
+      }
+    }
+    function listUsageIds() {
+      const out = LOCKED_USAGE_IDS.map((k) => ({
+        id: k.id,
+        label: k.label,
+        client: k.client,
+        account: k.account,
+        envVar: k.envVar,
+        lanes: [...k.lanes],
+        locked: true,
+        source: "cli config"
+      }));
+      const known = new Set(out.map((k) => k.id));
+      for (const k of readRegistryKeys()) {
+        const id = String(k && k.id || "").trim();
+        if (!id || known.has(id) || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(id)) continue;
+        known.add(id);
+        out.push({
+          id,
+          label: String(k.label || id),
+          client: String(k.client || ""),
+          account: String(k.account || ""),
+          envVar: String(k.envVar || ""),
+          lanes: Array.isArray(k.lanes) ? k.lanes.map(String) : [],
+          locked: false,
+          source: "server registry"
+        });
+      }
+      return out;
+    }
+    function ownUsageIds2() {
+      return listUsageIds().filter((k) => k.client !== "junkalot.co");
+    }
+    function accountTags2(ids) {
+      const counts = /* @__PURE__ */ new Map();
+      for (const k of ids || []) {
+        const a = k && k.account;
+        if (a) counts.set(a, (counts.get(a) || 0) + 1);
+      }
+      const tags = /* @__PURE__ */ new Map();
+      for (const k of ids || []) {
+        if (k && k.account && counts.get(k.account) > 1) tags.set(k.id, k.account);
+      }
+      return tags;
+    }
+    function describeUsageId(k) {
+      if (!k) return "";
+      const parts = [k.id];
+      if (k.label) parts.push(k.label);
+      if (k.account) parts.push(k.account);
+      if (k.envVar) parts.push(k.envVar);
+      return parts.join(" \xB7 ");
+    }
+    module.exports = {
+      REGISTRY_FILE,
+      LOCKED_USAGE_IDS,
+      LANE_USAGE_ID,
+      usageIdFor: usageIdFor2,
+      listUsageIds,
+      ownUsageIds: ownUsageIds2,
+      accountTags: accountTags2,
+      describeUsageId
+    };
+  }
+});
+
 // ../src/updater.js
 var require_updater = __commonJS({
   "../src/updater.js"(exports, module) {
@@ -3032,6 +3178,7 @@ function LiveOutputPanel({
 // src/components/UsageView.jsx
 import React11 from "react";
 import { TextAttributes as TextAttributes8 } from "@opentui/core";
+var import_usage_ids = __toESM(require_usage_ids());
 import { Fragment as Fragment5, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var BLOCKS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
 function fmtNum(n) {
@@ -3157,32 +3304,47 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
     line(`Tokens all time  in ${fmtNum(data.tokenUsage && data.tokenUsage.inputTokens)} \xB7 out ${fmtNum(data.tokenUsage && data.tokenUsage.outputTokens)} \xB7 tool calls ${fmtNum(data.tokenUsage && data.tokenUsage.toolCalls)} \xB7 last ${since(data.tokenUsage && data.tokenUsage.lastUsedAt)}`, "gray"),
     line(`Token balance ${fmtNum(data.tokenBalance)} \xB7 live: ${rate} \xB7 updated ${updated}`, "gray"),
     /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) }),
-    data.keyLedger ? (() => {
-      const keys = Array.isArray(data.keyLedger.keys) ? data.keyLedger.keys : [];
-      const own = keys.filter((k) => k && k.client !== "junkalot.co").sort((a, b) => (Number((b.month || {}).requests) || 0) - (Number((a.month || {}).requests) || 0));
-      const jk = data.keyLedger.junkalotKey;
+    (() => {
+      const keys = Array.isArray(data.keyLedger && data.keyLedger.keys) ? data.keyLedger.keys : [];
+      const jk = data.keyLedger && data.keyLedger.junkalotKey || null;
       const money = data.ownerMeter;
-      const acctCount = /* @__PURE__ */ new Map();
+      const stale = !data.keyLedger;
+      const liveById = new Map(keys.map((k) => [k && k.id, k]));
+      const ids = (0, import_usage_ids.ownUsageIds)();
       for (const k of keys) {
-        const a = k && k.account;
-        if (a) acctCount.set(a, (acctCount.get(a) || 0) + 1);
+        if (k && k.client !== "junkalot.co" && !ids.some((i) => i.id === k.id)) {
+          ids.push({ id: k.id, label: k.label || "", account: k.account || "", envVar: k.envVar || "", lanes: Array.isArray(k.lanes) ? k.lanes.map(String) : [] });
+        }
       }
-      const acctTag = (k) => k && k.account && acctCount.get(k.account) > 1 ? ` \xB7 ${k.account}` : "";
+      const tags = (0, import_usage_ids.accountTags)(ids.map((k) => ({ id: k.id, account: k.account || (liveById.get(k.id) || {}).account || "" })));
       const jkKey = keys.filter((k) => k && k.client === "junkalot.co")[0] || null;
+      const show = ids.slice(0, 5);
       return /* @__PURE__ */ jsxs11(Fragment5, { children: [
-        line("Billing \xB7 HAKSTERAI-FLASH \xB7 one id per model key", "green"),
-        own.length ? own.slice(0, 3).map((k) => /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
-          line(`  ${k.id}${k.label ? ` \xB7 ${k.label}` : ""}${acctTag(k)}  30d ${fmtNum(k.month && k.month.requests)} req \xB7 in ${fmtNum(k.month && k.month.inTokens)} \xB7 out ${fmtNum(k.month && k.month.outTokens)}`),
-          line(`     all-time ${fmtNum(k.all && k.all.requests)} req \xB7 ${fmtNum(k.all && k.all.inTokens || 0)} in / ${fmtNum(k.all && k.all.outTokens || 0)} out${k.lanes && k.lanes.length ? ` \xB7 lanes ${k.lanes.map((l) => l.lane).slice(0, 2).join(", ")}` : ""}`, "gray")
-        ] }, k.id)) : line("  no key has recorded a call yet", "gray"),
-        line(`  ${jkKey ? jkKey.id : "key-junkalot-1"} \xB7 ${jkKey && jkKey.label || "Junkalot Coach"}${acctTag(jkKey)} \xB7 ${jk ? `${fmtNum(jk.month.requests)} turns 30d` : "reading her rows\u2026"} \xB7 wired to our admin profit meter`, "white"),
+        line("Billing \xB7 HAKSTERAI-FLASH \xB7 one id per model key \xB7 ids locked in CLI config", "green"),
+        show.length ? show.map((k) => {
+          const l = liveById.get(k.id) || null;
+          const tag = tags.get(k.id) ? ` \xB7 ${tags.get(k.id)}` : "";
+          const name = `${k.id}${k.label ? ` \xB7 ${k.label}` : ""}${tag}`;
+          if (!l) {
+            const lane = k.lanes && k.lanes.length ? `lane ${k.lanes.join("/")}` : "no lane bound yet";
+            return /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: clip(`  ${name}  ${stale ? "locked \xB7 ledger reads after the server restart" : "locked \xB7 no call recorded yet"} \xB7 ${lane}${k.envVar ? ` \xB7 ${k.envVar}` : ""}`, inner) }) }, k.id);
+          }
+          return /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
+            line(`  ${name}  30d ${fmtNum(l.month && l.month.requests)} req \xB7 in ${fmtNum(l.month && l.month.inTokens)} \xB7 out ${fmtNum(l.month && l.month.outTokens)}`),
+            line(`     all-time ${fmtNum(l.all && l.all.requests)} req \xB7 ${fmtNum(l.all && l.all.inTokens || 0)} in / ${fmtNum(l.all && l.all.outTokens || 0)} out${l.usedLanes && l.usedLanes.length ? ` \xB7 lanes ${l.usedLanes.map((x) => x.lane).slice(0, 2).join(", ")}` : ""}`, "gray")
+          ] }, k.id);
+        }) : line("  no usage ids in the CLI config", "gray"),
+        line(`  ${jkKey ? jkKey.id : "key-junkalot-1"} \xB7 ${jkKey && jkKey.label || "Junkalot Coach"}${jkKey && tags.get(jkKey.id) ? ` \xB7 ${tags.get(jkKey.id)}` : ""} \xB7 ${jk ? `${fmtNum(jk.month && jk.month.requests)} turns 30d` : stale ? "her rows read after the server restart" : "reading her rows\u2026"} \xB7 wired to our admin profit meter`, stale ? "gray" : "white"),
         money ? line(`  metered $${Number(money.monthMeterUsd || 0).toFixed(2)} 30d \xB7 $${Number(money.meterUsd || 0).toFixed(2)} all-time at $${Number(money.rateInPerMTok || 0).toFixed(2)} in / $${Number(money.rateOutPerMTok || 0).toFixed(2)} out per Mtok \xB7 meter, not an invoice`, "gray") : null,
         /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) })
       ] });
-    })() : line("Billing \xB7 our key ledger is read by the server after its next restart \u2014 nothing is shown rather than her card in its place", "gray"),
+    })(),
     Array.isArray(data.tokenWiring && data.tokenWiring.recent) && data.tokenWiring.recent.length ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
       line("Recent calls", "green"),
-      data.tokenWiring.recent.slice(0, Math.max(0, Math.min(5, height - 16))).map((r, i) => /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: clip(`${new Date(Number(r.created_at) * 1e3).toISOString().slice(5, 16).replace("T", " ")}  ${String(r.endpoint || "").padEnd(16)} ${String(r.model || r.provider || "").slice(0, 18).padEnd(18)} in ${fmtNum(r.input_tokens)} out ${fmtNum(r.output_tokens)}`, inner) }) }, `recent:${i}`))
+      data.tokenWiring.recent.slice(0, Math.max(0, Math.min(5, height - 16))).map((r, i) => {
+        const id = (0, import_usage_ids.usageIdFor)(r.provider || r.lane) || "unattributed";
+        return /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: clip(`${new Date(Number(r.created_at) * 1e3).toISOString().slice(5, 16).replace("T", " ")}  ${String(id).padEnd(20)} ${String(r.model || r.provider || "").slice(0, 16).padEnd(16)} in ${fmtNum(r.input_tokens)} out ${fmtNum(r.output_tokens)}`, inner) }) }, `recent:${i}`);
+      })
     ] }) : null,
     line("r refresh \xB7 ] faster \xB7 [ slower \xB7 PgUp/PgDn scroll \xB7 esc back", "gray")
   ] });
