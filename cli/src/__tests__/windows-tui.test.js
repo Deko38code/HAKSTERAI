@@ -129,7 +129,12 @@ test('the launcher consults the Windows locations before falling back', () => {
   assert.ok(/wellKnownBun\(env\)/.test(src), 'findBun no longer consults wellKnownBun');
   const launcher = read('index.js');
   assert.ok(/dashboardDied/.test(launcher), 'a crashing dashboard is no longer reported');
-  assert.ok(/the full error:/.test(launcher), 'the operator is no longer told how to see the real error');
+  // 2026-11-26: the launcher no longer only *tells* you to reproduce the crash —
+  // it captures the dashboard's own stderr (piped, because the alternate screen
+  // wipes it), prints the tail, and names the saved log. Assert that stronger
+  // guarantee rather than the old instruction line it replaced.
+  assert.ok(/what it said:/.test(launcher), 'a crashed dashboard no longer prints what it actually said');
+  assert.ok(/full log:/.test(launcher), 'a crashed dashboard no longer names where its output was saved');
 });
 
 test('the Windows installer recognises an existing Bun and says what to do', () => {

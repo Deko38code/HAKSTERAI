@@ -3230,27 +3230,123 @@ program
       fallbackInk('Bun is not installed (run install.sh again, or install Bun from bun.sh to get the full dashboard)');
       return;
     }
+    // The TUI cannot start without OpenTUI's per-platform native package
+    // (@opentui/core-<os>-<arch>). A dependency install that skipped optional
+    // packages, or a copy moved between machines, leaves the bundle importable
+    // but the native library absent - and the dashboard then dies the instant it
+    // opens. Resolving it is a file lookup: the answer is known BEFORE the TUI
+    // takes the screen, so this reports the real reason instead of a crash
+    // (Surface Pro, 2026-11-26 - "dashboard tui failed", cause unknown).
+    // A package is on disk when its directory holds a package.json. It is checked
+    // this way and NOT with require.resolve: these packages publish an exports map
+    // with only "bun" and "import" conditions, so require.resolve throws
+    // ERR_PACKAGE_PATH_NOT_EXPORTED on a package that is installed and fine.
+    const installed = (name) => {
+      const fsmod = require('fs');
+      for (const dir of (require.resolve.paths(name) || [])) {
+        if (fsmod.existsSync(path.join(dir, name, 'package.json'))) return true;
+      }
+      return false;
+    };
+    const nativeGap = () => {
+      const want = [];
+      if (process.platform === 'linux') {
+        want.push(`@opentui/core-linux-${process.arch}-musl`, `@opentui/core-linux-${process.arch}`);
+      } else {
+        want.push(`@opentui/core-${process.platform}-${process.arch}`);
+      }
+      for (const mod of want) { if (installed(mod)) return null; }
+      if (!installed('@opentui/core')) {
+        return { what: '@opentui/core', why: 'the OpenTUI runtime is not installed with this copy' };
+      }
+      return { what: want[0], why: 'npm skipped its optional platform package for this OS/CPU' };
+    };
+    const gap = nativeGap();
+    if (gap) {
+      fallbackInk(`${gap.what} is missing — ${gap.why}; reinstall the CLI so npm fetches it`);
+      return;
+    }
+
     // A .cmd/.bat launcher (Windows npm shim) cannot be spawned directly; it
     // needs the shell, and the quoted form keeps a path with spaces intact.
     const viaShell = /\.(cmd|bat)$/i.test(bun);
+    // stderr is piped, not inherited, for one reason: the dashboard draws in the
+    // terminal's ALTERNATE screen, so a crash prints its error inside a screen
+    // that is wiped when the process exits. That is why a failed start showed our
+    // one line and never the cause (Surface Pro, 2026-11-26). Captured here, the
+    // real message survives; stdout and stdin still go straight to the terminal so
+    // the TUI draws exactly as before.
+    const spawnOpts = {
+      stdio: ['inherit', 'inherit', 'pipe'],
+      env: { ...process.env, HAKSTER_TUI_VERSION: version },
+    };
     const child = viaShell
-      ? spawn(`"${bun}" "${entry}"`, { shell: true, stdio: 'inherit', env: { ...process.env, HAKSTER_TUI_VERSION: version } })
-      : spawn(bun, [entry], { stdio: 'inherit', env: { ...process.env, HAKSTER_TUI_VERSION: version } });
-    // The dashboard is the interface this account pays for. A crash must not
-    // look like a normal quit and must not leave a dead terminal: name what
-    // happened, give the command that prints the real error, and open the Ink
-    // TUI so the CLI still runs (owner, 2026-11-26, Surface Pro — "it shows
-    // input bar tui only" was a dashboard start that died without saying so).
+      ? spawn(`"${bun}" "${entry}"`, { ...spawnOpts, shell: true })
+      : spawn(bun, [entry], spawnOpts);
+
+    let errBuf = '';
+    if (child.stderr) {
+      child.stderr.on('data', (chunk) => {
+        // Written through as well as captured, so the TUI's own notices (an
+        // applied update, a warning) read exactly as they did when stderr was
+        // inherited and nothing that used to be visible goes quiet. The bundle
+        // renders entirely on stdout, so this cannot disturb the drawing.
+        try { process.stderr.write(chunk); } catch { /* closed terminal */ }
+        errBuf += chunk.toString();
+        // A crash trace is short; a chatty one still cannot eat the heap.
+        if (errBuf.length > 64000) errBuf = errBuf.slice(-32000);
+      });
+    }
+
+    // The point at the real cause of a dashboard crash, from what it printed.
+    const dashboardHint = (text) => {
+      if (/core-(win32|linux|darwin)/i.test(text) && /cannot find|not found|module/i.test(text)) {
+        return 'the OpenTUI native package for this OS is missing — reinstall the CLI so npm fetches it';
+      }
+      if (/libopentui|\.dll|\.so\b|dlopen|bun:ffi|ffi/i.test(text)) {
+        return 'the OpenTUI native library would not load — an old Bun under this build is the usual cause; run "hakster update", or install Bun from bun.sh';
+      }
+      if (/EPERM|EACCES|EBUSY|locked/i.test(text)) {
+        return 'a file the dashboard needs is locked — close the other hakster windows and start it again';
+      }
+      if (/raw mode|setRawMode|ENOTTY|not a tty/i.test(text)) {
+        return 'this terminal refuses raw mode — run it in Windows Terminal rather than the legacy console host';
+      }
+      return null;
+    };
+
+    // The dashboard is the interface this account pays for. A crash must not look
+    // like a normal quit, must not leave the terminal on the alternate screen, and
+    // must say what actually happened (owner, 2026-11-26, Surface Pro).
     let settled = false;
     const dashboardDied = (why) => {
       if (settled) return;
       settled = true;
+      // Leave the alternate screen BEFORE printing, or the terminal restores over
+      // everything written here and the report vanishes with the crash.
+      try { process.stdout.write('\x1b[?1049l\x1b[?25h\r\n'); } catch { /* no tty: print as usual */ }
+      const tail = errBuf.trim().split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean).slice(-12);
+      const hint = dashboardHint(errBuf);
+      let crashLog = '';
+      try {
+        const logsDir = path.join(require('os').homedir(), '.hakster', 'logs');
+        require('fs').mkdirSync(logsDir, { recursive: true });
+        crashLog = path.join(logsDir, 'dashboard-tui.log');
+        require('fs').writeFileSync(crashLog, `${new Date().toISOString()}\nexit: ${why}\nbun: ${bun}\nentry: ${entry}\n--- stderr ---\n${errBuf || '(nothing on stderr)'}\n`);
+      } catch { /* a log we cannot write must never block the fallback */ }
       console.error(`${C.red}✗ dashboard TUI exited (${why}).${C.reset}`);
-      console.error(`${C.dim}  the full error: "${bun}" "${entry}"${C.reset}`);
+      if (tail.length) {
+        console.error(`${C.dim}  what it said:${C.reset}`);
+        for (const line of tail) console.error(`${C.dim}    ${line}${C.reset}`);
+      } else {
+        console.error(`${C.dim}  it printed nothing before exiting.${C.reset}`);
+      }
+      if (hint) console.error(`${C.yellow}  likely cause: ${hint}${C.reset}`);
+      if (crashLog) console.error(`${C.dim}  full log: ${crashLog}${C.reset}`);
       console.error(`${C.dim}  running the simpler Ink TUI so the CLI still works.${C.reset}`);
       fallbackInk(null);
     };
-    child.on('exit', (code, signal) => {
+    child.on('close', (code, signal) => {
       if (code === 0) { settled = true; process.exit(0); }
       // Ctrl-C / a normal stop is the operator leaving, not a failure.
       if (signal === 'SIGINT' || signal === 'SIGTERM') { settled = true; process.exit(0); }
