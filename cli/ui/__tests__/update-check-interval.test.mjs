@@ -1,12 +1,12 @@
-/* The update check runs every 15 minutes, not every 30.
+/* The update check runs every 5 minutes.
  *
- * Owner, 2026-11-26: "lets make the update check faster then 30 min" → 15.
- * A check while the install is current is one small GET of /cli/latest.json, so
- * the interval is cheap to shorten; the pref makes 1 minute a setting, not a
- * code change.
+ * Owner, 2026-11-26: "lets make the update check faster then 30 min" → 15, then
+ * "make sure are cli updates poll servere every 5 min" → 5. A check while the
+ * install is current is one small GET of /cli/latest.json, so the interval is
+ * cheap to shorten; the pref makes 1 minute a setting, not a code change.
  *
  * Pinned here:
- *   1. the default is 15 minutes and lives in prefs, not a literal in the hook;
+ *   1. the default is 5 minutes and lives in prefs, not a literal in the hook;
  *   2. the interval is clamped to 1–240 minutes, so a typo cannot poll every
  *      second or silently disable the check;
  *   3. the timer is fixed per session (ref), jitter included, so a re-render
@@ -24,8 +24,8 @@ const cliRoot = path.resolve(here, '..', '..');
 const HOOK = fs.readFileSync(path.join(cliRoot, 'ui', 'src', 'hooks', 'useCliUpdate.js'), 'utf8');
 const PREFS = fs.readFileSync(path.join(cliRoot, 'src', 'prefs.js'), 'utf8');
 
-test('the default interval comes from prefs and is 15 minutes', () => {
-  assert.match(PREFS, /updateCheckMinutes: 15,/, 'the default is 15 minutes');
+test('the default interval comes from prefs and is 5 minutes', () => {
+  assert.match(PREFS, /updateCheckMinutes: 5,/, 'the default is 5 minutes');
   assert.match(HOOK, /prefs\.load\(\)\.updateCheckMinutes/, 'the hook reads the pref');
   assert.ok(!/intervalMs\s*=\s*30\s*\*\s*60\s*\*\s*1000/.test(HOOK), 'no 30-minute default in the hook');
 });

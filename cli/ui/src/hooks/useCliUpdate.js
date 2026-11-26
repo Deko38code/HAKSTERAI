@@ -65,13 +65,14 @@ function readStartup() {
   return { applied: null, status: { status: 'idle' } };
 }
 
-/* How often to check, from `updateCheckMinutes` (default 15). Owner, 2026-11-26:
- * "lets make the update check faster then 30 min" → 15. The check is a single
- * small GET of /cli/latest.json while the install is current, so the interval is
- * cheap to shorten; an explicit argument still wins, and anything unreadable
- * falls back to the default rather than to no check at all. Clamped to 1–240
- * minutes so a typo cannot poll the door every second or stop checks entirely. */
-const DEFAULT_CHECK_MINUTES = Number(prefs.load().updateCheckMinutes) || 15;
+/* How often to check, from `updateCheckMinutes` (default 5). Owner, 2026-11-26:
+ * "lets make the update check faster then 30 min" → 15, then "make sure are cli
+ * updates poll servere every 5 min" → 5. The check is a single small GET of
+ * /cli/latest.json while the install is current, so the interval is cheap to
+ * shorten; an explicit argument still wins, and anything unreadable falls back
+ * to the default rather than to no check at all. Clamped to 1–240 minutes so a
+ * typo cannot poll the door every second or stop checks entirely. */
+const DEFAULT_CHECK_MINUTES = Number(prefs.load().updateCheckMinutes) || 5;
 function resolveIntervalMs(explicitMs) {
   const given = Number(explicitMs);
   if (Number.isFinite(given) && given > 0) return given;

@@ -27,12 +27,12 @@ const DEFAULTS = {
   monitorFollow: true, // the monitor view follows the newest line
   updateCheck: true, // background CLI update check
   // Minutes between update checks. Owner, 2026-11-26: "lets make the update
-  // check faster then 30 min" → 15. A check is one small GET of
-  // /cli/latest.json while the install is current, so a quarter hour costs
-  // nothing and a release reaches a running session well inside the old half
-  // hour. Clamped 1–240 in useCliUpdate, so a one-minute check is just this key
-  // set to 1; a CLI preference, never the model config (§22).
-  updateCheckMinutes: 15,
+  // check faster then 30 min" → 15, then "make sure are cli updates poll
+  // servere every 5 min" → 5. A check is one small GET of /cli/latest.json
+  // while the install is current, so five minutes costs nothing and a release
+  // reaches a running session quickly. Clamped 1–240 in useCliUpdate; a CLI
+  // preference, never the model config (§22).
+  updateCheckMinutes: 5,
   opaqueBackdrop: false, // false = transparent over the terminal's wallpaper
   intro: true, // the five-line decode splash on start
   graphics: true, // real logo image in kitty / Ghostty / WezTerm (no-op elsewhere)

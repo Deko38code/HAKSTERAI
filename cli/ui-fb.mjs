@@ -1109,12 +1109,12 @@ var require_prefs = __commonJS({
       updateCheck: true,
       // background CLI update check
       // Minutes between update checks. Owner, 2026-11-26: "lets make the update
-      // check faster then 30 min" → 15. A check is one small GET of
-      // /cli/latest.json while the install is current, so a quarter hour costs
-      // nothing and a release reaches a running session well inside the old half
-      // hour. Clamped 1–240 in useCliUpdate, so a one-minute check is just this key
-      // set to 1; a CLI preference, never the model config (§22).
-      updateCheckMinutes: 15,
+      // check faster then 30 min" → 15, then "make sure are cli updates poll
+      // servere every 5 min" → 5. A check is one small GET of /cli/latest.json
+      // while the install is current, so five minutes costs nothing and a release
+      // reaches a running session quickly. Clamped 1–240 in useCliUpdate; a CLI
+      // preference, never the model config (§22).
+      updateCheckMinutes: 5,
       opaqueBackdrop: false,
       // false = transparent over the terminal's wallpaper
       intro: true,
@@ -7409,7 +7409,7 @@ function readStartup() {
   }
   return { applied: null, status: { status: "idle" } };
 }
-var DEFAULT_CHECK_MINUTES = Number(import_prefs2.default.load().updateCheckMinutes) || 15;
+var DEFAULT_CHECK_MINUTES = Number(import_prefs2.default.load().updateCheckMinutes) || 5;
 function resolveIntervalMs(explicitMs) {
   const given = Number(explicitMs);
   if (Number.isFinite(given) && given > 0) return given;
