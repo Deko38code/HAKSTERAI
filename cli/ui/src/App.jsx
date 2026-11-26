@@ -757,6 +757,11 @@ export default function App({ version = '0.1.0' }) {
       case '/menu':
         setMenuIndex(0);
         setMenuQuery('');
+        // The popout draws in the chat column's composer slot, so a full page
+        // (dashboard, monitor) has to close first or the command would open a
+        // menu nobody can see. (owner, 2026-11-26: "need to make sure the /menu
+        // closes the dashboard".)
+        setView('chat');
         setMenuOpen(true);
         return;
       case '/attach':
@@ -1525,8 +1530,13 @@ export default function App({ version = '0.1.0' }) {
     }
 
     if (key.name === 'escape') {
+      // esc is the way out of every page, the same one the monitor, usage,
+      // scripts, squad, mcp, settings, debug and model pages already had. The
+      // dashboard was the one that never closed on it (owner, 2026-11-26:
+      // "1 wouldnt close with esc"). A run in flight still stops first, so one
+      // esc stops the run and the next one leaves the page.
       if (agent.busy) agent.abort();
-      else if (view === 'monitor') setView('chat');
+      else if (view === 'monitor' || view === 'dashboard') setView('chat');
       else if (focus !== 'composer') setFocus('composer');
       return;
     }
@@ -1599,6 +1609,9 @@ export default function App({ version = '0.1.0' }) {
       // The popout's shortcut, the way crush opens its palette from anywhere.
       setMenuQuery('');
       setMenuIndex(0);
+      // Same rule as `/menu`: the palette draws in the chat column, so a full
+      // page closes first instead of hiding the menu behind it (§ same fix).
+      setView('chat');
       setMenuOpen(true);
       return;
     }

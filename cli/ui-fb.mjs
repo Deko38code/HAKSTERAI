@@ -8256,6 +8256,7 @@ function App({ version = "0.1.0" }) {
       case "/menu":
         setMenuIndex(0);
         setMenuQuery("");
+        setView("chat");
         setMenuOpen(true);
         return;
       case "/attach":
@@ -8930,7 +8931,7 @@ function App({ version = "0.1.0" }) {
     }
     if (key.name === "escape") {
       if (agent.busy) agent.abort();
-      else if (view === "monitor") setView("chat");
+      else if (view === "monitor" || view === "dashboard") setView("chat");
       else if (focus !== "composer") setFocus("composer");
       return;
     }
@@ -8979,6 +8980,7 @@ function App({ version = "0.1.0" }) {
     if (key.ctrl && key.name === "p") {
       setMenuQuery("");
       setMenuIndex(0);
+      setView("chat");
       setMenuOpen(true);
       return;
     }
