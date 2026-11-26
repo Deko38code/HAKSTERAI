@@ -71,7 +71,15 @@ const UPSTREAM_TIMEOUT_MS = 30000;
 // half the traffic the standby's stale build (2026-11-26: the Nov 3 Pandemonium
 // page, 5 of 10 loads). Only the primary serves it while both boxes are alive;
 // a real failover still reaches the peer, as it always did.
-const STATEFUL_PREFIX = ['/api/', '/admin', '/login', '/auth', '/callback', '/oauth', '/logout', '/miniforge/app'];
+// 2026-11-26: /cli/ and the installers join this list for the same reason
+// /miniforge/app did. The router round-robins stateless GETs, but the standby
+// only carries the CLI tree the §41 sync last pushed — and while that sync is
+// HELD its /cli/latest.json answered 0.3.79 against the Dell's 0.3.82, so an
+// install took the old build on every second attempt (measured: 10 of 10
+// alternating). /cli/authorize also mints and redeems device codes against the
+// Dell's own database. Only the primary serves these while both boxes are
+// alive; a real failover still reaches the peer, exactly as /miniforge/app does.
+const STATEFUL_PREFIX = ['/api/', '/admin', '/login', '/auth', '/callback', '/oauth', '/logout', '/miniforge/app', '/cli/', '/install.sh', '/install.ps1'];
 // Long-lived streams: no socket timeout, keep the pipe open.
 const STREAM_PREFIX = ['/api/agent/run', '/api/tui', '/api/stream', '/api/events'];
 

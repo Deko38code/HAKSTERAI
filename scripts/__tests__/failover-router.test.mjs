@@ -115,6 +115,24 @@ test('static pages are served by both boxes', async () => {
   assert.deepEqual([...seen].sort(), ['peer', 'primary'], 'both boxes must actually take static load');
 });
 
+// 2026-11-26: the release artifacts are not "static" in the sharing sense.
+// The standby only carries the CLI tree the §41 sync last pushed, so while that
+// sync was HELD the door answered /cli/latest.json 0.3.79 on every second request
+// against the Dell's 0.3.82 and an install took the old build. A device code is
+// also minted and redeemed on the Dell's own database.
+test('the CLI package and installers always come from the primary while it is up', async () => {
+  const paths = ['/cli/latest.json', '/cli/pkg.tar.gz', '/cli/authorize?user_code=X', '/install.sh', '/install.ps1'];
+  for (const p of paths) {
+    const seen = new Set();
+    for (let i = 0; i < 6; i += 1) {
+      const r = await get(routerPort, p);
+      assert.equal(r.status, 200);
+      seen.add(r.node);
+    }
+    assert.deepEqual([...seen], ['primary'], `${p} must never be served by the standby while the Dell is up`);
+  }
+});
+
 test('primary down: everything, state included, moves to the peer', async () => {
   await new Promise((r) => primary.server.close(r));
   // two failed probes at 5 s decide it
@@ -124,6 +142,10 @@ test('primary down: everything, state included, moves to the peer', async () => 
   assert.equal(api.node, 'peer');
   const page = await get(routerPort, '/');
   assert.equal(page.node, 'peer');
+  // A real failover still reaches the peer for the package — installs cannot
+  // break just because the Dell is down.
+  const pkg = await get(routerPort, '/cli/latest.json');
+  assert.equal(pkg.node, 'peer');
   const status = JSON.parse((await get(routerPort, '/router/status')).body);
   assert.equal(status.primary_alive, false);
   assert.ok(status.failovers >= 1, 'a failover must be counted so the DB sync can hold');
