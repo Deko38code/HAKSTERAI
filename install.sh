@@ -311,7 +311,7 @@ if [ -n "$OT_OS" ] && [ -n "$OT_ARCH" ]; then
     else
       say "⚠ the dashboard renderer could not be installed — the CLI still runs, with its built-in Ink UI"
       say "  To get the full dashboard, run this once and start the CLI again:"
-      say "    npm install -g $OT_SPEC"
+      say "    npm install -g --prefix \"$(dirname \"$OT_ROOT\")\" $OT_SPEC"
     fi
   fi
 fi

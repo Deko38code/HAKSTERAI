@@ -3275,7 +3275,12 @@ program
     const nativeFix = (name) => {
       const pkg = name || platformPackages()[0];
       const ver = coreVersion();
-      return `npm install -g ${pkg}${ver ? '@' + ver : ''}`;
+      const spec = pkg + (ver ? '@' + ver : '');
+      // Installed into THIS copy's own directory, so the lookup above finds it on
+      // every layout. A plain `npm install -g` can land in a different prefix than
+      // the one the CLI was installed with — the Windows plain-prefix install is
+      // exactly that — and the package would be "installed" yet still invisible.
+      return `cd "${__dirname}" && npm install --no-save --no-package-lock ${spec}`;
     };
     const nativeGap = () => {
       const want = platformPackages();

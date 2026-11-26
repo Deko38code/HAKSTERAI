@@ -186,7 +186,8 @@ test('the launcher names the exact fix instead of "reinstall the CLI"', () => {
   const src = read('index.js');
   assert.ok(!/reinstall the CLI so npm fetches it/.test(src), 'the launcher still gives the vague instruction');
   assert.ok(/Fix it with: \$\{gap\.fix\}/.test(src), 'the missing-renderer message no longer carries the command');
-  assert.ok(/npm install -g \$\{pkg\}/.test(src), 'the repair command is no longer built from the real package name');
+  assert.ok(/npm install --no-save --no-package-lock \$\{spec\}/.test(src), 'the repair command is no longer built from the real package name');
+  assert.ok(/cd "\$\{__dirname\}"/.test(src), 'the repair command no longer installs where this copy resolves from');
   assert.ok(/platformPackages\(\)/.test(src), 'the platform package list is no longer derived once for both paths');
   assert.ok(/coreVersion/.test(src), 'the repair command no longer matches the installed @opentui/core version');
 });

@@ -466,7 +466,7 @@
     } else {
       Say '! the dashboard renderer could not be installed - the CLI still runs, with its built-in Ink UI.'
       Say '  To get the full dashboard, run this once and start the CLI again:'
-      Say ("    npm install -g " + $otSpec)
+      Say ("    npm install --prefix `"" + $NpmPrefix + "`" --no-save " + $otSpec)
     }
   }
 
