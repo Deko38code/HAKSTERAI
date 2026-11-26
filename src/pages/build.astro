@@ -3880,9 +3880,13 @@ import Layout from '../layouts/Layout.astro';
       const quality = (document.querySelector('input[name="image-quality"]:checked') as HTMLInputElement)?.value || 'hd';
       const provider = ['dall-e-3', 'gpt-image-1'].includes(model) ? 'openai' : 'pollinations';
       try {
+        // Bounded like the server (§50.1): the button must never spin forever.
+        // The server caps itself below Cloudflare's 100 s edge window, so a
+        // client that gives up first would show a fake failure — it waits past it.
         const res = await fetch(`${API}/api/images/generate`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', ...(getStoredAuthToken() ? { 'x-api-key': getStoredAuthToken()! } : {}) },
           body: JSON.stringify({ provider, model, prompt, size, quality }),
+          signal: AbortSignal.timeout(110000),
         });
         const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Image generation failed');
         if (data.images && data.images[0]) {
@@ -3896,10 +3900,16 @@ import Layout from '../layouts/Layout.astro';
             imageResultImg.src = img.url; imageResultDownload.href = img.url;
             imageResultInfo.textContent = `${data.provider || provider} · ${model} · ${size} · ${quality}`;
           }
-          imageResult.classList.remove('hidden'); imageStatus.textContent = `Done in ${data.latency || '?'}ms`;
+          imageResult.classList.remove('hidden');
+          imageStatus.style.color = '';
+          imageStatus.textContent = `Done in ${data.latency || '?'}ms`;
         } else { throw new Error('No image returned'); }
       } catch (err: any) {
-        imageStatus.textContent = `Error: ${err.message || String(err)}`; imageStatus.style.color = '#ef4444';
+        const aborted = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+        imageStatus.textContent = aborted
+          ? 'Error: the image service did not answer in time — try again or use a different model'
+          : `Error: ${err.message || String(err)}`;
+        imageStatus.style.color = '#ef4444';
       } finally { generateImageBtn.disabled = false; generateImageBtn.textContent = 'Generate Image'; }
     });
 

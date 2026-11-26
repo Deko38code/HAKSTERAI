@@ -400,6 +400,30 @@ const IMAGE_PROVIDERS = {
 // Keep upstream image calls below Cloudflare's common 100s 524 window.
 // The Chat agent streams heartbeats, but the image modal/API returns JSON.
 const IMAGE_REQUEST_TIMEOUT_MS = 85000;
+// A refused key (no balance, revoked, rate-limited) is remembered for a few
+// minutes so a repeat click answers at once instead of stalling on the same
+// refusal, and the free lane is tried instead. Measured 2026-11-26: the
+// Pollinations key answered 402 "Insufficient balance" in ~0.5 s and every
+// OpenRouter key answered 402 as well, so the operator saw an 85 s spinner
+// followed by a raw JSON blob — a stall with no true reason in it.
+const IMAGE_KEY_COOLDOWN_MS = 5 * 60 * 1000;
+let _pollinationsKeyBadUntil = 0;
+let _pollinationsKeyBadReason = '';
+
+function isPollinationsKeyRefusal(err) {
+  const status = Number(err && err.status);
+  if ([401, 402, 403, 429].includes(status)) return true;
+  return /insufficient balance|no balance|unauthor|permission denied|invalid api key|invalid key|quota|credit/i.test(String((err && err.message) || ''));
+}
+
+function markPollinationsKeyBad(reason) {
+  _pollinationsKeyBadUntil = Date.now() + IMAGE_KEY_COOLDOWN_MS;
+  _pollinationsKeyBadReason = String(reason || '').slice(0, 240);
+}
+
+function pollinationsKeyUsable() {
+  return Date.now() >= _pollinationsKeyBadUntil;
+}
 
 function parseImageSize(size = '1024x1024') {
   const match = String(size || '').match(/^(\d{2,5})x(\d{2,5})$/i);
@@ -487,10 +511,9 @@ async function phantomImagegenGenerate({ prompt, model, size }) {
   };
 }
 
-async function pollinationsImageFromUrl({ prompt, model, size, quality, imageUrl, enhance = false }) {
+async function pollinationsImageFetch({ prompt, model, size, quality, imageUrl, enhance = false, apiKey = '' }) {
   const dims = parseImageSize(size);
   const imageModel = (!model || model === 'dall-e-3' || model === 'gpt-image-1') ? (imageUrl ? 'kontext' : 'zimage') : model;
-  const apiKey = getPollinationsKey();
   const baseUrl = apiKey ? 'https://gen.pollinations.ai' : 'https://image.pollinations.ai';
   const url = new URL(`${baseUrl}/image/${encodeURIComponent(prompt)}`);
   url.searchParams.set('width', String(dims.width));
@@ -513,7 +536,16 @@ async function pollinationsImageFromUrl({ prompt, model, size, quality, imageUrl
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok || !contentType.startsWith('image/')) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Pollinations image generation failed (${response.status}): ${body.slice(0, 240) || contentType || response.statusText}`);
+    // A refused or over-quota request often answers with an image placeholder
+    // (measured 2026-11-26: 402 with an 83,870-byte JPEG error card). A body is
+    // therefore NOT evidence of a usable image, and its bytes must never be
+    // pasted into a message, a log or a chat panel.
+    const binary = /[\u0000-\u0008\u000e-\u001f]/.test(body.slice(0, 200));
+    const detail = binary ? `${contentType || 'binary body'} — no usable image returned` : (body.slice(0, 240) || contentType || response.statusText);
+    const err = new Error(`Pollinations image generation failed (${response.status}): ${detail}`);
+    err.status = response.status;
+    err.body = binary ? '' : body;
+    throw err;
   }
   return {
     b64_json: Buffer.from(await response.arrayBuffer()).toString('base64'),
@@ -524,14 +556,47 @@ async function pollinationsImageFromUrl({ prompt, model, size, quality, imageUrl
   };
 }
 
+async function pollinationsImageFromUrl({ prompt, model, size, quality, imageUrl, enhance = false }) {
+  const args = { prompt, model, size, quality, imageUrl, enhance };
+  const keyUsable = pollinationsKeyUsable();
+  const apiKey = keyUsable ? getPollinationsKey() : '';
+  if (apiKey) {
+    try {
+      return await pollinationsImageFetch({ ...args, apiKey });
+    } catch (err) {
+      // A key that cannot pay is not a reason to fail the operator. Remember it
+      // (so the next click is instant) and retry once on the free lane.
+      if (!isPollinationsKeyRefusal(err)) throw err;
+      markPollinationsKeyBad(err.message);
+      // The free lane is the same account's unauthenticated door: when the
+      // refusal is account-level (no balance / quota gone) it cannot pay either,
+      // so answer now instead of spending another round trip on it.
+      if (/insufficient balance|no balance|quota|credit/i.test(String(err.message || ''))) throw err;
+      return pollinationsImageFetch({ ...args, apiKey: '' });
+    }
+  }
+  // The key is in cooldown, so this is the free lane. If it fails too, say why
+  // the key was skipped — otherwise the operator only sees the free lane's own
+  // refusal and cannot tell that their key is the real problem.
+  try {
+    return await pollinationsImageFetch({ ...args, apiKey: '' });
+  } catch (err) {
+    if (!keyUsable && _pollinationsKeyBadReason && err && err.message) {
+      err.message = `${err.message} (provider key skipped: ${_pollinationsKeyBadReason})`;
+    }
+    throw err;
+  }
+}
+
 async function pollinationsEditFromFile({ prompt, model, size, quality, imagePath, enhance = false }) {
   const apiKey = getPollinationsKey();
   const dims = parseImageSize(size);
   const imageModel = (!model || model === 'dall-e-3' || model === 'gpt-image-1' || model === 'zimage' || model === 'flux') ? 'kontext' : model;
   const finalPrompt = enhance ? `${prompt}\n\nEnhance image quality, sharpen details, improve lighting/color balance, and preserve the main subject unless instructed otherwise.` : prompt;
 
-  // If no API key, fall back to free image.pollinations.ai (no auth needed, no file upload)
-  if (!apiKey) {
+  // No usable key (none, or a refused one still in cooldown): fall back to the
+  // free lane, which needs no auth and no file upload.
+  if (!apiKey || !pollinationsKeyUsable()) {
     const img = await pollinationsImageFromUrl({ prompt: finalPrompt, model: imageModel, size: dims.size, quality, enhance });
     return { ...img, revised_prompt: img.revised_prompt };
   }
@@ -558,7 +623,16 @@ async function pollinationsEditFromFile({ prompt, model, size, quality, imagePat
   const data = await response.json().catch(async () => ({ error: await response.text().catch(() => response.statusText) }));
   if (!response.ok) {
     const msg = data?.error?.message || data?.error || response.statusText;
-    throw new Error(`Pollinations image edit failed (${response.status}): ${String(msg).slice(0, 240)}`);
+    const err = new Error(`Pollinations image edit failed (${response.status}): ${String(msg).slice(0, 240)}`);
+    err.status = response.status;
+    if (isPollinationsKeyRefusal(err)) {
+      // Same refusal the generation lane sees (402 "Insufficient balance" took the
+      // whole enhance down in 0.8 s): remember it and generate on the free lane.
+      markPollinationsKeyBad(err.message);
+      const img = await pollinationsImageFromUrl({ prompt: finalPrompt, model: imageModel, size: dims.size, quality, enhance });
+      return { ...img, revised_prompt: img.revised_prompt };
+    }
+    throw err;
   }
   const first = data?.data?.[0];
   if (!first?.b64_json && !first?.url) throw new Error('Pollinations image edit returned no image');
@@ -1910,10 +1984,17 @@ async function generateImage({ provider = 'openai', model = 'dall-e-3', prompt, 
           ? await pollinationsEditFromFile({ prompt, model, size, quality, imagePath, enhance: useEnhance })
           : await pollinationsImageFromUrl({ prompt, model, size, quality, imageUrl, enhance: useEnhance });
       } catch (err) {
-        const authFailed = /401|auth|unauthorized/i.test(err.message || String(err));
+        // 402/403/429 are as fatal as a 401: a key that cannot pay or is not
+        // permitted must reach the fallback provider instead of being rethrown.
+        const authFailed = /401|402|403|429|auth|unauthor|insufficient|balance|quota|credit|permission denied/i.test(err.message || String(err));
         if (!authFailed || imagePath || imageUrl) throw err;
-        img = await phantomImagegenGenerate({ prompt, model, size });
-        fallbackProvider = 'phantomide-imagegen';
+        try {
+          img = await phantomImagegenGenerate({ prompt, model, size });
+          fallbackProvider = 'phantomide-imagegen';
+        } catch (fbErr) {
+          // Report both lanes truthfully — one line, no raw JSON blob.
+          throw new Error(`${err.message} · fallback (PhantomIDE imagegen) also failed: ${fbErr.message}`);
+        }
       }
     } finally {
       if (tempImagePath) {
