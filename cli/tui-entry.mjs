@@ -55,6 +55,10 @@ try {
     const applied = go && typeof updater.applyPending === 'function' ? updater.applyPending() : null;
     if (applied && applied.applied) {
       process.stderr.write(`✓ CLI updated to v${applied.version} (was v${applied.from})\n`);
+    } else if (applied && applied.superseded) {
+      /* The record names a build this install has already passed: there is no
+       * update here, so there is nothing to report (§10 — never announce a
+       * downgrade, never call a non-update a failed one). */
     } else if (applied && applied.reason && applied.reason !== 'current' && applied.reason !== 'already applied') {
       process.stderr.write(`⬆ update not applied: ${applied.reason}\n`);
     }

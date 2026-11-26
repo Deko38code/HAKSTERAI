@@ -806,6 +806,10 @@ var require_updater = __commonJS({
     }
     function extractStaged() {
       fs11.mkdirSync(STAGED_DIR, { recursive: true, mode: 448 });
+      try {
+        fs11.rmSync(path8.join(STAGED_DIR, "cli"), { recursive: true, force: true });
+      } catch {
+      }
       return new Promise((resolve) => {
         const tar = spawn2("tar", ["-xzf", TARBALL, "-C", STAGED_DIR], { stdio: "ignore" });
         tar.on("error", (e) => resolve({ ok: false, reason: String(e.message || e) }));
@@ -943,17 +947,22 @@ var require_updater = __commonJS({
       const target = cliDirOf2(explicitDir);
       if (pending.unknown) return { applied: false, reason: "cannot read this install\u2019s package.json", version: pending.version };
       if (pending.appliedAt) return { applied: false, reason: "already applied", version: pending.version };
-      if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
       if (pending.superseded) {
         writeJson(PENDING_FILE, { ...pending, state: "superseded", supersededAt: (/* @__PURE__ */ new Date()).toISOString() });
-        return { applied: false, reason: `superseded by the running v${runningInfo(target).version}`, version: pending.version };
+        return {
+          applied: false,
+          reason: `superseded by the running v${runningInfo(target).version}`,
+          version: pending.version,
+          superseded: true
+        };
       }
-      if (isSourceCheckout3(target)) return { applied: false, reason: "source-checkout", version: pending.version };
       const running = runningInfo(target);
       if (sameBuild(pending, running)) {
         writeJson(PENDING_FILE, { ...pending, matchedAt: (/* @__PURE__ */ new Date()).toISOString(), state: "current" });
         return { applied: false, reason: "current", version: pending.version };
       }
+      if (isSourceCheckout3(target)) return { applied: false, reason: "source-checkout", version: pending.version };
+      if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
       const installedDeps = readJson(path8.join(target, "package.json"), {}).dependencies || {};
       const staged = stagedInfo();
       if (!sameDeps(JSON.stringify(installedDeps), staged.deps)) {
@@ -1064,6 +1073,7 @@ var require_updater = __commonJS({
     module.exports = {
       checkForUpdate: checkForUpdate2,
       applyPending: applyPending2,
+      extractStaged,
       appliedNotice: appliedNotice2,
       pendingInfo: pendingInfo2,
       promptStagedUpdate,
@@ -6650,7 +6660,16 @@ function useAgentStream({
         try {
           const res = await fetch(`${api}/api/agent/run`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {} },
+            headers: {
+              "Content-Type": "application/json",
+              // Say we are the CLI, so the server's paid-plan gate applies to
+              // this surface exactly as it does to every other CLI command
+              // (§28.5). Without this header the TUI was the one door a
+              // signed-in account without CLI entitlement could still walk
+              // through: /api/agent/run only checks the header.
+              "x-hakster-client": "cli",
+              ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {}
+            },
             signal: controller.signal,
             body: JSON.stringify({
               messages: [
@@ -6679,6 +6698,12 @@ function useAgentStream({
           });
           ctx.status = res.status;
           if (!res.ok) {
+            if (res.status === 403) {
+              const refusal = await res.json().catch(() => null);
+              const why = refusal && refusal.error || "this plan does not include the CLI";
+              const where = refusal && refusal.upgrade ? ` Upgrade: ${api}${refusal.upgrade}` : "";
+              throw new Error(`${why}${where}`);
+            }
             throw new Error(
               res.status === 413 ? "the server refused the body (413) \u2014 image too large" : `server replied ${res.status}`
             );

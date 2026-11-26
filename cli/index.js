@@ -664,9 +664,26 @@ program
   .command('whoami')
   .description('Show who this CLI is signed in as, and whether the plan includes the CLI')
   .option('-s, --server <url>', 'Server URL (default: the one already configured)')
+  .option('--json', 'Print one machine-readable object (used by the installers)')
   .action(async (opts) => {
     const { whoami } = require('./src/login');
     const me = await whoami({ server: opts.server });
+    // The installers read this to decide what to offer after signing in, so it
+    // is one object, one line, and it never carries the key (§9, §23).
+    if (opts.json) {
+      const u = me.user || {};
+      const cli = me.cli || {};
+      console.log(JSON.stringify({
+        signedIn: !!me.signedIn,
+        server: me.server || null,
+        reason: me.reason || null,
+        user: me.signedIn ? { username: u.username || null, plan: u.plan || null } : null,
+        cli: me.signedIn
+          ? { included: !!cli.included, upgrade: cli.upgrade || '/plans/' }
+          : null,
+      }));
+      return;
+    }
     if (!me.signedIn) {
       console.log(`${C.yellow}not signed in${C.reset}${me.reason ? ` ${C.gray}(${me.reason})${C.reset}` : ''} ${C.gray}— run 'hakster login'.${C.reset}`);
       return;

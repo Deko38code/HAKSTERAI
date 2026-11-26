@@ -267,15 +267,72 @@
   # §42: every install stays on the newest released build. This one is a package
   # install, so it does that by itself; say how to ask now.
   Say "  updates: automatic - 'hakster update' checks now; a newer build applies at the next start"
+
+  # ── sign in ───────────────────────────────────────────────────────────────
+  # Owner, 2026-11-26: the paid-plan flow carries its own sign-in, so a plan is
+  # usable the moment this finishes. The CLI asks the server for a device code,
+  # a magic link opens in the browser, the operator checks that the short code
+  # matches and presses Allow - only then does this machine hold the account's
+  # key, written straight into ~/.hakster/config.json (mode 600) and never
+  # printed, logged or put on a command line (§9, §23).
+  # Signing in proves who you are; the plan decides what the CLI may do, so this
+  # reports the plan rather than assuming it. HAKSTER_NO_LOGIN=1 (or a
+  # non-interactive host) skips the prompt and prints the command instead.
+  function Get-Session {
+    try {
+      $raw = (& $HaksterCmd whoami --json 2>$null | Select-Object -Last 1)
+      if (-not $raw) { return $null }
+      return ($raw | ConvertFrom-Json)
+    } catch { return $null }
+  }
+
+  Say ''
+  $session = Get-Session
+  $interactive = (-not $env:HAKSTER_NO_LOGIN) -and (-not $env:CI) -and [Environment]::UserInteractive
+  if ($session -and $session.signedIn) {
+    Say 'OK already signed in on this machine'
+  } elseif ($interactive) {
+    Say 'Sign in now? A magic link opens in your browser - press Allow there and this finishes by itself. [Y/n]'
+    $answer = ''
+    try { $answer = Read-Host '  sign in' } catch { $answer = 'n' }
+    if ($answer -eq '' -or $answer -match '^(y|yes)$') {
+      & $HaksterCmd login
+      $session = Get-Session
+    } else {
+      Say '  skipped - run "hakster login" whenever you are ready'
+    }
+  } else {
+    Say '  sign in:  hakster login'
+  }
+
+  $cliIncluded = $false
+  if ($session -and $session.signedIn) {
+    $who = if ($session.user.username) { '@' + $session.user.username } else { 'your account' }
+    Say "OK signed in as $who - plan $($session.user.plan)"
+    if ($session.cli -and $session.cli.included) {
+      $cliIncluded = $true
+      Say 'OK this plan includes the CLI'
+    } else {
+      Say "! this plan does not include the CLI - upgrade at $Origin/plans/"
+    }
+  }
+
   Say ''
   Say 'Next (open a new terminal so PATH applies):'
-  Say '  1) sign in - a magic link opens in your browser, press Allow:'
-  Say '       hakster login'
-  Say '  2) start your agent, or run Claude Code on this plan:'
-  Say '       hakster            # our own terminal agent'
-  Say '       hakster claude     # Claude Code on this plan (sets it up once if you have none)'
-  Say ''
-  Say '  Check any time:  hakster whoami'
+  if ($cliIncluded) {
+    Say '  1) start your agent, or run Claude Code on this plan:'
+    Say '       hakster            # our own terminal agent'
+    Say '       hakster claude     # Claude Code on this plan (sets it up once if you have none)'
+    Say ''
+    Say '  Check any time:  hakster whoami'
+  } else {
+    Say '  1) sign in - a magic link opens in your browser, press Allow:'
+    Say '       hakster login'
+    Say '  2) start your agent once your plan includes the CLI:'
+    Say '       hakster            # our own terminal agent'
+    Say ''
+    Say "  Plans:  $Origin/plans/    Check any time:  hakster whoami"
+  }
   Say "  No browser handy?  `$env:HAKSTER_API_KEY='<key from $Origin/dashboard/>'"
 
   Remove-Item -Path $Tmp -Recurse -Force -ErrorAction SilentlyContinue

@@ -930,7 +930,16 @@ export function useAgentStream({
         try {
           const res = await fetch(`${api}/api/agent/run`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}) },
+            headers: {
+              'Content-Type': 'application/json',
+              // Say we are the CLI, so the server's paid-plan gate applies to
+              // this surface exactly as it does to every other CLI command
+              // (§28.5). Without this header the TUI was the one door a
+              // signed-in account without CLI entitlement could still walk
+              // through: /api/agent/run only checks the header.
+              'x-hakster-client': 'cli',
+              ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}),
+            },
             signal: controller.signal,
             body: JSON.stringify({
               messages: [
@@ -962,6 +971,16 @@ export function useAgentStream({
 
           ctx.status = res.status;
           if (!res.ok) {
+            // An entitlement refusal is answered with a 403 that names the
+            // reason and the upgrade path (§28.5). Say that, not "server
+            // replied 403", so the operator knows a plan change is the fix
+            // rather than a retry or another model.
+            if (res.status === 403) {
+              const refusal = await res.json().catch(() => null);
+              const why = (refusal && refusal.error) || 'this plan does not include the CLI';
+              const where = refusal && refusal.upgrade ? ` Upgrade: ${api}${refusal.upgrade}` : '';
+              throw new Error(`${why}${where}`);
+            }
             throw new Error(
               res.status === 413
                 ? 'the server refused the body (413) — image too large'

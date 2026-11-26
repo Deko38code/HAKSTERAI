@@ -197,6 +197,17 @@ async function downloadTarball(url, timeoutMs) {
 
 function extractStaged() {
   fs.mkdirSync(STAGED_DIR, { recursive: true, mode: 0o700 });
+  // Untarring over the tree an earlier check left behind keeps the files the new
+  // package no longer ships, so the directory stops describing exactly one
+  // package — and the record then names a bundle hash that is not what is on
+  // disk, which reads as a corrupt download. Owner, 2026-11-26: the Dell's
+  // "update not applied · staged pkg failed verification", on a stage that was
+  // fine. The stage is rebuilt from this tarball alone; only the extracted tree
+  // is removed, never the tarball or pending.json, which are the record of the
+  // last check (§4: nothing else is touched).
+  try {
+    fs.rmSync(path.join(STAGED_DIR, 'cli'), { recursive: true, force: true });
+  } catch { /* an unclearable tree is still caught by the hash check below */ }
   return new Promise((resolve) => {
     const tar = spawn('tar', ['-xzf', TARBALL, '-C', STAGED_DIR], { stdio: 'ignore' });
     tar.on('error', (e) => resolve({ ok: false, reason: String(e.message || e) }));
@@ -409,20 +420,35 @@ function applyPending(explicitDir) {
   // from, so nothing is written (§2.1, §8).
   if (pending.unknown) return { applied: false, reason: 'cannot read this install’s package.json', version: pending.version };
   if (pending.appliedAt) return { applied: false, reason: 'already applied', version: pending.version };
-  if (!pending.verified) return { applied: false, reason: 'staged package failed verification', version: pending.version };
+  // "Is this even an update?" is answered without hashing anything, and it comes
+  // first: a stage the running install already supersedes, and a source checkout
+  // that never installs anything (§43.4), are both refusals for reasons that have
+  // nothing to do with the download's integrity. Deciding them before the hash
+  // check is what stops a stale record on a checkout from being reported as
+  // "staged package failed verification" — a stage that was never going to be
+  // applied, on a tree that was never going to receive it (owner, 2026-11-26).
   if (pending.superseded) {
     writeJson(PENDING_FILE, { ...pending, state: 'superseded', supersededAt: new Date().toISOString() });
-    return { applied: false, reason: `superseded by the running v${runningInfo(target).version}`, version: pending.version };
+    return {
+      applied: false,
+      reason: `superseded by the running v${runningInfo(target).version}`,
+      version: pending.version,
+      superseded: true,
+    };
   }
-  if (isSourceCheckout(target)) return { applied: false, reason: 'source-checkout', version: pending.version };
   const running = runningInfo(target);
   if (sameBuild(pending, running)) {
     // The stage is this very build — nothing was installed, so it must not
     // leave an appliedAt behind (that record is the "update was installed"
     // notice, and a false one would be a lie on the next start screen).
+    // Answered before the checkout and hash refusals: a record describing the
+    // running build is not a downgrade to announce and not a download to
+    // distrust, on a checkout or anywhere else (§10).
     writeJson(PENDING_FILE, { ...pending, matchedAt: new Date().toISOString(), state: 'current' });
     return { applied: false, reason: 'current', version: pending.version };
   }
+  if (isSourceCheckout(target)) return { applied: false, reason: 'source-checkout', version: pending.version };
+  if (!pending.verified) return { applied: false, reason: 'staged package failed verification', version: pending.version };
   const installedDeps = readJson(path.join(target, 'package.json'), {}).dependencies || {};
   const staged = stagedInfo();
   if (!sameDeps(JSON.stringify(installedDeps), staged.deps)) {
@@ -553,6 +579,7 @@ function readChoice(timeoutMs) {
 module.exports = {
   checkForUpdate,
   applyPending,
+  extractStaged,
   appliedNotice,
   pendingInfo,
   promptStagedUpdate,

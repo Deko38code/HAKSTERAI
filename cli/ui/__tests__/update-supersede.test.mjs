@@ -82,6 +82,69 @@ test('a stage from an older version is superseded, not pending', async () => {
   }
 });
 
+test('a stale record on an older stage is superseded, never "failed verification"', async () => {
+  // The Dell, 2026-11-26 ("update not applied · staged pkg failed verification").
+  // An old stage left on disk, a record naming an even older one, a running
+  // install newer than both: the hashes disagree, so the record reads as
+  // unverified. Reporting that as a corrupt download is a false alarm — there
+  // was never an update here, and a tree that installs nothing (§43.4) must not
+  // be told its download failed.
+  const { home, cli, root } = makeInstall({ running: '0.3.79', pending: '0.3.68' });
+  try {
+    // What a tree left behind by a different extraction looks like: the bundle
+    // on disk is not the one the record names.
+    fs.writeFileSync(path.join(home, '.hakster', 'updates', 'staged', 'cli', 'ui-fb.mjs'), '// a different release\n');
+    const updater = loadUpdater(home);
+
+    const info = updater.pendingInfo(cli);
+    assert.equal(info.verified, false, 'the hashes really do disagree');
+    assert.equal(info.superseded, true, 'but the running install is past it');
+
+    const res = updater.applyPending(cli);
+    assert.equal(res.applied, false);
+    assert.equal(res.superseded, true, 'the caller must be able to stay quiet about it');
+    assert.match(String(res.reason), /superseded/);
+    assert.doesNotMatch(String(res.reason), /verification/, 'a non-update is never a failed download');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('extracting a package replaces the previous stage instead of merging with it', async () => {
+  // The other half of the same bug: untarring over yesterday's tree leaves the
+  // files the new package dropped, so the stage stops describing one package and
+  // the record can never match it again.
+  const { home, root } = makeInstall({ running: '0.3.24', pending: '0.3.24' });
+  try {
+    const updates = path.join(home, '.hakster', 'updates');
+    const stale = path.join(updates, 'staged', 'cli', 'only-in-the-old-package.js');
+    fs.writeFileSync(stale, '// left behind by an earlier release\n');
+    // A real tarball carrying just the two files a stage must contain.
+    const src = path.join(root, 'src', 'cli');
+    fs.mkdirSync(src, { recursive: true });
+    fs.writeFileSync(path.join(src, 'package.json'), JSON.stringify({ version: '0.3.99' }));
+    fs.writeFileSync(path.join(src, 'ui-fb.mjs'), '// the new bundle\n');
+    require('node:child_process').execFileSync('tar', [
+      '-czf', path.join(updates, 'latest.tar.gz'), '-C', path.join(root, 'src'), 'cli',
+    ]);
+
+    const updater = loadUpdater(home);
+    // Awaited inside the try: `return promise` inside try/finally runs the
+    // cleanup the moment the promise is returned, so the throwaway home was
+    // being deleted while tar was still opening it. The test only ever proves
+    // anything once the extraction has settled.
+    const ex = await updater.extractStaged();
+    assert.equal(ex.ok, true, ex.reason);
+    assert.equal(fs.existsSync(stale), false, 'the old package must not leak into the new stage');
+    assert.equal(
+      fs.readFileSync(path.join(updates, 'staged', 'cli', 'ui-fb.mjs'), 'utf8'),
+      '// the new bundle\n',
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a stage from a newer version is a real pending update', async () => {
   const { home, cli, root } = makeInstall({ running: '0.3.24', pending: '0.3.99' });
   try {

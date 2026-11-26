@@ -400,16 +400,74 @@ elif command -v guake >/dev/null 2>&1; then
     say "  Guake: found, but the look could not be applied — run: hakster quake --setup --repair"
   fi
 fi
+# ── sign in ─────────────────────────────────────────────────────────────────
+# Same flow as install.ps1 (owner, 2026-11-26: the paid-plan flow carries its own
+# sign-in): the CLI asks the server for a device code, a magic link opens in the
+# browser, the operator checks the short code matches and presses Allow — only
+# then does this machine hold the account's key, written straight into
+# ~/.hakster/config.json and never printed, logged or put in a command line
+# (§9, §23). Signing in proves who you are; the plan decides what the CLI may
+# do, so the plan is read back rather than assumed.
+# HAKSTER_NO_LOGIN=1, CI, or no terminal skips the prompt and prints the command.
+json_str() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p" | head -1; }
+signed_in() { [ -n "$1" ] && printf '%s' "$1" | grep -q '"signedIn":true'; }
+
+SESSION=$("$HAKSTER_BIN" whoami --json 2>/dev/null | tail -1) || SESSION=''
+INTERACTIVE=yes
+[ -n "${HAKSTER_NO_LOGIN:-}" ] && INTERACTIVE=no
+[ -n "${CI:-}" ] && INTERACTIVE=no
+[ -r /dev/tty ] || INTERACTIVE=no
+
 say ""
-say "Next:"
-say "  1) sign in — a magic link opens in your browser, press Allow:"
-say "       hakster login"
-say "  2) start your agent, or run Claude Code on this plan:"
-say "       hakster            # our own terminal agent"
-say "       hakster claude     # Claude Code on this plan (sets it up once if you have none)"
-say "       hakster quake      # the same CLI in a Guake drop-down"
+if signed_in "$SESSION"; then
+  say "OK already signed in on this machine"
+elif [ "$INTERACTIVE" = yes ]; then
+  printf 'Sign in now? A magic link opens in your browser — press Allow there and this finishes by itself. [Y/n] ' > /dev/tty
+  ANSWER=''
+  read -r ANSWER < /dev/tty || ANSWER='n'
+  case "$ANSWER" in
+    ''|y|Y|yes|YES)
+      "$HAKSTER_BIN" login || say "  ! sign-in did not finish — run 'hakster login' whenever you are ready"
+      SESSION=$("$HAKSTER_BIN" whoami --json 2>/dev/null | tail -1) || SESSION=''
+      ;;
+    *) say "  skipped — run 'hakster login' whenever you are ready" ;;
+  esac
+else
+  say "  sign in:  hakster login"
+fi
+
+CLI_INCLUDED=no
+if signed_in "$SESSION"; then
+  P_USER=$(json_str "$SESSION" username)
+  P_PLAN=$(json_str "$SESSION" plan)
+  [ -n "$P_USER" ] && say "OK signed in as @$P_USER — plan $P_PLAN" || say "OK signed in — plan $P_PLAN"
+  if printf '%s' "$SESSION" | grep -q '"included":true'; then
+    CLI_INCLUDED=yes
+    say "OK this plan includes the CLI"
+  else
+    say "! this plan does not include the CLI — upgrade at $ORIGIN/plans/"
+  fi
+fi
+
 say ""
-say "  Check any time:  hakster whoami"
+if [ "$CLI_INCLUDED" = yes ]; then
+  say "Next (open a new terminal if PATH was just changed):"
+  say "  1) start your agent, or run Claude Code on this plan:"
+  say "       hakster            # our own terminal agent"
+  say "       hakster claude     # Claude Code on this plan (sets it up once if you have none)"
+  say "       hakster quake      # the same CLI in a Guake drop-down"
+  say ""
+  say "  Check any time:  hakster whoami"
+else
+  say "Next (open a new terminal if PATH was just changed):"
+  say "  1) sign in — a magic link opens in your browser, press Allow:"
+  say "       hakster login"
+  say "  2) start your agent once your plan includes the CLI:"
+  say "       hakster            # our own terminal agent"
+  say "       hakster quake      # the same CLI in a Guake drop-down"
+  say ""
+  say "  Plans:  $ORIGIN/plans/    Check any time:  hakster whoami"
+fi
 say "  No browser handy?  export HAKSTER_API_KEY=<key from $ORIGIN/dashboard/>"
 
 cd /
