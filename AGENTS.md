@@ -1006,3 +1006,44 @@ Verified at adoption 2026-11-26: five seeded keys read; lane mapping `deepseek-k
 `ui-fb.mjs` rebuilt at 430.3 kB carrying the new block (§50.2); CLI **0.3.97**. The live server keeps its
 running code until its next natural restart (§37, §45): the `keyLedger` blocks and the per-key recording
 call are **pending a restart**, reported as pending rather than live.
+
+
+---
+
+## Section 52 Added — Our Profits Live On haksterai.com, And Junkalot Gets Billing Only (2026-11-26)
+
+_Appended 2026-11-26 at the owner's direction ("and never expose our profits to junkalot only billing to
+admin"; "profits go to haksterai.com admin"). Nothing above this line was rewritten, reordered or removed.
+Backups taken and hash-verified identical before the append: `AGENTS.md.bak-20261126T042727Z` (77140 B,
+sha256 `07222377…`); master-rulebook backup `CLAUDE.md.bak-20261126T042727Z` (118546 B, sha256 `e7ee5462…`)._
+
+`/home/ghost/CLAUDE.md` is now **§1–§52**. §52 is **"Our Profits Live On haksterai.com — Junkalot Gets
+Billing Only, Never Profit"**. What it makes binding here:
+
+1. **One display home for profit: this project's owner admin.** The rate card, meter, margin, cost base,
+   demand index and per-key breakdown render on haksterai.com's `/admin/profit`, fed by
+   `GET /api/admin/profit-live` behind `requireOwner` — and nowhere else. PhantomIDE reads the shared
+   snapshot read-only (§26.6); haksterai.com is where ours is shown (§36.7).
+2. **Junkalot gets billing, never profit.** Her side shows her plan, allowance, turns, tokens, meter
+   against her plan, invoices and amounts due. Not our rate, cost, margin, index or per-key figures, and
+   not even the fact that a profit figure exists (§30, §36 extended).
+3. **The only path between the projects reads.** Her recorded Coach turns come from
+   `data/mred-usage.jsonl` on Parrot over SSH (`cat`, 12 s bound, cached, warmed in the background so a
+   usage poll never waits) and fold onto `key-junkalot-1`. `providerKeys.summarizeJunkalotRows()` writes
+   nothing into that project; the modules that touch her tree (`fleetLog.js`, `updateLog.js`,
+   `junkalotGuard.js`, `junkalotUpdate.js`, `hostingLock.js`) carry zero profit fields and read with
+   `wc -l` / `tail`.
+4. **Gated by account.** `/api/usage`'s `keyLedger` is built only inside `if (isOwnerUser(user))`;
+   `/api/admin/profit-live` is `requireOwner`. A non-owner or logged-out caller gets no key id, rate or
+   meter — the keys are absent from the payload, not hidden in the UI (§25.2, §30.2).
+5. **Verify by key, never by eye** — the non-owner payload must carry no `keyLedger`, `ownerMeter`,
+   `rates`, `junkalotValue`, `userMeter`, `profit`, `margin` or `costBase` (§13, §36.4).
+6. **Accounting, never billing, and nothing moves the setup** — no charge, plan, allowance, route, model,
+   provider order or rate changes (§19, §22.4, §24, §26). HaksterAI scope; nothing is written into
+   Junkalot, PhantomIDE or another project (§16).
+
+Verified read-only at adoption 2026-11-26: `keyLedger` gated at `server/src/index.js` ~12246,
+`/api/admin/profit-live` behind `requireOwner` at ~12652, `providerKeys.js` writes only this project's
+`data/provider-keys.json` + `data/key-usage.jsonl` (mode 600), and the profit-field grep across the five
+Junkalot-touching modules returns nothing. The `keyLedger` blocks are **pending the live server's next
+natural restart** (§37, §45) and are reported as pending rather than live.
