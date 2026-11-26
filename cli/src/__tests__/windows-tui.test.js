@@ -225,9 +225,11 @@ test('the CLI ships a renderer new enough to have a real Windows build', () => {
 
 test('the launcher refuses a Bun older than the renderer requires', () => {
   const launcher = read('index.js');
-  const m = launcher.match(/const MIN_BUN = \[(\d+),\s*(\d+),\s*(\d+)\]/);
-  assert.ok(m, 'the launcher no longer declares the Bun floor the renderer needs');
-  const min = [Number(m[1]), Number(m[2]), Number(m[3])];
+  // The enforced floor is computed per platform/CPU (win32-arm64 -> 1.4.0, since
+  // Bun 1.3 has no FFI there). Take the launcher's own answer rather than a
+  // literal it no longer carries, and require that it does the asking.
+  assert.ok(/MIN_BUN = rpFloor\.minBunFor\(\)/.test(launcher), 'the launcher no longer computes the Bun floor');
+  const min = require('../runtime-paths').minBunFor();
   // The floor is not a guess: it must satisfy @opentui/core's own engines field.
   const corePkg = JSON.parse(read('node_modules/@opentui/core/package.json'));
   const want = String((corePkg.engines && corePkg.engines.bun) || '').match(/(\d+)\.(\d+)\.(\d+)/);

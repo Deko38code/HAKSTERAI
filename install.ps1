@@ -129,7 +129,20 @@
   # reported success (Surface Pro, 2026-11-26). Measured here, never assumed — and
   # an unusable one never shadows the supported Bun this installer brings (the
   # launcher measures every candidate the same way).
-  $MinBun = @(1, 3, 14)
+  #
+  # Windows on ARM is the documented exception: Bun 1.3 has no FFI there, and the
+  # dashboard's renderer is loaded through bun:ffi — so an arm64 machine needs
+  # Bun 1.4.0+. A flat 1.3.14 floor accepted an old Bun on an arm64 Surface Pro,
+  # every line reported success, and the dashboard died at its first native call
+  # (owner, 2026-11-26). The architecture is measured ONCE here and reused by the
+  # renderer block below, so the floor and the package can never disagree.
+  $IsWinArm64 = $false
+  try {
+    if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { $IsWinArm64 = $true }
+  } catch {
+    if ("$env:PROCESSOR_ARCHITECTURE" -match 'ARM64') { $IsWinArm64 = $true }
+  }
+  $MinBun = if ($IsWinArm64) { @(1, 4, 0) } else { @(1, 3, 14) }
   function Get-BunVersion([string]$exe) {
     if (-not $exe) { return $null }
     try {
@@ -537,12 +550,9 @@
   # dashboard dies at the first frame — the Surface Pro's "input bar, no panels"
   # (owner, 2026-11-26). This block compares versions and repairs a mismatch
   # instead of reporting presence as success (§10, §13, §50.1).
-  $otArch = 'x64'
-  try {
-    if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { $otArch = 'arm64' }
-  } catch {
-    if ("$env:PROCESSOR_ARCHITECTURE" -match 'ARM64') { $otArch = 'arm64' }
-  }
+  # Measured once, at the Bun floor above: the same answer decides both the
+  # renderer package and the Bun version that must carry it.
+  $otArch = if ($IsWinArm64) { 'arm64' } else { 'x64' }
   $otName = "@opentui/core-win32-$otArch"
   $otAppDir = Join-Path $NpmPrefix 'node_modules\hakster-cli'
   $otHere = @(

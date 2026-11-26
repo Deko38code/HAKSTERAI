@@ -90,7 +90,15 @@ test('both installers gate on the renderer\'s Bun floor', () => {
   assert.ok(/older than the dashboard's \$BUN_MIN/.test(sh), 'an old Bun is no longer reported as too old');
 
   const ps1 = fs.readFileSync(path.join(REPO_DIR, 'install.ps1'), 'utf8');
-  assert.ok(/\$MinBun = @\(1, 3, 14\)/.test(ps1), 'install.ps1 no longer declares the Bun floor');
+  // Two branches, one measurement: every other Windows build keeps the
+  // renderer's 1.3.14 floor, and win32-arm64 needs 1.4.0 because Bun 1.3 has no
+  // FFI there — the arm64 Surface Pro accepted a 1.3.x Bun and got the
+  // input-only screen (owner, 2026-11-26).
+  assert.ok(
+    /\$MinBun = if \(\$IsWinArm64\) \{ @\(1, 4, 0\) \} else \{ @\(1, 3, 14\) \}/.test(ps1),
+    'install.ps1 no longer declares the per-architecture Bun floor'
+  );
+  assert.ok(/\$IsWinArm64 = \$false/.test(ps1), 'install.ps1 no longer measures the architecture');
   assert.ok(/function Find-UsableBun/.test(ps1), 'install.ps1 picks a Bun without measuring it');
   assert.ok(/function Test-BunUsable/.test(ps1), 'install.ps1 has no usable-version test');
   assert.ok(/function Bun-Candidates/.test(ps1), 'install.ps1 no longer lists every Bun location in one place');
@@ -108,9 +116,11 @@ test('the fallback reason is written down, not just printed', () => {
   assert.ok(/noteDashboard/.test(launcher), 'the fallback reason is no longer recorded');
   assert.ok(/dashboard-tui\.log/.test(launcher), 'nothing names the file the reason is kept in');
   assert.ok(/findSupportedBun/.test(launcher), 'the launcher no longer measures Bun candidates');
-  const m = launcher.match(/const MIN_BUN = \[(\d+),\s*(\d+),\s*(\d+)\]/);
-  assert.ok(m, 'the launcher no longer declares the Bun floor');
-  assert.deepEqual([Number(m[1]), Number(m[2]), Number(m[3])], FLOOR);
+  // The floor is per machine now (Windows arm64 needs 1.4.0), so the value that
+  // is enforced is the one the code computes — asked of the same function the
+  // launcher calls, never re-typed here.
+  assert.ok(/minBunFor\(\)/.test(launcher), 'the launcher no longer asks for the per-machine floor');
+  assert.deepEqual(rp.minBunFor(), FLOOR, 'this machine\'s floor moved away from the renderer floor');
 });
 
 test('hakster doctor exists, and it answers the lane question', () => {

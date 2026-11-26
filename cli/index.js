@@ -3281,7 +3281,18 @@ program
     // the native library — which on Windows reads as "the dashboard opened and
     // vanished" with nothing to act on. A Bun from bun.sh can be years old, so
     // the version is measured before the screen is taken (§10, §13, §50.1).
-    const MIN_BUN = [1, 3, 14];
+    // The floor is per machine, not one number for every box. The renderer is a
+    // native library loaded through bun:ffi, and Bun 1.3 has no FFI on Windows
+    // arm64 — so an arm64 Surface Pro needs 1.4.0+ (OpenTUI's documented Windows
+    // requirement). A 1.3.x there passed the flat 1.3.14 check, imported the
+    // bundle and died at the first native call: the "input bar, no grids, nothing
+    // responds" screen the owner reported (2026-11-26). minBunFor() answers for
+    // this platform and CPU; the literal stays as the fallback for an older tree.
+    let MIN_BUN = [1, 3, 14];
+    try {
+      const rpFloor = require('./src/runtime-paths');
+      if (typeof rpFloor.minBunFor === 'function') MIN_BUN = rpFloor.minBunFor();
+    } catch { /* older tree: the renderer's own flat floor */ }
     const olderThan = (v, min) => {
       for (let i = 0; i < min.length; i += 1) {
         if (v[i] !== min[i]) return v[i] < min[i];
@@ -3457,6 +3468,38 @@ program
       if (typeof rp.nativeLibrary === 'function') nativeLib = rp.nativeLibrary();
     } catch { /* older tree: let core resolve it as before */ }
     if (nativeLib && !spawnEnv.OPENTUI_LIB_PATH) spawnEnv.OPENTUI_LIB_PATH = nativeLib.file;
+
+    // Loading the bundle proves the JavaScript; it does NOT prove the renderer.
+    // A Bun without FFI (1.3 on Windows arm64) or a native library missing its
+    // own dependencies imports the bundle fine and then dies at the first native
+    // call — after the screen is taken, which is what "input bar, no grids,
+    // nothing responds" looked like (owner, 2026-11-26). The load is therefore
+    // measured BEFORE the dashboard opens, and a failure is named here instead
+    // of becoming a mute Ink screen. Read-only: dlopen, nothing runs (§11).
+    if (nativeLib) {
+      let nativeProbe = { ok: null, reason: 'not measured' };
+      try {
+        const rpNative = require('./src/runtime-paths');
+        if (typeof rpNative.probeNative === 'function') {
+          nativeProbe = rpNative.probeNative(bun, nativeLib.file, { timeoutMs: 15000 });
+        }
+      } catch { /* older tree: no probe, start as before */ }
+      if (nativeProbe.ok === false) {
+        try { process.stdout.write('\x1b[?1049l\x1b[?25h\r\n'); } catch { /* no tty */ }
+        console.error(`${C.red}✗ the dashboard's renderer will not load under this Bun.${C.reset}`);
+        console.error(`${C.dim}  on: ${process.platform} ${process.arch} · Bun ${(bunVer || []).join('.') || 'unknown'} (${bun})${C.reset}`);
+        console.error(`${C.dim}  library: ${nativeLib.file}${C.reset}`);
+        console.error(`${C.yellow}  cause: ${nativeProbe.reason}${C.reset}`);
+        if (process.platform === 'win32' && process.arch === 'arm64') {
+          console.error(`${C.dim}  Windows on ARM needs Bun 1.4.0 or newer for the native renderer.${C.reset}`);
+          console.error(`${C.dim}  fix:  irm bun.sh/install.ps1 | iex   then start the CLI again (§38.5 latency: this check is one dlopen)${C.reset}`);
+        } else {
+          console.error(`${C.dim}  next: run "hakster doctor" — one block names what is missing.${C.reset}`);
+        }
+        fallbackInk(null);
+        return;
+      }
+    }
     const spawnOpts = {
       stdio: ['inherit', 'inherit', 'pipe'],
       env: spawnEnv,

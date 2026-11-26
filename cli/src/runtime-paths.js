@@ -149,6 +149,22 @@ function atLeast(v, min) {
 }
 
 /**
+ * The Bun floor for THIS machine, not one number for every box.
+ *
+ * @opentui/core declares `bun >= 1.3.14`, and that is the floor everywhere the
+ * renderer can actually load. Windows on ARM is the exception the vendor
+ * documents: Bun 1.3 has no FFI there, and the dashboard's renderer is a native
+ * library loaded through bun:ffi — so a 1.3.x Bun on an arm64 Surface Pro passes
+ * a version check, starts the bundle, and dies at the first native call. That is
+ * the "input bar, no grids, nothing responds" screen the owner hit on his
+ * Surface Pro (2026-11-26). Bun 1.4.0 added FFI on win32-arm64.
+ */
+function minBunFor(platform = process.platform, arch = process.arch) {
+  if (platform === 'win32' && arch === 'arm64') return [1, 4, 0];
+  return [1, 3, 14];
+}
+
+/**
  * The first Bun that can actually run the dashboard's renderer.
  *
  * The machine's own Bun is tried first — but an OLD one must not shadow a
@@ -294,6 +310,56 @@ function probeBundle(bunPath, cliDir, opts = {}) {
   }
 }
 
+
+/**
+ * Can this Bun actually LOAD the dashboard's native renderer?
+ *
+ * `probeBundle` answers a different question: the JavaScript imports. A Bun
+ * without FFI (1.3 on Windows arm64), or a renderer whose own DLL dependencies
+ * are missing, imports the bundle perfectly and then dies at the first native
+ * call — which the operator sees as a dashboard that opens and vanishes, or an
+ * input bar with nothing in it. This runs the load itself through `bun:ffi`, so
+ * that failure is named before the screen is taken (§10, §13, §50.1).
+ *
+ * The path travels in the environment, never in the script text: a Windows path
+ * with spaces or quotes must not be re-parsed by a shell. Bounded and read-only;
+ * loading a library runs none of the dashboard.
+ *
+ * Returns { ok, reason } — ok true when the library loaded, false when the Bun
+ * said why, null when there was nothing to measure.
+ */
+function probeNative(bunPath, libFile, opts = {}) {
+  const { spawnSync } = require('child_process');
+  const timeout = opts.timeoutMs === undefined ? 15000 : opts.timeoutMs;
+  if (!libFile) return { ok: null, reason: 'no native library was resolved for this platform' };
+  // bun:ffi refuses an empty symbol map ("Expected at least one symbol"), so one
+  // throwaway name is declared. A library that OPENS answers `Symbol "x" not
+  // found in "lib"` — that IS the proof we want, and it is told apart inside the
+  // Bun, where the message is generated, from a library that will not open at
+  // all (`Failed to open library …`, a missing DLL dependency, or `bun:ffi`
+  // itself absent on Bun 1.3 / Windows arm64).
+  const script = "try{const{dlopen}=require('bun:ffi');"
+    + "try{dlopen(process.env.HAKSTER_NATIVE_PROBE,{__hakster_probe__:{args:[],returns:'void'}})}"
+    + "catch(e){const m=String((e&&e.message)||e);"
+    + "if(!/Symbol\\s+\"[^\"]*\"\\s+not found in/.test(m))throw e}"
+    + "console.log('HAKSTER_NATIVE_OK')}"
+    + "catch(e){console.error(String((e&&e.message)||e));process.exit(4)}";
+  const shim = /\.(cmd|bat)$/i.test(String(bunPath || ''));
+  const env = { ...(opts.env || process.env), HAKSTER_NATIVE_PROBE: String(libFile) };
+  const common = { encoding: 'utf8', timeout, windowsHide: true, env };
+  try {
+    const r = shim
+      ? spawnSync(`"${bunPath}" -e "${script}"`, { ...common, shell: true })
+      : spawnSync(bunPath, ['-e', script], common);
+    if (r && r.status === 0 && String(r.stdout || '').includes('HAKSTER_NATIVE_OK')) return { ok: true, reason: '' };
+    const line = String((r && (r.stderr || r.stdout)) || '').trim()
+      .split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-3).join(' | ');
+    return { ok: false, reason: line || `the load probe exited ${r && r.status}` };
+  } catch (err) {
+    return { ok: false, reason: String((err && err.message) || err) };
+  }
+}
+
 /** Node: PATH first, then the installer's runtime. Returns a path or null. */
 function findNode(env = process.env) {
   const onPath = findOnPath('node', env);
@@ -312,5 +378,6 @@ function findNode(env = process.env) {
 
 module.exports = {
   runtimeRoot, findOnPath, findBun, findNode, isExecutableFile, wellKnownBun,
-  bunCandidates, bunVersion, findSupportedBun, atLeast, packageDir, probeBundle, nativeLibrary,
+  bunCandidates, bunVersion, findSupportedBun, atLeast, packageDir, probeBundle, probeNative,
+  nativeLibrary, minBunFor,
 };

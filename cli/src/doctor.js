@@ -21,8 +21,17 @@ const rp = require('./runtime-paths');
 
 const CLI_DIR = path.resolve(__dirname, '..');
 
-/** The Bun floor the dashboard's renderer declares, read from the launcher. */
+/**
+ * The Bun floor for this machine — asked of the code that enforces it.
+ *
+ * Not one number: the renderer loads through bun:ffi, and Bun 1.3 has no FFI on
+ * Windows arm64, so an arm64 Surface Pro needs 1.4.0+. Reporting a flat 1.3.14
+ * there would tell the operator a Bun is fine when the dashboard cannot use it
+ * (Surface Pro, 2026-11-26). The literal in index.js is the fallback for a tree
+ * that predates minBunFor().
+ */
 function minBun() {
+  try { if (typeof rp.minBunFor === 'function') return rp.minBunFor(); } catch { /* older runtime-paths */ }
   try {
     const src = fs.readFileSync(path.join(CLI_DIR, 'index.js'), 'utf8');
     const m = src.match(/const MIN_BUN = \[(\d+),\s*(\d+),\s*(\d+)\]/);
@@ -176,6 +185,21 @@ function report(env = process.env) {
       : probe.ok === false
         ? `no — ${probe.reason}`
         : probe.reason}`);
+  }
+
+  // The renderer ITSELF, loaded through the chosen Bun — the one question the
+  // file checks above cannot answer. A Bun without FFI (1.3 on Windows arm64) or
+  // a library missing its own dependencies imports the bundle and dies at the
+  // first native call, which the operator sees as a dashboard that opened and
+  // vanished (§10, §50.1). Read-only: one dlopen, nothing runs.
+  if (which.lane === 'dashboard' && pick.path) {
+    const lib = rp.nativeLibrary();
+    if (lib) {
+      const loaded = rp.probeNative(pick.path, lib.file, { timeoutMs: 15000 });
+      out.push(`renderer load ${loaded.ok === true
+        ? 'yes — the native library loads under that Bun'
+        : loaded.ok === false ? `no — ${loaded.reason}` : loaded.reason}`);
+    }
   }
 
   const cfg = configState();
