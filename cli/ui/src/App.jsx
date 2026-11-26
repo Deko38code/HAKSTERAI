@@ -959,7 +959,7 @@ export default function App({ version = '0.1.0' }) {
         showNotice('transcript cleared · steer queue emptied');
         return;
       case '/help':
-        showNotice('keys: tab focus · shift+tab auto mode · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /recap /clear /quit');
+        showNotice('keys: tab focus · shift+tab auto mode · pgup/pgdn scroll · ^P catalog · h handoff · d dashboard · v monitor · m models · s scripts · g squad · u usage · c clear · q quit · esc stop — commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /recap /quickskill /clear /quit');
         return;
       case '/recap': {
         // The idle recap row carries an id (`#a3f9k2`) because every run's
@@ -1019,6 +1019,45 @@ export default function App({ version = '0.1.0' }) {
             agent.note(lines.join('\n'), 'notice');
           } catch (e) {
             showNotice(`▣ recap ${want} — ${(e && e.message) || 'lookup failed'}`);
+          }
+        })();
+        return;
+      }
+      case '/quickskill': {
+        // Turn what this run learned into a skill (owner, 2026-11-26: "add
+        // skills playbook were we can make qickskill from what we learn").
+        // `/quickskill <name>` files the LAST recap's mistakes and lessons
+        // under that name; `/quickskill <name> :: your note` adds the
+        // operator's own line. Nothing is invented: with no recap and no note
+        // the server refuses, and the notice says why.
+        const raw = String(arg || '').trim();
+        if (!raw) {
+          showNotice('▣ quickskill <name> — files what the last run learned · add " :: note" for your own line');
+          return;
+        }
+        const [namePart, ...noteParts] = raw.split('::');
+        const name = namePart.trim();
+        const notes = noteParts.join('::').trim();
+        if (!name) { showNotice('▣ quickskill — a name comes first, e.g. /quickskill port conflict on restart'); return; }
+        const recap = agent.lastRecap && agent.lastRecap.id ? agent.lastRecap.id : '';
+        (async () => {
+          try {
+            const res = await fetch(`${API}/api/agent/quickskill`, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                ...(process.env.HAKSTER_API_KEY ? { 'x-api-key': process.env.HAKSTER_API_KEY } : {}),
+              },
+              body: JSON.stringify({ name, notes: notes || undefined, recap: recap || undefined }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data || data.ok !== true) throw new Error((data && data.error) || `write failed (${res.status})`);
+            agent.note([
+              `▣ quickskill ${data.name} — ${data.appended ? 'appended to' : 'written to'} skills/${data.name}.md`,
+              `  ${data.mistakes || 0} mistake(s) · ${data.learned || 0} lesson(s)${data.recap ? ` · from ${data.recap}` : ''} · /quickskill again to add more`,
+            ].join('\n'), 'notice');
+          } catch (e) {
+            showNotice(`▣ quickskill — ${(e && e.message) || 'write failed'}`);
           }
         })();
         return;

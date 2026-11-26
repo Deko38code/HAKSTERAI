@@ -51,6 +51,10 @@ export const PHASE_PHRASES = {
     'Calling on tools — putting the plan to work',
     'Keeping the execution crisp',
     'On fire and knocking out the next step',
+    // Owner's own line for a working run (2026-11-26: "add that boy got the
+    // flavor now when cooking"). ACT is the cooking phase — the plan actually
+    // moving — so it belongs in this list and nowhere else.
+    'Boy got the flavor now — cooking it right',
   ],
   OBSERVE: [
     'Checking whether anything is getting cold',

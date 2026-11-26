@@ -750,7 +750,17 @@ export function useAgentStream({
             // they dont clear and block my outputpanel"). One marker round,
             // then a fresh round, so the answer continues underneath it.
             patch(assistantId, (m) => applySteer(m, text, !!evt.supersede));
-            if (text) pushActivity('sys', evt.supersede ? '↳ live steer — reply restarted with it' : '↳ live steer applied');
+            // Steering never cuts a live answer now (owner, 2026-11-26: "fix
+            // our steer to not interrupt you but you still grab message before
+            // your run to kill 2 birds 1 stone"). Killing 2 birds 1 stone is
+            // exactly what the drain does — the answer already on screen
+            // survives AND the update still reaches the model before the next
+            // run starts — so the row says that instead of claiming a restart.
+            if (text) {
+              pushActivity('sys', evt.supersede
+                ? '↳ live steer — reply restarted with it'
+                : '↳ live steer applied · killing 2 birds 1 stone — answer kept, update delivered');
+            }
             break;
           }
 

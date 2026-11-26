@@ -3782,6 +3782,7 @@ var MENU_ITEMS = [
   { cmd: "/scripts", label: "Live scripts", detail: "run ours live \xB7 OMP snapshot compares the source" },
   { cmd: "/squad", label: "Sub-agents", detail: "the peer agents the server reports \xB7 enter delegates" },
   { cmd: "/recap", label: "Recap", detail: "/recap #id \xB7 read a run back out of memory" },
+  { cmd: "/quickskill", label: "Quickskill", detail: "/quickskill <name> \xB7 file what the last run learned as a skill" },
   { cmd: "/status", label: "Status", detail: "server, phase, tokens" },
   { cmd: "/usage", label: "Usage", detail: "per-user \xB7 daily & weekly graphs \xB7 r refresh \xB7 [ ] rate" },
   { cmd: "/debug", label: "Debugger", detail: "render times \xB7 event-loop lag \xB7 tools \xB7 server build" },
@@ -5035,7 +5036,11 @@ var PHASE_PHRASES = {
   ACT: [
     "Calling on tools \u2014 putting the plan to work",
     "Keeping the execution crisp",
-    "On fire and knocking out the next step"
+    "On fire and knocking out the next step",
+    // Owner's own line for a working run (2026-11-26: "add that boy got the
+    // flavor now when cooking"). ACT is the cooking phase — the plan actually
+    // moving — so it belongs in this list and nowhere else.
+    "Boy got the flavor now \u2014 cooking it right"
   ],
   OBSERVE: [
     "Checking whether anything is getting cold",
@@ -6562,7 +6567,9 @@ function useAgentStream({
           case "steer": {
             const text2 = String(evt.content || "").trim();
             patch(assistantId, (m) => applySteer(m, text2, !!evt.supersede));
-            if (text2) pushActivity("sys", evt.supersede ? "\u21B3 live steer \u2014 reply restarted with it" : "\u21B3 live steer applied");
+            if (text2) {
+              pushActivity("sys", evt.supersede ? "\u21B3 live steer \u2014 reply restarted with it" : "\u21B3 live steer applied \xB7 killing 2 birds 1 stone \u2014 answer kept, update delivered");
+            }
             break;
           }
           case "steer_undelivered": {
@@ -8415,7 +8422,7 @@ function App({ version = "0.1.0" }) {
         showNotice("transcript cleared \xB7 steer queue emptied");
         return;
       case "/help":
-        showNotice("keys: tab focus \xB7 shift+tab auto mode \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /recap /clear /quit");
+        showNotice("keys: tab focus \xB7 shift+tab auto mode \xB7 pgup/pgdn scroll \xB7 ^P catalog \xB7 h handoff \xB7 d dashboard \xB7 v monitor \xB7 m models \xB7 s scripts \xB7 g squad \xB7 u usage \xB7 c clear \xB7 q quit \xB7 esc stop \u2014 commands: /menu /model /auto /graphics /mcp /handoff /ports /attach /dashboard /monitor /scripts /squad /usage /debug /status /update /settings /danger /recap /quickskill /clear /quit");
         return;
       case "/recap": {
         const want = String(arg || "").trim().toLowerCase().replace(/^#?/, "#");
@@ -8465,6 +8472,42 @@ function App({ version = "0.1.0" }) {
             agent.note(lines.join("\n"), "notice");
           } catch (e) {
             showNotice(`\u25A3 recap ${want} \u2014 ${e && e.message || "lookup failed"}`);
+          }
+        })();
+        return;
+      }
+      case "/quickskill": {
+        const raw2 = String(arg || "").trim();
+        if (!raw2) {
+          showNotice('\u25A3 quickskill <name> \u2014 files what the last run learned \xB7 add " :: note" for your own line');
+          return;
+        }
+        const [namePart, ...noteParts] = raw2.split("::");
+        const name = namePart.trim();
+        const notes = noteParts.join("::").trim();
+        if (!name) {
+          showNotice("\u25A3 quickskill \u2014 a name comes first, e.g. /quickskill port conflict on restart");
+          return;
+        }
+        const recap = agent.lastRecap && agent.lastRecap.id ? agent.lastRecap.id : "";
+        (async () => {
+          try {
+            const res = await fetch(`${API}/api/agent/quickskill`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                ...process.env.HAKSTER_API_KEY ? { "x-api-key": process.env.HAKSTER_API_KEY } : {}
+              },
+              body: JSON.stringify({ name, notes: notes || void 0, recap: recap || void 0 })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data || data.ok !== true) throw new Error(data && data.error || `write failed (${res.status})`);
+            agent.note([
+              `\u25A3 quickskill ${data.name} \u2014 ${data.appended ? "appended to" : "written to"} skills/${data.name}.md`,
+              `  ${data.mistakes || 0} mistake(s) \xB7 ${data.learned || 0} lesson(s)${data.recap ? ` \xB7 from ${data.recap}` : ""} \xB7 /quickskill again to add more`
+            ].join("\n"), "notice");
+          } catch (e) {
+            showNotice(`\u25A3 quickskill \u2014 ${e && e.message || "write failed"}`);
           }
         })();
         return;

@@ -27,6 +27,10 @@ function resolveGhostHome() {
   return require('os').homedir();
 }
 const HAKSTER_DIR = path.join(resolveGhostHome(), '.hakster');
+// The living skill bank. `extractSkill` writes here automatically; the
+// `/api/agent/quickskill` capture writes here too, so an operator-captured
+// skill and an auto-extracted one live in the same place and the same index.
+const SKILLS_DIR = path.join(HAKSTER_DIR, 'skills');
 
 const {
   AgentLoopPhase,
@@ -1181,6 +1185,7 @@ module.exports = {
   searchBanks,
   curateNewMemoriesWithCodex,
   bankPath,
+  SKILLS_DIR,
   BANK_CAP,
   MEMORY_SECTIONS,
 

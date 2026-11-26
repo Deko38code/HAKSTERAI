@@ -4516,6 +4516,140 @@ app.get('/api/agent/recap/:id', (req, res) => {
   }
 });
 
+// ── `POST /api/agent/quickskill` — file what a run learned as a skill ──
+// Owner, 2026-11-26: "add skills playbook were we can make qickskill from what
+// we learn". A skill is captured from measured work — the recap's own mistakes
+// and lessons, plus any line the operator adds — and nothing is invented: with
+// no recap under the id and no note there is nothing learned to file, so the
+// write is REFUSED rather than producing an empty skill (§10, §13, §50.1).
+// It appends to the living bank `~/.hakster/skills` (the same directory and
+// index `extractSkill` writes), never overwrites an existing skill, and never
+// invents a confidence score.
+app.post('/api/agent/quickskill', (req, res) => {
+  try {
+    const path = require('path');
+    const body = req.body || {};
+    const title = String(body.name || body.title || '').trim();
+    if (!title) return res.status(400).json({ ok: false, error: 'name is required — e.g. "port conflict on restart"' });
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+    if (!slug) return res.status(400).json({ ok: false, error: 'that name has no letters or digits to build a filename from' });
+
+    const rawRecap = String(body.recap || '').trim().toLowerCase().replace(/^#?/, '#');
+    const recapId = /^#[a-z0-9]{3,16}$/.test(rawRecap) ? rawRecap : '';
+
+    let line = '';
+    const mistakes = [];
+    const learned = [];
+    if (recapId) {
+      try { const k = getMemory(`recap${recapId}`); line = k ? String(k.value || '') : ''; } catch { /* no keyed record */ }
+      const take = (type, text) => {
+        const t = String(text || '').trim();
+        if (!t) return;
+        if (type === 'error') mistakes.push(t); else learned.push(t);
+      };
+      try {
+        for (const m of autolearn.readRawMemories()) {
+          if (!Array.isArray(m && m.tags) || !m.tags.includes(recapId)) continue;
+          take(m.type, m.observation);
+        }
+      } catch { /* raw bank is optional */ }
+      try {
+        for (const section of autolearn.MEMORY_SECTIONS) {
+          const entries = autolearn.readBank(null, section) || [];
+          for (const e of entries) {
+            if (!Array.isArray(e && e.tags) || !e.tags.includes(recapId)) continue;
+            take(e.type, e.observation);
+          }
+        }
+      } catch { /* banks are optional */ }
+    }
+    const uniq = (a) => Array.from(new Set(a)).slice(0, 12);
+    const errs = uniq(mistakes);
+    const oks = uniq(learned);
+    const notes = String(body.notes || '').trim().slice(0, 8000);
+    if (!recapId && !notes) {
+      return res.status(400).json({ ok: false, error: 'nothing learned to capture — pass a recap id (bare /quickskill uses the last run) or a note after " :: "' });
+    }
+
+    const stamp = new Date().toISOString();
+    const day = stamp.slice(0, 10);
+    const steps = (Array.isArray(body.steps) ? body.steps : String(body.steps || body.how || '').split('\n'))
+      .map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
+    const description = String(body.description || '').trim() || line || (notes ? notes.split('\n')[0] : '') || `Captured from ${recapId || 'the operator'}`;
+    const trigger = String(body.trigger || '').trim() || (recapId ? `Use when a task like ${recapId} comes up again` : `Use when: ${title}`);
+
+    const block = [
+      '## Description', description, '',
+      '## Trigger', trigger, '',
+      ...(steps.length ? ['## Steps', ...steps.map((x, i) => `${i + 1}. ${x}`), ''] : []),
+      ...(errs.length ? ['## Mistakes not to repeat', ...errs.map((x) => `- ${x}`), ''] : []),
+      ...(oks.length ? ['## What worked', ...oks.map((x) => `- ${x}`), ''] : []),
+      ...(notes ? ['## Operator note', notes, ''] : []),
+      '## Source', `${recapId ? `recap ${recapId} · ` : ''}captured ${stamp}`, '',
+    ].join('\n');
+
+    const skillsDir = autolearn.SKILLS_DIR;
+    fs.mkdirSync(skillsDir, { recursive: true });
+    const file = path.join(skillsDir, `${slug}.md`);
+    const exists = fs.existsSync(file);
+    if (exists) {
+      // Append, never replace: an earlier capture is someone's work, and this
+      // keeps one skill per name with its history intact (§49.1, §2.1).
+      fs.appendFileSync(file, `\n\n## ${day} — ${recapId || 'operator note'}\n\n${block}`, 'utf8');
+    } else {
+      fs.writeFileSync(file, `# ${title}\n\n${block}`, 'utf8');
+    }
+
+    // Keep the bank's own index honest — one row per file, updated in place.
+    const indexPath = path.join(skillsDir, 'index.json');
+    let index = { skills: [], lastUpdated: '' };
+    try { index = JSON.parse(fs.readFileSync(indexPath, 'utf8')) || index; } catch { /* first capture */ }
+    if (!Array.isArray(index.skills)) index.skills = [];
+    const row = {
+      name: slug,
+      file: `${slug}.md`,
+      category: 'captured',
+      extracted: day,
+      triggerCount: 1,
+      description: description.slice(0, 200),
+      recap: recapId || null,
+      source: 'quickskill',
+    };
+    const at = index.skills.findIndex((x) => x && (x.name === slug || x.file === `${slug}.md`));
+    if (at >= 0) {
+      // A later capture must not erase what the first one recorded: the recap
+      // it came from and the description it earned survive unless this capture
+      // supplies its own (§2.4 — nothing a run learned is dropped by a merge).
+      const prev = index.skills[at] || {};
+      const ownDescription = String(body.description || '').trim();
+      index.skills[at] = {
+        ...prev,
+        ...row,
+        recap: recapId || prev.recap || null,
+        description: ownDescription ? row.description : (prev.description || row.description),
+        extracted: prev.extracted || day,
+        triggerCount: (Number(prev.triggerCount) || 1) + 1,
+      };
+    } else index.skills.push(row);
+    index.lastUpdated = stamp;
+    fs.writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`, 'utf8');
+
+    console.log(`[quickskill] ${exists ? 'appended' : 'wrote'} ${file} (${errs.length} mistake(s), ${oks.length} lesson(s))${recapId ? ` from ${recapId}` : ''}`);
+    res.json({
+      ok: true,
+      name: slug,
+      file: `skills/${slug}.md`,
+      path: file,
+      appended: exists,
+      recap: recapId || null,
+      mistakes: errs.length,
+      learned: oks.length,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.put('/api/memory/:key', (req, res) => {
   try {
     const existing = getMemory(req.params.key);
@@ -5584,12 +5718,15 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
   if (cfg.type === 'claude-cli') {
     // Live steering on this lane (owner, 2026-11-25: "make sure his steer is
     // working and he recieves his messages while working to do it all in one
-    // shot"). `claude -p` reads its prompt once and has no stdin turn loop, so
-    // a message typed mid-run cannot be handed to the running child. It is
-    // taken here instead: the turn is stopped at the next boundary, the steer
-    // is written to the client as a live `steer` event, and the run restarts
-    // on the same conversation with what was already completed spelled out,
-    // so the update lands inside THIS run and nothing is repeated.
+    // shot"; tightened 2026-11-26: "fix our steer to not interrupt you but you
+    // still grab message before your run to kill 2 birds 1 stone"). `claude -p`
+    // reads its prompt once and has no stdin turn loop, so a message typed
+    // mid-run cannot be handed to the running child. It is taken at the TURN
+    // BOUNDARY instead — never by killing the live turn: the steer is written
+    // to the client as a `steer` event once the reply has landed, and the run
+    // continues on the same conversation with what was already completed
+    // spelled out, so the update lands inside THIS run, the delivered answer is
+    // never truncated, and nothing is repeated.
     const CLAUDE_CLI_MAX_STEERS = 4;
     // The window the spawned CLI compacts at — the same 200000 `claudeCliEnv()`
     // hands it as CLAUDE_CODE_AUTO_COMPACT_WINDOW (§39.1). Reported to the TUI
@@ -5757,26 +5894,30 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         child.stdin.write(transcript);
         child.stdin.end();
 
-        // ── Live steer on this lane ────────────────────────────────────
-        // `claude -p` has no open stdin turn loop, so the running child is
-        // stopped at the next boundary and the run restarts on the same
-        // conversation with this update in front of it (see the loop below).
-        // The steer is acknowledged on the wire the moment it is taken, so a
-        // message typed mid-run is never silently held until the run ends.
-        let steeredText = '';
-        const steerPoll = setInterval(() => {
-          if (settled || steeredText || !runId) return;
+        // ── Live steer on this lane — taken at the boundary, NOT by killing
+        //    the turn ─────────────────────────────────────────────────────
+        // `claude -p` has no open stdin turn loop, so a message typed mid-run
+        // cannot be handed to the running child. It is not allowed to cut the
+        // answer the operator is watching either (owner, 2026-11-26: "fix our
+        // steer to not interrupt you but you still grab message before your
+        // run to kill 2 birds 1 stone"): the child runs to completion and the
+        // inbox is drained ONCE, after the turn closes. Killing 2 birds 1
+        // stone — the delivered answer survives untouched AND the update still
+        // reaches the model inside this run, before its next run starts — the
+        // loop below then continues on the same conversation with everything
+        // already completed spelled out.
+        const takeSteerAtBoundary = () => {
+          if (!runId) return '';
           const box = agentSteerRuns.get(runId);
-          if (!box || !box.items.length) return;
+          if (!box || !box.items.length) return '';
           const text = box.items.splice(0, 8).map((t) => String(t).trim()).filter(Boolean).join('\n\n').slice(0, 16000);
-          if (!text) return;
-          steeredText = text;
+          if (!text) return '';
           box.at = Date.now();
-          res.write(`data: ${JSON.stringify({ type: 'steer', content: text, supersede: true })}\n\n`);
-          console.log(`[agent] live steer interrupted the claude-cli turn: ${text.slice(0, 60).replace(/\s+/g, ' ')}`);
-          try { child.kill('SIGTERM'); } catch { /* already gone */ }
-          setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, 4000);
-        }, 350);
+          // No `supersede`: nothing is retracted, the reply has already landed.
+          res.write(`data: ${JSON.stringify({ type: 'steer', content: text })}\n\n`);
+          console.log(`[agent] live steer taken at the turn boundary (claude-cli): ${text.slice(0, 60).replace(/\s+/g, ' ')}`);
+          return text;
+        };
 
         // Guard against a stuck spawn (e.g. MCP tool-discovery hanging) —
         // without this, a hung `claude` process never closes and the SSE
@@ -5914,18 +6055,18 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
           if (sysPromptFile) { try { fs.unlinkSync(sysPromptFile); } catch { /* already gone */ } }
           if (leanMcpFile) { try { fs.unlinkSync(leanMcpFile); } catch { /* already gone */ } }
         };
-        child.on('error', (err) => { if (!settled) { settled = true; clearTimeout(timeoutTimer); clearInterval(steerPoll); cleanupSysPromptFile(); reject(err); } });
+        child.on('error', (err) => { if (!settled) { settled = true; clearTimeout(timeoutTimer); cleanupSysPromptFile(); reject(err); } });
         child.on('close', (code) => {
           if (settled) return;
           settled = true;
           clearTimeout(timeoutTimer);
-          clearInterval(steerPoll);
           cleanupSysPromptFile();
           if (timedOut) reject(new Error(`claude-cli timed out after ${AGENT_TIMEOUT_MS / 1000}s (killed)`));
-          // A turn stopped to take a steer is not a failure: the loop below
-          // restarts it with the update applied.
-          else if (code !== 0 && !finalText && !steeredText) reject(new Error(stderrBuf.slice(0, 500) || `claude exited with code ${code}`));
-          else resolve({ finalText, toolCount, realModel, costUsd, usage, steered: steeredText, promptTokens: lastPromptTokens });
+          // Any non-zero exit without an answer is a real failure; a turn is
+          // never "stopped to take a steer" any more — the steer waits for the
+          // boundary instead of cutting the turn (see takeSteerAtBoundary).
+          else if (code !== 0 && !finalText) reject(new Error(stderrBuf.slice(0, 500) || `claude exited with code ${code}`));
+          else resolve({ finalText, toolCount, realModel, costUsd, usage, steered: takeSteerAtBoundary(), promptTokens: lastPromptTokens });
         });
       });
     }
@@ -5950,8 +6091,8 @@ app.post('/api/agent/run', requireSignedIn, requireCliEntitlement, async (req, r
         progress.push(`round ${steers}: ${result.toolCount || 0} tool call(s)${result.finalText ? `; text delivered ended with: ${result.finalText.trim().slice(-240)}` : ''}`);
         const note = [
           '=== CONTINUATION — LIVE OPERATOR STEERING ===',
-          'The operator typed an update while you were working. It arrived inside this same run, so apply it now and finish the whole task in one go.',
-          'Already completed in this run before the interruption:',
+          'The operator typed an update while you were working. Your previous reply was delivered in full (nothing was interrupted or cut off), and this update arrived inside the same run, so apply it now and finish the whole task in one go.',
+          'Already completed in this run — do not redo any of it:',
           ...progress.map((p) => `- ${p}`),
           'Do not repeat completed steps, and do not restate text the operator has already seen unless the update requires it. Continue from where you were.',
           '',
@@ -6687,9 +6828,6 @@ ${dirListing}
     runTextChars = line.length;
     res.write(`data: ${JSON.stringify({ type: 'delta', content: line })}\n\n`);
   };
-  // Mid-stream steer interruptions used by this run (bounded, so a chatty
-  // operator cannot pin one turn open forever).
-  let steerInterrupts = 0;
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       // Check abort at start of each iteration
@@ -6841,26 +6979,17 @@ ${dirListing}
       let thinkingActive = false;
       let assistantThinking = ''; // reasoning channel, kept for the empty-reply fallback
 
-      let steerInterrupt = '';
       try {
       for await (const chunk of stream) {
-        // ── Interruptible steering ─────────────────────────────────────
-        // A steer typed while this reply streams is read at the first
-        // chunk boundary after it lands, so the update reaches the model
-        // BEFORE the answer is finished. Break out, drop the partial
-        // prose, and regenerate this same turn with it applied.
-        if (runId && steerInterrupts < 6) {
-          const _steerBox = agentSteerRuns.get(runId);
-          if (_steerBox && _steerBox.items.length) {
-            steerInterrupt = _steerBox.items.splice(0, 8).map((t) => String(t).trim()).filter(Boolean).join('\n\n').slice(0, 16000);
-            if (steerInterrupt) {
-              steerInterrupts++;
-              _steerBox.at = Date.now();
-              try { streamAbort.abort(); } catch { /* already closed */ }
-              break;
-            }
-          }
-        }
+        // ── Steering never interrupts a live answer ────────────────────
+        // Killing 2 birds 1 stone: the run's steer inbox is drained only at
+        // natural boundaries — before each model call (top of the turn loop)
+        // and at run end — so a message typed mid-reply (a) never cuts the
+        // answer the operator is watching and (b) still reaches the model
+        // inside THIS run, before its next run starts (owner, 2026-11-26:
+        // "fix our steer to not interrupt you but you still grab message
+        // before your run to kill 2 birds 1 stone"). Nothing is read from
+        // the inbox here on purpose; the drain points own delivery.
 
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
@@ -6915,37 +7044,14 @@ ${dirListing}
         }
       }
       } catch (_streamErr) {
-        // An abort we issued ourselves to take a steer is not a failure —
-        // the block below regenerates the turn. Every other error keeps
-        // the behaviour it had before this hook existed.
-        if (!steerInterrupt) throw _streamErr;
+        // The only abort left on this stream is the 600 s timeout above, so
+        // every error here is real: surface it unchanged. Steering no longer
+        // aborts a live answer (see the block inside the stream loop).
+        throw _streamErr;
       }
 
       // Stream finished successfully
       clearTimeout(streamTimeout);
-
-      // ── A steer arrived while the reply was still streaming ───────────
-      // The partial prose this round already streamed is retracted on the
-      // client (`supersede`) and is never pushed to history; the SAME turn
-      // is then regenerated with the operator's update in front of the
-      // model, so the run gives one answer that already accounts for it
-      // instead of an answer followed by a correction (owner, 2026-11-24:
-      // "i need him to get messages before to do all in one shot").
-      if (steerInterrupt) {
-        if (thinkingActive) {
-          thinkingActive = false;
-          res.write(`data: ${JSON.stringify({ type: 'thinking_end' })}\n\n`);
-        }
-        agentMessages.push({
-          role: 'system',
-          content: `LIVE USER STEERING — the operator typed this while your reply was still streaming; it replaces the partial text you had written, which was discarded. Act on it now and give one complete answer with it applied. Do not restate or repeat the discarded text:\n\n${steerInterrupt}`,
-        });
-        res.write(`data: ${JSON.stringify({ type: 'steer', content: steerInterrupt, supersede: true })}\n\n`);
-        console.log(`[agent] live steer interrupted the reply on turn ${turn}: ${steerInterrupt.slice(0, 60).replace(/\s+/g, ' ')}`);
-        steerInterrupt = '';
-        turn--;   // regenerate the same turn, now steered
-        continue;
-      }
 
       // Close thinking if still active at end of stream
       if (thinkingActive) {

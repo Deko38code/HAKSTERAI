@@ -883,3 +883,81 @@ until the owner says so; master entry in `/home/ghost/CLAUDE.md` under the same 
 - **Still holds:** no model, route, provider, rate, plan or allowance moves (§19.3, §22.4, §26); the locked
   config and the checklist rails stay truthful in every skin (§35, §38.1, §10).
 - **Status: NOT STARTED** — direction saved; working note in `cli-skins-menu-planned.md`.
+
+---
+
+## Session Log — 2026-11-26 (steer never interrupts · killing 2 birds 1 stone · quickskill)
+
+_Appended at the end of this file at the owner's direction ("fix our steer to not interupt you but you
+still grab message beore your run to kill 2 birds 1 stone add that phrase to ours killing 2 birds 1
+stone wired in the right place when knocking 2 thing out at once get it"; "and add skills playbook were
+we can make qickskill from what we learn"). Nothing above this line was rewritten, reordered or removed.
+Backups taken and hash-verified identical before the append: `CLAUDE.md.bak-20261126T035840Z` (108026 B, sha256
+`6aaa96c6d9a7…`), `haksterAi/AGENTS.md.bak-20261126T035840Z` (68205 B, sha256 `26b47e65bb85…`)._
+
+### 1. The steer never interrupts a run — it is drained at the boundary
+
+Amends the mechanism §38.4 described. On 2026-11-25 a steer typed mid-run was taken by **cutting the
+live answer** (abort the stream, retract the partial, regenerate the turn) so it couldn't be handed to
+`claude -p`, which reads its prompt once. The owner changed the requirement on 2026-11-26: *"fix our
+steer to not interupt you but you still grab message beore your run"*.
+
+So steering is now taken **only at natural boundaries** and never cuts what the operator is watching:
+
+- **standard lane** (`/api/agent/run`): the stream loop reads **nothing** from the steer inbox — no
+  abort, no retraction, no regeneration. The inbox is drained at the top of the next turn (before the
+  next model call) and again at run end, where a steer the run never reached keeps the run alive
+  instead of closing it (`steer_undelivered` is the fallback when it still cannot be delivered).
+- **`claude-cli` lane**: the child runs to completion and `takeSteerAtBoundary()` drains the inbox
+  **after** the turn closes; the `steerPoll` that SIGTERM/SIGKILLed the child is gone, and the turn
+  resolves with `steered`. A non-zero exit without an answer is now a real failure, not "stopped for
+  a steer".
+- The TUI records a non-supersede steer as a marker round and **keeps the delivered text**; only a
+  legacy `supersede` event (older servers) still retracts the round being written.
+
+Pinned by `server/__smoke__/mid-stream-steer-probe.mjs` — **7 checks**, including that the stream
+loop never reads the inbox, the poll/kill path is gone, the boundary drain consumes (so it can't
+apply twice), and the TUI's transcript survives. Verified 2026-11-26: 7/7 pass; `cli` suite
+**310/310** pass; `node --check` clean on `server/src/index.js` and `server/src/agent/autolearn.js`.
+
+### 2. "Killing 2 birds 1 stone" — the phrase, wired where one action does two things
+
+Owner: *"add that phrase to ours … wired in the right place when knocking 2 thing out at once"*. It is
+recorded here as our own phrase for **one action that settles two things at once**, and it lives at the
+exact places that do it — never as decoration:
+
+- `server/src/index.js` — the boundary-drain comments (standard lane and `claude-cli`) name it: the
+  delivered answer survives **and** the update still reaches the model inside the same run.
+- `cli/ui/src/hooks/useAgentStream.js` — the applied-steer activity row reads
+  `↳ live steer applied · killing 2 birds 1 stone — answer kept, update delivered`, so the operator
+  sees both wins in one line instead of a claim that the reply restarted.
+- `server/__smoke__/mid-stream-steer-probe.mjs` — asserts the row still names both things, so the
+  phrase cannot drift into a promise the code no longer keeps.
+
+Use it when the work really does two jobs in one pass (a drain that both preserves the answer and
+delivers the update). Do not use it to describe two separate steps done in a row.
+
+### 3. Skills playbook — a quickskill from what we learn
+
+Owner: *"add skills playbook were we can make qickskill from what we learn"*. Built as a working
+capture path, not just a document:
+
+- **Playbook:** `docs/agent/skills-playbook.md` — what a skill is, the two ways one gets written
+  (auto-extraction at 3+ recurrences; deliberate capture), what qualifies (measured only), the file
+  shape, and the rules that hold for every capture.
+- **Capture:** `POST /api/agent/quickskill` (`server/src/index.js`) writes
+  `~/.hakster/skills/<slug>.md` + its `index.json` row — the same bank and index
+  `extractSkill` uses (`autolearn.SKILLS_DIR`, now exported). It files the recap's own **mistakes**
+  and **lessons** plus the operator's note, **refuses** a capture with nothing learned (no recap and no
+  note), **appends** a dated section instead of overwriting an existing skill, keeps the first
+  capture's recap/description through the merge, slugs the name so it cannot escape the bank, and
+  invents no confidence score (§10, §13, §50.1).
+- **CLI:** `/quickskill <name>` (bare = the last recap) and `/quickskill <name> :: your note`; listed
+  in `/help` and the `^P` palette.
+- **Probe:** `server/__smoke__/quickskill-probe.mjs` — **6 checks** that slice the **real handler**
+  out of `server/src/index.js` and run it against a temp bank (refusal, content, append, slug, index).
+  Verified 2026-11-26: 6/6 pass.
+
+Nothing here moves a model, route, provider order, rate, plan or allowance (§19.3, §22.4, §26), and
+nothing is written into Junkalot, PhantomIDE or another project (§16). CLI version **0.3.94**,
+`ui-fb.mjs` rebuilt from source (§50.2 — a bundled module is not edited until it is rebuilt).
