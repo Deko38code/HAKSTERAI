@@ -3296,6 +3296,37 @@ program
       return;
     }
 
+    // The renderer the CLI ships is @opentui/core 0.9.x, whose own package.json
+    // declares `bun >= 1.3.14`. An older Bun loads the bundle, then fails inside
+    // the native library — which on Windows reads as "the dashboard opened and
+    // vanished" with nothing to act on. A Bun from bun.sh can be years old, so
+    // the version is measured here, before the screen is taken, and an
+    // unsupported one is named with its own fix rather than crashing later
+    // (§10, §13, §50.1: the real cause, before the TUI starts).
+    const MIN_BUN = [1, 3, 14];
+    const bunVersionOf = () => {
+      const { spawnSync } = require('child_process');
+      try {
+        const r = spawnSync(bun, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+        const m = String((r && r.stdout) || '').trim().match(/(\d+)\.(\d+)\.(\d+)/);
+        return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+      } catch { return null; }
+    };
+    const olderThan = (v, min) => {
+      for (let i = 0; i < min.length; i += 1) {
+        if (v[i] !== min[i]) return v[i] < min[i];
+      }
+      return false;
+    };
+    const bunVer = bunVersionOf();
+    if (bunVer && olderThan(bunVer, MIN_BUN)) {
+      fallbackInk(
+        `Bun ${bunVer.join('.')} is older than the dashboard's ${MIN_BUN.join('.')} — `
+        + 'install Bun from bun.sh (or re-run the installer), then start the CLI again'
+      );
+      return;
+    }
+
     // A .cmd/.bat launcher (Windows npm shim) cannot be spawned directly; it
     // needs the shell, and the quoted form keeps a path with spaces intact.
     const viaShell = /\.(cmd|bat)$/i.test(bun);
@@ -3408,6 +3439,43 @@ program
   .option('--yes', 'Install Guake without asking (only when it is missing)')
   .action(async (opts) => {
     const { spawnSync } = require('child_process');
+    // Windows: the drop-down and the look both come from Windows Terminal
+    // (src/quake-windows.js) — Guake does not exist there, and before this the
+    // command had nothing to do on a paid Windows machine (Surface Pro,
+    // 2026-11-26: "none of our grids tui guake for windows").
+    if (process.platform === 'win32') {
+      const qw = require('./src/quake-windows');
+      const say = (line) => console.log(line);
+      const commandline = `"${process.execPath}" "${path.join(__dirname, 'index.js')}" tui`;
+      const wantsSetup = opts.setup === undefined ? true : Boolean(opts.setup);
+      if (wantsSetup) {
+        const wrote = qw.writeFragment({ commandline });
+        if (!wrote.ok) {
+          say(`${C.red}✗ could not install the Windows Terminal look (${wrote.reason})${C.reset}`);
+          process.exit(1);
+        }
+        say(`${C.green}✓ Windows Terminal look installed${C.reset}${C.dim}${wrote.backup ? ` (previous file saved: ${wrote.backup})` : ''}${C.reset}`);
+        say(`${C.dim}  ${wrote.path}${C.reset}`);
+        say(`${C.dim}  it appears as the "${qw.PROFILE_NAME}" profile and colour scheme${C.reset}`);
+      }
+      if (opts.setup) process.exit(0);
+      // Windows Terminal owns the drop-down window; there is no per-window show/
+      // hide from a CLI, so those flags report the real gesture instead of
+      // pretending to have done something (§10, §13).
+      if (opts.hide || opts.show || opts.toggle) {
+        say(`${C.yellow}◆ the drop-down is Windows Terminal's own — ${qw.quakeModeHint()}${C.reset}`);
+        process.exit(0);
+      }
+      const wt = qw.findWindowsTerminal();
+      if (!wt) {
+        say(`${C.yellow}◆ Windows Terminal is not installed${C.reset}`);
+        say(`${C.dim}  install it from the Microsoft Store, then run: hakster quake${C.reset}`);
+        process.exit(1);
+      }
+      say(`${C.gray}opening ${qw.PROFILE_NAME} in Windows Terminal · ${qw.quakeModeHint()}${C.reset}`);
+      const res = spawnSync(wt, qw.launchArgs({ cwd: process.cwd() }), { stdio: 'inherit', windowsHide: false });
+      process.exit(typeof res.status === 'number' ? res.status : 0);
+    }
     const quake = require('./src/quake');
     const version = require('./package.json').version;
     const say = (line) => console.log(line);

@@ -113,11 +113,16 @@ test('the run starts from memory: a MEMORY FIRST block ahead of machine context'
   assert.ok(src.includes('function buildMemoryFirstBlock('), 'the block builder exists');
   assert.match(src, /const memoryFirst = buildMemoryFirstBlock\(lastUserMsg\?\.content \|\| ''/);
   assert.match(src, /memoryFirst\.text \? '\\n\\n' \+ memoryFirst\.text : ''/, 'memory block is in the prompt');
-  assert.match(
-    src,
-    /\+\s*\(!customerDirective && memoryFirst\.text \? '\\n\\n' \+ memoryFirst\.text : ''\)\s*\+\s*\(customerDirective \? '' : '\\n\\n' \+ machineContext\)/,
-    'MEMORY FIRST sits above the machine context',
-  );
+  // Order, not adjacency: the prompt grew a PAST PROJECTS block that sits
+  // between them (2026-11-26), and pinning the two blocks as touching made this
+  // test fail for a change that was correct. What the rule actually requires is
+  // that everything recalled for the task comes BEFORE the machine context.
+  const atMemory = src.indexOf("+ (!customerDirective && memoryFirst.text ? '\\n\\n' + memoryFirst.text : '')");
+  const atPast = src.indexOf("+ (!customerDirective && pastProjects.text ? '\\n\\n' + pastProjects.text : '')");
+  const atMachine = src.indexOf("+ (customerDirective ? '' : '\\n\\n' + machineContext)");
+  assert.ok(atMemory > 0, 'the memory block is no longer concatenated into the system prompt');
+  assert.ok(atMachine > atMemory, 'MEMORY FIRST no longer sits above the machine context');
+  if (atPast > 0) assert.ok(atPast > atMemory && atMachine > atPast, 'recalled memory must also sit above the machine context');
   assert.ok(src.includes("type: 'memory_recall'"), 'the recall is announced on the stream');
   assert.match(src, /Do not repeat them; apply the fix noted\./, 'mistakes are framed as do-not-repeat');
   assert.match(src, /if \(s <= 0\) return;/, 'only matching memories are injected');

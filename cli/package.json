@@ -1,6 +1,6 @@
 {
   "name": "hakster-cli",
-  "version": "0.3.115",
+  "version": "0.3.116",
   "description": "haksterAi CLI — pentester AI agent shell with streaming chat, tool loop, file management, and Guardian pentest commands",
   "main": "index.js",
   "bin": {
@@ -31,8 +31,8 @@
     "test:ui": "bun ui/smoke.mjs"
   },
   "dependencies": {
-    "@opentui/core": "^0.3.4",
-    "@opentui/react": "^0.3.4",
+    "@opentui/core": "^0.9.9",
+    "@opentui/react": "^0.9.9",
     "commander": "^12.0.0",
     "ink": "^7.1.1",
     "ink-text-input": "^6.0.0",

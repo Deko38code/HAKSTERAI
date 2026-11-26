@@ -193,6 +193,44 @@ test('the Linux/macOS installer does the same, musl included', () => {
   assert.ok(/dashboard renderer could not be installed/.test(sh), 'a failed renderer install is no longer reported');
 });
 
+// ── the renderer version, and the Bun that renderer needs ─────────────────
+// The dashboard died on Windows because @opentui/core 0.3.4's per-platform
+// package was an early stub build. 0.9.x ships the full native renderer
+// (mingw-w64, ffmpeg, libwebp) — and it declares `bun >= 1.3.14`, so an old Bun
+// then fails inside the native library, which reads as "the dashboard opened
+// and vanished". Both halves are pinned here against the packages themselves,
+// so a later bump cannot move one without the other.
+
+test('the CLI ships a renderer new enough to have a real Windows build', () => {
+  const pkg = JSON.parse(read('package.json'));
+  const floor = (v) => String(v).replace(/^[\^~]/, '').split('.').map(Number);
+  const core = floor(pkg.dependencies['@opentui/core']);
+  // 0.9.0 is where the Windows package became a full native build; anything
+  // below it is the stub that failed on the Surface Pro.
+  assert.ok(
+    core[0] > 0 || (core[0] === 0 && core[1] >= 9),
+    `@opentui/core is ${pkg.dependencies['@opentui/core']} — the Windows renderer needs 0.9.x or newer`
+  );
+  assert.equal(pkg.dependencies['@opentui/react'], pkg.dependencies['@opentui/core'], 'core and react must move together');
+});
+
+test('the launcher refuses a Bun older than the renderer requires', () => {
+  const launcher = read('index.js');
+  const m = launcher.match(/const MIN_BUN = \[(\d+),\s*(\d+),\s*(\d+)\]/);
+  assert.ok(m, 'the launcher no longer declares the Bun floor the renderer needs');
+  const min = [Number(m[1]), Number(m[2]), Number(m[3])];
+  // The floor is not a guess: it must satisfy @opentui/core's own engines field.
+  const corePkg = JSON.parse(read('node_modules/@opentui/core/package.json'));
+  const want = String((corePkg.engines && corePkg.engines.bun) || '').match(/(\d+)\.(\d+)\.(\d+)/);
+  assert.ok(want, '@opentui/core no longer declares a bun engine — recheck the floor');
+  const req = [Number(want[1]), Number(want[2]), Number(want[3])];
+  for (let i = 0; i < 3; i += 1) {
+    if (min[i] !== req[i]) { assert.ok(min[i] > req[i], `MIN_BUN ${min.join('.')} is below the required ${req.join('.')}`); break; }
+  }
+  assert.ok(/olderThan\(bunVer, MIN_BUN\)/.test(launcher), 'the floor is declared but never enforced');
+  assert.ok(/install Bun from bun\.sh/.test(launcher), 'an old Bun no longer names its own fix');
+});
+
 test('the launcher names the exact fix instead of "reinstall the CLI"', () => {
   const src = read('index.js');
   assert.ok(!/reinstall the CLI so npm fetches it/.test(src), 'the launcher still gives the vague instruction');
