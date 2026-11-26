@@ -3140,57 +3140,28 @@ program
 // ── TUI mode — Ink/React interface ───────────────────────────────────────
 program
   .command('ui')
-  .description('Launch haksterAI TUI (Ink/React)')
+  .description('Launch the haksterAI TUI (the dashboard — same screen as `hakster tui`)')
   .action(() => {
-    // Ink requires a real TTY for raw mode key input
-    if (!process.stdin.isTTY) {
-      console.log(`${C.red}✗ TUI requires a real terminal (TTY).${C.reset}`);
-      console.log(`${C.dim}Run this command directly in your terminal, not through a pipe or non-interactive shell.${C.reset}`);
-      console.log(`${C.dim}Try: ${C.green}node cli/index.js ui${C.reset}`);
+    // Owner, 2026-11-26: "rplace old with new tui".
+    //
+    // `hakster ui` used to open the older Ink/React renderer (ui.mjs). Ink stays
+    // in the tree only as the fallback the dashboard takes on a machine that
+    // cannot load the native renderer — it is never a screen of its own, because
+    // two TUIs means two things to keep in sync on every change (§39.4, §49.1).
+    // Both names reach the one dashboard this CLI ships.
+    //
+    // Re-entry is a fresh process with inherited stdio, so the dashboard's real
+    // launch path (Bun detection, renderer floor, the renderer owning the
+    // terminal) runs exactly as it does for bare `hakster` and `hakster tui`,
+    // with nothing duplicated here to drift.
+    const { spawnSync } = require('child_process');
+    const res = spawnSync(process.execPath, [__filename, 'tui'], { stdio: 'inherit' });
+    if (res.error) {
+      console.error(`${C.red}✗ Could not start the dashboard TUI.${C.reset}`);
+      console.error(`${C.dim}${res.error.message}${C.reset}`);
       process.exit(1);
     }
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    // Enter alternate screen buffer so TUI doesn't clobber scrollback
-    process.stdout.write('\x1b[?1049h\x1b[?25l');
-
-    // ── Terminal restoration: ensure the screen never “disappears” on exit/crash ──
-    let _restored = false;
-    function restoreTerminal() {
-      if (_restored) return;
-      _restored = true;
-      try { process.stdin.setRawMode(false); } catch {}
-      try { process.stdin.pause(); } catch {}
-      // show cursor + leave alternate screen so scrollback is restored
-      process.stdout.write('\x1b[?25h\x1b[?1049l');
-    }
-    process.on('exit', restoreTerminal);
-    process.on('SIGINT',  () => { restoreTerminal(); process.exit(0); });
-    process.on('SIGTERM', () => { restoreTerminal(); process.exit(0); });
-    process.on('uncaughtException', (err) => {
-      restoreTerminal();
-      console.error('\n' + (err && err.stack ? err.stack : err));
-      process.exit(1);
-    });
-    process.on('unhandledRejection', (err) => {
-      restoreTerminal();
-      console.error('\nUnhandled rejection:', err);
-      process.exit(1);
-    });
-
-    process.env.NODE_ENV = process.env.NODE_ENV || 'production';
-    // The hacker-theme start screen, drawn on the alternate screen we already
-    // entered — then Ink takes over with its own (older, three-line) splash
-    // switched off. One brand, one renderer, on every platform.
-    process.env.HAKSTER_NO_SPLASH = '1';
-    const bootInk = () => import('./ui.mjs').then(mod => {
-      try { mod.start(); }
-      catch (err) { restoreTerminal(); console.error(err); process.exit(1); }
-    }).catch(err => { restoreTerminal(); console.error(err); process.exit(1); });
-    let splash;
-    try { splash = require('./src/cli-splash').playSplash({ altScreen: false }); } catch { splash = null; }
-    if (splash && typeof splash.then === 'function') splash.then(bootInk, bootInk);
-    else bootInk();
+    process.exit(typeof res.status === 'number' ? res.status : 1);
   });
 
 // ── tui mode — the OpenTUI dashboard TUI (ui-fb.mjs) ─────────────────────
@@ -3886,7 +3857,7 @@ program
 
 // ── no args? launch the dashboard TUI ────────────────────────────────────
 // Owner direction 2026-11-23: the OMP render with its live output panels is the
-// one `hakster` opens. `hakster ui` still opens the Ink TUI, `hakster chat` the
+// one `hakster` opens. `hakster ui` opens this same dashboard, `hakster chat` the
 // scrolling shell.
 if (process.argv.length <= 2) {
   process.argv.push('tui');
