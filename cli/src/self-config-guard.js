@@ -33,23 +33,39 @@
  * ════════════════════════════════════════════════════════════════════════ */
 
 const path = require('path');
+const os = require('os');
 
-const HOME = process.env.HOME || '/home/ghost';
+// Windows sets USERPROFILE, not HOME. Reading HOME alone made `~` expand to a
+// POSIX path on a Windows box, so the guard resolved a config file that does
+// not exist there (owner-reported 2026-11-26: the start card showed two rails
+// missing on the Surface Pro).
+const HOME = (() => {
+  try { const h = os.homedir(); if (h) return h; } catch { /* fall through */ }
+  return process.env.HOME || process.env.USERPROFILE || '/home/ghost';
+})();
 const REPO = path.resolve(__dirname, '..', '..'); // <repo>/cli/src -> <repo>
 
-/* Files whose CONTENT is the locked config. Matched two ways so the guard
- * holds in the live tree and in an installed copy:
+/* Files whose CONTENT is the locked config. Matched three ways so the guard
+ * holds in the live tree, in an installed copy, and in a copy installed under
+ * any folder name:
  *   - exact resolved path under this repo
  *   - a path suffix, for any install root
+ *   - a `tail`, for an install whose directory is not named `cli`
+ *
+ * Owner-reported 2026-11-26: "its mising 2 out of 5 startup checklist" on a
+ * Windows box. The Windows installer puts the app in
+ * `%APPDATA%\npm\node_modules\hakster-cli`, so `\src\models\ladder.js`
+ * never matched a `/cli/...` suffix and the ladder was NOT protected there —
+ * the rail was reporting a real hole, not a cosmetic one.
  */
 const PROTECTED_FILES = [
-  { path: path.join(REPO, 'cli', 'src', 'models', 'ladder.js'), suffix: '/cli/src/models/ladder.js', aliases: ['models/ladder.js', 'ladder.js'], what: 'the model ladder (wire model, provider, lane order)' },
-  { path: path.join(REPO, 'cli', 'src', 'prefs.js'), suffix: '/cli/src/prefs.js', aliases: ['src/prefs.js', 'prefs.js'], what: 'the CLI preferences store' },
+  { path: path.join(REPO, 'cli', 'src', 'models', 'ladder.js'), suffix: '/cli/src/models/ladder.js', tail: '/src/models/ladder.js', aliases: ['models/ladder.js', 'ladder.js'], what: 'the model ladder (wire model, provider, lane order)' },
+  { path: path.join(REPO, 'cli', 'src', 'prefs.js'), suffix: '/cli/src/prefs.js', tail: '/src/prefs.js', aliases: ['src/prefs.js', 'prefs.js'], what: 'the CLI preferences store' },
   // The usage ids are locked the same way (§22.4 shape): re-IDing a key would
   // silently move historical usage onto a different name, so a tool write to
   // this file is refused and the ids are pinned by usage-ids.test.mjs.
-  { path: path.join(REPO, 'cli', 'src', 'usage-ids.js'), suffix: '/cli/src/usage-ids.js', aliases: ['src/usage-ids.js', 'usage-ids.js'], what: 'the per-key usage ids (one id per model key)' },
-  { path: path.join(HOME, '.hakster', 'config.json'), suffix: '/.hakster/config.json', aliases: ['.hakster/config.json'], what: 'the CLI runtime config (server, api key, model)' },
+  { path: path.join(REPO, 'cli', 'src', 'usage-ids.js'), suffix: '/cli/src/usage-ids.js', tail: '/src/usage-ids.js', aliases: ['src/usage-ids.js', 'usage-ids.js'], what: 'the per-key usage ids (one id per model key)' },
+  { path: path.join(HOME, '.hakster', 'config.json'), suffix: '/.hakster/config.json', tail: '/.hakster/config.json', aliases: ['.hakster/config.json'], what: 'the CLI runtime config (server, api key, model)' },
   { path: path.join(REPO, '.env'), suffix: '/haksterAi/.env', aliases: ['.env'], what: 'the server environment (model, provider, relay)' },
   { path: path.join(REPO, 'cli', '.env'), suffix: '/haksterAi/cli/.env', aliases: ['.env'], what: 'the CLI environment' },
 ];
@@ -83,6 +99,15 @@ function resolveTarget(file, cwd) {
   return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(cwd || process.cwd(), expanded);
 }
 
+/** Does `norm` end with `tail` on a real path boundary? Never "evil-ladder.js". */
+function endsOnBoundary(norm, tail) {
+  if (!tail || !norm.endsWith(tail)) return false;
+  // A tail that starts with "/" already carries its own segment boundary, so
+  // the character before it may be any name character ("hakster-cli/src/...").
+  if (tail.startsWith('/')) return true;
+  return norm.length === tail.length || norm[norm.length - tail.length - 1] === '/';
+}
+
 /** Which protected file (if any) a path names. */
 function protectedTarget(file, cwd) {
   const abs = resolveTarget(file, cwd);
@@ -90,10 +115,9 @@ function protectedTarget(file, cwd) {
   const norm = abs.replace(/\\/g, '/');
   for (const entry of PROTECTED_FILES) {
     if (abs === entry.path) return entry;
-    // Suffix match, but only on a real path boundary (never "evil-ladder.js").
-    if (norm.endsWith(entry.suffix) && (norm.length === entry.suffix.length || norm[norm.length - entry.suffix.length - 1] === '/')) {
-      return entry;
-    }
+    // Suffix for an install root named `cli`; tail for any other folder name
+    // (a Windows npm install is `node_modules\hakster-cli`).
+    if (endsOnBoundary(norm, entry.suffix) || endsOnBoundary(norm, entry.tail)) return entry;
   }
   return null;
 }

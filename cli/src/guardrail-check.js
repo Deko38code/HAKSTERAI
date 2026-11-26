@@ -96,9 +96,20 @@ const CHECKS = [
     id: 'secrets',
     label: 'secrets gate',
     run() {
-      const scanner = path.join(HOME, 'bin', 'secret-scan.sh');
-      if (!isFile(scanner)) return { ok: false, detail: 'secret-scan.sh not installed' };
-      if (!isExecutable(scanner)) return { ok: false, detail: 'secret-scan.sh not executable' };
+      // The scanner is a POSIX shell gate for our repositories (§48). A Windows
+      // package install carries no shell scanner, so this rail cannot be proven
+      // there: it reads as a grey note on Windows instead of a permanent red
+      // cross with no fix (owner-reported 2026-11-26: two rails missing on the
+      // Surface Pro). A Windows box that does carry a scanner is still checked.
+      const names = ['secret-scan.sh', 'secret-scan.cmd', 'secret-scan.ps1', 'secret-scan.js'];
+      const scanner = names.map((n) => path.join(HOME, 'bin', n)).find((p) => isFile(p));
+      if (!scanner) {
+        if (process.platform === 'win32') {
+          return { ok: false, optional: true, note: 'not on Windows', detail: 'no secret-scan in ~/bin (a Windows install carries no shell scanner)' };
+        }
+        return { ok: false, detail: 'secret-scan.sh not installed' };
+      }
+      if (/\.sh$/i.test(scanner) && !isExecutable(scanner)) return { ok: false, detail: path.basename(scanner) + ' not executable' };
       // The hooks are the enforcement side. An installed package has no .git,
       // so a missing hook is a note, not a failure — the scanner is the rail.
       const hooks = [

@@ -219,3 +219,30 @@ test('a clean band is green throughout — and a failure is never painted green'
   assert.ok(failText.includes('2/3 rails active'), 'the count drops to the measured figure');
   assert.ok(failText.includes('codex not installed'), 'the failure names its reason');
 });
+
+test('the secrets rail is a grey note on Windows, never a red cross', () => {
+  // Owner-reported 2026-11-26: "its mising 2 out of 5 startup checklist" on the
+  // Surface Pro. A Windows package install carries no ~/bin/secret-scan.sh, so
+  // the rail read as a permanent red failure with no fix, and the card looked
+  // like two rails were missing. It is reported as an unmeasured note instead
+  // (§10: never claim more than was measured, never alarm what cannot be fixed
+  // here). A Windows box that DOES carry a scanner is still checked.
+  const home = tmpdir('winsec');
+  const mod = loadWithHome(home);
+  const prev = Object.getOwnPropertyDescriptor(process, 'platform');
+  try {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const item = byId(mod.runGuardrailCheck({ only: ['secrets'] }).items, 'secrets');
+    assert.equal(item.ok, false);
+    assert.equal(item.optional, true, 'an absent Windows scanner is not a scored failure');
+    assert.match(item.note, /not on Windows/);
+
+    // With a scanner present the rail measures it for real.
+    fs.mkdirSync(path.join(home, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'bin', 'secret-scan.ps1'), '# scanner\n');
+    const withScanner = byId(loadWithHome(home).runGuardrailCheck({ only: ['secrets'] }).items, 'secrets');
+    assert.equal(withScanner.ok, true, 'a scanner that exists is reported as up');
+  } finally {
+    if (prev) Object.defineProperty(process, 'platform', prev);
+  }
+});

@@ -98,6 +98,29 @@ test('the self-config guard protects the locked files', () => {
   }
 });
 
+test('the guard still protects an install whose folder is not named `cli`', () => {
+  // Owner-reported 2026-11-26: "its mising 2 out of 5 startup checklist" on
+  // the Surface Pro. The Windows installer puts the app in
+  // %APPDATA%\npm\node_modules\hakster-cli, so the `/cli/src/...` suffix never
+  // matched and the ladder was writable there — a real hole, reported by the
+  // rail as a missing check. Matched by tail now, on both separators.
+  const { guardSelfConfig } = require('../../src/self-config-guard.js');
+  const guardOn = process.env.HAKSTER_ALLOW_SELF_CONFIG;
+  delete process.env.HAKSTER_ALLOW_SELF_CONFIG;
+  try {
+    assert.match(guardSelfConfig('write_file', { path: '/app/node_modules/hakster-cli/src/models/ladder.js' }) || '', /BLOCKED/);
+    assert.match(guardSelfConfig('write_file', { path: 'C:\\Users\\M\\AppData\\Roaming\\npm\\node_modules\\hakster-cli\\src\\models\\ladder.js' }) || '', /BLOCKED/);
+    assert.match(guardSelfConfig('edit_file', { file: 'C:\\app\\hakster-cli\\src\\prefs.js' }) || '', /BLOCKED/);
+    assert.match(guardSelfConfig('write_file', { path: '/opt/hakster-cli/src/usage-ids.js' }) || '', /BLOCKED/);
+    // …and a tail match never widens into a look-alike file.
+    assert.equal(guardSelfConfig('write_file', { path: '/tmp/x/evil-ladder.js' }), null);
+    assert.equal(guardSelfConfig('write_file', { path: '/srv/app/src/models/ladder2.js' }), null);
+  } finally {
+    if (guardOn === undefined) delete process.env.HAKSTER_ALLOW_SELF_CONFIG;
+    else process.env.HAKSTER_ALLOW_SELF_CONFIG = guardOn;
+  }
+});
+
 test('the spawned CLI runs this session’s own config, value for value', () => {
   // Owner (2026-11-25): "make it exacly like this cli and my model are set to
   // and he will perform great". The spawned Claude Code CLI gets its env from
