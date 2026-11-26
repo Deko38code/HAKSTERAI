@@ -14141,7 +14141,7 @@ if (fs.existsSync(distPath)) {
     try {
       script = fs.readFileSync(path.join(__dirname, '..', '..', 'install.ps1'), 'utf8');
     } catch {
-      return res.status(404).send('# install.ps1 is not present on this server. Install Node.js 20+ and run: npm install -g hakster-cli\n');
+      return res.status(404).send('# install.ps1 is not present on this server. Install Node.js 22.12+ and run: npm install -g hakster-cli\n');
     }
     res.send(script.replace(/__ORIGIN__/g, origin));
   });

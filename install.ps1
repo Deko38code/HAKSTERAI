@@ -6,7 +6,8 @@
 # sure its solid please". Same rule as the Linux/macOS installer: check first,
 # install only what is missing, never replace something the machine already has.
 #
-#   Node.js  — reused when present and version 20+; otherwise the official
+#   Node.js  — reused when present and new enough to load the ES modules that
+#              npm itself needs (20.19+, 22.12+, or 23+); otherwise the official
 #              Node build is downloaded into %USERPROFILE%\.hakster\runtime and
 #              checked against nodejs.org's published SHA-256 before it is used.
 #   CLI      — packed and installed with npm into a per-user prefix (no admin).
@@ -234,6 +235,26 @@
     } catch { return 0 }
   }
 
+  # A bare "20+" was not enough. Node loads an ES module from require() by
+  # default only from 20.19, 22.12 and 23 on, and the npm this installer drives
+  # depends on that. On 20.0-20.18 or 22.0-22.11 npm dies with
+  # ERR_REQUIRE_ESM - "require() of ES Module ... not supported" - so the
+  # install stopped halfway with a message that looked like a bundle problem
+  # (owner's Surface Pro, 2026-11-26). The floor is the version, not the major.
+  function Test-NodeUsable {
+    $ver = $null
+    try { $ver = (& node -p 'process.versions.node' 2>$null | Select-Object -Last 1) } catch { }
+    if (-not $ver) { return $false }
+    $parts = @($ver.Trim().Split('.'))
+    if ($parts.Count -lt 2) { return $false }
+    $major = [int]$parts[0]
+    $minor = [int]$parts[1]
+    if ($major -ge 23) { return $true }
+    if ($major -eq 22) { return ($minor -ge 12) }
+    if ($major -eq 20) { return ($minor -ge 19) }
+    return $false
+  }
+
   # One resolution for the whole script: $npmExe is a command that actually
   # answered --version, or it is empty (and the install says so instead of
   # printing a cmdlet error and pretending npm failed on its own).
@@ -257,15 +278,15 @@
   if (Get-Command node -ErrorAction SilentlyContinue) {
     $nodeVer = ''
     try { $nodeVer = (& node --version 2>$null) } catch { }
-    if ((Get-NodeMajor) -ge 20 -and $npmExe) {
+    if ((Test-NodeUsable) -and $npmExe) {
       Say ("  OK node " + $nodeVer + " and npm (" + $npmLabel + ") - used as they are")
-    } elseif ((Get-NodeMajor) -ge 20) {
-      Say ("  X  node " + $nodeVer + " is here but no npm on this machine could be started - a Node 20+ runtime comes with this install")
+    } elseif (Test-NodeUsable) {
+      Say ("  X  node " + $nodeVer + " is here but no npm on this machine could be started - a newer Node runtime comes with this install")
     } else {
-      Say ("  X  node " + $nodeVer + " is older than 20 - a Node 20+ runtime comes with this install")
+      Say ("  X  node " + $nodeVer + " cannot load the ES modules npm needs (20.19+, 22.12+ or 23+) - a newer Node comes with this install")
     }
   } else {
-    Say '  X  node - a Node 20+ runtime comes with this install (one time, about 32 MB)'
+    Say '  X  node - a Node runtime comes with this install (one time, about 32 MB)'
   }
   $bunPick = Find-UsableBun
   if ($bunPick.Path) {
@@ -304,7 +325,8 @@
   # ── Node.js ─────────────────────────────────────────────────────────────
   # $npmExe was resolved by Get-NpmCommand above, so it is a command that ran.
   $nodeOk = $false
-  if ($npmExe -and (Get-Command node -ErrorAction SilentlyContinue) -and (Get-NodeMajor) -ge 20) { $nodeOk = $true }
+  $nodeReplaced = $false
+  if ($npmExe -and (Get-Command node -ErrorAction SilentlyContinue) -and (Test-NodeUsable)) { $nodeOk = $true }
 
   if ($nodeOk) {
     $npmVer = ''
@@ -314,7 +336,7 @@
     $arch = $env:PROCESSOR_ARCHITECTURE
     if ($arch -eq 'ARM64') { $tag = 'win-arm64' }
     elseif ($arch -eq 'AMD64' -or $arch -eq 'x86') { $tag = 'win-x64' }
-    else { Fail "This installer does not know how to bring Node to Windows $arch. Install Node.js 20+ from https://nodejs.org and run this again." }
+    else { Fail "This installer does not know how to bring Node to Windows $arch. Install Node.js 22.12+ from https://nodejs.org and run this again." }
 
     $name = "node-$NodeVersion-$tag"
     $zip = Join-Path $Tmp "$name.zip"
@@ -341,9 +363,12 @@
     if (-not (Test-Path (Join-Path $nodeDir 'node.exe'))) { Fail "Node unpacked but $nodeDir\node.exe is missing" }
     $env:Path = "$nodeDir;$env:Path"
     Say ("OK Node " + (& node --version) + " installed in $nodeDir")
+    $nodeReplaced = $true
   }
 
-  if (-not $npmExe) {
+  # A Node we just installed brings its own npm: resolve it again, or an npm
+  # from the older Node would be the one driving the install (§13).
+  if (-not $npmExe -or $nodeReplaced) {
     $npm = Get-NpmCommand
     if ($npm) {
       $npmExe = [string]$npm.exe
@@ -352,7 +377,7 @@
     }
   }
   if (-not $npmExe) {
-    Fail ('no npm on this machine could be started - tried npm.cmd, npm.exe, node''s own npm-cli.js and cmd /c npm. Install Node.js 20+ from https://nodejs.org (it ships npm.cmd) and run this again.')
+    Fail ('no npm on this machine could be started - tried npm.cmd, npm.exe, node''s own npm-cli.js and cmd /c npm. Install Node.js 22.12+ from https://nodejs.org (it ships npm.cmd) and run this again.')
   }
   Say ("  npm: " + $npmLabel)
 

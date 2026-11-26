@@ -1,6 +1,6 @@
 {
   "name": "hakster-cli",
-  "version": "0.3.122",
+  "version": "0.3.123",
   "description": "haksterAi CLI — pentester AI agent shell with streaming chat, tool loop, file management, and Guardian pentest commands",
   "main": "index.js",
   "bin": {
