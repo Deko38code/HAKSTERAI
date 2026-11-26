@@ -2046,13 +2046,42 @@ import { TextAttributes as TextAttributes5 } from "@opentui/core";
 import { usePaste } from "@opentui/react";
 
 // src/utils/wrap.js
+function wordRowsForLine(line, cols) {
+  const words = String(line).split(" ");
+  let rows = 1;
+  let used = 0;
+  for (const word of words) {
+    const len = word.length;
+    if (used === 0) {
+      let rest = len;
+      while (rest > cols) {
+        rows += 1;
+        rest -= cols;
+      }
+      used = rest;
+    } else if (used + 1 + len <= cols) {
+      used += 1 + len;
+    } else {
+      rows += 1;
+      let rest = len;
+      while (rest > cols) {
+        rows += 1;
+        rest -= cols;
+      }
+      used = rest;
+    }
+  }
+  return rows;
+}
 function visualRows(text, columns, maxRows = 6) {
-  const cols = Math.max(1, Math.floor(Number(columns) || 1));
+  const cols = Math.max(1, Math.floor(Number(columns) || 1) - 1);
   const cap = Math.max(1, Math.floor(Number(maxRows) || 1));
   const lines = String(text == null ? "" : text).split("\n");
   let rows = 0;
   for (const line of lines) {
-    rows += Math.max(1, Math.ceil(line.length / cols));
+    const byWord = wordRowsForLine(line, cols);
+    const byChar = Math.max(1, Math.ceil(line.length / cols));
+    rows += Math.max(byWord, byChar);
     if (rows >= cap) return cap;
   }
   return Math.max(1, rows);

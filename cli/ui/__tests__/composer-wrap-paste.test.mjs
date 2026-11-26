@@ -31,18 +31,41 @@ const composer = read('src/components/Composer.jsx');
 const app = read('src/App.jsx');
 const transcript = read('src/components/Transcript.jsx');
 
-test('an empty draft needs one input row; a wrapped one needs more', () => {
+/* Owner, 2026-11-26: "fix input bar when i type keeps glitching bad".
+ *
+ * These numbers are the wrap the real textarea draws, not a character estimate.
+ * Measured on the renderer (ui/__smoke__/caret-col-probe.mjs) at terminal width
+ * 40, where the box gives the textarea 32 columns:
+ *
+ *   31 chars → 1 row · 32 chars → 2 rows · 33 chars → 2 rows
+ *   63 chars → 3 rows · 64 chars → 3 rows
+ *
+ * i.e. the usable width is one column less than the box hands over, because the
+ * caret needs a cell. The old pins asserted the character count ("exactly full
+ * is still one row"), which is exactly the estimate that made the bar allocate
+ * one row too few near every wrap boundary — the textarea then scrolled its own
+ * content and the top of the draft vanished while typing.
+ */
+test('rows follow the width the textarea can actually use', () => {
   assert.equal(visualRows('', 40), 1);
   assert.equal(visualRows('short', 40), 1);
-  assert.equal(visualRows('x'.repeat(80), 40), 2);
-  assert.equal(visualRows('x'.repeat(40), 40), 1, 'exactly full is still one row');
-  assert.equal(visualRows('x'.repeat(41), 40), 2);
+  assert.equal(visualRows('x'.repeat(39), 40), 1, 'exactly the usable width is one row');
+  assert.equal(visualRows('x'.repeat(40), 40), 2, 'one column over wraps — the caret owns the last cell');
+  assert.equal(visualRows('x'.repeat(80), 40), 3);
+});
+
+test('a word landing on the boundary is budgeted the row it really takes', () => {
+  // Both measured on the renderer: the 32-character phrase is one row plus the
+  // caret row when it ends the draft, and two rows once more text follows it.
+  assert.equal(visualRows('keeps buffering on the firestick', 32), 2);
+  assert.equal(visualRows('keeps buffering on the firestick more', 32), 2);
+  assert.equal(visualRows('one two three', 32), 1, 'words that fit still share a row');
 });
 
 test('every newline is a row, even an empty one', () => {
   assert.equal(visualRows('a\nb\nc', 40), 3);
   assert.equal(visualRows('a\n\nb', 40), 3);
-  assert.equal(visualRows('a\n' + 'x'.repeat(80), 40), 3);
+  assert.equal(visualRows('a\n' + 'x'.repeat(80), 40), 4);
 });
 
 test('the cap wins — a pasted novel cannot swallow the transcript', () => {
@@ -56,7 +79,7 @@ test('the composer height is its chrome plus its wrapped input rows', () => {
   assert.equal(composerRows('', 40), 5);
   assert.equal(composerRows('hello', 40), 5);
   assert.equal(composerRows('a\nb', 40), 6);
-  assert.equal(composerRows('x'.repeat(200), 40, 6), 9);
+  assert.equal(composerRows('x'.repeat(200), 40, 6), 10);
 });
 
 test('a paste keeps its newlines and loses the terminal colour', () => {
