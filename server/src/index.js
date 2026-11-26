@@ -13920,7 +13920,27 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
   #signin{display:none;margin-top:14px;padding:11px 14px;border-radius:10px;border:1px solid rgba(0,255,65,.45);background:rgba(0,255,65,.12);color:#00ff41;font-weight:700;text-align:center;text-decoration:none}
   a{color:#00ff41}
 </style></head>
-<body><main>
+<body>
+<script>window.__HAKSTER_AUTHORIZE_SITE__ = __SITE_ORIGIN__;</script>
+<script>
+/* The browser's sign-in lives on the public site, and a session is per-origin.
+   A CLI pointed at a loopback/LAN server prints its verification link on that
+   address, where this browser holds no session at all — so approving here can
+   only ever fail. Hand the short code over to the public site, where the account
+   is known; the failover router pins /cli/ and /api/ to the primary, so the
+   approval still lands on the process that issued the code. A page that is
+   already on the public site, or that holds a session on this origin, is left
+   exactly as it was. */
+(function () {
+  var SITE = String(window.__HAKSTER_AUTHORIZE_SITE__ || '');
+  if (!SITE) return;
+  try { if (localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key')) return; } catch (e) { return; }
+  var code = (new URLSearchParams(location.search).get('user_code') || '').toUpperCase();
+  if (!code) return;
+  location.replace(SITE + '/cli/authorize?user_code=' + encodeURIComponent(code));
+})();
+</script>
+<main>
   <div class="head">
     <img src="/icons/authorize-icon.png" alt="HaksterAI" width="56" height="56" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='/icons/authorize-logo.png'}else{this.style.display='none'}"/>
     <div>
@@ -13939,6 +13959,7 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
 </main>
 <script>
 (function () {
+  var SITE = String(window.__HAKSTER_AUTHORIZE_SITE__ || '');
   var code = (new URLSearchParams(location.search).get('user_code') || '').toUpperCase();
   document.getElementById('code').textContent = code || 'missing code';
   var state = document.getElementById('state');
@@ -13955,8 +13976,8 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
   function showSignin(text) {
     ready = false; allow.disabled = true; deny.disabled = true;
     signin.style.display = 'block';
-    signin.href = '/?signin=1&redirect=' + encodeURIComponent('/cli/authorize?user_code=' + code);
-    plan.textContent = 'not signed in on this browser';
+    signin.href = (SITE || '') + '/?signin=1&redirect=' + encodeURIComponent('/cli/authorize?user_code=' + code);
+    plan.textContent = SITE ? 'not signed in on this browser - sign in at haksterai.com' : 'not signed in on this browser';
     if (text) setState(text, 'err');
   }
   function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
@@ -14033,9 +14054,30 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
 })();
 </script></body></html>`;
 
-app.get('/cli/authorize', (_req, res) => {
+// A CLI pointed at a loopback or LAN server prints its verification link on that
+// address — 127.0.0.1:3579 on the owner's own box, for instance — but the
+// operator's signed-in session lives on the public site, and a session is
+// per-origin. The page read localStorage there, found nothing, and its sign-in
+// link was relative, so OAuth started on an address Google holds no redirect URI
+// for: it could never sign in, so the Allow button stayed disabled. The button
+// was never broken, its prerequisite could not be met (§13).
+//
+// The page now carries the public origin and hands the short code over to it.
+// The failover router pins /cli/ and /api/ to the primary, so the approval still
+// reaches the process that issued the code, and the CLI's poll picks it up.
+function cliAuthorizePage(req) {
+  const site = String(process.env.PUBLIC_URL || 'https://haksterai.com').replace(/\/+$/, '');
+  const here = cliOrigin(req);
+  const host = String(req.get('host') || '').toLowerCase();
+  const onPrivateHost = /^(localhost|127\.0\.0\.1|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(host)
+    && !/:4321$/i.test(host); // astro dev keeps its own origin
+  const siteOrigin = (here === site || !onPrivateHost) ? '' : site;
+  return CLI_AUTHORIZE_HTML.split('__SITE_ORIGIN__').join(JSON.stringify(siteOrigin));
+}
+
+app.get('/cli/authorize', (req, res) => {
   res.set('cache-control', 'no-store');
-  res.type('html').send(CLI_AUTHORIZE_HTML);
+  res.type('html').send(cliAuthorizePage(req));
 });
 
   app.use(express.static(distPath));
