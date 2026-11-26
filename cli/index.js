@@ -14,7 +14,16 @@ if (process.env.NO_COLOR && process.env.FORCE_COLOR) { delete process.env.NO_COL
 const { Command } = require('commander');
 const fs = require('fs');
 const path = require('path');
-const { haksterDir } = require('./src/home-dir');
+const { haksterDir, homeDir: resolveHomeRoot } = require('./src/home-dir');
+
+// Windows sets USERPROFILE, not HOME. providers.js, tools.js and memory.js read
+// process.env.HOME when they load (a few lines below), so on a default Windows
+// install every path they own resolved to C:\home\ghost — a directory that does
+// not exist. Pin the home root once, here, from home-dir.js (which honours
+// HAKSTER_HOME, %USERPROFILE% and the system drive), so every module and every
+// child process agrees on it. Owner, 2026-11-26: "windows flow … we need to ace
+// this" (§16: this is the shipped CLI's own path, never another project's).
+if (!process.env.HOME || process.env.HAKSTER_HOME) process.env.HOME = resolveHomeRoot();
 const os = require('os');
 const http = require('http');
 const https = require('https');
@@ -799,6 +808,33 @@ program
       // is held, never the key (§9, §23).
       console.log(line);
     }
+  });
+
+// ── secret-scan: the gate, runnable on any platform ────────────────────────
+// Owner, 2026-11-26: "windows flow is only thing left … we need to ace this".
+// ~/bin/secret-scan.sh is POSIX only; the package ships the same rules in Node
+// so a Windows install can run the gate the start card proves (§48).
+program
+  .command('secret-scan [paths...]')
+  .description('Scan for leaked credentials (staged | tree | at REV | commits RANGE | deep)')
+  .option('--staged', 'Added lines in the index (pre-commit mode)')
+  .option('--tree', 'Every tracked file at HEAD')
+  .option('--at <rev>', 'Every tracked file at REV')
+  .option('--commits <range>', 'Files changed in a commit range')
+  .option('--deep', 'Also match the live values in ~/.secrets.env')
+  .option('--strict', 'Treat soft findings as failures too')
+  .option('--quiet', 'Only set the exit code')
+  .action((paths, opts) => {
+    const argv = [];
+    if (opts.staged) argv.push('--staged');
+    if (opts.tree) argv.push('--tree');
+    if (opts.at) argv.push('--at', opts.at);
+    if (opts.commits) argv.push('--commits', opts.commits);
+    if (opts.deep) argv.push('--deep');
+    if (opts.strict) argv.push('--strict');
+    if (opts.quiet) argv.push('--quiet');
+    if (Array.isArray(paths) && paths.length) argv.push('--', ...paths);
+    process.exitCode = require('./src/secret-scan').run(argv);
   });
 
 // ── news: live AI + hacking headlines with real links ──────────────────────

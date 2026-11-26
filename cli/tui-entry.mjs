@@ -18,6 +18,12 @@ import path from 'node:path';
 import homeDirPkg from './src/home-dir.js';
 import { fileURLToPath } from 'node:url';
 
+// Windows sets USERPROFILE, not HOME. The bundle and the modules it imports
+// read process.env.HOME, and this entry is a separate process from index.js —
+// pin the same home root here before anything else loads (owner, 2026-11-26:
+// "windows flow … we need to ace this").
+if (!process.env.HOME || process.env.HAKSTER_HOME) process.env.HOME = homeDirPkg.homeDir();
+
 if (!process.env.HAKSTER_API_KEY || !process.env.HAKSTER_API_URL) {
   try {
     const cfgPath = path.join(homeDirPkg.haksterDir(), 'config.json');

@@ -49,7 +49,7 @@ const readline = require('readline');
 const { execSync } = require('child_process');
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const HOME     = process.env.HOME || '/home/ghost';
+const HOME     = process.env.HOME || os.homedir();
 const CLI_ROOT = path.dirname(fs.realpathSync(__filename));
 
 // Rebranded file paths (with fallback to legacy phantom files)
@@ -164,11 +164,14 @@ function loadTrust() {
       if (fs.existsSync(f)) return JSON.parse(fs.readFileSync(f, 'utf8'));
     } catch {}
   }
-  // Default trusted paths
-  return {
-    trusted: [HOME, '/home/ghost/workspace', '/home/ghost/agent-knowledge', '/tmp'],
-    auto_usb_sync: true,
-  };
+  // Default trusted paths, derived from this machine — a shipped install must
+  // never default to the owner's absolute directories (a Windows box resolved
+  // them to C:\home\ghost, which does not exist).
+  const trusted = [HOME, path.join(HOME, 'workspace'), os.tmpdir()];
+  for (const legacy of ['/home/ghost/workspace', '/home/ghost/agent-knowledge', '/tmp']) {
+    if (fs.existsSync(legacy) && !trusted.includes(legacy)) trusted.push(legacy);
+  }
+  return { trusted, auto_usb_sync: true };
 }
 
 function saveTrust(cfg) {
@@ -446,16 +449,13 @@ let _repoCacheTs = 0;
 function scanGitRepos() {
   if (_repoCache && (Date.now() - _repoCacheTs) < 600000) return _repoCache; // 10min cache
   const repos = [];
-  const scanDirs = [
-    '/home/ghost',
-    '/home/ghost/haksterAi',
-    '/home/ghost/cine-vault-live',
-    '/home/ghost/cine-vault-movie-site',
-    '/home/ghost/workspace',
-  ];
+  const scanDirs = [HOME, path.join(HOME, 'workspace'), process.cwd()];
+  for (const legacy of ['/home/ghost/haksterAi', '/home/ghost/cine-vault-live', '/home/ghost/cine-vault-movie-site']) {
+    if (fs.existsSync(legacy)) scanDirs.push(legacy);
+  }
   for (const dir of scanDirs) {
     try {
-      const gitDir = dir === '/home/ghost' ? '/home/ghost/.git' : `${dir}/.git`;
+      const gitDir = path.join(dir, '.git');
       if (fs.existsSync(gitDir)) {
         // Get remote URL
         let remote = '';

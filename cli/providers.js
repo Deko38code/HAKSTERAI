@@ -22,7 +22,7 @@ const http  = require('http');
 const https = require('https');
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const HOME       = process.env.HOME || '/home/ghost';
+const HOME       = process.env.HOME || require('os').homedir();
 const CLI_ROOT   = path.dirname(fs.realpathSync(__filename));
 const LOG_DIR    = path.join(HOME, 'logs');
 const OLLAMA_LOG = path.join(LOG_DIR, 'ollama-out.log');

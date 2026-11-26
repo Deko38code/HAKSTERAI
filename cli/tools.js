@@ -23,7 +23,7 @@ const { exec, execSync, spawn } = require('child_process');
 const readline = require('readline');
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const HOME     = process.env.HOME || '/home/ghost';
+const HOME     = process.env.HOME || require('os').homedir();
 const CLI_ROOT = path.dirname(fs.realpathSync(__filename));
 
 // ── ANSI colors (mirrors phantom-cli.js C object) ──────────────────────────

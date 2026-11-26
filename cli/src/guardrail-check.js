@@ -96,28 +96,39 @@ const CHECKS = [
     id: 'secrets',
     label: 'secrets gate',
     run() {
-      // The scanner is a POSIX shell gate for our repositories (§48). A Windows
-      // package install carries no shell scanner, so this rail cannot be proven
-      // there: it reads as a grey note on Windows instead of a permanent red
-      // cross with no fix (owner-reported 2026-11-26: two rails missing on the
-      // Surface Pro). A Windows box that does carry a scanner is still checked.
+      // The gate is real when a scanner is present AND it catches a leaked key.
+      // Owner, 2026-11-26: "windows flow is only thing left … we need to ace
+      // this" — a Windows package install carries no ~/bin shell scanner, so
+      // this rail used to read a permanent grey note there. The package now
+      // ships `src/secret-scan.js` (§48), so the gate is proven in-process on
+      // every platform: the same rules our commit hooks run, no shell needed.
       const names = ['secret-scan.sh', 'secret-scan.cmd', 'secret-scan.ps1', 'secret-scan.js'];
-      const scanner = names.map((n) => path.join(HOME, 'bin', n)).find((p) => isFile(p));
-      if (!scanner) {
-        if (process.platform === 'win32') {
-          return { ok: false, optional: true, note: 'not on Windows', detail: 'no secret-scan in ~/bin (a Windows install carries no shell scanner)' };
-        }
-        return { ok: false, detail: 'secret-scan.sh not installed' };
+      const binScanner = names.map((n) => path.join(HOME, 'bin', n)).find((p) => isFile(p));
+      // Prove the bundled scanner by catching a fixture built here, never a
+      // literal in the tree — and prove the safe form stays clean, so a rail
+      // that passes cannot be one that flags absolutely everything.
+      let bundled = '';
+      try {
+        const scan = require('./secret-scan');
+        const fake = 'ghp_' + 'A'.repeat(36);
+        const caught = scan.scanText('token = "' + fake + '"');
+        const quiet = scan.scanText('token = process.env.GITHUB_TOKEN');
+        if (caught.some((h) => h.rule === 'github') && quiet.length === 0) bundled = 'bundled scanner';
+      } catch { /* no bundled scanner (old install) */ }
+
+      if (!binScanner && !bundled) return { ok: false, detail: 'no secret scanner installed' };
+      if (binScanner && /\.sh$/i.test(binScanner) && !isExecutable(binScanner)) {
+        return { ok: false, detail: path.basename(binScanner) + ' not executable' };
       }
-      if (/\.sh$/i.test(scanner) && !isExecutable(scanner)) return { ok: false, detail: path.basename(scanner) + ' not executable' };
-      // The hooks are the enforcement side. An installed package has no .git,
-      // so a missing hook is a note, not a failure — the scanner is the rail.
+      // Hooks are the enforcement side. An installed package has no .git, so a
+      // missing hook is a note, not a failure — the scanner is the rail.
       const hooks = [
         path.join(REPO, '.git', 'hooks', 'pre-commit'),
         path.join(HOME, '.git', 'hooks', 'pre-commit'),
       ];
       const wired = hooks.some((h) => /secret-scan/.test(read(h, 8192)));
-      return { ok: true, detail: wired ? 'scanner + commit hooks' : 'scanner (no commit hook here)' };
+      const source = binScanner ? path.basename(binScanner) : bundled;
+      return { ok: true, detail: source + (wired ? ' + commit hooks' : ' (no commit hook here)') };
     },
   },
   {

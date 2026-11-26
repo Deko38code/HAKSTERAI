@@ -220,28 +220,30 @@ test('a clean band is green throughout — and a failure is never painted green'
   assert.ok(failText.includes('codex not installed'), 'the failure names its reason');
 });
 
-test('the secrets rail is a grey note on Windows, never a red cross', () => {
-  // Owner-reported 2026-11-26: "its mising 2 out of 5 startup checklist" on the
-  // Surface Pro. A Windows package install carries no ~/bin/secret-scan.sh, so
-  // the rail read as a permanent red failure with no fix, and the card looked
-  // like two rails were missing. It is reported as an unmeasured note instead
-  // (§10: never claim more than was measured, never alarm what cannot be fixed
-  // here). A Windows box that DOES carry a scanner is still checked.
+test('the secrets gate is green on Windows — the packaged scanner carries it', () => {
+  // Owner, 2026-11-26: "windows flow is only thing left … we need to ace this".
+  // The rail used to be a permanent grey note on Windows because a package
+  // install carries no ~/bin shell scanner. The package now ships
+  // src/secret-scan.js with the same rules, so the gate is PROVEN in-process on
+  // every platform and the rail is scored (§48). A Windows box that carries its
+  // own ~/bin scanner is still measured from there.
   const home = tmpdir('winsec');
   const mod = loadWithHome(home);
   const prev = Object.getOwnPropertyDescriptor(process, 'platform');
   try {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     const item = byId(mod.runGuardrailCheck({ only: ['secrets'] }).items, 'secrets');
-    assert.equal(item.ok, false);
-    assert.equal(item.optional, true, 'an absent Windows scanner is not a scored failure');
-    assert.match(item.note, /not on Windows/);
+    assert.equal(item.ok, true, 'the bundled scanner must satisfy the rail: ' + item.detail);
+    assert.equal(item.optional, false, 'the gate is scored, not a grey note');
+    assert.match(item.detail, /bundled scanner/);
+    assert.doesNotMatch(String(item.detail || ''), /not on Windows/);
 
-    // With a scanner present the rail measures it for real.
+    // With a local scanner present the rail names that one instead.
     fs.mkdirSync(path.join(home, 'bin'), { recursive: true });
     fs.writeFileSync(path.join(home, 'bin', 'secret-scan.ps1'), '# scanner\n');
     const withScanner = byId(loadWithHome(home).runGuardrailCheck({ only: ['secrets'] }).items, 'secrets');
     assert.equal(withScanner.ok, true, 'a scanner that exists is reported as up');
+    assert.match(withScanner.detail, /secret-scan\.ps1/);
   } finally {
     if (prev) Object.defineProperty(process, 'platform', prev);
   }
