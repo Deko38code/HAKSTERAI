@@ -180,6 +180,120 @@ function findSupportedBun(min, env = process.env, opts = {}) {
   return { path: null, version: null, skipped };
 }
 
+/**
+ * The directory a package actually resolves from, as the loader sees it.
+ *
+ * `@opentui/core` imports its platform renderer (`@opentui/core-<os>-<arch>`)
+ * from ITS OWN location, not from the launcher's. A global npm install can put
+ * core under `<prefix>/lib/node_modules/hakster-cli/node_modules` or flat under
+ * `<prefix>/node_modules`, and a package present in one tree is invisible from
+ * the other. A check that only looks from the launcher's own directory reports
+ * "installed" for a renderer the core cannot load — and the dashboard then dies
+ * the instant it opens, with every check above it reporting success. So the
+ * search starts where core lives and walks up exactly as Node/Bun do, then falls
+ * back to the launcher's own paths.
+ */
+function packageDir(name, env = process.env, opts = {}) {
+  // opts.paths lets a test answer the question for a tree the running process is
+  // not inside; production always uses the real loader's list.
+  const searchPaths = (n) => {
+    if (typeof opts.paths === 'function') return opts.paths(n) || [];
+    try { return require.resolve.paths(n) || []; } catch { return []; }
+  };
+  const paths = searchPaths('@opentui/core');
+  const roots = [];
+  let coreRoot = null;
+  for (const dir of paths) {
+    if (fs.existsSync(path.join(dir, '@opentui', 'core', 'package.json'))) { coreRoot = dir; break; }
+  }
+  if (coreRoot) {
+    roots.push(coreRoot);
+    let at = coreRoot;
+    for (let i = 0; i < 6; i += 1) {
+      const next = path.dirname(at.replace(/[\\/]node_modules$/, ''));
+      if (!next || next === at) break;
+      at = next;
+      roots.push(path.join(at, 'node_modules'));
+    }
+  }
+  for (const dir of searchPaths(name)) roots.push(dir);
+  const seen = new Set();
+  for (const dir of roots) {
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    if (fs.existsSync(path.join(dir, name, 'package.json'))) return path.join(dir, name);
+  }
+  return null;
+}
+
+/**
+ * The native renderer library this OS/CPU needs, and where it actually is.
+ *
+ * `@opentui/core` finds it by importing `@opentui/core-<os>-<arch>` from its own
+ * directory, which is the one thing a global npm install can place differently
+ * from what any path check here assumes. The library file itself is always
+ * `<package>/libopentui.so` (darwin: `.dylib`, win32: `opentui.dll`) and the
+ * package's own `index.bun.js` imports exactly that file, so the name is read
+ * from there and only defaulted when it cannot be read.
+ *
+ * The launcher passes this back as OPENTUI_LIB_PATH, which the core honours
+ * before any resolution — so a renderer that is on disk but in another
+ * node_modules tree loads anyway. Nothing is installed, moved or edited (§11).
+ */
+function nativeLibrary(platform = process.platform, arch = process.arch, env = process.env) {
+  const libName = { linux: 'libopentui.so', darwin: 'libopentui.dylib', win32: 'opentui.dll' }[platform] || '';
+  // Mirrors the core's own choice: glibc unless OPENTUI_LIBC says musl.
+  const names = platform === 'linux'
+    ? (String(env.OPENTUI_LIBC || '') === 'musl'
+      ? [`@opentui/core-linux-${arch}-musl`, `@opentui/core-linux-${arch}`]
+      : [`@opentui/core-linux-${arch}`, `@opentui/core-linux-${arch}-musl`])
+    : [`@opentui/core-${platform}-${arch}`];
+  for (const name of names) {
+    const dir = packageDir(name, env);
+    if (!dir) continue;
+    let file = '';
+    try {
+      const entry = fs.readFileSync(path.join(dir, 'index.bun.js'), 'utf8');
+      const m = entry.match(/import\(\s*["']\.\/([^"']+)["']/);
+      if (m) file = path.join(dir, m[1]);
+    } catch { /* no entry file: use the platform default name */ }
+    if (!file && libName) file = path.join(dir, libName);
+    if (file && fs.existsSync(file)) return { package: name, dir, file };
+  }
+  return null;
+}
+
+/**
+ * Does the dashboard bundle actually load under this Bun?
+ *
+ * The launcher can check files all day; only the chosen Bun knows whether the
+ * bundle and its native renderer load. This runs the import the TUI itself runs
+ * — the bundle, not a renderer — so a crash is answered with a real reason
+ * instead of "it exited" (§10, §13, §50.1). Bounded, read-only, no installs.
+ *
+ * Returns { ok, reason }. ok is true when the bundle imported, false when the
+ * Bun named a reason, and null when nothing could be measured.
+ */
+function probeBundle(bunPath, cliDir, opts = {}) {
+  const { spawnSync } = require('child_process');
+  const timeout = opts.timeoutMs === undefined ? 20000 : opts.timeoutMs;
+  const script = "try{await import('./ui-fb.mjs');console.log('HAKSTER_PROBE_OK')}"
+    + "catch(e){console.error(String((e&&e.message)||e));process.exit(3)}";
+  const shim = /\.(cmd|bat)$/i.test(String(bunPath || ''));
+  const common = { cwd: cliDir, encoding: 'utf8', timeout, windowsHide: true, env: opts.env || process.env };
+  try {
+    const r = shim
+      ? spawnSync(`"${bunPath}" -e "${script}"`, { ...common, shell: true })
+      : spawnSync(bunPath, ['-e', script], common);
+    if (r && r.status === 0 && String(r.stdout || '').includes('HAKSTER_PROBE_OK')) return { ok: true, reason: '' };
+    const line = String((r && (r.stderr || r.stdout)) || '').trim()
+      .split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-3).join(' | ');
+    return { ok: false, reason: line || `the probe exited ${r && r.status}` };
+  } catch (err) {
+    return { ok: false, reason: String((err && err.message) || err) };
+  }
+}
+
 /** Node: PATH first, then the installer's runtime. Returns a path or null. */
 function findNode(env = process.env) {
   const onPath = findOnPath('node', env);
@@ -198,5 +312,5 @@ function findNode(env = process.env) {
 
 module.exports = {
   runtimeRoot, findOnPath, findBun, findNode, isExecutableFile, wellKnownBun,
-  bunCandidates, bunVersion, findSupportedBun, atLeast,
+  bunCandidates, bunVersion, findSupportedBun, atLeast, packageDir, probeBundle, nativeLibrary,
 };

@@ -34,21 +34,20 @@ function minBun() {
 /** `[major, minor, patch]` from a package's engines.bun, or null. */
 function rendererBunFloor() {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(CLI_DIR, 'node_modules', '@opentui', 'core', 'package.json'), 'utf8'));
+    // Where core actually lives, not where this file assumes it lives: a global
+    // install nests it under the app or puts it flat in the prefix (§ packageDir).
+    const coreDir = rp.packageDir('@opentui/core') || path.join(CLI_DIR, 'node_modules', '@opentui', 'core');
+    const pkg = JSON.parse(fs.readFileSync(path.join(coreDir, 'package.json'), 'utf8'));
     const m = String((pkg.engines && pkg.engines.bun) || '').match(/(\d+)\.(\d+)\.(\d+)/);
     return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
   } catch { return null; }
 }
 
-/** An installed package's version, looked up the way the launcher does it. */
+/** An installed package's version, found the way the renderer finds it. */
 function installedVersion(name) {
-  for (const dir of (require.resolve.paths(name) || [])) {
-    const file = path.join(dir, name, 'package.json');
-    if (fs.existsSync(file)) {
-      try { return String(JSON.parse(fs.readFileSync(file, 'utf8')).version || ''); } catch { return ''; }
-    }
-  }
-  return '';
+  const dir = rp.packageDir(name);
+  if (!dir) return '';
+  try { return String(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version || ''); } catch { return ''; }
 }
 
 /** The per-platform renderer package for this OS/CPU, if it is installed. */
@@ -166,6 +165,18 @@ function report(env = process.env) {
     ? `will start — ${which.why}`
     : `will NOT start — ${which.why}`}`);
   if (which.skipped && which.skipped.length) out.push(`              skipped: ${which.skipped.join(', ')}`);
+  // The last question, and the one the launcher cannot answer by looking at
+  // files: does the dashboard bundle actually load under THAT Bun? One real
+  // import, no renderer, bounded — so "the dashboard will open" is measured
+  // rather than predicted, and a failing machine gets the reason here (§10).
+  if (which.lane === 'dashboard' && pick.path) {
+    const probe = rp.probeBundle(pick.path, CLI_DIR, { timeoutMs: 20000 });
+    out.push(`bundle loads  ${probe.ok === true
+      ? 'yes — the dashboard bundle imports under that Bun'
+      : probe.ok === false
+        ? `no — ${probe.reason}`
+        : probe.reason}`);
+  }
 
   const cfg = configState();
   out.push(`server        ${cfg.server || '(not configured — run: hakster config set server <url>)'}`);

@@ -3322,6 +3322,12 @@ program
     // ERR_PACKAGE_PATH_NOT_EXPORTED on a package that is installed and fine.
     const installed = (name) => {
       const fsmod = require('fs');
+      // Ask the loader's own question first: the core imports its platform
+      // package from ITS directory, so a renderer that exists only in another
+      // node_modules tree is invisible to it however present it looks here.
+      try {
+        if (require('./src/runtime-paths').packageDir(name)) return true;
+      } catch { /* older tree: fall through to the plain search */ }
       for (const dir of (require.resolve.paths(name) || [])) {
         if (fsmod.existsSync(path.join(dir, name, 'package.json'))) return true;
       }
@@ -3335,6 +3341,14 @@ program
     // and reported the same way — Surface Pro, 2026-11-26).
     const installedVersion = (name) => {
       const fsmod = require('fs');
+      // Same reason as `installed`: a core-relative hit is the one the native
+      // loader will actually find, so its version is the version that matters.
+      try {
+        const dir = require('./src/runtime-paths').packageDir(name);
+        if (dir) {
+          try { return String(JSON.parse(fsmod.readFileSync(path.join(dir, 'package.json'), 'utf8')).version || ''); } catch { return ''; }
+        }
+      } catch { /* older tree: fall through to the plain search */ }
       for (const dir of (require.resolve.paths(name) || [])) {
         const file = path.join(dir, name, 'package.json');
         if (fsmod.existsSync(file)) {
@@ -3430,9 +3444,22 @@ program
     // one line and never the cause (Surface Pro, 2026-11-26). Captured here, the
     // real message survives; stdout and stdin still go straight to the terminal so
     // the TUI draws exactly as before.
+    // Hand the renderer the library file we resolved. Core would otherwise
+    // import its platform package from its OWN directory — and a global npm
+    // install can hold that package somewhere core's import cannot see, which
+    // fails with "Cannot find package" the instant the screen opens. Pointing
+    // OPENTUI_LIB_PATH at a file we verified makes the install layout irrelevant.
+    // Never overrides an operator who set it themselves (§2, §49).
+    const spawnEnv = { ...process.env, HAKSTER_TUI_VERSION: version };
+    let nativeLib = null;
+    try {
+      const rp = require('./src/runtime-paths');
+      if (typeof rp.nativeLibrary === 'function') nativeLib = rp.nativeLibrary();
+    } catch { /* older tree: let core resolve it as before */ }
+    if (nativeLib && !spawnEnv.OPENTUI_LIB_PATH) spawnEnv.OPENTUI_LIB_PATH = nativeLib.file;
     const spawnOpts = {
       stdio: ['inherit', 'inherit', 'pipe'],
-      env: { ...process.env, HAKSTER_TUI_VERSION: version },
+      env: spawnEnv,
     };
     const child = viaShell
       ? spawn(`"${bun}" "${entry}"`, { ...spawnOpts, shell: true })
@@ -3480,15 +3507,44 @@ program
       // everything written here and the report vanishes with the crash.
       try { process.stdout.write('\x1b[?1049l\x1b[?25h\r\n'); } catch { /* no tty: print as usual */ }
       const tail = errBuf.trim().split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean).slice(-12);
-      const hint = dashboardHint(errBuf);
+      // "it exited" is not a diagnosis. The chosen Bun is asked to load the same
+      // bundle the TUI loads — the import only, no renderer, no screen — so the
+      // report names the real cause: a bundle that will not parse, a native
+      // package the core cannot find, a terminal that refuses raw mode. Without
+      // this, a Windows crash and a Windows crash on another machine read
+      // identically, and the operator has to guess (§10, §13, §50.1).
+      let probe = { ok: null, reason: 'not measured' };
+      try {
+        const rp = require('./src/runtime-paths');
+        if (typeof rp.probeBundle === 'function') probe = rp.probeBundle(bun, __dirname, { timeoutMs: 20000 });
+      } catch { /* older tree: report what it printed and say so */ }
+      const hint = dashboardHint(errBuf) || (probe.ok === false ? probe.reason : null);
+      const where = `${process.platform} ${process.arch} · ${bunVer ? 'Bun ' + bunVer.join('.') : 'Bun'} (${bun})`;
       let crashLog = '';
       try {
-        const logsDir = path.join(require('os').homedir(), '.hakster', 'logs');
+        // The SAME file the launcher's lane note and "hakster doctor" read
+        // (haksterDir(), which honours HAKSTER_HOME). It used to be written under
+        // the plain home directory instead, so on a box with a custom home the
+        // doctor block showed "nothing written yet" right after a crash.
+        const logsDir = path.join(haksterDir(), 'logs');
         require('fs').mkdirSync(logsDir, { recursive: true });
         crashLog = path.join(logsDir, 'dashboard-tui.log');
-        require('fs').writeFileSync(crashLog, `${new Date().toISOString()}\nexit: ${why}\nbun: ${bun}\nentry: ${entry}\n--- stderr ---\n${errBuf || '(nothing on stderr)'}\n`);
+        require('fs').writeFileSync(crashLog, [
+          new Date().toISOString(),
+          `exit: ${why}`,
+          `host: ${where}`,
+          `install: ${__dirname}`,
+          `entry: ${entry}`,
+          `bundle loads: ${probe.ok === true ? 'yes' : probe.ok === false ? 'no — ' + probe.reason : probe.reason}`,
+          '--- stderr ---',
+          errBuf || '(nothing on stderr)',
+          '',
+        ].join('\n'));
       } catch { /* a log we cannot write must never block the fallback */ }
       console.error(`${C.red}✗ dashboard TUI exited (${why}).${C.reset}`);
+      console.error(`${C.dim}  on: ${where}${C.reset}`);
+      console.error(`${C.dim}  native lib: ${nativeLib ? nativeLib.file : 'not found on disk'}${C.reset}`);
+      console.error(`${C.dim}  bundle loads under that Bun: ${probe.ok === true ? 'yes — so the failure is in starting the screen' : probe.ok === false ? 'no — ' + probe.reason : probe.reason}${C.reset}`);
       if (tail.length) {
         console.error(`${C.dim}  what it said:${C.reset}`);
         for (const line of tail) console.error(`${C.dim}    ${line}${C.reset}`);

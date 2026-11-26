@@ -92,4 +92,17 @@ function readVersion() {
 }
 
 const { start } = await import('./ui-fb.mjs');
-start({ version: process.env.HAKSTER_TUI_VERSION || readVersion() });
+// Awaited, and failing loudly. This call used to be fire-and-forget: when the
+// renderer could not open, Bun printed an unhandled-rejection trace — or
+// nothing at all — and the launcher saw only a non-zero exit ("dashboard TUI
+// exited", Surface Pro, 2026-11-26). One clear line here is what the launcher
+// captures, prints back and writes to its crash log, so a failure is always
+// reported by its cause (§10, §13, §50.1). Never exits on success: the renderer
+// owns the event loop from here.
+try {
+  await start({ version: process.env.HAKSTER_TUI_VERSION || readVersion() });
+} catch (err) {
+  const msg = String((err && (err.stack || err.message)) || err);
+  process.stderr.write(`✗ dashboard failed to start: ${msg}\n`);
+  process.exitCode = 1;
+}
