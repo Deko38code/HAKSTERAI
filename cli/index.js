@@ -3079,10 +3079,18 @@ program
     });
 
     process.env.NODE_ENV = process.env.NODE_ENV || 'production';
-    import('./ui.mjs').then(mod => {
+    // The hacker-theme start screen, drawn on the alternate screen we already
+    // entered — then Ink takes over with its own (older, three-line) splash
+    // switched off. One brand, one renderer, on every platform.
+    process.env.HAKSTER_NO_SPLASH = '1';
+    const bootInk = () => import('./ui.mjs').then(mod => {
       try { mod.start(); }
       catch (err) { restoreTerminal(); console.error(err); process.exit(1); }
     }).catch(err => { restoreTerminal(); console.error(err); process.exit(1); });
+    let splash;
+    try { splash = require('./src/cli-splash').playSplash({ altScreen: false }); } catch { splash = null; }
+    if (splash && typeof splash.then === 'function') splash.then(bootInk, bootInk);
+    else bootInk();
   });
 
 // ── tui mode — the OpenTUI dashboard TUI (ui-fb.mjs) ─────────────────────
@@ -3131,6 +3139,14 @@ program
       // other path (§43.4). The restart is the operator's keystroke, never ours
       // (§45.1) — this path only installs and says so.
       (async () => {
+        // The Ink bundle's own splash is three lines of box drawing with a
+        // frozen `v0.1.0` ("didnt show png logo matrix etc" — Surface Pro,
+        // 2026-11-26) and it lives in a bundle with no source. So the real
+        // hacker start screen is drawn here, before Ink takes the terminal,
+        // and the bundle's copy is switched off. Both are best-effort: a
+        // failure here opens the TUI as it always did.
+        process.env.HAKSTER_NO_SPLASH = '1';
+        try { await require('./src/cli-splash').playSplash(); } catch { /* never block a start */ }
         let updater = null;
         try { updater = require('./src/updater'); } catch { /* older tree */ }
         if (!updater || typeof updater.checkForUpdate !== 'function') return;
