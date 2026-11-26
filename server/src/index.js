@@ -1266,6 +1266,14 @@ const TOOLS_CACHE_TTL = 10000; // dashboard counters should stay live
 const _dashboardCache = new Map();
 const DASHBOARD_CACHE_TTL = 5000;
 
+// Services scan. `ss` is a process spawn, and a spawn on this box's swapping
+// spinner disk can take seconds — running it inside the request handler froze
+// the event loop for every other admin call. The scan is cached and refreshed
+// out-of-band with an async execFile (never execFileSync), so a request only
+// ever reads rows that are already here.
+const SERVICES_SCAN_TTL = 5000;
+const _servicesScan = { time: 0, rows: null, inflight: false, lastError: null };
+
 function walkMarkdownFiles(dir, maxFiles = 5000) {
   const files = [];
   const stack = [dir];
@@ -8640,7 +8648,7 @@ app.post('/api/images/analyze', requireSignedIn, async (req, res) => {
 // reused for a few seconds so the beat no longer carries ~650 ms of work on
 // every request. The response timestamps still report when each reading was
 // taken; nothing is presented as fresher than it is.
-const serverStatusCache = { cpu: { at: 0, value: null }, site: { at: 0, value: null } };
+const serverStatusCache = { cpu: { at: 0, value: null }, site: { at: 0, value: null }, siteProbing: false };
 async function cachedCpuSnapshot() {
   const c = serverStatusCache.cpu;
   if (c.value && Date.now() - c.at < 5000) return c.value;
@@ -8692,25 +8700,41 @@ app.get('/api/admin/server-status', requireOwner, async (_req, res) => {
     // Public site check — HEAD from the Dell through the tunnel, redirects not
     // followed, so a hijack or stale route shows up as "Not answering" instead
     // of a false green. cf-ray in the response proves Cloudflare is carrying it.
+    //
+    // 2026-11-26 (owner: "server in admin keeps timing out"): this probe used to
+    // be awaited inline, so a slow or blackholed route held the owner's panel
+    // request for the full 6 s abort budget on a cold cache. It now answers from
+    // the last known result immediately and re-probes in the background.
     const site = { url: 'https://haksterai.com/', online: false, status: 0, ms: 0, viaCloudflare: false, ray: '' };
-    if (serverStatusCache.site.value && Date.now() - serverStatusCache.site.at < 20000) {
-      Object.assign(site, serverStatusCache.site.value);
-    } else {
-      try {
-        const started = Date.now();
-        const upstream = await fetch(site.url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(6000) });
-        site.online = upstream.status > 0 && upstream.status < 500;
-        site.status = upstream.status;
-        site.ms = Date.now() - started;
-        site.ray = upstream.headers.get('cf-ray') || '';
-        site.viaCloudflare = Boolean(site.ray);
-      } catch {
-        site.online = false;
-      }
-      // Cache both success and failure: a 20 s old failure is still the truth
-      // until the next real check, and it stops every beat from waiting on a
-      // dead route for the full 6 s timeout.
-      serverStatusCache.site = { at: Date.now(), value: { ...site } };
+    if (serverStatusCache.site.value) Object.assign(site, serverStatusCache.site.value);
+    const siteAgeMs = Date.now() - (serverStatusCache.site.at || 0);
+    if (siteAgeMs >= 20000 && !serverStatusCache.siteProbing) {
+      serverStatusCache.siteProbing = true;
+      const started = Date.now();
+      fetch(site.url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(6000) })
+        .then((upstream) => {
+          const ray = upstream.headers.get('cf-ray') || '';
+          serverStatusCache.site = {
+            at: Date.now(),
+            value: {
+              url: site.url,
+              online: upstream.status > 0 && upstream.status < 500,
+              status: upstream.status,
+              ms: Date.now() - started,
+              ray,
+              viaCloudflare: Boolean(ray),
+            },
+          };
+        })
+        .catch(() => {
+          // Cache the failure too: a 20 s old failure is still the truth until
+          // the next real check, and it stops every beat re-probing a dead route.
+          serverStatusCache.site = {
+            at: Date.now(),
+            value: { url: site.url, online: false, status: 0, ms: 0, viaCloudflare: false, ray: '' },
+          };
+        })
+        .finally(() => { serverStatusCache.siteProbing = false; });
     }
 
     res.json({
@@ -9221,7 +9245,11 @@ app.get('/api/dashboard', requireOwner, (req, res) => {
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
     const forceLive = req.query.live === '1';
-    if (forceLive) {
+    // `live=1` means "fresh process and service numbers", not "re-walk the whole
+    // skill and tool tree on every poll". Nulling those caches made each 15 s beat
+    // a cold walk of hundreds of files on a swapping disk; they keep their own 10 s
+    // TTL instead. Only a deliberate ?refresh=all still cold-walks them.
+    if (req.query.refresh === 'all') {
       _skillsCache = null;
       _skillsCacheTime = 0;
       _toolsCache = null;
@@ -9355,22 +9383,45 @@ app.get('/api/dashboard', requireOwner, (req, res) => {
       }
       return rows;
     };
-    let runningServices = [];
-    try {
-      const { execFileSync } = require('child_process');
-      const tcpOut = execFileSync('ss', ['-H', '-tlnp'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] });
-      const udpOut = execFileSync('ss', ['-H', '-ulnp'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] });
-      const seen = new Set();
-      runningServices = [...parseSs(tcpOut, 'tcp'), ...parseSs(udpOut, 'udp')]
-        .filter((svc) => {
-          const key = `${svc.protocol}:${svc.port}:${svc.pid || svc.process}:${svc.bind}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        })
-        .sort((a, b) => a.port - b.port || a.protocol.localeCompare(b.protocol));
-    } catch (e) {
-      runningServices = [{
+    // Serve what the last scan produced and refresh in the background. A stale
+    // scan is corrected on this beat; the request itself never blocks.
+    if ((!_servicesScan.rows || (Date.now() - _servicesScan.time) > SERVICES_SCAN_TTL) && !_servicesScan.inflight) {
+      _servicesScan.inflight = true;
+      try {
+        const { execFile } = require('child_process');
+        const scanOne = (args) => new Promise((resolve) => {
+          execFile('ss', args, { encoding: 'utf8', timeout: 4000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+            resolve(err ? '' : String(stdout || ''));
+          });
+        });
+        Promise.all([scanOne(['-H', '-tlnp']), scanOne(['-H', '-ulnp'])])
+          .then(([tcpOut, udpOut]) => {
+            const seen = new Set();
+            _servicesScan.rows = [...parseSs(tcpOut, 'tcp'), ...parseSs(udpOut, 'udp')]
+              .filter((svc) => {
+                const key = `${svc.protocol}:${svc.port}:${svc.pid || svc.process}:${svc.bind}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              })
+              .sort((a, b) => a.port - b.port || a.protocol.localeCompare(b.protocol));
+            _servicesScan.time = Date.now();
+            _servicesScan.lastError = null;
+          })
+          .catch((e) => {
+            _servicesScan.lastError = e && e.message;
+            _servicesScan.time = Date.now();
+          })
+          .finally(() => { _servicesScan.inflight = false; });
+      } catch (e) {
+        _servicesScan.lastError = e && e.message;
+        _servicesScan.time = Date.now();
+        _servicesScan.inflight = false;
+      }
+    }
+    let runningServices = (_servicesScan.rows && _servicesScan.rows.length)
+      ? _servicesScan.rows
+      : [{
         name: 'haksterAi',
         port: PORT,
         protocol: 'tcp',
@@ -9380,9 +9431,8 @@ app.get('/api/dashboard', requireOwner, (req, res) => {
         pid: process.pid,
         desc: 'Main server',
         checkedAt: new Date().toISOString(),
-        warning: `service scan limited: ${e.message}`,
+        warning: 'service scan warming up',
       }];
-    }
 
     // HaksterAi model config (separate from crush — crush overwrites its own config)
     const haksterConfigPath = path.join(__dirname, '..', 'hakster-config.json');

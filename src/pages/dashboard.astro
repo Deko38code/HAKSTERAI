@@ -1394,10 +1394,15 @@ import Layout from '../layouts/Layout.astro';
         const period = Number(ms) > 0 ? Number(ms) : 8000;
         const offset = (seq++ * 420) % 7000;
         let inflight = false;
+        // 2026-11-26 (owner: "server in admin keeps timing out"): a card whose
+        // fetch never settled left `inflight` pinned true, so that card stopped
+        // refreshing for the rest of the session and just sat on its stale
+        // reading. The guard releases the flag if fn overruns the beat.
         const tick = async () => {
           if (document.visibilityState !== 'visible' || inflight) return;
           inflight = true;
-          try { await fn(); } catch (_) {} finally { inflight = false; }
+          const guard = setTimeout(() => { inflight = false; }, Math.max(period * 2, 25000));
+          try { await fn(); } catch (_) {} finally { clearTimeout(guard); inflight = false; }
         };
         setTimeout(() => { tick(); setInterval(tick, period); }, offset);
         return tick;
@@ -1778,9 +1783,17 @@ import Layout from '../layouts/Layout.astro';
     async function liveFetch(path, options) {
       const opts = options || {};
       const sep = path.includes('?') ? '&' : '?';
+      // 2026-11-26 (owner: "server in admin keeps timing out"): every live call
+      // now carries a hard deadline. Without one a stalled upstream left the
+      // promise pending forever, which pinned the caller's card and made the
+      // panel look like it was timing out. Callers can raise it with
+      // opts.timeoutMs or pass their own opts.signal.
+      const deadline = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 15000;
+      const signal = opts.signal || AbortSignal.timeout(deadline);
       const send = (extra) => fetch(path + sep + '_=' + Date.now() + '&_hk=' + (++hkFetchSeq) + extra, {
         cache: 'no-store',
         ...opts,
+        signal,
         headers: {
           'Cache-Control': 'no-cache',
           Pragma: 'no-cache',
@@ -2928,11 +2941,16 @@ import Layout from '../layouts/Layout.astro';
     loadServerStatus();
     loadSiteAnalytics();
     loadAutoAgent(true);   // panel opened → run the audit (server throttles)
-    // 8s live cards by default. WebSocket events below still trigger immediate
-    // refreshes on top of this beat.
+    // Live cards run on a per-card beat; WebSocket events still trigger
+    // immediate refreshes on top of it.
+    // 2026-11-26 (owner: "server in admin keeps timing out", "its the refresh
+    // rate in dash"): the host panel is the heaviest card — a /proc CPU sample,
+    // lm-sensors, disk/swap reads AND an outbound HEAD to haksterai.com. None of
+    // that changes meaningfully inside 8 s, so asking for it every 8 s was pure
+    // load. Host panel now 30 s, the dashboard aggregate 15 s.
     window.hkLiveEvery(() => loadAutoAgent(false), 20000);
-    window.hkLiveEvery(loadDashboard);
-    window.hkLiveEvery(loadServerStatus);
+    window.hkLiveEvery(loadDashboard, 15000);
+    window.hkLiveEvery(loadServerStatus, 30000);
     window.hkLiveEvery(loadSiteAnalytics, 15000);
 
 
