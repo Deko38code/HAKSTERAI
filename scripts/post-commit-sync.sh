@@ -11,7 +11,8 @@
 #   · Runs only on the PRIMARY — the box that holds the live database. On the standby, `ssh mint`
 #     answers with this box's own hostname, and the script stands down.
 #   · Runs only for a commit that touches something failover-sync actually ships (server/, cli/,
-#     scripts/, dist/, public/, package.json). A docs-only commit does not churn the standby.
+#     scripts/, dist/, public/, package.json, the root installers). A docs-only commit does not
+#     churn the standby.
 #   · Retries while another sync holds the lock, so a commit that lands mid-sync is not missed.
 #   · A policy hold (primary down, the standby answered during a failover, ...) is logged as HELD and
 #     never as synced — it is a decision for the owner, not something this script overrides.
@@ -40,7 +41,11 @@ TOUCHED=$(git show --pretty=format: --name-only "$SHA" 2>/dev/null || true)
 # AGENTS.md (and its CLAUDE.md symlink) is the agent's steering, loaded by walk-up from the
 # slot's own working directory. A rule change that never reaches the standby leaves it steering
 # blind after a failover, so a rules-only commit is a shipped commit. (§41.1, §41.3)
-RELEVANT=$(printf '%s\n' "$TOUCHED" | grep -E '^(server|cli|scripts|dist|public)/|^package\.json$|^AGENTS\.md$|^CLAUDE\.md$' || true)
+# The root installers are shipped by failover-sync.sh, so a change to them is a shipped change.
+# Without them here, an installer-only commit matched nothing and was neither pushed nor synced —
+# the fixed script would have sat on this box while half the public door kept serving the old one
+# (2026-11-26, §41.1, §50.2).
+RELEVANT=$(printf '%s\n' "$TOUCHED" | grep -E '^(server|cli|scripts|dist|public)/|^package\.json$|^AGENTS\.md$|^CLAUDE\.md$|^install\.(sh|ps1)$' || true)
 [ -n "$RELEVANT" ] || exit 0
 
 say "commit $SHA touches $(printf '%s\n' "$RELEVANT" | wc -l | tr -d ' ') shipped file(s)"

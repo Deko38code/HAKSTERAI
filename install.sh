@@ -11,8 +11,10 @@
 #   bun         — what our TUI runs on; installed into ~/.hakster/runtime/bun
 #                 when the machine has none. Without it the CLI still runs on
 #                 its Ink fallback, so this step is reported, never fatal.
-#   the CLI     — installed with npm as before (global, then ~/.local if the
-#                 global prefix needs permissions we do not have).
+#   the CLI     — installed with npm from the published package (global, then
+#                 ~/.local when the global prefix is not writable). A `hakster`
+#                 already in npm's bin that is not npm's own is moved aside,
+#                 never forced, and npm's real message is printed on failure.
 #
 # Before any of that, one read-only pass prints what this machine already has —
 # node, bun, Guake, Claude Code and an older CLI (owner, 2026-11-26: "on install
@@ -268,7 +270,58 @@ esac
 [ -f "$TMP/$PKG" ] || fail "could not pack the CLI for install"
 
 HAKSTER_BIN=""
-if npm install -g "$TMP/$PKG" >/dev/null 2>&1; then
+NPM_ERR=""
+# npm refuses to overwrite a `hakster` already in its bin directory when that
+# entry is not its own — a hand-written launcher, or an old symlink into a
+# checkout — and exits EEXIST. This used to be hidden: npm's output went to
+# /dev/null and the failure was reported as "the global install needs
+# permissions we do not have", a cause nobody had read. On the Lenovo standby
+# (2026-11-26) the real cause was EEXIST on a stale nvm bin, so a fully
+# permitted install was refused twice and blamed on permissions. Now npm's own
+# message is kept and printed, and a conflicting entry is moved aside (never
+# `--force`) and put back if the install still fails: nothing is deleted.
+install_into() {
+  # $1 = packed tarball · $2 = npm prefix ("" for npm's default global)
+  log="$TMP/npm-install.log"
+  rc=0
+  if [ -n "$2" ]; then
+    npm install -g "$1" --prefix "$2" >"$log" 2>&1 || rc=$?
+  else
+    npm install -g "$1" >"$log" 2>&1 || rc=$?
+  fi
+  if [ "$rc" -eq 0 ]; then return 0; fi
+  if grep -q EEXIST "$log" 2>/dev/null; then
+    conflict=$(sed -n 's/^npm error path \(.*\)$/\1/p' "$log" 2>/dev/null | head -n 1)
+    if [ -z "$conflict" ] && [ -n "$2" ]; then
+      for c in "$2/bin/hakster" "$2/bin/hakster.cmd"; do
+        if [ -e "$c" ] || [ -L "$c" ]; then conflict="$c"; fi
+      done
+    fi
+    if [ -n "$conflict" ] && { [ -e "$conflict" ] || [ -L "$conflict" ]; }; then
+      aside="$conflict.pre-npm-$(date +%Y%m%dT%H%M%S 2>/dev/null || echo aside)"
+      if mv "$conflict" "$aside" 2>/dev/null; then
+        say "  · moved the existing $conflict aside — npm will not overwrite it"
+        rc=0
+        if [ -n "$2" ]; then
+          npm install -g "$1" --prefix "$2" >"$log" 2>&1 || rc=$?
+        else
+          npm install -g "$1" >"$log" 2>&1 || rc=$?
+        fi
+        if [ "$rc" -eq 0 ]; then
+          say "  · the entry moved aside is kept at $aside"
+          return 0
+        fi
+        if mv "$aside" "$conflict" 2>/dev/null; then
+          say "  · put $conflict back"
+        fi
+      fi
+    fi
+  fi
+  NPM_ERR=$(tail -n 4 "$log" 2>/dev/null | tr -d '\r' || true)
+  return 1
+}
+
+if install_into "$TMP/$PKG" ""; then
   # npm's global bin is not always on PATH yet (a fresh prefix, a new shell),
   # so the launcher is located from npm's own prefix, not from `command -v`.
   GP=$(npm prefix -g 2>/dev/null | tr -d '\n' || true)
@@ -282,12 +335,18 @@ if npm install -g "$TMP/$PKG" >/dev/null 2>&1; then
     *) say "  Add this to your shell profile:  export PATH=\"$GP/bin:\$PATH\"" ;;
   esac
 else
-  say "… the global install needs permissions we do not have — installing into ~/.local"
-  npm install -g "$TMP/$PKG" --prefix "$HOME/.local" >/dev/null 2>&1 \
-    || fail "npm could not install the CLI into ~/.local"
-  HAKSTER_BIN="$HOME/.local/bin/hakster"
-  [ -e "$HAKSTER_BIN" ] || fail "the CLI installed but $HAKSTER_BIN is missing"
-  say "  Add this to your shell profile:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+  say "… npm could not install globally — it reported:"
+  printf '%s\n' "$NPM_ERR" | sed 's/^/    /'
+  say "… installing into ~/.local instead"
+  if install_into "$TMP/$PKG" "$HOME/.local"; then
+    HAKSTER_BIN="$HOME/.local/bin/hakster"
+    [ -e "$HAKSTER_BIN" ] || fail "the CLI installed but $HAKSTER_BIN is missing"
+    say "  Add this to your shell profile:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+  else
+    say "✗ npm could not install the CLI into ~/.local either — it reported:"
+    printf '%s\n' "$NPM_ERR" | sed 's/^/    /'
+    fail "npm could not install the CLI into either prefix"
+  fi
 fi
 
 # OpenTUI's native renderer for this machine. The dashboard draws through
