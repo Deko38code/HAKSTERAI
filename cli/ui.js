@@ -571,30 +571,35 @@ ${C.bold}Examples:${C.reset}
 
 // ── Banner — adaptive neon terminal dashboard ─────────────────────────────
 function printBanner(usbRoot, trustCfg) {
-  // ── haksterAi block-ASCII splash (cli/logo.js) — new startup branding ──
+  // ── haksterAi brand card (cli/logo.js) ────────────────────────────────
+  // The name, the tagline and the signed-in account sit inside one bordered
+  // frame (owner, 2026-11-26), with the session band underneath it.
   try {
     const _logo = require('./logo');
     let _ver = '';
-    try { _ver = require('../package.json').version; } catch {}
-    const DMx = t => '\x1b[2m\x1b[38;5;240m' + t + '\x1b[0m';
+    try { _ver = require('./package.json').version; } catch { try { _ver = require('../package.json').version; } catch {} }
     let _mem = 0, _usbs = 0;
     try { _mem = memGetNotes(loadMemory()).length; } catch {}
     try { _usbs = findAllUSBs().length; } catch {}
     const _now = new Date();
-    const _t = _now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
-    const _d = _now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
-    process.stdout.write('\n');
-    for (const _l of _logo.renderBanner()) process.stdout.write('  ' + _l + '\n');
-    process.stdout.write('\n');
-    process.stdout.write('  ' + _logo.gradientText('autonomous ai coding & ops agent') + '\n');
-    process.stdout.write('  ' + DMx('v' + _ver + '  ·  haksterAI CLI  ·  haksterai.com') + '\n');
-    process.stdout.write('\n');
-    process.stdout.write('  ' + '\x1b[1m\x1b[38;5;46m▸ ONLINE\x1b[0m' + DMx('  ·  session ready  ·  ' + _t + '  ·  ' + _d) + '\n');
-    process.stdout.write('  ' + DMx('  memory ' + _mem + ' notes   usb ' + _usbs + '   cwd ' + process.cwd()) + '\n');
-    process.stdout.write('  ' + DMx('  cmds /help /tools /models /clear /exit') + '\n');
-    process.stdout.write('\n');
+    const _session = {
+      online: true,
+      detail: 'session ready',
+      time: _now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      date: _now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+      memory: _mem,
+      usbs: _usbs,
+      cwd: process.cwd(),
+      cmds: '/help  /tools  /models  /clear  /exit',
+    };
+    // showIntro already drew the brand + account card on this launch, so only
+    // the session band is added — the name is never printed twice.
+    const _lines = _logo.introShown()
+      ? _logo.renderCard(_session)
+      : _logo.renderStartup({ version: _ver, session: _session });
+    process.stdout.write('\n' + _lines.join('\n') + '\n\n');
   } catch (_e) { /* splash is cosmetic — never block startup */ }
-  return; // legacy box art below is superseded by the splash above
+  return; // legacy box art below is superseded by the card above
 
   const P  = s => '\x1b[38;5;99m'  + s + C.reset;   // purple border
   const G  = s => '\x1b[1m\x1b[38;5;118m' + s + C.reset;  // neon green

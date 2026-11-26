@@ -36,7 +36,19 @@ async function _haksterLicenseGate() {
     console.error('\n' + lic.message + '\n');
     process.exit(1);
   }
-  if (lic.message) console.log(lic.message + '\n');
+  if (!lic.message) return;
+  // The start card (cli/logo.js) already names the account and its plan
+  // (owner, 2026-11-26), so a plain "Signed in — X plan." would print the same
+  // fact twice. Say it only when it adds something: a plan the card did not
+  // have, an account just verified, a grace period or a trial.
+  const signedIn = /^✅ Signed in — .+ plan\.$/.test(String(lic.message));
+  if (signedIn) {
+    const shown = String(introPlan() || '').toLowerCase();
+    const fresh = String(lic.plan || '').toLowerCase();
+    if (!introShown() || shown !== fresh) printAccountBand(lic.plan, lic.email);
+    return;
+  }
+  console.log(lic.message + '\n');
 }
 // Setup/help commands stay available so a paid customer can add their API key.
 // Every agent, chat, and model operation still requires an active paid plan.
@@ -49,7 +61,7 @@ const _helpOrVersion = _rawArgs.includes('--help') || _rawArgs.includes('-h') ||
 const _skipLicenseGate = _helpOrVersion || _setupOnlyCommand;
 
 const pkg = require('./package.json');
-const { showIntro, C: logoC } = require('./logo');
+const { showIntro, introShown, introPlan, printAccountBand, C: logoC } = require('./logo');
 
 // ── Grid helpers ───────────────────────────────────────────────────────
 function _avg(arr) {
