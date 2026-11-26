@@ -206,7 +206,7 @@ export default function UsageView({ width = 80, height = 24, usage = null, refre
             <Row w={inner}><text> </text></Row>
           </>
         );
-      })() : null}
+      })() : line('Billing · our key ledger is read by the server after its next restart — nothing is shown rather than her card in its place', 'gray')}
 
       {/* The last measured calls, so a figure can be traced to its row. */}
       {Array.isArray(data.tokenWiring && data.tokenWiring.recent) && data.tokenWiring.recent.length ? (

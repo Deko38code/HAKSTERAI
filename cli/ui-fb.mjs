@@ -3172,7 +3172,7 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
         money ? line(`  metered $${Number(money.monthMeterUsd || 0).toFixed(2)} 30d \xB7 $${Number(money.meterUsd || 0).toFixed(2)} all-time at $${Number(money.rateInPerMTok || 0).toFixed(2)} in / $${Number(money.rateOutPerMTok || 0).toFixed(2)} out per Mtok \xB7 meter, not an invoice`, "gray") : null,
         /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) })
       ] });
-    })() : null,
+    })() : line("Billing \xB7 our key ledger is read by the server after its next restart \u2014 nothing is shown rather than her card in its place", "gray"),
     Array.isArray(data.tokenWiring && data.tokenWiring.recent) && data.tokenWiring.recent.length ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
       line("Recent calls", "green"),
       data.tokenWiring.recent.slice(0, Math.max(0, Math.min(5, height - 16))).map((r, i) => /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: clip(`${new Date(Number(r.created_at) * 1e3).toISOString().slice(5, 16).replace("T", " ")}  ${String(r.endpoint || "").padEnd(16)} ${String(r.model || r.provider || "").slice(0, 18).padEnd(18)} in ${fmtNum(r.input_tokens)} out ${fmtNum(r.output_tokens)}`, inner) }) }, `recent:${i}`))
