@@ -604,7 +604,19 @@ program
     console.log(`${C.gray}running v${running.version} · ${updater.isSourceCheckout() ? 'source checkout (never rewritten automatically)' : 'installed copy'}${C.reset}`);
     const pending = updater.pendingInfo();
     if (pending && !pending.appliedAt) {
-      console.log(`${C.yellow}⬆ staged v${pending.version}${C.reset}${pending.blocked ? ` ${C.gray}(${pending.blocked} — not applied)${C.reset}` : ` ${C.gray}— applies on the next launch${C.reset}`}`);
+      // Only a stage that can still apply is announced as one. A record left by
+      // a build this install has already passed is not "staged" — saying
+      // "applies on the next launch" for it promised an install that could
+      // never happen (measured 2026-11-26: running v0.3.86, this line claimed
+      // "⬆ staged v0.3.81 — applies on the next launch"). The TUI header already
+      // reads it as current; the command had to say the same (§10, §50.1).
+      if (pending.isCurrent || pending.unknown) {
+        /* the stage is the running build, or describes no update at all: say nothing */
+      } else if (pending.superseded) {
+        console.log(`${C.gray}stale stage v${pending.version} — superseded by v${running.version}, nothing to apply${C.reset}`);
+      } else {
+        console.log(`${C.yellow}⬆ staged v${pending.version}${C.reset}${pending.blocked ? ` ${C.gray}(${pending.blocked} — not applied)${C.reset}` : ` ${C.gray}— applies on the next launch${C.reset}`}`);
+      }
     }
     if (opts.check) return;
     process.stdout.write(`${C.gray}checking the server…${C.reset}\n`);

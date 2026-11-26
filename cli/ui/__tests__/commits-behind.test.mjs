@@ -211,4 +211,9 @@ test('hakster update prints the same count as the header', () => {
   assert.match(src, /const behind = Number\(res\.behind\) > 0/, 'the command reads the updater\'s figure');
   assert.match(src, /v\$\{res\.version\}\$\{behind\} downloaded and verified/, 'the staged line carries it');
   assert.match(src, /v\$\{res\.version\}\$\{behind\} downloaded and verified[\s\S]{0,300}source checkout/, 'the checkout line carries it');
+  // A stage this install has already passed is not "staged — applies on the next
+  // launch": that promised an install that could never happen (measured
+  // 2026-11-26: v0.3.86 running, the command claimed "staged v0.3.81").
+  assert.match(src, /pending\.superseded/, 'a superseded stage is read as superseded');
+  assert.match(src, /superseded by v\$\{running\.version\}, nothing to apply/, 'and says so instead of promising an install');
 });
