@@ -3248,22 +3248,46 @@ program
       }
       return false;
     };
+    // The packages that can satisfy the dashboard's renderer on this OS/CPU.
+    // Linux lists musl first, exactly as before; the others have one name.
+    const platformPackages = () => (process.platform === 'linux'
+      ? [`@opentui/core-linux-${process.arch}-musl`, `@opentui/core-linux-${process.arch}`]
+      : [`@opentui/core-${process.platform}-${process.arch}`]);
+    // The version the platform package must match — read from the @opentui/core
+    // copy this install actually holds, so a repair command names a published
+    // version instead of a guess. Absent means the spec is left unpinned.
+    const coreVersion = () => {
+      const fsmod = require('fs');
+      try {
+        for (const dir of (require.resolve.paths('@opentui/core') || [])) {
+          const file = path.join(dir, '@opentui', 'core', 'package.json');
+          if (fsmod.existsSync(file)) {
+            return String(JSON.parse(fsmod.readFileSync(file, 'utf8')).version || '');
+          }
+        }
+      } catch { /* version unknown — the repair command stays unpinned */ }
+      return '';
+    };
+    // One command an operator can act on. Both installers now install this
+    // package themselves, so reaching a message here means it was skipped or
+    // the copy was moved between machines (Surface Pro, 2026-11-26: the screen
+    // showed a failure and no way forward).
+    const nativeFix = (name) => {
+      const pkg = name || platformPackages()[0];
+      const ver = coreVersion();
+      return `npm install -g ${pkg}${ver ? '@' + ver : ''}`;
+    };
     const nativeGap = () => {
-      const want = [];
-      if (process.platform === 'linux') {
-        want.push(`@opentui/core-linux-${process.arch}-musl`, `@opentui/core-linux-${process.arch}`);
-      } else {
-        want.push(`@opentui/core-${process.platform}-${process.arch}`);
-      }
+      const want = platformPackages();
       for (const mod of want) { if (installed(mod)) return null; }
       if (!installed('@opentui/core')) {
-        return { what: '@opentui/core', why: 'the OpenTUI runtime is not installed with this copy' };
+        return { what: '@opentui/core', why: 'the OpenTUI runtime is not installed with this copy', fix: nativeFix(want[0]) };
       }
-      return { what: want[0], why: 'npm skipped its optional platform package for this OS/CPU' };
+      return { what: want[0], why: 'npm skipped its optional platform package for this OS/CPU', fix: nativeFix(want[0]) };
     };
     const gap = nativeGap();
     if (gap) {
-      fallbackInk(`${gap.what} is missing — ${gap.why}; reinstall the CLI so npm fetches it`);
+      fallbackInk(`${gap.what} is missing — ${gap.why}. Fix it with: ${gap.fix}`);
       return;
     }
 
@@ -3301,7 +3325,7 @@ program
     // The point at the real cause of a dashboard crash, from what it printed.
     const dashboardHint = (text) => {
       if (/core-(win32|linux|darwin)/i.test(text) && /cannot find|not found|module/i.test(text)) {
-        return 'the OpenTUI native package for this OS is missing — reinstall the CLI so npm fetches it';
+        return `the OpenTUI native package for this OS is missing — fix it with: ${nativeFix()}`;
       }
       if (/libopentui|\.dll|\.so\b|dlopen|bun:ffi|ffi/i.test(text)) {
         return 'the OpenTUI native library would not load — an old Bun under this build is the usual cause; run "hakster update", or install Bun from bun.sh';

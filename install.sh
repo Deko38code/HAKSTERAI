@@ -270,6 +270,52 @@ else
   say "  Add this to your shell profile:  export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
+# OpenTUI's native renderer for this machine. The dashboard draws through
+# @opentui/core, which loads a per-OS/CPU package npm publishes as an OPTIONAL
+# dependency — and an npm that skips optional packages leaves the dashboard
+# dying the instant it opens, with nothing useful on screen (Surface Pro,
+# 2026-11-26). The name comes from uname, never a guess, and it is installed
+# only when the lookup below finds it absent: nothing here replaces a package
+# that is already there, and nothing is installed silently.
+OT_OS=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+OT_ARCH=$(uname -m 2>/dev/null)
+case "$OT_ARCH" in
+  x86_64|amd64) OT_ARCH=x64 ;;
+  aarch64|arm64) OT_ARCH=arm64 ;;
+  *) OT_ARCH="" ;;
+esac
+case "$OT_OS" in linux|darwin) ;; *) OT_OS="" ;; esac
+if [ -n "$OT_OS" ] && [ -n "$OT_ARCH" ]; then
+  OT_NAME="@opentui/core-$OT_OS-$OT_ARCH"
+  if [ "$OT_OS" = linux ] && (ldd --version 2>&1 || true) | grep -qi musl; then
+    OT_NAME="$OT_NAME-musl"
+  fi
+  OT_ROOT=""
+  for r in "$(npm root -g 2>/dev/null | tail -n 1)" "$HOME/.local/lib/node_modules"; do
+    if [ -n "$r" ] && [ -d "$r/hakster-cli" ]; then OT_ROOT="$r"; break; fi
+  done
+  if [ -z "$OT_ROOT" ]; then
+    say "⚠ could not tell where the CLI was installed — the dashboard renderer was not checked"
+  elif [ -f "$OT_ROOT/$OT_NAME/package.json" ]; then
+    say "✓ dashboard renderer present ($OT_NAME)"
+  else
+    OT_VER=""
+    if [ -f "$OT_ROOT/@opentui/core/package.json" ] && command -v node >/dev/null 2>&1; then
+      OT_VER=$(node -e "try{process.stdout.write(String(require('$OT_ROOT/@opentui/core/package.json').version))}catch(e){}" 2>/dev/null || true)
+    fi
+    OT_SPEC="$OT_NAME"; [ -n "$OT_VER" ] && OT_SPEC="$OT_NAME@$OT_VER"
+    say "… installing the dashboard renderer for this machine ($OT_SPEC)"
+    if npm install -g --prefix "$(dirname "$OT_ROOT")" --no-audit --no-fund "$OT_SPEC" >/dev/null 2>&1 \
+       && [ -f "$OT_ROOT/$OT_NAME/package.json" ]; then
+      say "✓ dashboard renderer installed ($OT_NAME)"
+    else
+      say "⚠ the dashboard renderer could not be installed — the CLI still runs, with its built-in Ink UI"
+      say "  To get the full dashboard, run this once and start the CLI again:"
+      say "    npm install -g $OT_SPEC"
+    fi
+  fi
+fi
+
 # Bun runs our TUI. Installed next to the CLI when the machine has none, so a
 # clean machine gets the same screen as the owner's.
 if command -v bun >/dev/null 2>&1; then

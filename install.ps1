@@ -427,6 +427,49 @@
   }
   $env:Path = "$NpmPrefix;$env:Path"
 
+  # ── OpenTUI's native renderer for this machine ──────────────────────────
+  # The dashboard draws through @opentui/core, which loads its renderer from a
+  # per-OS/CPU package npm publishes as an OPTIONAL dependency. A prefix install
+  # or an npm config that skips optional packages leaves the dashboard dying the
+  # instant it opens, with nothing useful on screen (Surface Pro, 2026-11-26).
+  # The name comes from the machine's real architecture, never a guess, and it is
+  # installed only when the lookup below finds it absent — nothing here replaces
+  # a package that is already there.
+  $otArch = 'x64'
+  try {
+    if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { $otArch = 'arm64' }
+  } catch {
+    if ("$env:PROCESSOR_ARCHITECTURE" -match 'ARM64') { $otArch = 'arm64' }
+  }
+  $otName = "@opentui/core-win32-$otArch"
+  $otHere = @(
+    (Join-Path $NpmPrefix ("node_modules\@opentui\core-win32-" + $otArch)),
+    (Join-Path $NpmPrefix ("node_modules\hakster-cli\node_modules\@opentui\core-win32-" + $otArch))
+  )
+  $otPresent = $false
+  foreach ($p in $otHere) { if (Test-Path (Join-Path $p 'package.json')) { $otPresent = $true } }
+  if ($otPresent) {
+    Say "OK the dashboard renderer for this machine is installed ($otName)"
+  } else {
+    $otCore = Join-Path $NpmPrefix 'node_modules\@opentui\core\package.json'
+    $otVer = ''
+    if (Test-Path $otCore) {
+      try { $otVer = [string]((Get-Content $otCore -Raw | ConvertFrom-Json).version) } catch { $otVer = '' }
+    }
+    if ($otVer) { $otSpec = "$otName@$otVer" } else { $otSpec = $otName }
+    Say ".. installing the dashboard renderer for this machine ($otSpec)"
+    $otCode = Invoke-Npm @('install', '--prefix', $NpmPrefix, '--no-audit', '--no-fund', '--no-save', $otSpec)
+    $otPresent = $false
+    foreach ($p in $otHere) { if (Test-Path (Join-Path $p 'package.json')) { $otPresent = $true } }
+    if ($otCode -eq 0 -and $otPresent) {
+      Say "OK dashboard renderer installed ($otName)"
+    } else {
+      Say '! the dashboard renderer could not be installed - the CLI still runs, with its built-in Ink UI.'
+      Say '  To get the full dashboard, run this once and start the CLI again:'
+      Say ("    npm install -g " + $otSpec)
+    }
+  }
+
   # ── Bun (the full TUI) ──────────────────────────────────────────────────
   $bunDir = Join-Path $Runtime 'bun'
   $bunExe = Join-Path $bunDir 'node_modules\bun\bin\bun.exe'

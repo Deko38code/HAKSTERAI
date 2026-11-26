@@ -153,3 +153,40 @@ test('the Ink fallback no longer claims a Linux-only tool', () => {
   assert.ok(!ink.includes('ss not readable'), 'the fallback still blames ss on Windows');
   assert.ok(ink.includes('no port tool'));
 });
+
+// ── the dashboard's native renderer must be installed, not just named ──────
+// The Surface Pro's dashboard opened and died because @opentui/core's OPTIONAL
+// per-platform package was never installed, and the launcher could only fall
+// back with "reinstall the CLI so npm fetches it". Both installers now install
+// that package themselves, and the launcher names the exact command.
+
+const REPO_DIR = path.join(CLI_DIR, '..');
+const readRoot = (p) => fs.readFileSync(path.join(REPO_DIR, p), 'utf8');
+
+test('the Windows installer installs the renderer for this machine', () => {
+  const ps1 = readRoot('install.ps1');
+  assert.ok(/@opentui\/core-win32-\$otArch/.test(ps1), 'install.ps1 no longer names the renderer from the architecture');
+  assert.ok(/OSArchitecture/.test(ps1), 'the architecture is no longer read from the runtime');
+  assert.ok(/Arm64/.test(ps1), 'an ARM64 Surface is no longer handled');
+  assert.ok(/Get-Content \$otCore -Raw \| ConvertFrom-Json/.test(ps1), 'the renderer version is no longer matched to the installed @opentui/core');
+  assert.ok(/Test-Path \(Join-Path \$p 'package\.json'\)/.test(ps1), 'the installer no longer checks whether the renderer is already present');
+  assert.ok(/npm install -g /.test(ps1), 'a failed renderer install no longer gives the exact command');
+});
+
+test('the Linux/macOS installer does the same, musl included', () => {
+  const sh = readRoot('install.sh');
+  assert.ok(/@opentui\/core-\$OT_OS-\$OT_ARCH/.test(sh), 'install.sh no longer names the renderer from uname');
+  assert.ok(/-musl/.test(sh), 'musl Linux is no longer handled');
+  assert.ok(/aarch64\|arm64\) OT_ARCH=arm64/.test(sh), 'arm64 is no longer mapped');
+  assert.ok(/npm install -g --prefix/.test(sh), 'the renderer is no longer installed where the CLI resolves from');
+  assert.ok(/dashboard renderer could not be installed/.test(sh), 'a failed renderer install is no longer reported');
+});
+
+test('the launcher names the exact fix instead of "reinstall the CLI"', () => {
+  const src = read('index.js');
+  assert.ok(!/reinstall the CLI so npm fetches it/.test(src), 'the launcher still gives the vague instruction');
+  assert.ok(/Fix it with: \$\{gap\.fix\}/.test(src), 'the missing-renderer message no longer carries the command');
+  assert.ok(/npm install -g \$\{pkg\}/.test(src), 'the repair command is no longer built from the real package name');
+  assert.ok(/platformPackages\(\)/.test(src), 'the platform package list is no longer derived once for both paths');
+  assert.ok(/coreVersion/.test(src), 'the repair command no longer matches the installed @opentui/core version');
+});
