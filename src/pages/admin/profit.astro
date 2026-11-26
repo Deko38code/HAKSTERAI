@@ -52,13 +52,14 @@ import Layout from '../../layouts/Layout.astro';
     .pl-session .who{font-size:12px;color:#94a3b8;overflow-wrap:anywhere;}
     .pl-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 12px;margin-bottom:10px;}
     .pl-form-grid label,.pl-form-full{display:flex;flex-direction:column;gap:4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#94a3b8;}
-    .pl-form-grid input,.pl-form-full input{background:#0b0b12;border:1px solid #1e1e2e;border-radius:8px;padding:8px 10px;color:#e2e8f0;font:13px/1.4 ui-monospace,monospace;min-width:0;width:100%;box-sizing:border-box;}
-    .pl-form-grid input:focus,.pl-form-full input:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 2px rgba(124,58,237,.25);}
+    .pl-form-grid input,.pl-form-full input,.pl-form-grid select,.pl-form-full select{background:#0b0b12;border:1px solid #1e1e2e;border-radius:8px;padding:8px 10px;color:#e2e8f0;font:13px/1.4 ui-monospace,monospace;min-width:0;width:100%;box-sizing:border-box;}
+    .pl-form-grid input:focus,.pl-form-full input:focus,.pl-form-grid select:focus,.pl-form-full select:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 2px rgba(124,58,237,.25);}
     .pl-form-full{margin-bottom:10px;}
     .pl-form-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
     .pl-form-actions button{border:1px solid #334155;background:#15151f;color:#e2e8f0;border-radius:9px;padding:8px 14px;font:600 12px ui-sans-serif,system-ui;cursor:pointer;}
     .pl-form-actions button[type="submit"]{border-color:#166534;background:#052e16;color:#4ade80;}
     .pl-form-actions button:hover{border-color:#7c3aed;}
+    .pl-form-sub{font-size:10px;letter-spacing:.02em;text-transform:none;color:#475569;}
     .pl-form-hint{font-size:11.5px;line-height:1.6;color:#64748b;margin:10px 0 0;}
     .pl-form-hint.good{color:#4ade80;}
     .pl-form-hint.bad{color:#fca5a5;}
@@ -102,10 +103,14 @@ import Layout from '../../layouts/Layout.astro';
     </section>
 
     <section class="pl-section">
-      <h2>Add a key id &middot; registering a key is data, never a secret</h2>
+      <h2>Add a key id &middot; per user, per key &middot; registering a key is data, never a secret</h2>
       <div class="pl-card" id="pl-key-add">
         <form id="pl-key-form" autocomplete="off">
           <div class="pl-form-grid">
+            <label>User <span class="pl-form-sub">paid account this key serves</span>
+              <select name="user" id="pl-key-user"><option value="owner">Owner (ours)</option></select>
+            </label>
+            <label>User label<input name="userLabel" placeholder="Owner" value="Owner"></label>
             <label>Key id<input name="id" placeholder="key-haksterai-codex-2" pattern="[a-z0-9][a-z0-9\-]{1,62}" required></label>
             <label>Label<input name="label" placeholder="Codex Pro 2 (ours)"></label>
             <label>Client / owner<input name="client" placeholder="haksterai.com" value="haksterai.com"></label>
@@ -524,36 +529,50 @@ import Layout from '../../layouts/Layout.astro';
           var kl = d.keyLedger;
           if (kl && Array.isArray(kl.keys)) {
             var klMid = ' · ';
-            var own = kl.keys.filter(function (k) { return k && k.client !== 'junkalot.co'; });
-            var jkKey = kl.keys.filter(function (k) { return k && k.client === 'junkalot.co'; })[0] || null;
-            // Same account, different name: our key and Junkalot's both sit on
+            // Same account, different name: our key and a client's both sit on
             // OLLAMA_CLOUD_KEY_2, so the account is printed on every row that shares
             // it and the label is what tells their usage apart (owner, 2026-11-26).
             var acctCount = {};
             kl.keys.forEach(function (k) { if (k && k.account) acctCount[k.account] = (acctCount[k.account] || 0) + 1; });
             var acctTag = function (k) { return k && k.account && acctCount[k.account] > 1 ? klMid + k.account : ''; };
             var jkRows = kl.junkalotKey;
-            var out = '<h3>' + own.length + ' key' + (own.length === 1 ? '' : 's') + ' ours ' +
+            // Per user, per key (owner 2026-11-26: "per user per key"): one block per
+            // user, its keys inside it. Nothing is summed across users — our keys and a
+            // paid user's key never share a total, and a client's key is not merged
+            // into ours (§29.6). A user with no recorded call still shows, at zero (§10).
+            var byId = {};
+            kl.keys.forEach(function (k) { if (k && k.id) byId[k.id] = k; });
+            var groups = Array.isArray(kl.byUser) && kl.byUser.length
+              ? kl.byUser
+              : [{ user: 'owner', label: 'Owner', keys: kl.keys.filter(function (k) { return k && k.client !== 'junkalot.co'; }).map(function (k) { return k.id; }) }];
+            var out = '<h3>Per user, per key ' +
               '<span class="pl-badge ' + (Number(kl.rows) > 0 ? 'live' : 'off') + '">' +
               (Number(kl.rows) > 0 ? compact(kl.rows) + ' RECORDED CALLS' : 'NO ROWS YET') + '</span></h3>';
-            out += own.length
-              ? own.map(function (k) {
-                  var m = k.month || {}, a = k.all || {};
-                  return row(k.id + ' · ' + (k.label || '') + acctTag(k),
-                    (Number(m.requests) > 0 || Number(a.requests) > 0)
-                      ? '30d ' + compact(m.requests) + ' req' + klMid + compact(m.inTokens) + ' in / ' + compact(m.outTokens) + ' out' +
-                        klMid + 'all-time ' + compact(a.requests) + ' req' + (k.envVar ? klMid + k.envVar : '')
-                      : 'no recorded call yet' + (k.envVar ? klMid + k.envVar : ''));
-                }).join('')
-              : '<p class="pl-empty">The key registry has no key of ours yet.</p>';
-            if (jkKey) {
-              out += '<h3 style="margin-top:14px;">Client key &middot; wired back to this meter</h3>' +
-                row(jkKey.id + ' · ' + (jkKey.label || '') + acctTag(jkKey), jkRows
-                  ? compact(jkRows.month.requests) + ' turns 30d' + klMid + compact(jkRows.month.inTokens) + ' in / ' + compact(jkRows.month.outTokens) + ' out' +
-                    (jkRows.all && jkRows.all.lastAt ? klMid + 'last ' + String(jkRows.all.lastAt).slice(0, 16).replace('T', ' ') : '')
-                  : 'her recorded rows have not been read yet — no figure is shown rather than a guess');
-            }
-            out += '<p class="pl-empty" style="margin-top:10px;">Our keys are counted from the calls this box recorded, per key id; Junkalot&rsquo;s key is read back from her own recorded turns, read only. Nothing is written into that project and nothing is billed. Her Junkalot admin never renders this card (CLAUDE.md §16, §19, §25, §30, §36).</p>';
+            out += groups.map(function (g) {
+              var gk = (Array.isArray(g.keys) ? g.keys : []).map(function (id) {
+                return byId[id] || { id: String(id), label: '', client: '', month: null, all: null };
+              });
+              var head = '<h3 style="margin-top:14px;">' + esc(String(g.label || g.user || 'Owner')) +
+                ' &middot; ' + gk.length + ' key' + (gk.length === 1 ? '' : 's') +
+                (g.month ? klMid + '30d ' + compact(g.month.requests) + ' req &middot; ' + compact(g.month.inTokens) + ' in / ' + compact(g.month.outTokens) + ' out' : '') +
+                '</h3>';
+              if (!gk.length) return head + '<p class="pl-empty">No key filed under this user yet.</p>';
+              return head + gk.map(function (k) {
+                var m = k.month || {}, a = k.all || {};
+                var isClient = k.client === 'junkalot.co';
+                return row(k.id + ' · ' + (k.label || '') + acctTag(k),
+                  isClient
+                    ? (jkRows
+                        ? compact(jkRows.month.requests) + ' turns 30d' + klMid + compact(jkRows.month.inTokens) + ' in / ' + compact(jkRows.month.outTokens) + ' out' +
+                          (jkRows.all && jkRows.all.lastAt ? klMid + 'last ' + String(jkRows.all.lastAt).slice(0, 16).replace('T', ' ') : '')
+                        : 'her recorded rows have not been read yet — no figure is shown rather than a guess')
+                    : ((Number(m.requests) > 0 || Number(a.requests) > 0)
+                        ? '30d ' + compact(m.requests) + ' req' + klMid + compact(m.inTokens) + ' in / ' + compact(m.outTokens) + ' out' +
+                          klMid + 'all-time ' + compact(a.requests) + ' req' + (k.envVar ? klMid + k.envVar : '')
+                        : 'no recorded call yet' + (k.envVar ? klMid + k.envVar : '')));
+              }).join('');
+            }).join('');
+            out += '<p class="pl-empty" style="margin-top:10px;">Every key is counted from the calls this box recorded, per key id; a client key (Junkalot&rsquo;s) is read back from her own recorded turns, read only. Per user first, per key inside it — no figure is summed across users. Nothing is written into another project and nothing is billed. A client&rsquo;s own admin never renders this card (CLAUDE.md §16, §19, §25, §29, §30, §36).</p>';
             klEl.innerHTML = out;
           } else {
             klEl.innerHTML = '<p class="pl-empty">The key ledger could not be read just now, so no per-key figure is shown rather than zeroes that look like data.</p>';
@@ -720,6 +739,53 @@ import Layout from '../../layouts/Layout.astro';
       var keyForm = document.getElementById('pl-key-form');
       var keyMsg = document.getElementById('pl-key-msg');
       var codexBtn = document.getElementById('pl-key-codex');
+      var keyUserSel = document.getElementById('pl-key-user');
+      // Per user, per key (owner 2026-11-26: "they keys u make for codex add to
+      // our admin for paid users in our monitor"). The user list is the real paid
+      // accounts from the server's own entitlement check — never a typed name — so
+      // a key is filed against an account that exists and actually pays, and one
+      // user's usage is never counted against another's (§29, §51.6).
+      function keySlugOf() {
+        return keyUserSel ? String(keyUserSel.value || 'owner') : 'owner';
+      }
+      function keyUserLabelOf() {
+        if (!keyUserSel || keyUserSel.selectedIndex < 0) return 'Owner';
+        var o = keyUserSel.options[keyUserSel.selectedIndex];
+        return (o && (o.getAttribute('data-label') || o.textContent)) || 'Owner';
+      }
+      if (keyUserSel && keyForm) {
+        keyUserSel.addEventListener('change', function () {
+          keyForm.elements.userLabel.value = keyUserLabelOf();
+          var idl = keyForm.elements.id;
+          var slug = keySlugOf();
+          if (!idl.value || /^key-[a-z0-9-]+-codex(?:-\d+)?$/.test(idl.value)) {
+            idl.value = slug === 'owner' ? 'key-haksterai-codex-2' : 'key-' + slug + '-codex';
+          }
+        });
+      }
+      function loadKeyUsers() {
+        if (!keyUserSel) return;
+        if (!token) { setKeyMsg('Owner sign-in required to list paid accounts.', false); return; }
+        fetch('/api/admin/provider-keys', { headers: { 'x-api-key': token } })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || !Array.isArray(d.paidUsers)) return;
+            var keep = keyUserSel.value || 'owner';
+            var html = '<option value="owner" data-label="Owner">Owner (ours)</option>';
+            d.paidUsers.forEach(function (u) {
+              if (!u || !u.user || u.user === 'owner') return;
+              var lab = String(u.label || u.user) + ' · ' + String(u.plan || 'paid') + (u.cliIncluded ? '' : ' · lapsed');
+              html += '<option value="' + esc(u.user) + '" data-label="' + esc(u.label || u.user) + '">' + esc(lab) + '</option>';
+            });
+            keyUserSel.innerHTML = html;
+            keyUserSel.value = keep;
+            if (keyUserSel.selectedIndex < 0) keyUserSel.value = 'owner';
+          })
+          .catch(function () {
+            // The list is a convenience; a key can still be registered for the owner.
+          });
+      }
+      loadKeyUsers();
       function setKeyMsg(text, ok) {
         if (!keyMsg) return;
         keyMsg.textContent = text;
@@ -728,8 +794,10 @@ import Layout from '../../layouts/Layout.astro';
       if (codexBtn && keyForm) {
         codexBtn.addEventListener('click', function () {
           var f = keyForm.elements;
-          if (!f.id.value) f.id.value = 'key-haksterai-codex-2';
-          if (!f.label.value) f.label.value = 'Codex Pro 2 (ours)';
+          var slug = keySlugOf();
+          if (!f.id.value) f.id.value = slug === 'owner' ? 'key-haksterai-codex-2' : 'key-' + slug + '-codex';
+          if (!f.userLabel.value) f.userLabel.value = keyUserLabelOf();
+          if (!f.label.value) f.label.value = slug === 'owner' ? 'Codex Pro 2 (ours)' : 'Codex · ' + keyUserLabelOf();
           if (!f.account.value) f.account.value = 'codex-pro';
           if (!f.provider.value) f.provider.value = 'codex-cli';
           if (!f.envVar.value) f.envVar.value = 'CODEX_AUTH_JSON (~/.codex/auth.json)';
@@ -746,6 +814,8 @@ import Layout from '../../layouts/Layout.astro';
           var body = {
             id: String(f.id.value || '').trim(),
             label: String(f.label.value || '').trim(),
+            user: String(f.user.value || 'owner').trim(),
+            userLabel: String(f.userLabel.value || '').trim(),
             client: String(f.client.value || '').trim() || 'haksterai.com',
             account: String(f.account.value || '').trim(),
             provider: String(f.provider.value || '').trim(),

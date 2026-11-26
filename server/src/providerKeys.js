@@ -45,6 +45,8 @@ const DEFAULT_REGISTRY = {
   keys: [
     {
       id: 'key-haksterai-1',
+      user: 'owner',
+      userLabel: 'Owner',
       label: 'HAKSTERAI-FLASH (ours)',
       client: 'haksterai.com',
       account: 'ollama-cloud-2',
@@ -57,6 +59,8 @@ const DEFAULT_REGISTRY = {
     },
     {
       id: 'key-haksterai-relay',
+      user: 'owner',
+      userLabel: 'Owner',
       label: 'HAKSTERAI-FLASH · relay (ours)',
       client: 'haksterai.com',
       provider: 'relay',
@@ -68,6 +72,8 @@ const DEFAULT_REGISTRY = {
     },
     {
       id: 'key-junkalot-1',
+      user: 'junkalot',
+      userLabel: 'Junkalot · client',
       label: 'Junkalot Coach',
       client: 'junkalot.co',
       account: 'ollama-cloud-2',
@@ -82,6 +88,8 @@ const DEFAULT_REGISTRY = {
     },
     {
       id: 'key-haksterai-codex',
+      user: 'owner',
+      userLabel: 'Owner',
       label: 'HAKSTERAI-FLASH · Codex Pro (ours)',
       client: 'haksterai.com',
       account: 'codex-pro',
@@ -94,6 +102,8 @@ const DEFAULT_REGISTRY = {
     },
     {
       id: 'key-haksterai-codex-api',
+      user: 'owner',
+      userLabel: 'Owner',
       label: 'Codex API · Nous (ours)',
       client: 'haksterai.com',
       account: 'codex-api',
@@ -106,6 +116,8 @@ const DEFAULT_REGISTRY = {
     },
     {
       id: 'key-ollama-cloud2',
+      user: 'owner',
+      userLabel: 'Owner',
       label: 'Ollama Cloud 2 · spare',
       client: 'haksterai.com',
       provider: 'ollama-cloud',
@@ -116,6 +128,8 @@ const DEFAULT_REGISTRY = {
     },
     {
       id: 'key-ollama-cloud3',
+      user: 'owner',
+      userLabel: 'Owner',
       label: 'Ollama Cloud 3 · spare',
       client: 'haksterai.com',
       provider: 'ollama-cloud',
@@ -151,10 +165,18 @@ function loadRegistry() {
   return {
     version: Number(raw.version) || 1,
     note: typeof raw.note === 'string' ? raw.note : DEFAULT_REGISTRY.note,
-    keys: merged.filter((k) => k && typeof k.id === 'string' && k.id.trim()).map((k) => ({
+    keys: merged.filter((k) => k && typeof k.id === 'string' && k.id.trim()).map((k) => {
+      // A registry row names its user; when it does not, the client is the only
+      // honest signal — a Junkalot key belongs to that client, everything else
+      // to us. Usage is never summed across users (§29.6).
+      const client = String(k.client || '').slice(0, 80);
+      const user = String(k.user || (client === 'junkalot.co' ? 'junkalot' : 'owner')).slice(0, 40);
+      return {
       id: String(k.id).trim(),
       label: String(k.label || k.id).slice(0, 80),
-      client: String(k.client || '').slice(0, 80),
+      user,
+      userLabel: String(k.userLabel || (user === 'junkalot' ? 'Junkalot · client' : 'Owner')).slice(0, 80),
+      client,
       account: String(k.account || '').slice(0, 60),
       provider: String(k.provider || '').slice(0, 60),
       envVar: String(k.envVar || '').slice(0, 80),
@@ -165,7 +187,8 @@ function loadRegistry() {
       note: String(k.note || '').slice(0, 300),
       fingerprint: typeof k.fingerprint === 'string' ? k.fingerprint.slice(0, 32) : '',
       createdAt: String(k.createdAt || '').slice(0, 20),
-    })),
+      };
+    }),
   };
 }
 
@@ -198,6 +221,8 @@ function listKeys() {
   return reg.keys.map((k) => ({
     id: k.id,
     label: k.label,
+    user: k.user,
+    userLabel: k.userLabel,
     client: k.client,
     account: k.account,
     provider: k.provider,
@@ -247,10 +272,14 @@ function upsertKey(input, opts = {}) {
   const fingerprint = fpEnv && process.env[fpEnv]
     ? fingerprintKey(process.env[fpEnv])
     : (prev ? prev.fingerprint : '');
+  const client = String(src.client || (prev && prev.client) || '').slice(0, 80);
+  const user = String(src.user || (prev && prev.user) || (client === 'junkalot.co' ? 'junkalot' : 'owner')).slice(0, 40);
   const row = {
     id,
     label: String(src.label || (prev && prev.label) || id).slice(0, 80),
-    client: String(src.client || (prev && prev.client) || '').slice(0, 80),
+    user,
+    userLabel: String(src.userLabel || (prev && prev.userLabel) || (user === 'junkalot' ? 'Junkalot · client' : 'Owner')).slice(0, 80),
+    client,
     account: String(src.account || (prev && prev.account) || '').slice(0, 60),
     provider: String(src.provider || (prev && prev.provider) || '').slice(0, 60),
     envVar: String(src.envVar || (prev && prev.envVar) || '').slice(0, 80),
@@ -281,6 +310,7 @@ function recordKeyUsage(row) {
     const clean = {
       at: new Date(row && row.at ? row.at : Date.now()).toISOString(),
       keyId: String((row && row.keyId) || '').slice(0, 64) || null,
+      user: String((row && row.user) || '').slice(0, 40) || null,
       client: String((row && row.client) || '').slice(0, 80) || null,
       provider: String((row && row.provider) || '').slice(0, 60) || null,
       model: String((row && row.model) || '').slice(0, 80) || null,
@@ -293,6 +323,15 @@ function recordKeyUsage(row) {
     if (!clean.keyId && !clean.lane) return null;
     if (!clean.keyId) clean.keyId = keyIdByLane(clean.lane);
     if (!clean.keyId) return null;
+    // Every recorded row is filed under its user AND its key, so a figure can be
+    // read per user, per key, without joining two keys of different users (§29.6).
+    if (!clean.user || !clean.client) {
+      const k = loadRegistry().keys.find((x) => x.id === clean.keyId);
+      if (k) {
+        if (!clean.user) clean.user = k.user;
+        if (!clean.client) clean.client = k.client;
+      }
+    }
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.appendFileSync(LEDGER_FILE, `${JSON.stringify(clean)}\n`, { mode: 0o600 });
     return clean;
@@ -375,12 +414,13 @@ function summarize(now = Date.now()) {
     b.lanes.set(lane, laneRow);
   }
   const empty = () => ({ requests: 0, inTokens: 0, outTokens: 0 });
-  return {
-    keys: reg.keys.map((k) => {
+  const keyRows = reg.keys.map((k) => {
       const b = buckets.get(k.id);
       return {
         id: k.id,
         label: k.label,
+        user: k.user,
+        userLabel: k.userLabel,
         client: k.client,
         account: k.account,
         provider: k.provider,
@@ -400,7 +440,27 @@ function summarize(now = Date.now()) {
         usedLanes: b ? [...b.lanes.values()].sort((x, y) => y.tokens - x.tokens) : [],
         measured: Boolean(b && b.all.requests),
       };
-    }),
+  });
+  // Per user, then per key: one block per user, its keys inside it, and the
+  // user's own month/all figures summed from those keys only. Nothing is summed
+  // across users — our lanes and a client's key never share a total (§29.6).
+  const userOrder = ['owner', 'junkalot'];
+  const userGroups = new Map();
+  for (const k of keyRows) {
+    const u = k.user || 'owner';
+    if (!userGroups.has(u)) userGroups.set(u, { user: u, label: k.userLabel || u, keys: [], month: empty(), all: empty() });
+    const g = userGroups.get(u);
+    g.keys.push(k.id);
+    add(g.month, k.month);
+    add(g.all, k.all);
+  }
+  const byUser = [...userGroups.values()].sort((a, b) => {
+    const ai = userOrder.indexOf(a.user); const bi = userOrder.indexOf(b.user);
+    return (ai === -1 ? userOrder.length : ai) - (bi === -1 ? userOrder.length : bi);
+  });
+  return {
+    keys: keyRows,
+    byUser,
     rows: rows.length,
     ledger: LEDGER_FILE,
     note: 'Requests and tokens recorded per key on this box. A key with no rows reads zero; nothing here is estimated (§10) and nothing is billed (§19).',

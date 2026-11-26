@@ -161,7 +161,10 @@ test('the self-config guard refuses a write to the usage ids', () => {
 
 test('/usage renders the locked ids and attributes recent calls per id', () => {
   assert.match(usageViewSource, /from '\.\.\/\.\.\/\.\.\/src\/usage-ids\.js'/, 'UsageView no longer reads the locked ids');
-  assert.match(usageViewSource, /ownUsageIds\(\)/, 'the locked floor is unused');
+  // The billing block renders the locked floor through listUsageIds() (every id,
+  // grouped per user), so pin that call — a view that stopped reading the locked
+  // config would silently fall back to whatever the server happened to serve.
+  assert.match(usageViewSource, /listUsageIds\(\)/, 'the locked floor is unused');
   assert.match(usageViewSource, /usageIdFor\(/, 'recent calls are no longer attributed to an id');
   assert.match(usageViewSource, /ids locked in CLI config/, 'the billing block stopped saying the ids are locked');
 });

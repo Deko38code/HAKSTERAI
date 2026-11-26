@@ -12809,6 +12809,53 @@ app.get('/api/admin/profit-live', requireOwner, async (req, res) => {
   }
 });
 
+// GET /api/admin/provider-keys — the key registry grouped per user, plus the
+// paid accounts a key can be registered for.
+// Owner (2026-11-26): "they keys u make for codex add to our admin for paid users
+// in our monitor" and "per user per key". The user list is read from the real
+// account table with the same entitlement check the CLI gate uses — never a
+// hand-typed name — so a key is filed against an account that actually exists and
+// actually pays. Owner-only, read-only, and it returns no key value: ids, labels,
+// env-var NAMES and measured counters only (§9, §23, §31, §51).
+function usageUserSlug(value) {
+  const s = String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return (s || 'user').slice(0, 40);
+}
+app.get('/api/admin/provider-keys', requireOwner, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  try {
+    let paidUsers = [];
+    try {
+      const db = getDb();
+      const rows = db.prepare(`SELECT id, username, email, role, plan, status FROM users ORDER BY created_at DESC LIMIT 500`).all();
+      paidUsers = rows
+        .filter((u) => planIncludesCli(u.plan) || cliEntitlementState(u).included)
+        .map((u) => ({
+          userId: u.id,
+          user: usageUserSlug(u.username || u.email),
+          label: String(u.username || u.email || '').slice(0, 80),
+          plan: u.plan || '',
+          planAllowsCli: planIncludesCli(u.plan),
+          cliIncluded: cliEntitlementState(u).included,
+        }))
+        .filter((u, i, arr) => u.user && arr.findIndex((x) => x.user === u.user) === i);
+    } catch { paidUsers = []; }
+    const summary = providerKeys.summarize();
+    return res.json({
+      ok: true,
+      keys: summary.keys,
+      byUser: summary.byUser,
+      rows: summary.rows,
+      paidUsers,
+      minPriceCents: CLI_MIN_PRICE_CENTS,
+      note: 'Per user, per key. A key is registered against a paid account from this page; its value never travels — only the env-var NAME it lives in. Nothing here is billed.',
+    });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: 'The key registry is unavailable right now' });
+  }
+});
+
 // POST /api/admin/provider-keys — register one key id from the admin page.
 // Owner only, and the key VALUE never travels: the endpoint accepts the env-var
 // NAME the value lives in (§9, §23, §31). Adding a key is data, not a code
@@ -12820,6 +12867,12 @@ app.post('/api/admin/provider-keys', express.json({ limit: '8kb' }), requireOwne
     const saved = providerKeys.upsertKey({
       id: body.id,
       label: body.label,
+      // Per user, per key: a key is filed under the account it serves, so one
+      // user's usage is never counted against another's even on a shared account
+      // (§29 one key per paid plan, §51.6 honest attribution). A missing user
+      // falls back to the registry's own rule inside upsertKey.
+      user: body.user ? usageUserSlug(body.user) : undefined,
+      userLabel: body.userLabel,
       client: body.client,
       account: body.account,
       provider: body.provider,
@@ -12839,6 +12892,8 @@ app.post('/api/admin/provider-keys', express.json({ limit: '8kb' }), requireOwne
       keys: saved.registry.keys.map((k) => ({
         id: k.id,
         label: k.label,
+        user: k.user,
+        userLabel: k.userLabel,
         client: k.client,
         account: k.account,
         provider: k.provider,
@@ -12847,6 +12902,8 @@ app.post('/api/admin/provider-keys', express.json({ limit: '8kb' }), requireOwne
         basis: k.basis,
         createdAt: k.createdAt,
       })),
+      // Grouped per user, per key, so the page can re-render without a second call.
+      byUser: providerKeys.summarize().byUser,
       note: 'The key id is registered. Its value belongs in the env var named below, entered through /home/ghost/bin/secret-add — never sent to this endpoint.',
     });
   } catch (err) {

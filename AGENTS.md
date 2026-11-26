@@ -1047,3 +1047,42 @@ Verified read-only at adoption 2026-11-26: `keyLedger` gated at `server/src/inde
 `data/provider-keys.json` + `data/key-usage.jsonl` (mode 600), and the profit-field grep across the five
 Junkalot-touching modules returns nothing. The `keyLedger` blocks are **pending the live server's next
 natural restart** (§37, §45) and are reported as pending rather than live.
+
+---
+
+## Session Log — 2026-11-26 (per user, per key)
+
+_Appended 2026-11-26 at the owner's direction ("per user per key"). Nothing above this line was rewritten,
+reordered or removed. Backups taken and hash-verified identical before the append:
+`AGENTS.md.bak-20261126T135500Z` (80246 B, sha256 `1f913eb42089…`), `CLAUDE.md.bak-20261126T135500Z`
+(123169 B, sha256 `b1ee8196ba45…`). A recorded direction and a record of work done; a numbered rule only if
+the owner says so._
+
+**Per user first, per key inside it — never summed across users.** Every key id is owned by exactly one
+user, so one account carrying our key and a paid user's key no longer merges into one figure (§29.6,
+§51.6).
+
+1. **Locked in the CLI config.** `cli/src/usage-ids.js` carries `USERS`, `USER_ORDER`, a `user` /
+   `userLabel` on every locked id, and `groupByUser()`; `ownUsageIds()` now means "filed under the owner",
+   not "not Junkalot's", so a paying user's key cannot be silently dropped (§29, §50.1).
+2. **The registry records the owner.** `server/src/providerKeys.js` seeds `user` / `userLabel`,
+   `loadRegistry()` derives them for a row that lacks them (`junkalot.co` → that client, else owner),
+   `upsertKey()` accepts them, `recordKeyUsage()` stamps `user` on every row and inherits it from the key id,
+   and `summarize()` returns `byUser` — per-user `month` / `all` totals summed from that user's keys only.
+3. **Both screens show the same shape** — `/usage` in the CLI and the **Model keys** card on
+   `haksterai.com/admin/profit`: a user block, its keys inside it, a client key never merged into ours, and
+   an id that measured nothing shown at zero (§10).
+4. **Adding a key from admin is per user.** `GET /api/admin/provider-keys` (owner only, read-only) lists the
+   real paid accounts from the `users` table behind `planIncludesCli` / `cliEntitlementState`; the
+   `/admin/profit` form files a new key — Codex included — under the user selected. The key VALUE never
+   travels, only the env-var NAME (§9, §23, §31).
+5. **Nothing locked moves** — no model, route, provider order, rate, plan or allowance (§19.3, §22.4, §26);
+   nothing written into Junkalot and no profit rendered there (§16, §30, §36, §52).
+
+Verified 2026-11-26: live registry reads 7 keys as owner 6 + junkalot 1 with no cross-user total; a
+temp-registry upsert produced a third ordered block and its ledger row inherited `user` / `client` from the
+key id, with no token-shaped value in the file; `node --check` clean on the three modules; CLI suite
+**321/321**; `ui-fb.mjs` rebuilt at 438.8 kB (sha256 `9d54ba88a03b…`), CLI **0.3.102**, `/cli/latest.json`
+matching disk; site built through the widget (§27) and `/admin/profit/` serving `200` with the per-user
+block. The live server keeps its running code until its next natural restart (§37, §45) — the new GET route
+and per-row `user` stamping are **pending a restart**, reported as pending rather than live.

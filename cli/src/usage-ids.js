@@ -57,13 +57,28 @@ const REGISTRY_FILE = process.env.PROVIDER_KEYS_FILE
   || (REPO ? path.join(REPO, 'server', 'data', 'provider-keys.json') : '');
 
 /**
- * LOCKED — our usage ids, one per model key. Every entry mirrors the server
- * seed; the codex lanes are here so Codex usage is measured per key too.
+ * LOCKED — who a key's usage belongs to, in display order. Usage is read and
+ * shown per user first, then per key: our own lanes and a client's key never
+ * fold into one figure, even when two keys sit on the same account (§29.6).
+ */
+const USERS = Object.freeze({
+  owner: Object.freeze({ user: 'owner', label: 'Owner' }),
+  junkalot: Object.freeze({ user: 'junkalot', label: 'Junkalot · client' }),
+});
+
+const USER_ORDER = Object.freeze(['owner', 'junkalot']);
+
+/**
+ * LOCKED — our usage ids, one per model key, each owned by one user. Every
+ * entry mirrors the server seed; the codex lanes are here so Codex usage is
+ * measured per key too.
  */
 const LOCKED_USAGE_IDS = Object.freeze([
   Object.freeze({
     id: 'key-haksterai-1',
     label: 'HAKSTERAI-FLASH (ours)',
+    user: 'owner',
+    userLabel: 'Owner',
     client: 'haksterai.com',
     account: 'ollama-cloud-2',
     envVar: 'OLLAMA_CLOUD_KEY_2',
@@ -72,6 +87,8 @@ const LOCKED_USAGE_IDS = Object.freeze([
   Object.freeze({
     id: 'key-haksterai-relay',
     label: 'HAKSTERAI-FLASH · relay (ours)',
+    user: 'owner',
+    userLabel: 'Owner',
     client: 'haksterai.com',
     account: '',
     envVar: 'DEEPSEEK_BASE_URL',
@@ -80,6 +97,8 @@ const LOCKED_USAGE_IDS = Object.freeze([
   Object.freeze({
     id: 'key-haksterai-codex',
     label: 'HAKSTERAI-FLASH · Codex Pro (ours)',
+    user: 'owner',
+    userLabel: 'Owner',
     client: 'haksterai.com',
     account: 'codex-pro',
     envVar: 'CODEX_AUTH_JSON (~/.codex/auth.json)',
@@ -88,6 +107,8 @@ const LOCKED_USAGE_IDS = Object.freeze([
   Object.freeze({
     id: 'key-haksterai-codex-api',
     label: 'Codex API · Nous (ours)',
+    user: 'owner',
+    userLabel: 'Owner',
     client: 'haksterai.com',
     account: 'codex-api',
     envVar: 'CODEX_API_KEY',
@@ -96,6 +117,8 @@ const LOCKED_USAGE_IDS = Object.freeze([
   Object.freeze({
     id: 'key-junkalot-1',
     label: 'Junkalot Coach',
+    user: 'junkalot',
+    userLabel: 'Junkalot · client',
     client: 'junkalot.co',
     account: 'ollama-cloud-2',
     envVar: 'OLLAMA_CLOUD_KEY_2',
@@ -145,6 +168,8 @@ function listUsageIds() {
   const out = LOCKED_USAGE_IDS.map((k) => ({
     id: k.id,
     label: k.label,
+    user: k.user,
+    userLabel: k.userLabel,
     client: k.client,
     account: k.account,
     envVar: k.envVar,
@@ -157,10 +182,16 @@ function listUsageIds() {
     const id = String((k && k.id) || '').trim();
     if (!id || known.has(id) || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(id)) continue;
     known.add(id);
+    const client = String(k.client || '');
+    // A registry row added later names its user; when it does not, the client is
+    // the only honest signal — a Junkalot key is a client's, everything else ours.
+    const user = String(k.user || (client === 'junkalot.co' ? 'junkalot' : 'owner'));
     out.push({
       id,
       label: String(k.label || id),
-      client: String(k.client || ''),
+      user,
+      userLabel: String(k.userLabel || (USERS[user] && USERS[user].label) || user),
+      client,
       account: String(k.account || ''),
       envVar: String(k.envVar || ''),
       lanes: Array.isArray(k.lanes) ? k.lanes.map(String) : [],
@@ -171,9 +202,14 @@ function listUsageIds() {
   return out;
 }
 
-/** Our ids only (everything that is not a client's). */
+/**
+ * Our own ids only — keys filed under the owner. Now that a paid account gets its
+ * own key id (§29, "per user per key"), "ours" cannot mean "not Junkalot's": a
+ * paying user's key is neither ours nor a client's, so it is excluded by user,
+ * never by client name.
+ */
 function ownUsageIds() {
-  return listUsageIds().filter((k) => k.client !== 'junkalot.co');
+  return listUsageIds().filter((k) => String(k.user || 'owner') === 'owner');
 }
 
 /** The account tag is printed only where two ids share one account (§51). */
@@ -190,6 +226,34 @@ function accountTags(ids) {
   return tags;
 }
 
+/**
+ * Usage grouped per user, then per key — the shape both /usage and the admin card
+ * render. Order is stable (`owner`, then `junkalot`, then anything added later in
+ * the order it appeared), so a user's block never jumps rows between refreshes.
+ * A key belongs to exactly one user; nothing is summed across users (§29.6).
+ */
+function groupByUser(ids) {
+  const list = Array.isArray(ids) ? ids : [];
+  const groups = new Map();
+  for (const k of list) {
+    if (!k || !k.id) continue;
+    const user = String(k.user || 'owner');
+    if (!groups.has(user)) {
+      groups.set(user, {
+        user,
+        label: String(k.userLabel || (USERS[user] && USERS[user].label) || user),
+        keys: [],
+      });
+    }
+    groups.get(user).keys.push(k);
+  }
+  const rank = (u) => {
+    const i = USER_ORDER.indexOf(u);
+    return i === -1 ? USER_ORDER.length : i;
+  };
+  return [...groups.values()].sort((a, b) => rank(a.user) - rank(b.user));
+}
+
 /** One-line display for an id. */
 function describeUsageId(k) {
   if (!k) return '';
@@ -202,11 +266,14 @@ function describeUsageId(k) {
 
 module.exports = {
   REGISTRY_FILE,
+  USERS,
+  USER_ORDER,
   LOCKED_USAGE_IDS,
   LANE_USAGE_ID,
   usageIdFor,
   listUsageIds,
   ownUsageIds,
+  groupByUser,
   accountTags,
   describeUsageId,
 };

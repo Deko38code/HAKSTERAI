@@ -671,10 +671,17 @@ var require_usage_ids = __commonJS({
       return base ? path8.resolve(base) : "";
     })();
     var REGISTRY_FILE = process.env.PROVIDER_KEYS_FILE || (REPO ? path8.join(REPO, "server", "data", "provider-keys.json") : "");
+    var USERS = Object.freeze({
+      owner: Object.freeze({ user: "owner", label: "Owner" }),
+      junkalot: Object.freeze({ user: "junkalot", label: "Junkalot \xB7 client" })
+    });
+    var USER_ORDER = Object.freeze(["owner", "junkalot"]);
     var LOCKED_USAGE_IDS = Object.freeze([
       Object.freeze({
         id: "key-haksterai-1",
         label: "HAKSTERAI-FLASH (ours)",
+        user: "owner",
+        userLabel: "Owner",
         client: "haksterai.com",
         account: "ollama-cloud-2",
         envVar: "OLLAMA_CLOUD_KEY_2",
@@ -683,6 +690,8 @@ var require_usage_ids = __commonJS({
       Object.freeze({
         id: "key-haksterai-relay",
         label: "HAKSTERAI-FLASH \xB7 relay (ours)",
+        user: "owner",
+        userLabel: "Owner",
         client: "haksterai.com",
         account: "",
         envVar: "DEEPSEEK_BASE_URL",
@@ -691,6 +700,8 @@ var require_usage_ids = __commonJS({
       Object.freeze({
         id: "key-haksterai-codex",
         label: "HAKSTERAI-FLASH \xB7 Codex Pro (ours)",
+        user: "owner",
+        userLabel: "Owner",
         client: "haksterai.com",
         account: "codex-pro",
         envVar: "CODEX_AUTH_JSON (~/.codex/auth.json)",
@@ -699,6 +710,8 @@ var require_usage_ids = __commonJS({
       Object.freeze({
         id: "key-haksterai-codex-api",
         label: "Codex API \xB7 Nous (ours)",
+        user: "owner",
+        userLabel: "Owner",
         client: "haksterai.com",
         account: "codex-api",
         envVar: "CODEX_API_KEY",
@@ -707,6 +720,8 @@ var require_usage_ids = __commonJS({
       Object.freeze({
         id: "key-junkalot-1",
         label: "Junkalot Coach",
+        user: "junkalot",
+        userLabel: "Junkalot \xB7 client",
         client: "junkalot.co",
         account: "ollama-cloud-2",
         envVar: "OLLAMA_CLOUD_KEY_2",
@@ -735,10 +750,12 @@ var require_usage_ids = __commonJS({
         return [];
       }
     }
-    function listUsageIds() {
+    function listUsageIds2() {
       const out = LOCKED_USAGE_IDS.map((k) => ({
         id: k.id,
         label: k.label,
+        user: k.user,
+        userLabel: k.userLabel,
         client: k.client,
         account: k.account,
         envVar: k.envVar,
@@ -751,10 +768,14 @@ var require_usage_ids = __commonJS({
         const id = String(k && k.id || "").trim();
         if (!id || known.has(id) || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(id)) continue;
         known.add(id);
+        const client2 = String(k.client || "");
+        const user = String(k.user || (client2 === "junkalot.co" ? "junkalot" : "owner"));
         out.push({
           id,
           label: String(k.label || id),
-          client: String(k.client || ""),
+          user,
+          userLabel: String(k.userLabel || USERS[user] && USERS[user].label || user),
+          client: client2,
           account: String(k.account || ""),
           envVar: String(k.envVar || ""),
           lanes: Array.isArray(k.lanes) ? k.lanes.map(String) : [],
@@ -764,8 +785,8 @@ var require_usage_ids = __commonJS({
       }
       return out;
     }
-    function ownUsageIds2() {
-      return listUsageIds().filter((k) => k.client !== "junkalot.co");
+    function ownUsageIds() {
+      return listUsageIds2().filter((k) => String(k.user || "owner") === "owner");
     }
     function accountTags2(ids) {
       const counts = /* @__PURE__ */ new Map();
@@ -779,6 +800,27 @@ var require_usage_ids = __commonJS({
       }
       return tags;
     }
+    function groupByUser2(ids) {
+      const list = Array.isArray(ids) ? ids : [];
+      const groups = /* @__PURE__ */ new Map();
+      for (const k of list) {
+        if (!k || !k.id) continue;
+        const user = String(k.user || "owner");
+        if (!groups.has(user)) {
+          groups.set(user, {
+            user,
+            label: String(k.userLabel || USERS[user] && USERS[user].label || user),
+            keys: []
+          });
+        }
+        groups.get(user).keys.push(k);
+      }
+      const rank = (u) => {
+        const i = USER_ORDER.indexOf(u);
+        return i === -1 ? USER_ORDER.length : i;
+      };
+      return [...groups.values()].sort((a, b) => rank(a.user) - rank(b.user));
+    }
     function describeUsageId(k) {
       if (!k) return "";
       const parts = [k.id];
@@ -789,11 +831,14 @@ var require_usage_ids = __commonJS({
     }
     module.exports = {
       REGISTRY_FILE,
+      USERS,
+      USER_ORDER,
       LOCKED_USAGE_IDS,
       LANE_USAGE_ID,
       usageIdFor: usageIdFor2,
-      listUsageIds,
-      ownUsageIds: ownUsageIds2,
+      listUsageIds: listUsageIds2,
+      ownUsageIds,
+      groupByUser: groupByUser2,
       accountTags: accountTags2,
       describeUsageId
     };
@@ -3310,31 +3355,49 @@ function UsageView({ width = 80, height = 24, usage = null, refreshSeconds = 15,
       const money = data.ownerMeter;
       const stale = !data.keyLedger;
       const liveById = new Map(keys.map((k) => [k && k.id, k]));
-      const ids = (0, import_usage_ids.ownUsageIds)();
+      const ids = (0, import_usage_ids.listUsageIds)();
       for (const k of keys) {
-        if (k && k.client !== "junkalot.co" && !ids.some((i) => i.id === k.id)) {
-          ids.push({ id: k.id, label: k.label || "", account: k.account || "", envVar: k.envVar || "", lanes: Array.isArray(k.lanes) ? k.lanes.map(String) : [] });
+        if (k && !ids.some((i) => i.id === k.id)) {
+          ids.push({
+            id: k.id,
+            label: k.label || "",
+            user: k.user || (k.client === "junkalot.co" ? "junkalot" : "owner"),
+            userLabel: k.userLabel || "",
+            client: k.client || "",
+            account: k.account || "",
+            envVar: k.envVar || "",
+            lanes: Array.isArray(k.lanes) ? k.lanes.map(String) : []
+          });
         }
       }
       const tags = (0, import_usage_ids.accountTags)(ids.map((k) => ({ id: k.id, account: k.account || (liveById.get(k.id) || {}).account || "" })));
-      const jkKey = keys.filter((k) => k && k.client === "junkalot.co")[0] || null;
-      const show = ids.slice(0, 5);
+      const groups = (0, import_usage_ids.groupByUser)(ids);
       return /* @__PURE__ */ jsxs11(Fragment5, { children: [
-        line("Billing \xB7 HAKSTERAI-FLASH \xB7 one id per model key \xB7 ids locked in CLI config", "green"),
-        show.length ? show.map((k) => {
-          const l = liveById.get(k.id) || null;
-          const tag = tags.get(k.id) ? ` \xB7 ${tags.get(k.id)}` : "";
-          const name = `${k.id}${k.label ? ` \xB7 ${k.label}` : ""}${tag}`;
-          if (!l) {
-            const lane = k.lanes && k.lanes.length ? `lane ${k.lanes.join("/")}` : "no lane bound yet";
-            return /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: clip(`  ${name}  ${stale ? "locked \xB7 ledger reads after the server restart" : "locked \xB7 no call recorded yet"} \xB7 ${lane}${k.envVar ? ` \xB7 ${k.envVar}` : ""}`, inner) }) }, k.id);
-          }
-          return /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
-            line(`  ${name}  30d ${fmtNum(l.month && l.month.requests)} req \xB7 in ${fmtNum(l.month && l.month.inTokens)} \xB7 out ${fmtNum(l.month && l.month.outTokens)}`),
-            line(`     all-time ${fmtNum(l.all && l.all.requests)} req \xB7 ${fmtNum(l.all && l.all.inTokens || 0)} in / ${fmtNum(l.all && l.all.outTokens || 0)} out${l.usedLanes && l.usedLanes.length ? ` \xB7 lanes ${l.usedLanes.map((x) => x.lane).slice(0, 2).join(", ")}` : ""}`, "gray")
-          ] }, k.id);
-        }) : line("  no usage ids in the CLI config", "gray"),
-        line(`  ${jkKey ? jkKey.id : "key-junkalot-1"} \xB7 ${jkKey && jkKey.label || "Junkalot Coach"}${jkKey && tags.get(jkKey.id) ? ` \xB7 ${tags.get(jkKey.id)}` : ""} \xB7 ${jk ? `${fmtNum(jk.month && jk.month.requests)} turns 30d` : stale ? "her rows read after the server restart" : "reading her rows\u2026"} \xB7 wired to our admin profit meter`, stale ? "gray" : "white"),
+        line("Billing \xB7 HAKSTERAI-FLASH \xB7 per user, per key \xB7 ids locked in CLI config", "green"),
+        groups.length ? groups.map((g) => /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
+          line(`  ${String(g.label).toUpperCase()} \xB7 ${g.keys.length} key${g.keys.length === 1 ? "" : "s"}`, "green"),
+          g.keys.map((k) => {
+            const l = liveById.get(k.id) || null;
+            const tag = tags.get(k.id) ? ` \xB7 ${tags.get(k.id)}` : "";
+            const name = `${k.id}${k.label ? ` \xB7 ${k.label}` : ""}${tag}`;
+            const isClient = k.client === "junkalot.co";
+            if (isClient) {
+              const fig = jk ? `${fmtNum(jk.month && jk.month.requests)} turns 30d \xB7 in ${fmtNum(jk.month && jk.month.inTokens)} \xB7 out ${fmtNum(jk.month && jk.month.outTokens)}` : stale ? "her rows read after the server restart" : "reading her rows\u2026";
+              return /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
+                line(`    ${name}   ${fig}`, stale && !jk ? "gray" : "white"),
+                line("       wired to our admin profit meter \xB7 never rendered on junkalot.co", "gray")
+              ] }, k.id);
+            }
+            if (!l) {
+              const lane = k.lanes && k.lanes.length ? `lane ${k.lanes.join("/")}` : "no lane bound yet";
+              return /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { fg: "gray", children: clip(`    ${name}  ${stale ? "locked \xB7 ledger reads after the server restart" : "locked \xB7 no call recorded yet"} \xB7 ${lane}${k.envVar ? ` \xB7 ${k.envVar}` : ""}`, inner) }) }, k.id);
+            }
+            return /* @__PURE__ */ jsxs11("box", { style: { width: inner, flexDirection: "column", flexShrink: 0 }, children: [
+              line(`    ${name}  30d ${fmtNum(l.month && l.month.requests)} req \xB7 in ${fmtNum(l.month && l.month.inTokens)} \xB7 out ${fmtNum(l.month && l.month.outTokens)}`),
+              line(`       all-time ${fmtNum(l.all && l.all.requests)} req \xB7 ${fmtNum(l.all && l.all.inTokens || 0)} in / ${fmtNum(l.all && l.all.outTokens || 0)} out${l.usedLanes && l.usedLanes.length ? ` \xB7 lanes ${l.usedLanes.map((x) => x.lane).slice(0, 2).join(", ")}` : ""}`, "gray")
+            ] }, k.id);
+          })
+        ] }, `u:${g.user}`)) : line("  no usage ids in the CLI config", "gray"),
         money ? line(`  metered $${Number(money.monthMeterUsd || 0).toFixed(2)} 30d \xB7 $${Number(money.meterUsd || 0).toFixed(2)} all-time at $${Number(money.rateInPerMTok || 0).toFixed(2)} in / $${Number(money.rateOutPerMTok || 0).toFixed(2)} out per Mtok \xB7 meter, not an invoice`, "gray") : null,
         /* @__PURE__ */ jsx11(Row2, { w: inner, children: /* @__PURE__ */ jsx11("text", { children: " " }) })
       ] });
