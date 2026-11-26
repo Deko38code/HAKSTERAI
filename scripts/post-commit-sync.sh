@@ -28,11 +28,10 @@ say() { printf '%s post-commit %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$
 
 SHA="${1:-HEAD}"
 
-# ── only the primary drives the sync ───────────────────────────────────────
+# ── which box am I, and is the standby reachable ───────────────────────────
 STANDBY_SSH="${STANDBY_SSH:-mint}"
 THIS_BOX=$(hostname 2>/dev/null || echo unknown)
 THAT_BOX=$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$STANDBY_SSH" hostname 2>/dev/null || echo '')
-[ -n "$THAT_BOX" ] || { say "commit $SHA: standby $STANDBY_SSH unreachable — nothing synced, check it"; exit 0; }
 [ "$THAT_BOX" != "$THIS_BOX" ] || exit 0   # we ARE the standby; the primary drives this
 
 # ── only a commit that changes the shipped server ──────────────────────────
@@ -44,7 +43,58 @@ TOUCHED=$(git show --pretty=format: --name-only "$SHA" 2>/dev/null || true)
 RELEVANT=$(printf '%s\n' "$TOUCHED" | grep -E '^(server|cli|scripts|dist|public)/|^package\.json$|^AGENTS\.md$|^CLAUDE\.md$' || true)
 [ -n "$RELEVANT" ] || exit 0
 
-say "commit $SHA touches $(printf '%s\n' "$RELEVANT" | wc -l | tr -d ' ') shipped file(s) — syncing both boxes"
+say "commit $SHA touches $(printf '%s\n' "$RELEVANT" | wc -l | tr -d ' ') shipped file(s)"
+
+# ── 0. publish: a shipped commit pushes itself to origin ───────────────────
+# Owner, 2026-11-26: "all cli installed are updates should auto push on commited to our cli" /
+# "both boxes are suppose to update". An install only sees a build once origin carries the
+# commit, so every shipped commit publishes itself — behind the same §48 secret scan a
+# pre-push hook runs. Never forced and never rebased: if origin has moved ahead the push is
+# refused, logged, and the owner decides (§28.3, §42.6, §49.2).
+# It runs BEFORE the standby check, so a standby that is down can never block a publish.
+push_origin() {
+  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  case "$BRANCH" in ''|HEAD) say "push: detached HEAD — nothing pushed"; return 0 ;; esac
+  git remote get-url origin >/dev/null 2>&1 || { say "push: no origin remote — nothing pushed"; return 0; }
+  if ! git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
+    git fetch -q origin "$BRANCH" 2>/dev/null || true
+  fi
+  if git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
+    RANGE="origin/$BRANCH..HEAD"
+    BEHIND=$(git rev-list --count "$RANGE" 2>/dev/null || echo 0)
+    SCAN_ARGS="--commits $RANGE"
+  else
+    RANGE="HEAD"          # first push of this branch: scan the whole tree, by shape and value
+    BEHIND=1
+    SCAN_ARGS="--tree --deep"
+  fi
+  if [ "$BEHIND" -eq 0 ]; then say "push: origin/$BRANCH already current — nothing to push"; return 0; fi
+  SCANNER="${HOME:-/home/ghost}/bin/secret-scan.sh"
+  if [ -x "$SCANNER" ]; then
+    # shellcheck disable=SC2086
+    if ! out=$(timeout 180 "$SCANNER" $SCAN_ARGS 2>&1); then
+      say "push: BLOCKED by the secret scan on $BEHIND commit(s) — nothing pushed (§48). Shape only:"
+      printf '%s\n' "$out" | tail -20 | sed 's/^/       /' >> "$LOG"
+      return 0
+    fi
+  else
+    say "push: no secret scanner at $SCANNER — REFUSED rather than push unscanned (§48.5)"
+    return 0
+  fi
+  if out=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=10' \
+           timeout 180 git push --porcelain origin "HEAD:refs/heads/$BRANCH" 2>&1); then
+    say "push: published $BEHIND commit(s) — origin/$BRANCH is now $(git rev-parse --short "$SHA" 2>/dev/null || git rev-parse --short HEAD)"
+  else
+    say "push: FAILED — nothing forced, origin untouched; the owner decides (§28.3, §49.2)"
+    printf '%s\n' "$out" | tail -8 | sed 's/^/       /' >> "$LOG"
+  fi
+}
+push_origin
+
+# ── the standby must answer before the sync can run ────────────────────────
+[ -n "$THAT_BOX" ] || { say "commit $SHA: standby $STANDBY_SSH unreachable — push done above, nothing synced"; exit 0; }
+
+say "commit $SHA — syncing both boxes"
 
 # ── run the sync, waiting out a sync already in progress ───────────────────
 i=0
