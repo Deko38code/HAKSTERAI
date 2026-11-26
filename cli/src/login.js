@@ -65,6 +65,46 @@ function openBrowser(url) {
   }
 }
 
+/** The public site our sign-in page lives on, unless one is named explicitly. */
+function siteOrigin(explicit) {
+  return String(explicit || process.env.HAKSTER_SITE || 'https://haksterai.com').replace(/\/+$/, '');
+}
+
+/** An address a browser cannot hold the operator's session on. */
+function isPrivateOrigin(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || host === '::1' || host === '0.0.0.0') return true;
+    return /^(127\.|10\.|192\.168\.|169\.254\.)/.test(host)
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The link the BROWSER opens — never the one polling uses.
+ * A newer server answers `browserUrl` itself and that always wins. An older
+ * server answers only `verificationUrl`; on a loopback/LAN CLI that address
+ * holds no session and OAuth has no redirect URI for it, so the page could never
+ * enable Allow (Dell, 2026-11-26). In that case the short code is carried to the
+ * site origin here. `origin` — the process that issued the code — is untouched.
+ */
+function browserLink(start, opts) {
+  const fromServer = String(start.browserUrl || '').trim();
+  if (fromServer) return { link: fromServer, substituted: false };
+  const verification = String(start.verificationUrl || '').trim();
+  if (!verification || !isPrivateOrigin(verification)) return { link: verification, substituted: false };
+  try {
+    const u = new URL(verification);
+    const path = u.pathname + u.search;
+    if (path.startsWith('/cli/authorize')) {
+      return { link: siteOrigin(opts.site) + path, substituted: true };
+    }
+  } catch { /* fall through to what the server said */ }
+  return { link: verification, substituted: false };
+}
+
 async function getMe(origin, apiKey) {
   try {
     const res = await fetch(`${origin}/api/auth/me`, { headers: { 'x-api-key': apiKey } });
@@ -103,17 +143,19 @@ async function login(opts = {}) {
     return { ok: false, reason: `cannot reach ${origin} (${(e && e.message) || e})` };
   }
 
-  // Where the BROWSER should open. A CLI pointed at a loopback/LAN server prints
-  // that address, but the operator's sign-in lives on the public site — a
-  // session is per-origin — so the server hands back the public link instead.
-  // An older server sends no browserUrl and the printed link is used, unchanged.
-  // Polling still goes to `origin`: same process, so the approval is seen here.
-  const link = String(start.browserUrl || start.verificationUrl || '').trim();
+  // Where the BROWSER should open. A CLI pointed at a loopback/LAN server would
+  // otherwise print that address, where the browser holds no session; the link
+  // is carried to the site origin instead (see browserLink). Polling still goes
+  // to `origin`: same process, so the approval is seen here.
+  const { link, substituted: handedOver } = browserLink(start, opts);
 
   say('');
   say(`  Open this link in your browser and press Allow:`);
   say(`    ${link}`);
   say(`  The page must show code  ${start.userCode}  — if it does not, stop.`);
+  if (handedOver) {
+    say(`  (this CLI talks to ${origin}, where a browser has no session — the sign-in page is ${siteOrigin(opts.site)})`);
+  }
   say('');
   if (opts.open !== false) openBrowser(link);
   say(`  Waiting for approval… (Ctrl+C stops this; nothing is changed)`);
@@ -174,4 +216,4 @@ async function whoami(opts = {}) {
   return { signedIn: true, server: origin, user: me.user, cli: me.cli };
 }
 
-module.exports = { login, logout, whoami, loadConfig, saveConfig, serverUrl };
+module.exports = { login, logout, whoami, loadConfig, saveConfig, serverUrl, browserLink };
