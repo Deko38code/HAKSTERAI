@@ -3888,12 +3888,36 @@ import Layout from '../layouts/Layout.astro';
       const list = document.getElementById('stm-banks-list');
       const totalEl = document.getElementById('stm-bank-total');
       if (!list) return;
-      const render = (banks, total, cap) => {
+      // Another box's memory. Drawn as its own card with a blue border and its
+      // own count: shown beside our banks, never added to our total.
+      // (owner, 2026-11-26: "add parrot to clusters will help")
+      const renderPeer = (p) => {
+        const state = p.pending ? 'reading…' : (p.reachable === false ? 'unreachable' : `${p.memories} memories`);
+        const tone = p.pending ? 'text-[#ffd700]' : (p.reachable === false ? 'text-[#ff6b6b]' : 'text-[#00bfff]');
+        const detail = (p.banks || []).map(b => `
+          <div class="text-[10px] text-[#64748b] leading-snug mt-1"><span class="text-[#94a3b8]">${escapeHtml(b.section)}</span> · ${escapeHtml(String(b.count))}</div>
+          ${(b.top || []).slice(0, 1).map(t => `<div class="text-[10px] text-[#4b5563] leading-snug mt-0.5 pl-2">• ${escapeHtml(String(t.observation || '').slice(0, 120))}</div>`).join('')}`).join('');
+        const idx = p.indexKeys ? `<div class="text-[10px] text-[#4b5563] mt-1">${escapeHtml(String(p.indexKeys))} index keywords</div>` : '';
+        return `
+          <div class="bg-[#0a0a0f] border border-[#00bfff]/25 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-1 gap-2">
+              <span class="text-sm font-medium truncate">🖥 ${escapeHtml(p.label || p.host)}</span>
+              <span class="text-[10px] font-mono shrink-0 ${tone}">${escapeHtml(state)}</span>
+            </div>
+            <div class="text-[10px] text-[#64748b] font-mono truncate">${escapeHtml(p.address || '')}${p.role ? ' · ' + escapeHtml(p.role) : ''}</div>
+            ${detail}${idx}
+          </div>`;
+      };
+      const render = (banks, total, cap, peers) => {
         const shown = banks.filter(b => b.count > 0);
-        if (totalEl) totalEl.textContent = (typeof total === 'number')
+        const peerList = (peers || []).filter(Boolean);
+        const peerNote = peerList.filter(p => p.reachable && p.memories > 0)
+          .map(p => `${String(p.label || p.host).toLowerCase()} ${p.memories}`).join(' · ');
+        if (totalEl) totalEl.textContent = ((typeof total === 'number')
           ? `${total}/${cap || 300} banked`
-          : `${shown.reduce((n, b) => n + b.count, 0)} shown`;
-        list.innerHTML = shown.length ? shown.map(b => `
+          : `${shown.reduce((n, b) => n + b.count, 0)} shown`) + (peerNote ? ` · ${peerNote}` : '');
+        const peerHtml = peerList.map(renderPeer).join('');
+        list.innerHTML = (shown.length || peerHtml) ? (shown.map(b => `
           <div class="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3">
             <div class="flex items-center justify-between mb-1 gap-2">
               <span class="text-sm font-medium truncate">${escapeHtml(b.section)}</span>
@@ -3901,14 +3925,20 @@ import Layout from '../layouts/Layout.astro';
             </div>
             ${(b.top || []).map(t => `<div class="text-[10px] text-[#64748b] leading-snug mt-1">• ${escapeHtml(String(t.observation || '').slice(0, 140))}</div>`).join('')}
           </div>
-        `).join('') : '<div class="text-xs text-[#64748b] text-center py-4 col-span-full">No banked memories yet</div>';
+        `).join('') + peerHtml) : '<div class="text-xs text-[#64748b] text-center py-4 col-span-full">No banked memories yet</div>';
       };
       // Primary: the dedicated banks route.
       try {
         const res = await liveFetch('/api/agent/memory-banks?top=4');
         if (res.ok) {
           const data = await res.json();
-          return render(data.banks || [], data.total, data.cap);
+          render(data.banks || [], data.total, data.cap, data.peers || []);
+          // A peer that was still warming gets one retry, then stops — no poll loop.
+          if (data.peersPending && !loadMemoryClusters._peerRetried) {
+            loadMemoryClusters._peerRetried = true;
+            setTimeout(loadMemoryClusters, 5000);
+          }
+          return;
         }
       } catch { /* fall through to the older shape below */ }
       // An older running server answers /api/agent/memory with the bank rows

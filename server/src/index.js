@@ -4411,7 +4411,7 @@ app.get('/api/agent/memory', (req, res) => {
 // `cluster:*` keyed rows (owner, 2026-11-26: "always update mem clusters in
 // admin to with all top memorys"). Read-only, owner-only, additive: the keyed
 // table stays the lookup layer and nothing here is ever written back.
-app.get('/api/agent/memory-banks', requireOwner, (req, res) => {
+app.get('/api/agent/memory-banks', requireOwner, async (req, res) => {
   try {
     const autolearn = require('./agent/autolearn');
     const topN = Math.max(1, Math.min(parseInt(req.query.top, 10) || 5, 20));
@@ -4438,7 +4438,14 @@ app.get('/api/agent/memory-banks', requireOwner, (req, res) => {
       });
     }
     banks.sort((a, b) => b.count - a.count);
-    res.json({ total, cap: 300, banks });
+    // Other boxes' memory, shown beside ours and never added to `total`
+    // (owner, 2026-11-26: "add parrot to clusters will help"). Read-only over
+    // ssh; a slow or dead peer returns `pending` and warms in the background,
+    // so this page never waits on another box.
+    let peers = [];
+    try { peers = await require('./peerMemory').peerMemorySnapshot({ topN, budgetMs: 6000 }); } catch { peers = []; }
+    const peersPending = peers.some((pr) => pr && pr.pending);
+    res.json({ total, cap: 300, banks, peers, peersPending });
   } catch (err) {
     res.status(500).json({ error: 'memory banks unavailable', detail: err && err.message });
   }
