@@ -332,11 +332,17 @@ function introShown() { return _introShown; }
 function introPlan() { return _introPlan; }
 
 function showIntro(version, opts = {}) {
+  // `instant` draws the whole card in one write. A command that exits the moment
+  // it has answered — `--version`, `--help` — kills the staggered reveal's
+  // pending timers, so the card printed its first line and stopped: measured
+  // 2026-11-26 on the animated path, 2 lines instead of 24. The reveal is a
+  // flourish, never a reason to lose the card (§10, §50.1).
+  const { instant, ...cardOpts } = opts;
   const isTTY = process.stdout.isTTY && !process.env.NO_COLOR;
   // The plan this card actually names, so a later fresh check can tell whether
   // it is saying anything the card did not already say.
-  _introPlan = opts.plan !== undefined ? (opts.plan || null) : readPlanSync().plan;
-  const lines = renderStartup({ ...opts, version });
+  _introPlan = cardOpts.plan !== undefined ? (cardOpts.plan || null) : readPlanSync().plan;
+  const lines = renderStartup({ ...cardOpts, version });
   _introShown = true;
 
   if (!isTTY) {
@@ -345,11 +351,20 @@ function showIntro(version, opts = {}) {
     return;
   }
 
-  // quick staggered reveal (skipped when HAKSTER_NO_ANIM=1)
-  const noAnim = process.env.HAKSTER_NO_ANIM === '1' || !process.stdout.isTTY;
+  // quick staggered reveal (skipped when HAKSTER_NO_ANIM=1 or on request)
+  const noAnim = instant || process.env.HAKSTER_NO_ANIM === '1';
   if (noAnim) { process.stdout.write(lines.join('\n') + '\n'); return; }
 
   let i = 0;
+  // Anything that exits mid-reveal — a refused gate, a failing command — flushes
+  // what is left instead of dropping it. Guarded by `i`, so a card that already
+  // finished is never printed twice.
+  const flush = () => {
+    if (i >= lines.length) return;
+    process.stdout.write(lines.slice(i).join('\n') + '\n');
+    i = lines.length;
+  };
+  process.once('exit', flush);
   const tick = () => {
     if (i >= lines.length) return;
     process.stdout.write(lines[i++] + '\n');

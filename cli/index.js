@@ -96,9 +96,11 @@ try {
 }
 
 // Show intro on normal CLI launches; UI/TUI render their own full-screen startup.
+// `--version` / `--help` answer and exit at once, which would cut the staggered
+// reveal short, so they get the whole card in one write (§10, §50.1).
 const _isTerminalUi = process.argv.some((arg) => arg === 'ui' || arg === 'tui');
 if (!_isTerminalUi && process.env.HAKSTER_SUPPRESS_INTRO !== '1') {
-  showIntro(pkg.version);
+  showIntro(pkg.version, { instant: _helpOrVersion });
 }
 
 // ── Auto-learn: eager init on startup (non-blocking, caches for later) ──
