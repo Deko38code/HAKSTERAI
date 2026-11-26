@@ -13,10 +13,19 @@
 //   secrets       ~/bin/secret-scan.sh is present and executable             (§48)
 //   tool-guard    the self-config guard is wired into the tool write path     (§38.1)
 //   update-guard  the updater refuses to write into a source checkout         (§43.4, §8)
+//   memory-bank   the bank store reads and every bank parses, with its count   (§40)
+//   mcp           the MCP belt is configured, deduped by name, with its count  (§46)
 //   codex-lane    the declared codex fallback has a binary that can run it   (§46)  [optional]
 //
 // Optional checks are reported when they fail but do not lower the score: a
 // user who has not installed codex is told once, not alarmed on every start.
+// A check may escalate itself by returning `optional: false` — an unreadable
+// bank file is a real fault (it silently kills recall, §40), while a bank that
+// is merely empty is a fresh install.
+//
+// Owner, 2026-11-26: "add memory bank check to startup list to and mcp count" —
+// the two counts ride on the rail as a short measured `note`, so the start card
+// states how much memory is loaded and how many servers are configured.
 
 const fs = require('fs');
 const os = require('os');
@@ -121,6 +130,70 @@ const CHECKS = [
     },
   },
   {
+    id: 'memory-bank',
+    label: 'memory bank',
+    // The store the TUI header reads (~/.hakster/memories/banks), not the
+    // project-local copy — the header's numbers come from here (§40).
+    // Empty banks are a fresh install (grey, never red). A bank that will not
+    // parse is the fault that silently disables recall, so it escalates.
+    optional: true,
+    run() {
+      const dir = path.join(HOME, '.hakster', 'memories', 'banks');
+      let files;
+      try {
+        files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+      } catch {
+        return { ok: false, detail: 'no banks yet' };
+      }
+      let entries = 0;
+      const broken = [];
+      for (const f of files) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+          if (Array.isArray(parsed)) entries += parsed.length;
+          else broken.push(f);
+        } catch { broken.push(f); }
+      }
+      if (broken.length) {
+        return { ok: false, optional: false, detail: broken.length + ' bank(s) unreadable: ' + broken.join(', ') };
+      }
+      if (!entries) return { ok: false, detail: files.length + ' banks, empty' };
+      return { ok: true, note: entries + ' notes', detail: files.length + ' banks · ' + entries + ' notes' };
+    },
+  },
+  {
+    id: 'mcp',
+    label: 'mcp belt',
+    // A box may legitimately run without MCP servers, so an absent config is a
+    // grey note. A config that will not parse is a fault and escalates (§46.1:
+    // a lane that cannot run is not a fallback).
+    optional: true,
+    run() {
+      const dirs = [
+        path.join(HOME, '.hakster'),
+        path.join(REPO, '.hakster'),
+        path.join(process.cwd(), '.hakster'),
+      ];
+      const names = new Set();
+      const broken = [];
+      let found = 0;
+      for (const dir of dirs) {
+        const raw = read(path.join(dir, 'mcp.json'), 400000);
+        if (!raw) continue;
+        found++;
+        try {
+          const json = JSON.parse(raw);
+          const servers = json.mcpServers || json.servers || {};
+          for (const name of Object.keys(servers)) names.add(name);
+        } catch { broken.push(dir); }
+      }
+      if (broken.length) return { ok: false, optional: false, detail: 'mcp.json unreadable in ' + broken.join(', ') };
+      if (!found) return { ok: false, detail: 'no mcp.json' };
+      if (!names.size) return { ok: false, detail: 'mcp.json lists no servers' };
+      return { ok: true, note: names.size + ' servers', detail: names.size + ' servers configured' };
+    },
+  },
+  {
     id: 'codex-lane',
     label: 'codex lane',
     optional: true,
@@ -155,8 +228,11 @@ function runGuardrailCheck(opts = {}) {
     items.push({
       id: check.id,
       label: check.label,
-      optional: !!check.optional,
+      // A result may escalate itself out of "optional" when what it found is a
+      // real fault rather than a component this box simply does not carry.
+      optional: result.optional != null ? !!result.optional : !!check.optional,
       ok: !!result.ok,
+      note: result.note || '',
       detail: result.detail || '',
     });
   }

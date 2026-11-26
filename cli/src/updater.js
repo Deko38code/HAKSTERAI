@@ -460,11 +460,14 @@ function applyPending(explicitDir) {
   // replaced.
   const backupDir = path.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
   const stagedCli = path.join(STAGED_DIR, 'cli');
+  const skipHeavy = (src) => !src.includes(`${path.sep}node_modules`) && !src.includes(`${path.sep}.git`);
   try {
-    fs.cpSync(stagedCli, backupDir, {
-      recursive: true,
-      filter: (src) => !src.includes(`${path.sep}node_modules`) && !src.includes(`${path.sep}.git`),
-    });
+    // Back up what is ABOUT TO BE REPLACED — the installed tree — not the
+    // stage. Copying the stage here left a directory named for the old version
+    // holding the NEW files, so a copy that failed halfway had nothing to
+    // restore from: a backup that cannot restore is not a backup (§4/§5).
+    // Measured 2026-11-26: backup-0.0.9-… contained v0.3.84 before this change.
+    fs.cpSync(target, backupDir, { recursive: true, filter: skipHeavy });
     fs.cpSync(stagedCli, target, {
       recursive: true,
       force: true,

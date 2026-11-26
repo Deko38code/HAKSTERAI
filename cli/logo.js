@@ -235,21 +235,28 @@ function railsChecklist(rails) {
   const ok = failed.length === 0;
 
   const dot = ok ? C.green + '\u25cf' + C.reset : C.yellow + '\u25cb' + C.reset;
-  const count = (ok ? C.green : C.yellow) + rails.pass + '/' + rails.total + ' rails active' + C.reset;
+  // Optional rails are listed but not scored, so the count says "required"
+  // whenever the ticks outnumber the score (§10: never claim more than is true).
+  const optCount = items.filter((i) => i.optional).length;
+  const countText = rails.pass + '/' + rails.total + (optCount ? ' required' : ' rails active');
+  const count = (ok ? C.green : C.yellow) + countText + C.reset;
   const out = ['', dot + '  ' + C.bold + C.white + 'CHECKLIST' + C.reset +
     C.gray + '  \u00b7  ' + C.reset + count +
     C.gray + '  \u00b7  ' + C.reset + C.gray + rails.ms + 'ms' + C.reset];
 
   // One tick per rail, in the order the check ran. Two columns when the
   // terminal has room, one when it does not, so the card never wraps.
-  const labelW = Math.max.apply(null, items.map((i) => String(i.label).length));
-  const cellW = labelW + 4; // "  ✓ label"
+  // A rail may carry a short measured value beside it ("386 notes",
+  // "21 servers"); the column width counts it, so two columns still fit.
+  const itemW = (i) => 4 + String(i.label).length + (i.note ? 2 + String(i.note).length : 0);
+  const cellW = Math.max.apply(null, items.map(itemW));
   const cell = (i) => {
     const tick = i.ok
       ? C.green + '\u2713' + C.reset
       : i.optional ? C.gray + '\u25cb' + C.reset : C.red + '\u2717' + C.reset;
     const label = i.ok ? C.gray + i.label + C.reset : C.white + i.label + C.reset;
-    return { ansi: '  ' + tick + ' ' + label, len: 4 + String(i.label).length };
+    const note = i.note ? C.gray + '  ' + i.note + C.reset : '';
+    return { ansi: '  ' + tick + ' ' + label + note, len: itemW(i) };
   };
   const cols = (process.stdout.columns || 80) >= cellW * 2 + 6 ? 2 : 1;
   for (let k = 0; k < items.length; k += cols) {

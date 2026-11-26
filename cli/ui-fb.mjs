@@ -970,11 +970,9 @@ var require_updater = __commonJS({
       }
       const backupDir = path8.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
       const stagedCli = path8.join(STAGED_DIR, "cli");
+      const skipHeavy = (src) => !src.includes(`${path8.sep}node_modules`) && !src.includes(`${path8.sep}.git`);
       try {
-        fs11.cpSync(stagedCli, backupDir, {
-          recursive: true,
-          filter: (src) => !src.includes(`${path8.sep}node_modules`) && !src.includes(`${path8.sep}.git`)
-        });
+        fs11.cpSync(target, backupDir, { recursive: true, filter: skipHeavy });
         fs11.cpSync(stagedCli, target, {
           recursive: true,
           force: true,

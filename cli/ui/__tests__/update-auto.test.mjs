@@ -121,3 +121,23 @@ test('the TUI reports no "installed" badge for a source checkout', () => {
     'the disk-newer probe must return nothing on a checkout (the Dell header rule)');
   assert.ok(src.includes('applyPending'), 'and a verified stage is installed from the session');
 });
+
+test('the backup keeps the install that was replaced, not the stage', async () => {
+  const { home, cli, root } = makeInstall();
+  try {
+    // A file only the installed tree has. A backup copied from the STAGE can
+    // never contain it — that was the defect measured 2026-11-26: the directory
+    // named backup-<old version> held the NEW build, so a copy that failed
+    // halfway had nothing to restore from (§4/§5: never lose the last good copy).
+    fs.writeFileSync(path.join(cli, 'OLD-ONLY.txt'), 'the replaced install\n');
+    const updater = loadUpdater(home);
+    const applied = updater.applyPending(cli);
+    assert.equal(applied.applied, true);
+    assert.ok(applied.backupDir, 'the apply names the backup it made');
+    const backed = JSON.parse(fs.readFileSync(path.join(applied.backupDir, 'package.json'), 'utf8'));
+    assert.equal(backed.version, REAL_VERSION, 'the backup is the version that was replaced');
+    assert.ok(fs.existsSync(path.join(applied.backupDir, 'OLD-ONLY.txt')), 'and carries that install’s own files');
+    // The install itself moved on to the staged build.
+    assert.equal(JSON.parse(fs.readFileSync(path.join(cli, 'package.json'), 'utf8')).version, NEXT_VERSION);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
