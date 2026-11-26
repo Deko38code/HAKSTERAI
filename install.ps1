@@ -463,14 +463,26 @@
   if (Test-Path $otCore) {
     try { $otVer = [string]((Get-Content $otCore -Raw | ConvertFrom-Json).version) } catch { $otVer = '' }
   }
-  $otHave = ''
-  foreach ($p in $otHere) { $v = Get-PkgVersion $p; if ($v) { $otHave = $v; break } }
-  $otMatches = $otHave -and ((-not $otVer) -or ($otHave -eq $otVer))
-  if ($otMatches) {
-    Say "OK the dashboard renderer for this machine is installed ($otName $otHave)"
+  # A renderer is usable when its version EQUALS the core's. Every location is
+  # scanned and only a real match counts, so a stale stub left at one place can
+  # never mask a correct package at the other — the half-updated copy that made
+  # the dashboard die at the first frame (Surface Pro, 2026-11-26).
+  function Get-OtState {
+    $found = @()
+    foreach ($p in $otHere) { $v = Get-PkgVersion $p; if ($v) { $found = @($found) + $v } }
+    $have = ''
+    if ($found.Count -gt 0) { $have = [string]$found[0] }
+    $match = $false
+    if ($otVer) { foreach ($v in $found) { if ($v -eq $otVer) { $match = $true } } }
+    elseif ($have) { $match = $true }
+    return @{ have = $have; match = $match }
+  }
+  $otState = Get-OtState
+  if ($otState.match) {
+    Say "OK the dashboard renderer for this machine is installed ($otName $($otState.have))"
   } else {
-    if ($otHave -and $otVer) {
-      Say ".. the dashboard renderer is $otHave but @opentui/core is $otVer - it would not load, so it is replaced"
+    if ($otState.have -and $otVer) {
+      Say ".. the dashboard renderer is $($otState.have) but @opentui/core is $otVer - it would not load, so it is replaced"
     }
     if ($otVer) { $otSpec = "$otName@$otVer" } else { $otSpec = $otName }
     Say ".. installing the dashboard renderer for this machine ($otSpec)"
@@ -482,15 +494,13 @@
     if (Test-Path (Join-Path $otAppDir 'package.json')) {
       $null = Invoke-Npm @('install', '--prefix', $otAppDir, '--no-audit', '--no-fund', '--no-save', '--no-package-lock', $otSpec)
     }
-    $otHave = ''
-    foreach ($p in $otHere) { $v = Get-PkgVersion $p; if ($v) { $otHave = $v; break } }
-    if (-not ($otHave -and ((-not $otVer) -or ($otHave -eq $otVer)))) {
+    $otState = Get-OtState
+    if (-not $otState.match) {
       $null = Invoke-Npm @('install', '--prefix', $NpmPrefix, '--no-audit', '--no-fund', '--no-save', $otSpec)
-      $otHave = ''
-      foreach ($p in $otHere) { $v = Get-PkgVersion $p; if ($v) { $otHave = $v; break } }
+      $otState = Get-OtState
     }
-    if ($otHave -and ((-not $otVer) -or ($otHave -eq $otVer))) {
-      Say "OK dashboard renderer installed ($otName $otHave)"
+    if ($otState.match) {
+      Say "OK dashboard renderer installed ($otName $($otState.have))"
     } else {
       Say '! the dashboard renderer could not be installed - the CLI still runs, with its built-in Ink UI.'
       Say '  To get the full dashboard, run this once and start the CLI again:'

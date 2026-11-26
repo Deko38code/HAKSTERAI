@@ -183,7 +183,9 @@ test('the Windows installer installs the renderer for this machine', () => {
   // Presence is not proof: a 0.3.4 stub beside a 0.9.9 core is exactly the
   // "input bar, no panels" Surface Pro copy, so the installer compares the two
   // versions and repairs a mismatch instead of reporting it as installed.
-  assert.ok(/\$otHave -eq \$otVer/.test(ps1), 'the installer no longer compares the renderer version with @opentui/core');
+  assert.ok(/\$v -eq \$otVer/.test(ps1), 'the installer no longer compares the renderer version with @opentui/core');
+  assert.ok(/function Get-OtState/.test(ps1), 'the renderer scan no longer checks every install location');
+  assert.ok(/\$otState\.match/.test(ps1), 'a renderer that does not match the core is no longer acted on');
   assert.ok(/would not load, so it is replaced/.test(ps1), 'a version-mismatched renderer is no longer repaired');
   assert.ok(/@\('install', '--prefix', \$otAppDir/.test(ps1), "the renderer is no longer installed into the CLI's own directory");
   assert.ok(/the CLI app went missing during the renderer step/.test(ps1), 'a reify that removes the app is no longer repaired');
