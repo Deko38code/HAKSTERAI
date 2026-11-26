@@ -13963,7 +13963,7 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
     <button id="deny" disabled>Deny</button>
   </div>
   <div id="state"></div>
-  <a id="signin" href="/">Sign in to haksterai.com</a>
+  <a id="signin" href="/">Or open the sign-in page</a>
 </main>
 <script>
 (function () {
@@ -13976,16 +13976,41 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
   var deny = document.getElementById('deny');
   var signin = document.getElementById('signin');
   var ready = false, done = false, timer = null, lastPlan = '';
+  var AUTO_KEY = 'hakster_cli_autoapprove';
 
   function setState(text, kind) { state.textContent = text || ''; state.className = kind || ''; }
   function readKey() {
     try { return localStorage.getItem('hakster_google_token') || localStorage.getItem('hakster_api_key') || ''; } catch (e) { return ''; }
   }
+  function signinHref() {
+    return (SITE || '') + '/?signin=1&redirect=' + encodeURIComponent('/cli/authorize?user_code=' + code);
+  }
+  /* One press, not two steps. A visitor with no session presses Allow (or Deny)
+     and the sign-in happens on the way: the intent is kept for this tab and this
+     code, the landing page stores the session and sends the browser straight
+     back here, and this page finishes the answer it was asked for. The plan is
+     checked after the account answers, so a paid user never has to open
+     haksterai.com and sign in before the terminal can be approved. */
+  function startSignin(approve) {
+    try { sessionStorage.setItem(AUTO_KEY, code + ':' + (approve ? 'allow' : 'deny')); } catch (e) {}
+    location.href = signinHref();
+  }
+  function takeIntent() {
+    if (!code) return '';
+    try {
+      var seen = sessionStorage.getItem(AUTO_KEY);
+      if (seen === code + ':allow' || seen === code + ':deny') {
+        sessionStorage.removeItem(AUTO_KEY);
+        return seen.slice(code.length + 1);
+      }
+    } catch (e) {}
+    return '';
+  }
   function showSignin(text) {
-    ready = false; allow.disabled = true; deny.disabled = true;
+    ready = false; allow.disabled = false; deny.disabled = false;
     signin.style.display = 'block';
-    signin.href = (SITE || '') + '/?signin=1&redirect=' + encodeURIComponent('/cli/authorize?user_code=' + code);
-    plan.textContent = SITE ? 'not signed in on this browser - sign in at haksterai.com' : 'not signed in on this browser';
+    signin.href = signinHref();
+    plan.textContent = 'not signed in on this browser — press Allow to sign in';
     if (text) setState(text, 'err');
   }
   function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
@@ -14009,6 +14034,9 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
         ready = true; stopTimer();
         signin.style.display = 'none';
         allow.disabled = false; deny.disabled = false;
+        // Back from signing in with a press still owed — answer it now.
+        var intent = takeIntent();
+        if (intent) { answer(intent === 'allow'); return; }
         if (!state.textContent) setState('', '');
       })
       .catch(function (e) {
@@ -14017,8 +14045,12 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
       });
   }
   function answer(approve) {
-    if (!ready || done) return;
+    if (done) return;
     var key = readKey();
+    // No session yet: this press IS the sign-in. Nothing was sent, so the
+    // terminal keeps waiting and the answer is completed on the way back.
+    if (!key) { startSignin(approve); return; }
+    if (!ready) return;
     allow.disabled = true; deny.disabled = true;
     setState(approve ? 'Approving…' : 'Denying…', 'work');
     fetch('/api/cli/device/approve', {
@@ -14032,9 +14064,10 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
     }).then(function (out) {
       var d = out.body || {};
       if (out.status === 401) {
+        // The session expired mid-press: sign in again and finish this same
+        // answer, rather than asking for a second press.
         ready = false;
-        showSignin('Your sign-in expired before the answer was sent — sign in below and this page picks the answer back up. If it does not, press ' + (approve ? 'Allow' : 'Deny') + ' again.');
-        schedule();
+        startSignin(approve);
         return;
       }
       if (out.status === 404) {
@@ -14073,6 +14106,11 @@ const CLI_AUTHORIZE_HTML = `<!doctype html>
 // The page now carries the public origin and hands the short code over to it.
 // The failover router pins /cli/ and /api/ to the primary, so the approval still
 // reaches the process that issued the code, and the CLI's poll picks it up.
+//
+// And a visitor with no session does not have to sign in first: pressing Allow
+// starts the sign-in itself, remembering this tab's intent, and the page answers
+// the approval on the way back. One press for a paid account, not a detour to
+// the site and a second press (§13 — the prerequisite is met by the button).
 // The site origin the BROWSER should use, or '' when this request already comes
 // in on it (or the operator runs their own instance, where the address the CLI
 // printed is the right one). Shared by the page and by the device-code start
