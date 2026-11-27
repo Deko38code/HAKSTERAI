@@ -42,6 +42,7 @@ import useHostStats from './hooks/useHostStats.js';
 import useDebugStats from './hooks/useDebugStats.js';
 import { noteRenderStart, noteRenderEnd } from './utils/debug-metrics.js';
 import useMemoryBank from './hooks/useMemoryBank.js';
+import useBankDrift from './hooks/useBankDrift.js';
 import useCliUpdate from './hooks/useCliUpdate.js';
 import useScriptRunner from './hooks/useScriptRunner.js';
 import { peersFromMcp } from './utils/squad.js';
@@ -535,6 +536,10 @@ export default function App({ version = '0.1.0' }) {
   // ◈ Memory: the same banks autolearn writes and the next run recalls,
   // counted from disk every 10 s (see useMemoryBank — counts only, no text).
   const memory = useMemoryBank(10000);
+  // Both boxes, one count (owner, 2026-11-27): the same server health read that
+  // names the drift per bank file, so the header can show 438/438 or 438/437
+  // instead of silently counting only this box's disk.
+  const bankDrift = useBankDrift(60000);
   // ⬆ Update: the Claude Code model — check in the background while this
   // session runs, download and verify a newer CLI into ~/.hakster/updates and
   // let the next launch apply it. The session itself is never restarted.
@@ -1814,13 +1819,24 @@ export default function App({ version = '0.1.0' }) {
   const healthFg = healthPct >= 80 ? '#3fb950' : healthPct >= 60 ? '#d29922' : '#f85149';
   const healthGlyph = health.trend === 'smarter' ? '▲' : health.trend === 'slipping' ? '▼' : '◆';
   const healthWord = health.trend === 'smarter' ? 'smarter' : health.trend === 'slipping' ? 'slipping' : 'steady';
+  // Both boxes, one count (owner, 2026-11-27: "i always want the memory count
+  // correct and the same on both boxes"). `438/438` green means the standby
+  // holds the same banks; `438/437` red means it has fallen behind. The pair is
+  // rendered only once the server has measured BOTH boxes, and never for a
+  // non-owner key (the route is owner-only) — so the row shows no figure it did
+  // not read (§10, §13). It replaces the lone local total rather than sitting
+  // beside it, so the row never reads "438 438/438".
+  const memPeerParts = bankDrift && Number.isFinite(bankDrift.localTotal) && Number.isFinite(bankDrift.peerTotal)
+    ? [{ t: ` ${bankDrift.localTotal}/${bankDrift.peerTotal}`, fg: bankDrift.equal ? '#3fb950' : '#f85149', bold: !bankDrift.equal }]
+    : null;
+  const memTotalParts = memPeerParts || (memTotal != null ? [{ t: ` ${memTotal}`, fg: 'gray' }] : []);
   // The same bar as the cpu/ram readings (owner, 2026-11-25: "some nice bars
   // that look rich not generic"), in the same place — the right edge of this row.
   const memParts = memPct == null || !memBar ? null : [
     { t: '◈ ', fg: memFg, bold: true },
     ...memBar,
     { t: ` ${memPct}%`, fg: memPct >= 90 ? 'red' : memPct === 0 ? 'gray' : 'white', bold: memPct > 0 },
-    ...(memTotal != null ? [{ t: ` ${memTotal}`, fg: 'gray' }] : []),
+    ...memTallParts,
     { t: '  ♥ ', fg: healthFg, bold: true },
     { t: `${healthPct}%`, fg: healthFg, bold: true },
     { t: ` ${healthGlyph} ${healthWord}`, fg: healthFg },
@@ -1833,7 +1849,7 @@ export default function App({ version = '0.1.0' }) {
       { t: '◈ ', fg: memFg, bold: true },
       ...memBar,
       { t: ` ${memPct}%`, fg: memPct >= 90 ? 'red' : memPct === 0 ? 'gray' : 'white', bold: memPct > 0 },
-      ...(memTotal != null ? [{ t: ` ${memTotal}`, fg: 'gray' }] : []),
+      ...memTotalParts,
       { t: ` ♥${healthPct}%`, fg: healthFg, bold: true },
       { t: healthGlyph, fg: healthFg },
     ],

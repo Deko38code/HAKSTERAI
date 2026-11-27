@@ -1086,3 +1086,46 @@ key id, with no token-shaped value in the file; `node --check` clean on the thre
 matching disk; site built through the widget (§27) and `/admin/profit/` serving `200` with the per-user
 block. The live server keeps its running code until its next natural restart (§37, §45) — the new GET route
 and per-row `user` stamping are **pending a restart**, reported as pending rather than live.
+
+---
+
+## Section 53 Added — Both Memory Banks Stay Readable, And The Count Is Correct And The Same On Both Boxes (2026-11-27)
+
+_Appended 2026-11-27 at the owner's direction ("add rule to always make sure you can access both memory
+banks and i always want the memory count correct and the same on both boxes for better memory recalling …
+this box has 438 and lenonvo cli says 437 … auto update feat that checks banks that are connnected to any
+cli per user who uses me owner paid users and will stay in sync with cli's signed in accounts"). Nothing
+above this line was rewritten, reordered or removed. Backups taken and hash-verified identical before the
+append: `AGENTS.md.bak-20261127T234827Z` (83,215 B, sha256 `2edaf818e6e6…`); master-rulebook backup
+`CLAUDE.md.bak-20261127T234827Z` (126,946 B, sha256 `908fad0885a4…`)._
+
+`/home/ghost/CLAUDE.md` is now **§1–§53**. §53 is **"Both Memory Banks Stay Readable, And The Count Is
+Correct And The Same On Both Boxes"**. What it makes binding here:
+
+1. **The number is the disk, not a counter.** The CLI counts its own
+   `~/.hakster/memories/banks` every tick; the agent reads it per task. Two boxes telling two stories is a
+   sync defect, never a display problem.
+2. **Correct and equal are one requirement.** The merge is content-keyed
+   (`scripts/memory-bank-union.cjs`): key = sha256(normalised observation), canonical = smaller id, tags =
+   sorted union, timestamp = earlier, order = ts desc then id asc — deterministic, so both boxes derive
+   **byte-identical** files. An id-keyed merge is not a sync (measured: 438 → 450 with no new knowledge).
+3. **Both directions, every five minutes, verified.** `scripts/failover-sync.sh` unions primary → standby,
+   standby → primary, then re-reads both and compares count and content hash per bank, logging
+   `banks: both boxes verified equal (N entries)`. A failure is logged as DRIFT, never as synced.
+4. **Per user, never across users.** `banks` and every `users/<slug>/banks` sync root for root; a user's set
+   is unioned only with that user's set on the other box, never into the owner's root or another user's,
+   and never summed into one figure (§29.6, §51.6). The owner plus every paid account whose plan includes
+   the CLI (§28.5) own roots; a new paid user is data, not a code change.
+5. **Nothing deleted, nothing claimed.** Destination-only files and entries are kept, every rewrite is
+   archived under `banks-sync-backup/<stamp>/` then swapped atomically, a half-written bank is skipped, an
+   empty or partial source is refused.
+6. **Nothing else moves** — no model, route, provider order, rate, plan, allowance or panel layout
+   (§19.3, §22.4, §26, §39.4). HaksterAI only (§16).
+7. **Verified, not assumed.** A change here is done only when
+   `node server/__smoke__/memory-bank-sync-probe.mjs` passes (17 checks, including per-user root isolation)
+   and the live log shows the equal line for the following cycle.
+
+Verified at adoption 2026-11-27: `--roots` → `1 root(s), 438 entries`; `--verify` against a fresh standby
+pull → `EQUAL … 438`; probe **17/17**; per-user tree modes proven on throwaway dirs (separate user root,
+`EQUAL across 2 roots`, second merge `0 added`); `bash -n scripts/failover-sync.sh` clean with
+`BANK_MODE=union` as the default. The first live union cycle is reported from the log.

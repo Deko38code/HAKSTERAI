@@ -146,6 +146,7 @@ ctl() { ssh -n -o BatchMode=yes "$STANDBY_SSH" "sh ~/hakster-standby-ctl.sh $*";
 # Resolve it once, with `node` as the fallback, so the bank merge can always run.
 NODE_REMOTE=$(ssh -n -o BatchMode=yes -o ConnectTimeout=6 "$STANDBY_SSH" 'command -v node 2>/dev/null' || true)
 [ -n "$NODE_REMOTE" ] || NODE_REMOTE=node
+NODE_LOCAL="${NODE_LOCAL:-$(command -v node 2>/dev/null || echo node)}"
 
 # ── 1. refuse while a failover has happened since the last sync ────────────
 STATUS=$(curl -s -m 5 "$ROUTER_STATUS" 2>/dev/null || true)
@@ -255,6 +256,8 @@ fi
 # memory banks by entry id without ever removing one of its own (§41).
 scp -q -o BatchMode=yes scripts/merge-banks-from-dir.cjs "$STANDBY_SSH:~/hakster-bank-merge.cjs" \
   || { say "warning: could not update the standby's bank merge helper"; }
+scp -q -o BatchMode=yes scripts/memory-bank-union.cjs "$STANDBY_SSH:~/hakster-bank-union.cjs" \
+  || { say "warning: could not update the standby's bank union helper"; }
 
 ssh -n -o BatchMode=yes "$STANDBY_SSH" "mkdir -p ~/$TARGET_DIR/data" \
   || { say "failed: could not create $TARGET_DIR"; exit 1; }
@@ -335,7 +338,14 @@ else
   done
 fi
 
-# ── 5c. carry the memory banks (mirror by default, merged by id) ────────────
+# ── 5c. reconcile the memory banks (union both ways by default) ─────────────
+# Owner, 2026-11-28: "i always want the memory count correct and the same on
+# both boxes". The one-way --prune mirror archived anything the standby learned
+# on its own, so the two counts drifted between syncs (438 here / 437 there).
+# BANK_MODE=union (default) unions by CONTENT in both directions: either box's
+# entry is kept, the same fact banked under two ids collapses to one, and both
+# sides end byte-identical so the count matches by construction. BANK_MODE=mirror
+# keeps the old one-way prune for a deliberate reset.
 # The agent pulls the banks before every task (pullMemoryBanks, called per run),
 # so a standby that boots without them recalls nothing. Banks change on
 # consolidation, not on commits, so this rides the five-minute timer rather than
@@ -354,9 +364,9 @@ if [ "${SKIP_BANKS:-0}" = "1" ]; then
   say "banks sync skipped (SKIP_BANKS=1)"
 elif [ ! -d "$BANK_DIR_SRC" ]; then
   say "banks: no bank dir at $BANK_DIR_SRC - the standby keeps its copy"
-elif ! ssh -n -o BatchMode=yes "$STANDBY_SSH" 'test -f ~/hakster-bank-merge.cjs'; then
-  say "banks: merge helper missing on the standby - the standby keeps its copy"
-else
+elif ! ssh -n -o BatchMode=yes "$STANDBY_SSH" 'test -f ~/hakster-bank-union.cjs'; then
+  say "banks: union helper missing on the standby - the standby keeps its copy"
+elif [ "${BANK_MODE:-union}" = "mirror" ]; then
   if tar -C "$BANK_DIR_SRC" -cf - --exclude='*.bak-*' . 2>/dev/null |
        ssh -o BatchMode=yes "$STANDBY_SSH" \
          'rm -rf ~/.hakster-banks-incoming && mkdir -p ~/.hakster-banks-incoming && tar -C ~/.hakster-banks-incoming -xf -'; then
@@ -383,6 +393,53 @@ else
     fi
     if printf '%s' "$BOUT" | grep -q '"replacedOwner"'; then
       say "banks: a previous root-owned bank file was replaced (derived cache, nothing removed)"
+    fi
+  else
+    say "warning: could not ship the banks to the standby - it keeps its copy"
+  fi
+else
+  # Union, both ways, every root. Push, let the standby union us in, pull its own
+  # entries home, then re-read its banks and prove the two sides are identical.
+  # --merge-tree walks `banks` plus each `users/<slug>/banks`, so a paid user's
+  # own banks sync with that same user's banks on the other box and never into
+  # anyone else's root (§53.4). With one root today it is the same union as before.
+  MEM_DIR_SRC=$(dirname "$BANK_DIR_SRC")
+  BANKS_TMP="$TMP/banks"; rm -rf "$BANKS_TMP"; mkdir -p "$BANKS_TMP/peer" "$BANKS_TMP/verify"
+  if ( cd "$MEM_DIR_SRC" && tar -cf - --exclude='*.bak-*' banks $(ls -d users/*/banks 2>/dev/null || true) ) 2>/dev/null |
+       ssh -o BatchMode=yes "$STANDBY_SSH" \
+         'rm -rf ~/.hakster-banks-incoming && mkdir -p ~/.hakster-banks-incoming && tar -C ~/.hakster-banks-incoming -xf -'; then
+    ROUT=$(ssh -n -o BatchMode=yes "$STANDBY_SSH" \
+      "cd \$HOME && $NODE_REMOTE \$HOME/hakster-bank-union.cjs --merge-tree \$HOME/.hakster-banks-incoming --json 2>&1; rc=\$?; rm -rf \$HOME/.hakster-banks-incoming; exit \$rc" 2>&1 || true)
+    radded=$(printf '%s\n' "$ROUT" | sed -n 's/^  "added": \([0-9][0-9]*\),\{0,1\}$/\1/p' | tail -1)
+    rtotal=$(printf '%s\n' "$ROUT" | sed -n 's/^  "total": \([0-9][0-9]*\),\{0,1\}$/\1/p' | tail -1)
+    if [ -z "$radded" ]; then
+      say "banks: union into the standby returned no count - the standby keeps its copy"
+      printf '%s\n' "$ROUT" | sed 's/^/  /' | head -6
+    else
+      say "banks: union into the standby ($radded new, ${rtotal:-?} entries there)"
+      if ssh -o BatchMode=yes "$STANDBY_SSH" 'cd ~/.hakster/memories && tar -cf - --exclude="*.bak-*" banks $(ls -d users/*/banks 2>/dev/null || true)' 2>/dev/null | tar -C "$BANKS_TMP/peer" -xf -; then
+        LOUT=$($NODE_LOCAL "$REPO_DIR/scripts/memory-bank-union.cjs" --mem-dir "$MEM_DIR_SRC" --merge-tree "$BANKS_TMP/peer" --json 2>&1 || true)
+        ladded=$(printf '%s\n' "$LOUT" | sed -n 's/^  "added": \([0-9][0-9]*\),\{0,1\}$/\1/p' | tail -1)
+        ltotal=$(printf '%s\n' "$LOUT" | sed -n 's/^  "total": \([0-9][0-9]*\),\{0,1\}$/\1/p' | tail -1)
+        if [ -z "$ladded" ]; then
+          say "banks: union back into the primary returned no count"
+          printf '%s\n' "$LOUT" | sed 's/^/  /' | head -6
+        else
+          say "banks: union back into the primary ($ladded new, ${ltotal:-?} entries here)"
+        fi
+        if ssh -o BatchMode=yes "$STANDBY_SSH" 'cd ~/.hakster/memories && tar -cf - --exclude="*.bak-*" banks $(ls -d users/*/banks 2>/dev/null || true)' 2>/dev/null | tar -C "$BANKS_TMP/verify" -xf -; then
+          if VOUT=$($NODE_LOCAL "$REPO_DIR/scripts/memory-bank-union.cjs" --mem-dir "$MEM_DIR_SRC" --verify-tree "$BANKS_TMP/verify" 2>&1); then
+            say "banks: both boxes verified equal ($(printf '%s\n' "$VOUT" | sed -n 's/^EQUAL.*local \([0-9][0-9]*\) .*/\1/p') entries)"
+          else
+            say "banks: DRIFT after union - $(printf '%s\n' "$VOUT" | tail -1)"
+            printf '%s\n' "$VOUT" | sed 's/^/  /' | head -14
+          fi
+        else
+          say "banks: could not re-read the standby's banks - equality not verified"
+        fi
+      else
+        say "banks: could not pull the standby's banks home - its own entries stay there"
+      fi
     fi
   else
     say "warning: could not ship the banks to the standby - it keeps its copy"

@@ -422,11 +422,11 @@ var require_inline_ad_layout = __commonJS({
 var require_home_dir = __commonJS({
   "../src/home-dir.js"(exports, module) {
     "use strict";
-    var fs11 = __require("fs");
+    var fs12 = __require("fs");
     var os2 = __require("os");
-    var path9 = __require("path");
+    var path10 = __require("path");
     function pathFor(platform) {
-      return platform === "win32" ? path9.win32 : path9;
+      return platform === "win32" ? path10.win32 : path10;
     }
     function driveOf(p) {
       const m = /^([A-Za-z]):/.exec(String(p || ""));
@@ -451,7 +451,7 @@ var require_home_dir = __commonJS({
       if (driveOf(home) === want) return home;
       const exists = opts.exists || ((p) => {
         try {
-          return fs11.existsSync(p);
+          return fs12.existsSync(p);
         } catch {
           return false;
         }
@@ -459,10 +459,10 @@ var require_home_dir = __commonJS({
       if (exists(P.join(home, ".hakster"))) return home;
       return P.join(root2, "Users", user);
     }
-    function haksterDir4(env = process.env, platform = process.platform, opts = {}) {
+    function haksterDir5(env = process.env, platform = process.platform, opts = {}) {
       return pathFor(platform).join(homeDir(env, platform, opts), ".hakster");
     }
-    module.exports = { homeDir, haksterDir: haksterDir4, driveOf, systemRoot };
+    module.exports = { homeDir, haksterDir: haksterDir5, driveOf, systemRoot };
   }
 });
 
@@ -470,8 +470,8 @@ var require_home_dir = __commonJS({
 var require_kitty_graphics = __commonJS({
   "../src/kitty-graphics.js"(exports, module) {
     "use strict";
-    var fs11 = __require("fs");
-    var path9 = __require("path");
+    var fs12 = __require("fs");
+    var path10 = __require("path");
     var CHUNK_BYTES = 4096;
     var LOGO_ID = 18507;
     function isSupported3(env = process.env, out = process.stdout) {
@@ -498,23 +498,23 @@ var require_kitty_graphics = __commonJS({
     }
     function logoPath(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
-      return path9.join(root2, "assets", "haksterai-logo.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path10.join(__dirname, "..");
+      return path10.join(root2, "assets", "haksterai-logo.png");
     }
     function heroPath2(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
-      return path9.join(root2, "assets", "haksterai-hero.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path10.join(__dirname, "..");
+      return path10.join(root2, "assets", "haksterai-hero.png");
     }
     function backdropPath(explicit) {
       if (explicit) return explicit;
-      const root2 = process.env.HAKSTER_CLI_DIR || path9.join(__dirname, "..");
-      return path9.join(root2, "assets", "haksterai-backdrop.png");
+      const root2 = process.env.HAKSTER_CLI_DIR || path10.join(__dirname, "..");
+      return path10.join(root2, "assets", "haksterai-backdrop.png");
     }
     function splashPath2({ checkout = false, exists = null } = {}) {
       const has = typeof exists === "function" ? exists : (f) => {
         try {
-          return fs11.existsSync(f);
+          return fs12.existsSync(f);
         } catch {
           return false;
         }
@@ -528,7 +528,7 @@ var require_kitty_graphics = __commonJS({
     function placeImage3({ file, cols = 24, rows = 12, id = LOGO_ID, zIndex = -1, write = (s) => process.stdout.write(s) } = {}) {
       let data;
       try {
-        data = fs11.readFileSync(file || logoPath());
+        data = fs12.readFileSync(file || logoPath());
       } catch {
         return null;
       }
@@ -584,12 +584,12 @@ var require_kitty_graphics = __commonJS({
 var require_live_image = __commonJS({
   "../src/live-image.js"(exports, module) {
     "use strict";
-    var fs11 = __require("fs");
+    var fs12 = __require("fs");
     var os2 = __require("os");
-    var path9 = __require("path");
-    var { haksterDir: haksterDir4 } = require_home_dir();
+    var path10 = __require("path");
+    var { haksterDir: haksterDir5 } = require_home_dir();
     var crypto = __require("crypto");
-    var CACHE_DIR = path9.join(haksterDir4(), "cache", "live");
+    var CACHE_DIR = path10.join(haksterDir5(), "cache", "live");
     var MAX_BYTES = 12 * 1024 * 1024;
     var FETCH_TIMEOUT_MS = 12e3;
     var EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
@@ -625,14 +625,14 @@ var require_live_image = __commonJS({
         const url = text.match(/https?:\/\/[^\s"'<>()\]]+/gi) || [];
         for (const u of url) {
           const ext = urlExt(u);
-          if (ext) return { kind: "url", ref: u.replace(/[.,;]+$/, ""), name: path9.basename(new URL(u.replace(/[.,;]+$/, "")).pathname) || `image.${ext}` };
+          if (ext) return { kind: "url", ref: u.replace(/[.,;]+$/, ""), name: path10.basename(new URL(u.replace(/[.,;]+$/, "")).pathname) || `image.${ext}` };
         }
         const paths = text.match(/(?:file:\/\/)?\/[^\s"'<>()\]]+\.(?:png|jpe?g|webp|gif|bmp)\b/gi) || [];
         for (const p of paths) {
           const file = p.replace(/^file:\/\//, "");
           try {
-            if (fs11.existsSync(file) && fs11.statSync(file).size <= MAX_BYTES) {
-              return { kind: "file", ref: file, name: path9.basename(file) };
+            if (fs12.existsSync(file) && fs12.statSync(file).size <= MAX_BYTES) {
+              return { kind: "file", ref: file, name: path10.basename(file) };
             }
           } catch {
           }
@@ -641,19 +641,19 @@ var require_live_image = __commonJS({
       return null;
     }
     function cacheFile(ext) {
-      return path9.join(CACHE_DIR, `${crypto.createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex").slice(0, 24)}.${ext}`);
+      return path10.join(CACHE_DIR, `${crypto.createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex").slice(0, 24)}.${ext}`);
     }
     function writeCache(buffer, ext) {
-      if (!fs11.existsSync(CACHE_DIR)) fs11.mkdirSync(CACHE_DIR, { recursive: true, mode: 448 });
+      if (!fs12.existsSync(CACHE_DIR)) fs12.mkdirSync(CACHE_DIR, { recursive: true, mode: 448 });
       const file = cacheFile(ext);
-      fs11.writeFileSync(file, buffer, { mode: 384 });
+      fs12.writeFileSync(file, buffer, { mode: 384 });
       return file;
     }
     async function materialize2(source) {
       if (!source || !source.ref) return { ok: false, reason: "no image" };
       if (source.kind === "file") {
         try {
-          const st = fs11.statSync(source.ref);
+          const st = fs12.statSync(source.ref);
           if (!st.isFile()) return { ok: false, reason: "not a file" };
           if (st.size > MAX_BYTES) return { ok: false, reason: `too big (${Math.round(st.size / 1048576)} MB)` };
           return { ok: true, file: source.ref, name: source.name };
@@ -707,19 +707,19 @@ var require_live_image = __commonJS({
 var require_usage_ids = __commonJS({
   "../src/usage-ids.js"(exports, module) {
     "use strict";
-    var fs11 = __require("fs");
-    var path9 = __require("path");
+    var fs12 = __require("fs");
+    var path10 = __require("path");
     var os2 = __require("os");
     var HOME = process.env.HOME || os2.homedir() || "/home/ghost";
     var REPO = (() => {
       try {
-        if (typeof __dirname === "string" && __dirname) return path9.resolve(__dirname, "..", "..");
+        if (typeof __dirname === "string" && __dirname) return path10.resolve(__dirname, "..", "..");
       } catch {
       }
       const base = process.env.HAKSTER_REPO || process.cwd() || "";
-      return base ? path9.resolve(base) : "";
+      return base ? path10.resolve(base) : "";
     })();
-    var REGISTRY_FILE = process.env.PROVIDER_KEYS_FILE || (REPO ? path9.join(REPO, "server", "data", "provider-keys.json") : "");
+    var REGISTRY_FILE = process.env.PROVIDER_KEYS_FILE || (REPO ? path10.join(REPO, "server", "data", "provider-keys.json") : "");
     var USERS = Object.freeze({
       owner: Object.freeze({ user: "owner", label: "Owner" }),
       junkalot: Object.freeze({ user: "junkalot", label: "Junkalot \xB7 client" })
@@ -793,7 +793,7 @@ var require_usage_ids = __commonJS({
     function readRegistryKeys() {
       if (!REGISTRY_FILE) return [];
       try {
-        const raw = JSON.parse(fs11.readFileSync(REGISTRY_FILE, "utf8"));
+        const raw = JSON.parse(fs12.readFileSync(REGISTRY_FILE, "utf8"));
         return raw && Array.isArray(raw.keys) ? raw.keys : [];
       } catch {
         return [];
@@ -898,15 +898,15 @@ var require_usage_ids = __commonJS({
 var require_updater = __commonJS({
   "../src/updater.js"(exports, module) {
     "use strict";
-    var fs11 = __require("fs");
+    var fs12 = __require("fs");
     var os2 = __require("os");
-    var path9 = __require("path");
-    var { haksterDir: haksterDir4 } = require_home_dir();
+    var path10 = __require("path");
+    var { haksterDir: haksterDir5 } = require_home_dir();
     var crypto = __require("crypto");
     var { spawn: spawn2 } = __require("child_process");
-    var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path9.join(__dirname, "..") : "");
+    var DEFAULT_CLI_DIR = process.env.HAKSTER_CLI_DIR || (typeof __dirname === "string" ? path10.join(__dirname, "..") : "");
     function hasPkgVersion(dir) {
-      const pkg = readJson(path9.join(String(dir), "package.json"), null);
+      const pkg = readJson(path10.join(String(dir), "package.json"), null);
       return !!(pkg && pkg.version);
     }
     function cliDirOf2(explicit) {
@@ -914,68 +914,68 @@ var require_updater = __commonJS({
       const add = (dir) => {
         if (!dir) return;
         try {
-          const abs = path9.resolve(String(dir));
+          const abs = path10.resolve(String(dir));
           if (!candidates.includes(abs)) candidates.push(abs);
         } catch {
         }
       };
       if (explicit) {
         try {
-          const named = path9.resolve(String(explicit));
-          if (fs11.existsSync(path9.join(named, "package.json"))) return named;
+          const named = path10.resolve(String(explicit));
+          if (fs12.existsSync(path10.join(named, "package.json"))) return named;
         } catch {
         }
       }
       add(explicit);
       add(process.env.HAKSTER_CLI_DIR);
       try {
-        if (typeof __dirname === "string" && __dirname) add(path9.join(__dirname, ".."));
+        if (typeof __dirname === "string" && __dirname) add(path10.join(__dirname, ".."));
       } catch {
       }
       try {
         if (process.argv[1]) {
-          const entry = path9.dirname(path9.resolve(process.argv[1]));
+          const entry = path10.dirname(path10.resolve(process.argv[1]));
           add(entry);
-          if (path9.basename(entry) === "src") add(path9.dirname(entry));
+          if (path10.basename(entry) === "src") add(path10.dirname(entry));
         }
       } catch {
       }
       add(process.cwd());
       for (const dir of candidates) if (hasPkgVersion(dir)) return dir;
-      return candidates[0] || path9.resolve(process.cwd());
+      return candidates[0] || path10.resolve(process.cwd());
     }
     function versionKnown(version) {
       const v = String(version || "");
       return !!v && v !== "0.0.0";
     }
-    var UPDATES_DIR = path9.join(haksterDir4(), "updates");
-    var STAGED_DIR = path9.join(UPDATES_DIR, "staged");
-    var TARBALL = path9.join(UPDATES_DIR, "latest.tar.gz");
-    var PENDING_FILE = path9.join(UPDATES_DIR, "pending.json");
+    var UPDATES_DIR = path10.join(haksterDir5(), "updates");
+    var STAGED_DIR = path10.join(UPDATES_DIR, "staged");
+    var TARBALL = path10.join(UPDATES_DIR, "latest.tar.gz");
+    var PENDING_FILE = path10.join(UPDATES_DIR, "pending.json");
     var MAX_TARBALL = 32 * 1024 * 1024;
     function readJson(file, fallback) {
       try {
-        return JSON.parse(fs11.readFileSync(file, "utf8"));
+        return JSON.parse(fs12.readFileSync(file, "utf8"));
       } catch {
         return fallback;
       }
     }
     function writeJson(file, value) {
-      fs11.mkdirSync(path9.dirname(file), { recursive: true, mode: 448 });
+      fs12.mkdirSync(path10.dirname(file), { recursive: true, mode: 448 });
       const tmp = `${file}.tmp-${process.pid}`;
-      fs11.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
+      fs12.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
 `, { mode: 384 });
-      fs11.renameSync(tmp, file);
+      fs12.renameSync(tmp, file);
     }
     function sha256File(file) {
       try {
-        return crypto.createHash("sha256").update(fs11.readFileSync(file)).digest("hex");
+        return crypto.createHash("sha256").update(fs12.readFileSync(file)).digest("hex");
       } catch {
         return "";
       }
     }
     function stampOf(dir) {
-      const stamp = readJson(path9.join(dir, ".build-stamp.json"), null);
+      const stamp = readJson(path10.join(dir, ".build-stamp.json"), null);
       if (!stamp) return null;
       const commits = parseInt(stamp.commits, 10);
       if (!Number.isFinite(commits) || commits <= 0) return null;
@@ -983,21 +983,21 @@ var require_updater = __commonJS({
     }
     function runningInfo(explicitDir) {
       const dir = cliDirOf2(explicitDir);
-      const pkg = readJson(path9.join(dir, "package.json"), {});
+      const pkg = readJson(path10.join(dir, "package.json"), {});
       const stamp = stampOf(dir);
       return {
         version: String(pkg.version || "0.0.0"),
-        bundleSha: sha256File(path9.join(dir, "ui-fb.mjs")),
+        bundleSha: sha256File(path10.join(dir, "ui-fb.mjs")),
         commit: stamp ? stamp.commit : "",
         commits: stamp ? stamp.commits : null,
         dir
       };
     }
     function isSourceCheckout3(explicitDir) {
-      return fs11.existsSync(path9.join(cliDirOf2(explicitDir), "..", ".git"));
+      return fs12.existsSync(path10.join(cliDirOf2(explicitDir), "..", ".git"));
     }
     function serverUrl() {
-      const cfg = readJson(path9.join(haksterDir4(), "config.json"), {});
+      const cfg = readJson(path10.join(haksterDir5(), "config.json"), {});
       return String(cfg.server || process.env.HAKSTER_SERVER || "").replace(/\/+$/, "");
     }
     function cmpVersion(a, b) {
@@ -1036,8 +1036,8 @@ var require_updater = __commonJS({
         const buf = Buffer.from(await res.arrayBuffer());
         if (!buf.length) return { ok: false, reason: "empty package" };
         if (buf.length > MAX_TARBALL) return { ok: false, reason: "package too large" };
-        fs11.mkdirSync(UPDATES_DIR, { recursive: true, mode: 448 });
-        fs11.writeFileSync(TARBALL, buf, { mode: 384 });
+        fs12.mkdirSync(UPDATES_DIR, { recursive: true, mode: 448 });
+        fs12.writeFileSync(TARBALL, buf, { mode: 384 });
         return { ok: true, bytes: buf.length };
       } catch (e) {
         return { ok: false, reason: e && e.name === "AbortError" ? "timeout" : String(e && e.message || e) };
@@ -1046,9 +1046,9 @@ var require_updater = __commonJS({
       }
     }
     function extractStaged() {
-      fs11.mkdirSync(STAGED_DIR, { recursive: true, mode: 448 });
+      fs12.mkdirSync(STAGED_DIR, { recursive: true, mode: 448 });
       try {
-        fs11.rmSync(path9.join(STAGED_DIR, "cli"), { recursive: true, force: true });
+        fs12.rmSync(path10.join(STAGED_DIR, "cli"), { recursive: true, force: true });
       } catch {
       }
       return new Promise((resolve) => {
@@ -1058,10 +1058,10 @@ var require_updater = __commonJS({
       });
     }
     function stagedInfo() {
-      const pkg = readJson(path9.join(STAGED_DIR, "cli", "package.json"), {});
+      const pkg = readJson(path10.join(STAGED_DIR, "cli", "package.json"), {});
       return {
         version: String(pkg.version || ""),
-        bundleSha: sha256File(path9.join(STAGED_DIR, "cli", "ui-fb.mjs")),
+        bundleSha: sha256File(path10.join(STAGED_DIR, "cli", "ui-fb.mjs")),
         deps: JSON.stringify(pkg && pkg.dependencies || {})
       };
     }
@@ -1102,7 +1102,7 @@ var require_updater = __commonJS({
       if (!staged.version || !staged.bundleSha) {
         return { status: "error", reason: "staged package unreadable", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), running };
       }
-      const stagedStamp = stampOf(path9.join(STAGED_DIR, "cli"));
+      const stagedStamp = stampOf(path10.join(STAGED_DIR, "cli"));
       const latestCommit = stagedStamp && stagedStamp.commit || (latest && latest.commit ? String(latest.commit) : "");
       const latestCommits = stagedStamp && stagedStamp.commits || (latest && Number.isFinite(parseInt(latest.commits, 10)) ? parseInt(latest.commits, 10) : null);
       const behind = Number.isFinite(running.commits) && Number.isFinite(latestCommits) && latestCommits > running.commits ? latestCommits - running.commits : 0;
@@ -1140,7 +1140,7 @@ var require_updater = __commonJS({
         latestCommits,
         behind,
         source: origin,
-        dir: path9.join(STAGED_DIR, "cli"),
+        dir: path10.join(STAGED_DIR, "cli"),
         state: blocked ? "blocked" : "staged",
         blocked
       };
@@ -1155,7 +1155,7 @@ var require_updater = __commonJS({
     function pendingInfo2(explicitDir) {
       const pending = readJson(PENDING_FILE, null);
       if (!pending || !pending.version) return null;
-      const ok = !!pending.bundleSha && sha256File(path9.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
+      const ok = !!pending.bundleSha && sha256File(path10.join(STAGED_DIR, "cli", "ui-fb.mjs")) === pending.bundleSha;
       const running = runningInfo(explicitDir);
       const runningKnown = versionKnown(running.version);
       return {
@@ -1204,20 +1204,20 @@ var require_updater = __commonJS({
       }
       if (isSourceCheckout3(target)) return { applied: false, reason: "source-checkout", version: pending.version };
       if (!pending.verified) return { applied: false, reason: "staged package failed verification", version: pending.version };
-      const installedDeps = readJson(path9.join(target, "package.json"), {}).dependencies || {};
+      const installedDeps = readJson(path10.join(target, "package.json"), {}).dependencies || {};
       const staged = stagedInfo();
       if (!sameDeps(JSON.stringify(installedDeps), staged.deps)) {
         return { applied: false, reason: "dependencies changed \u2014 run npm install for the new version", version: pending.version };
       }
-      const backupDir = path9.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
-      const stagedCli = path9.join(STAGED_DIR, "cli");
-      const skipHeavy = (src) => !src.includes(`${path9.sep}node_modules`) && !src.includes(`${path9.sep}.git`);
+      const backupDir = path10.join(UPDATES_DIR, `backup-${running.version}-${Date.now()}`);
+      const stagedCli = path10.join(STAGED_DIR, "cli");
+      const skipHeavy = (src) => !src.includes(`${path10.sep}node_modules`) && !src.includes(`${path10.sep}.git`);
       try {
-        fs11.cpSync(target, backupDir, { recursive: true, filter: skipHeavy });
-        fs11.cpSync(stagedCli, target, {
+        fs12.cpSync(target, backupDir, { recursive: true, filter: skipHeavy });
+        fs12.cpSync(stagedCli, target, {
           recursive: true,
           force: true,
-          filter: (src) => !src.includes(`${path9.sep}node_modules`) && !src.includes(`${path9.sep}.git`)
+          filter: (src) => !src.includes(`${path10.sep}node_modules`) && !src.includes(`${path10.sep}.git`)
         });
       } catch (e) {
         return { applied: false, reason: `copy failed: ${e && e.message || e}`, version: pending.version, backupDir };
@@ -1329,13 +1329,13 @@ var require_updater = __commonJS({
 var require_prefs = __commonJS({
   "../src/prefs.js"(exports, module) {
     "use strict";
-    var fs11 = __require("fs");
+    var fs12 = __require("fs");
     var os2 = __require("os");
-    var path9 = __require("path");
-    var { haksterDir: haksterDir4 } = require_home_dir();
-    var PREFS_DIR = haksterDir4();
-    var PREFS_FILE = path9.join(PREFS_DIR, "cli-prefs.json");
-    var LEGACY_FILE = path9.join(PREFS_DIR, "tui-prefs.json");
+    var path10 = __require("path");
+    var { haksterDir: haksterDir5 } = require_home_dir();
+    var PREFS_DIR = haksterDir5();
+    var PREFS_FILE = path10.join(PREFS_DIR, "cli-prefs.json");
+    var LEGACY_FILE = path10.join(PREFS_DIR, "tui-prefs.json");
     var DEFAULTS = {
       model: "",
       // '' = the pinned primary model (§22)
@@ -1389,7 +1389,7 @@ var require_prefs = __commonJS({
     var KEYS = Object.keys(DEFAULTS);
     function readJson(file) {
       try {
-        const value = JSON.parse(fs11.readFileSync(file, "utf8"));
+        const value = JSON.parse(fs12.readFileSync(file, "utf8"));
         return value && typeof value === "object" && !Array.isArray(value) ? value : null;
       } catch {
         return null;
@@ -1411,11 +1411,11 @@ var require_prefs = __commonJS({
         if (patch && Object.prototype.hasOwnProperty.call(patch, key)) next[key] = patch[key];
       }
       try {
-        fs11.mkdirSync(PREFS_DIR, { recursive: true, mode: 448 });
+        fs12.mkdirSync(PREFS_DIR, { recursive: true, mode: 448 });
         const tmp = `${PREFS_FILE}.tmp-${process.pid}`;
-        fs11.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}
+        fs12.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}
 `, { mode: 384 });
-        fs11.renameSync(tmp, PREFS_FILE);
+        fs12.renameSync(tmp, PREFS_FILE);
       } catch {
       }
       return next;
@@ -1647,14 +1647,14 @@ var require_ladder = __commonJS({
 // ../src/input-history.js
 var require_input_history = __commonJS({
   "../src/input-history.js"(exports, module) {
-    var fs11 = __require("fs");
+    var fs12 = __require("fs");
     var os2 = __require("os");
-    var path9 = __require("path");
-    var { haksterDir: haksterDir4 } = require_home_dir();
+    var path10 = __require("path");
+    var { haksterDir: haksterDir5 } = require_home_dir();
     var MAX_KEEP = 500;
     var MAX_RECALL = 200;
     function historyPath() {
-      return path9.join(haksterDir4(), "history");
+      return path10.join(haksterDir5(), "history");
     }
     var TERMINAL_JUNK = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\x1b|rgb:|VTE\(|[─│┌┐└┘├┤┬┴┼━┃┏┓┗┛┣┫┳┻╋]|;\d+\$y|\[\?/;
     var BOX_ONLY = /^[\s│┃|]+|[\s│┃|]+$/;
@@ -1750,7 +1750,7 @@ var require_input_history = __commonJS({
     }
     function loadInputHistory2(limit = MAX_RECALL) {
       try {
-        const lines = fs11.readFileSync(historyPath(), "utf8").split("\n");
+        const lines = fs12.readFileSync(historyPath(), "utf8").split("\n");
         return sanitizeLines(lines).slice(-Math.max(0, limit));
       } catch {
         return [];
@@ -1762,14 +1762,14 @@ var require_input_history = __commonJS({
       const value = String(line).replace(/\r/g, "").trim();
       try {
         const file = historyPath();
-        const dir = path9.dirname(file);
-        if (!fs11.existsSync(dir)) fs11.mkdirSync(dir, { recursive: true });
+        const dir = path10.dirname(file);
+        if (!fs12.existsSync(dir)) fs12.mkdirSync(dir, { recursive: true });
         const existing = sanitizeLines(
-          fs11.existsSync(file) ? fs11.readFileSync(file, "utf8").split("\n") : []
+          fs12.existsSync(file) ? fs12.readFileSync(file, "utf8").split("\n") : []
         );
         const next = existing.filter((h) => h !== value);
         next.push(value);
-        fs11.writeFileSync(file, next.slice(-limit).join("\n") + "\n");
+        fs12.writeFileSync(file, next.slice(-limit).join("\n") + "\n");
         return true;
       } catch {
         return false;
@@ -1968,9 +1968,9 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 // src/App.jsx
-import React32, { useCallback as useCallback6, useEffect as useEffect19, useRef as useRef15, useState as useState19 } from "react";
-import fs10 from "node:fs";
-import path8 from "node:path";
+import React32, { useCallback as useCallback6, useEffect as useEffect20, useRef as useRef16, useState as useState20 } from "react";
+import fs11 from "node:fs";
+import path9 from "node:path";
 import { execFile } from "node:child_process";
 import { useKeyboard as useKeyboard8, useRenderer as useRenderer3, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes as TextAttributes23 } from "@opentui/core";
@@ -5054,6 +5054,7 @@ var INSTALL_FILES = [
   "cli/src/updater.js",
   "cli/src/prefs.js",
   "cli/src/listening-ports.js",
+  "cli/src/home-dir.js",
   "cli/src/models/ladder.js",
   "cli/src/self-config-guard.js"
 ];
@@ -7857,12 +7858,78 @@ function useMemoryBank(intervalMs = 1e4) {
   return state;
 }
 
-// src/hooks/useCliUpdate.js
-var import_updater2 = __toESM(require_updater());
-var import_prefs2 = __toESM(require_prefs());
+// src/hooks/useBankDrift.js
+var import_home_dir5 = __toESM(require_home_dir());
 import { useEffect as useEffect17, useRef as useRef13, useState as useState17 } from "react";
 import fs9 from "node:fs";
 import path7 from "node:path";
+var DEFAULT_API3 = process.env.HAKSTER_API_URL || "http://localhost:3579";
+function configuredServer2() {
+  if (process.env.HAKSTER_API_URL) return String(process.env.HAKSTER_API_URL).replace(/\/+$/, "");
+  try {
+    const cfg = JSON.parse(fs9.readFileSync(path7.join((0, import_home_dir5.haksterDir)(), "config.json"), "utf8"));
+    if (cfg && typeof cfg.server === "string" && cfg.server) return cfg.server.replace(/\/+$/, "");
+  } catch {
+  }
+  return DEFAULT_API3;
+}
+function useBankDrift(intervalMs = 6e4, enabled = true) {
+  const [state, setState] = useState17({ localTotal: null, peerTotal: null, equal: null, peerLabel: null, restricted: false });
+  const alive = useRef13(true);
+  const timer = useRef13(null);
+  useEffect17(() => {
+    alive.current = true;
+    if (!enabled) return void 0;
+    const key = process.env.HAKSTER_API_KEY || "";
+    if (!key) return void 0;
+    const load = async () => {
+      try {
+        const res = await fetch(`${configuredServer2()}/api/agent/memory-banks/health`, {
+          headers: { "x-api-key": key },
+          cache: "no-store"
+        });
+        if (!alive.current) return;
+        if (res.status === 403 || res.status === 401) {
+          setState((s) => ({ ...s, restricted: true, equal: null }));
+          return;
+        }
+        const body = await res.json().catch(() => null);
+        if (!alive.current || !body || typeof body !== "object") return;
+        const localTotal = body.local && Number.isFinite(body.local.total) ? body.local.total : null;
+        const peerTotal = body.peer && body.peer.reachable === true && Number.isFinite(body.peer.total) ? body.peer.total : null;
+        const equal = peerTotal == null ? null : typeof body.equal === "boolean" ? body.equal : localTotal === peerTotal;
+        setState({
+          localTotal,
+          peerTotal,
+          equal,
+          peerLabel: body.peer && body.peer.label || null,
+          restricted: false
+        });
+      } catch {
+      }
+    };
+    load();
+    const every = Math.max(15e3, Number(intervalMs) || 6e4);
+    timer.current = setInterval(load, every);
+    try {
+      if (typeof timer.current.unref === "function") timer.current.unref();
+    } catch {
+    }
+    return () => {
+      alive.current = false;
+      if (timer.current) clearInterval(timer.current);
+      timer.current = null;
+    };
+  }, [intervalMs, enabled]);
+  return state;
+}
+
+// src/hooks/useCliUpdate.js
+var import_updater2 = __toESM(require_updater());
+var import_prefs2 = __toESM(require_prefs());
+import { useEffect as useEffect18, useRef as useRef14, useState as useState18 } from "react";
+import fs10 from "node:fs";
+import path8 from "node:path";
 function readStartup() {
   try {
     const applied = (0, import_updater2.appliedNotice)();
@@ -7907,18 +7974,18 @@ function resolveIntervalMs(explicitMs) {
   return mins * 60 * 1e3 + jitter;
 }
 function useCliUpdate(intervalMs = null, sessionVersion = "") {
-  const startup = useRef13(null);
+  const startup = useRef14(null);
   if (startup.current === null) startup.current = readStartup();
-  const tickMs = useRef13(0);
+  const tickMs = useRef14(0);
   if (!tickMs.current) tickMs.current = resolveIntervalMs(intervalMs);
   const applied = startup.current.applied;
-  const [state, setState] = useState17(startup.current.status);
+  const [state, setState] = useState18(startup.current.status);
   const diskNewer = () => {
     try {
       if (!sessionVersion) return null;
       if ((0, import_updater2.isSourceCheckout)()) return null;
       const diskVersion = String(
-        JSON.parse(fs9.readFileSync(path7.join((0, import_updater2.cliDirOf)(), "package.json"), "utf8")).version || ""
+        JSON.parse(fs10.readFileSync(path8.join((0, import_updater2.cliDirOf)(), "package.json"), "utf8")).version || ""
       );
       if (!diskVersion || diskVersion === sessionVersion) return null;
       const pa = diskVersion.split(".").map((n) => parseInt(n, 10) || 0);
@@ -7932,7 +7999,7 @@ function useCliUpdate(intervalMs = null, sessionVersion = "") {
       return null;
     }
   };
-  useEffect17(() => {
+  useEffect18(() => {
     if (!sessionVersion) return void 0;
     const probe = () => {
       const onDisk = diskNewer();
@@ -7947,7 +8014,7 @@ function useCliUpdate(intervalMs = null, sessionVersion = "") {
     }
     return () => clearInterval(id);
   }, [sessionVersion]);
-  useEffect17(() => {
+  useEffect18(() => {
     let alive = true;
     const tick = async () => {
       const onDisk = diskNewer();
@@ -8023,7 +8090,7 @@ function useCliUpdate(intervalMs = null, sessionVersion = "") {
 }
 
 // src/hooks/useScriptRunner.js
-import { useCallback as useCallback5, useEffect as useEffect18, useRef as useRef14, useState as useState18 } from "react";
+import { useCallback as useCallback5, useEffect as useEffect19, useRef as useRef15, useState as useState19 } from "react";
 import { spawn } from "node:child_process";
 var MAX_LINES = 400;
 var TIMEOUT_MS = 12e4;
@@ -8036,17 +8103,17 @@ function spawnSpec(run) {
   return { cmd: winQuote(run[0]), args: run.slice(1).map(winQuote), shell: true };
 }
 function useScriptRunner() {
-  const [scripts] = useState18(() => {
+  const [scripts] = useState19(() => {
     try {
       return discoverScripts();
     } catch {
       return [];
     }
   });
-  const [run, setRun] = useState18({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
-  const procRef = useRef14(null);
-  const timerRef = useRef14(null);
-  const seq2 = useRef14(0);
+  const [run, setRun] = useState19({ status: "idle", script: null, lines: [], startedAt: 0, endedAt: 0, exit: null });
+  const procRef = useRef15(null);
+  const timerRef = useRef15(null);
+  const seq2 = useRef15(0);
   const stop = useCallback5(() => {
     const p = procRef.current;
     if (p) {
@@ -8062,7 +8129,7 @@ function useScriptRunner() {
     }
     setRun((r) => r.status === "running" ? { ...r, status: "stopped", endedAt: Date.now() } : r);
   }, []);
-  useEffect18(() => () => {
+  useEffect19(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     const p = procRef.current;
     if (p) {
@@ -8341,13 +8408,13 @@ function writePrefs(patch) {
   }
 }
 var CRUSH_CONFIG_PATHS = [
-  path8.join(process.env.HOME || "/home/ghost", ".crush.json"),
-  path8.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
+  path9.join(process.env.HOME || "/home/ghost", ".crush.json"),
+  path9.join(process.env.HOME || "/home/ghost", ".config", "crush", "crush.json")
 ];
 function readCrushModels() {
   for (const p of CRUSH_CONFIG_PATHS) {
     try {
-      const j = JSON.parse(fs10.readFileSync(p, "utf8"));
+      const j = JSON.parse(fs11.readFileSync(p, "utf8"));
       const out = [];
       for (const [slot, m] of Object.entries(j.models || {})) {
         if (m && m.model) out.push({ slot, model: m.model, provider: m.provider || "ollama" });
@@ -8372,18 +8439,18 @@ function readImageAttachment(file) {
   const raw = String(file || "").trim();
   if (!raw) throw new Error("no file given");
   const home = process.env.HOME || process.env.USERPROFILE || "";
-  const abs = path8.resolve(raw.replace(/^~(?=[\\/])/, home));
-  const mime = IMAGE_MIME[path8.extname(abs).toLowerCase()];
+  const abs = path9.resolve(raw.replace(/^~(?=[\\/])/, home));
+  const mime = IMAGE_MIME[path9.extname(abs).toLowerCase()];
   if (!mime) throw new Error("not an image (png, jpg, webp, gif, bmp)");
-  const st = fs10.statSync(abs);
+  const st = fs11.statSync(abs);
   if (!st.isFile()) throw new Error("not a file");
   if (st.size > MAX_IMAGE_BYTES) {
     throw new Error(`too large (${Math.round(st.size / 1024 / 1024)}MB, max 12MB)`);
   }
-  const buf = fs10.readFileSync(abs);
+  const buf = fs11.readFileSync(abs);
   return {
     path: abs,
-    name: path8.basename(abs),
+    name: path9.basename(abs),
     bytes: buf.length,
     dataUrl: `data:${mime};base64,${buf.toString("base64")}`
   };
@@ -8395,53 +8462,53 @@ function App({ version = "0.1.0" }) {
   React32.useLayoutEffect(() => {
     noteRenderEnd(renderT0);
   });
-  const [view, setView] = useState19("chat");
-  const [focus, setFocus] = useState19("composer");
-  const [adsOn, setAdsOn] = useState19(() => readPrefs().ads !== false);
-  const [dockExpanded, setDockExpanded] = useState19(false);
-  const [draft, setDraft] = useState19("");
-  const [inputHistory, setInputHistory] = useState19(() => (0, import_input_history.loadInputHistory)());
-  const [histIdx, setHistIdx] = useState19(-1);
-  const draftStash = useRef15("");
-  const [model, setModel] = useState19(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
-  const [provider, setProvider] = useState19(() => process.env.HAKSTER_PROVIDER || readPrefs().provider || "");
-  const [modelIdx, setModelIdx] = useState19(0);
-  const prefsRef = useRef15(null);
+  const [view, setView] = useState20("chat");
+  const [focus, setFocus] = useState20("composer");
+  const [adsOn, setAdsOn] = useState20(() => readPrefs().ads !== false);
+  const [dockExpanded, setDockExpanded] = useState20(false);
+  const [draft, setDraft] = useState20("");
+  const [inputHistory, setInputHistory] = useState20(() => (0, import_input_history.loadInputHistory)());
+  const [histIdx, setHistIdx] = useState20(-1);
+  const draftStash = useRef16("");
+  const [model, setModel] = useState20(() => process.env.HAKSTER_MODEL && !/^glm/i.test(process.env.HAKSTER_MODEL) ? process.env.HAKSTER_MODEL : readPrefs().model || import_ladder2.PRIMARY_MODEL);
+  const [provider, setProvider] = useState20(() => process.env.HAKSTER_PROVIDER || readPrefs().provider || "");
+  const [modelIdx, setModelIdx] = useState20(0);
+  const prefsRef = useRef16(null);
   if (!prefsRef.current) prefsRef.current = readPrefs();
-  const [handoffOn, setHandoffOn] = useState19(() => prefsRef.current.autoHandoff !== false);
-  const [autoMode, setAutoMode] = useState19(() => {
+  const [handoffOn, setHandoffOn] = useState20(() => prefsRef.current.autoHandoff !== false);
+  const [autoMode, setAutoMode] = useState20(() => {
     const saved = String(prefsRef.current.autoMode || "");
     return AUTO_MODES.has(saved) ? saved : "auto-edit";
   });
-  const [expandThinking, setExpandThinking] = useState19(() => prefsRef.current.thinkingExpanded === true);
-  const [usageRefresh, setUsageRefresh] = useState19(() => {
+  const [expandThinking, setExpandThinking] = useState20(() => prefsRef.current.thinkingExpanded === true);
+  const [usageRefresh, setUsageRefresh] = useState20(() => {
     const n = Number(prefsRef.current.usageRefresh);
     return Number.isFinite(n) && n >= 0 ? n : 15;
   });
-  const [introDone, setIntroDone] = useState19(() => process.env.HAKSTER_NO_INTRO === "1" || readPrefs().intro === false);
-  const [status, setStatus] = useState19(null);
-  const [statusErr, setStatusErr] = useState19(null);
-  const [mcp, setMcp] = useState19(null);
-  const [history, setHistory] = useState19([]);
-  const [menuOpen, setMenuOpen] = useState19(false);
-  const [dangerSetup, setDangerSetup] = useState19(false);
-  const [scriptIdx, setScriptIdx] = useState19(0);
-  const [squadIdx, setSquadIdx] = useState19(0);
-  const [menuIndex, setMenuIndex] = useState19(0);
-  const [menuQuery, setMenuQuery] = useState19("");
-  const [settingsIdx, setSettingsIdx] = useState19(0);
-  const [mcpIdx, setMcpIdx] = useState19(0);
-  const [prefsTick, setPrefsTick] = useState19(0);
-  const [notice, setNotice] = useState19(null);
-  const [scan, setScan] = useState19({ ok: false, ports: [], procs: {}, at: 0 });
-  const [guard, setGuard] = useState19(null);
-  const [pointsHistory, setPointsHistory] = useState19([]);
-  const [attachment, setAttachment] = useState19(null);
-  const [steerQueue, setSteerQueue] = useState19([]);
-  const scrollRef = useRef15(null);
-  const dashRef = useRef15(null);
-  const usageRef = useRef15(null);
-  const debugRef = useRef15(null);
+  const [introDone, setIntroDone] = useState20(() => process.env.HAKSTER_NO_INTRO === "1" || readPrefs().intro === false);
+  const [status, setStatus] = useState20(null);
+  const [statusErr, setStatusErr] = useState20(null);
+  const [mcp, setMcp] = useState20(null);
+  const [history, setHistory] = useState20([]);
+  const [menuOpen, setMenuOpen] = useState20(false);
+  const [dangerSetup, setDangerSetup] = useState20(false);
+  const [scriptIdx, setScriptIdx] = useState20(0);
+  const [squadIdx, setSquadIdx] = useState20(0);
+  const [menuIndex, setMenuIndex] = useState20(0);
+  const [menuQuery, setMenuQuery] = useState20("");
+  const [settingsIdx, setSettingsIdx] = useState20(0);
+  const [mcpIdx, setMcpIdx] = useState20(0);
+  const [prefsTick, setPrefsTick] = useState20(0);
+  const [notice, setNotice] = useState20(null);
+  const [scan, setScan] = useState20({ ok: false, ports: [], procs: {}, at: 0 });
+  const [guard, setGuard] = useState20(null);
+  const [pointsHistory, setPointsHistory] = useState20([]);
+  const [attachment, setAttachment] = useState20(null);
+  const [steerQueue, setSteerQueue] = useState20([]);
+  const scrollRef = useRef16(null);
+  const dashRef = useRef16(null);
+  const usageRef = useRef16(null);
+  const debugRef = useRef16(null);
   const agent = useAgentStream_default({
     // A steer the run could not deliver comes back here and joins the same
     // queue an undelivered POST uses, so it sends with the next run.
@@ -8463,10 +8530,10 @@ function App({ version = "0.1.0" }) {
   });
   const usagePage = useServerUsage(usageRefresh, view === "usage");
   const debugStats = useDebugStats({ enabled: view === "debug", api: API });
-  useEffect19(() => {
+  useEffect20(() => {
     writePrefs({ autoHandoff: handoffOn });
   }, [handoffOn]);
-  useEffect19(() => {
+  useEffect20(() => {
     writePrefs({ autoMode });
   }, [autoMode]);
   const load = useCallback6(async () => {
@@ -8481,13 +8548,13 @@ function App({ version = "0.1.0" }) {
       setStatusErr(e.message);
     }
   }, []);
-  useEffect19(() => {
+  useEffect20(() => {
     load();
     const t = setInterval(load, 3e3);
     return () => clearInterval(t);
   }, [load]);
-  const mcpRefreshRef = useRef15(null);
-  useEffect19(() => {
+  const mcpRefreshRef = useRef16(null);
+  useEffect20(() => {
     let alive = true;
     const tick = async () => {
       try {
@@ -8510,7 +8577,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect19(() => {
+  useEffect20(() => {
     let alive = true;
     const tick = async () => {
       const next = await scanPorts();
@@ -8523,7 +8590,7 @@ function App({ version = "0.1.0" }) {
       clearInterval(t);
     };
   }, []);
-  useEffect19(() => {
+  useEffect20(() => {
     const tick = () => {
       try {
         setGuard(fileGuard());
@@ -8535,7 +8602,7 @@ function App({ version = "0.1.0" }) {
     return () => clearInterval(t);
   }, []);
   const meterPoints = Number(agent.meters && agent.meters.points) || 0;
-  useEffect19(() => {
+  useEffect20(() => {
     setPointsHistory((h) => [...h.slice(-59), meterPoints]);
   }, [meterPoints]);
   const models = import_catalog.default.REFERENCE_CATALOG || [];
@@ -8572,6 +8639,7 @@ function App({ version = "0.1.0" }) {
   const liveImage = React32.useMemo(() => lastAssistant ? (0, import_live_image2.findImageSource)([lastTool && lastTool.result != null ? String(lastTool.result) : "", String(lastAssistant.text || "")]) : null, [lastAssistant, lastTool]);
   const host = useHostStats(1e3);
   const memory = useMemoryBank(1e4);
+  const bankDrift = useBankDrift(6e4);
   const update = useCliUpdate(void 0, version);
   const runner = useScriptRunner_default();
   const { userTurns, toolCalls, webCalls } = React32.useMemo(() => {
@@ -8603,8 +8671,8 @@ function App({ version = "0.1.0" }) {
   const peers = peersFromMcp(mcp);
   const services = serviceStates(scan);
   const otherPorts = otherListening(scan);
-  const [pm2Here, setPm2Here] = useState19(null);
-  useEffect19(() => {
+  const [pm2Here, setPm2Here] = useState20(null);
+  useEffect20(() => {
     const finder = process.platform === "win32" ? "where" : "which";
     execFile(finder, ["pm2"], { timeout: 4e3, windowsHide: true }, (err, stdout) => {
       setPm2Here(!err && String(stdout || "").trim().length > 0);
@@ -8614,7 +8682,7 @@ function App({ version = "0.1.0" }) {
     setNotice(text);
     setTimeout(() => setNotice((cur) => cur === text ? null : cur), 6e3);
   }, []);
-  const startingRef = useRef15(/* @__PURE__ */ new Set());
+  const startingRef = useRef16(/* @__PURE__ */ new Set());
   const startPortByNumber = useCallback6((n) => {
     const entry = quickStartEntry(n, services, scan);
     if (!entry) {
@@ -8652,16 +8720,16 @@ function App({ version = "0.1.0" }) {
       agent.note(text, updated ? "notice" : "warn");
     }
   });
-  const installedAnnounced = useRef15(false);
-  useEffect19(() => {
+  const installedAnnounced = useRef16(false);
+  useEffect20(() => {
     if (installedAnnounced.current) return;
     if (!update || !update.applied || !update.applied.version) return;
     installedAnnounced.current = true;
     const from = update.applied.from && update.applied.from !== update.applied.version ? ` (was v${update.applied.from})` : " (newer build, same version)";
     showNotice(`\u2713 CLI updated to v${update.applied.version}${from} \u2014 installed on this start`);
   }, [update, showNotice]);
-  const updateAnnounced = useRef15("");
-  useEffect19(() => {
+  const updateAnnounced = useRef16("");
+  useEffect20(() => {
     if (update && update.applied) return;
     if (!update || !update.version) return;
     if (update.status === "installed") {
@@ -8994,7 +9062,7 @@ function App({ version = "0.1.0" }) {
         showNotice(`unknown command ${cmd} \u2014 /menu lists them`);
     }
   }, [agent, models, model, mcp, status, statusErr, renderer2, showNotice, services, otherPorts, scan, handoffOn, autoMode, update, version]);
-  const crushModelList = useRef15(null);
+  const crushModelList = useRef16(null);
   if (!crushModelList.current) crushModelList.current = readCrushModels();
   const catalogRows = (() => {
     const q = menuQuery.trim().toLowerCase();
@@ -9116,8 +9184,8 @@ function App({ version = "0.1.0" }) {
     },
     [agent, attachment, runCommand, showNotice, steerQueue.length]
   );
-  const steerFlushLock = useRef15(false);
-  useEffect19(() => {
+  const steerFlushLock = useRef16(false);
+  useEffect20(() => {
     if (agent.busy) {
       steerFlushLock.current = false;
       return;
@@ -9145,9 +9213,9 @@ function App({ version = "0.1.0" }) {
     for (let i = 0; i < line.length; i += mcpPanelWidth) rows2.push(line.slice(i, i + mcpPanelWidth));
     return rows2;
   });
-  const [mcpPanelCleared, setMcpPanelCleared] = useState19(false);
+  const [mcpPanelCleared, setMcpPanelCleared] = useState20(false);
   const mcpToolCallKey = latestMcpTool ? `${latestMcpTool.id || latestMcpTool.name || "mcp"}:${latestMcpTool.result == null ? "live" : "done"}` : "";
-  useEffect19(() => {
+  useEffect20(() => {
     const live = !!latestMcpTool && latestMcpTool.result == null && agent.busy;
     if (live) {
       setMcpPanelCleared(false);
@@ -9180,7 +9248,7 @@ function App({ version = "0.1.0" }) {
   useKeyboard8((key) => {
     if (process.env.HAKSTER_TUI_KEYLOG) {
       try {
-        fs10.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
+        fs11.appendFileSync(process.env.HAKSTER_TUI_KEYLOG, JSON.stringify({ name: key.name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift }) + "\n");
       } catch {
       }
     }
@@ -9588,11 +9656,13 @@ function App({ version = "0.1.0" }) {
   const healthFg = healthPct >= 80 ? "#3fb950" : healthPct >= 60 ? "#d29922" : "#f85149";
   const healthGlyph = health.trend === "smarter" ? "\u25B2" : health.trend === "slipping" ? "\u25BC" : "\u25C6";
   const healthWord = health.trend === "smarter" ? "smarter" : health.trend === "slipping" ? "slipping" : "steady";
+  const memPeerParts = bankDrift && Number.isFinite(bankDrift.localTotal) && Number.isFinite(bankDrift.peerTotal) ? [{ t: ` ${bankDrift.localTotal}/${bankDrift.peerTotal}`, fg: bankDrift.equal ? "#3fb950" : "#f85149", bold: !bankDrift.equal }] : null;
+  const memTotalParts = memPeerParts || (memTotal != null ? [{ t: ` ${memTotal}`, fg: "gray" }] : []);
   const memParts = memPct == null || !memBar ? null : [
     { t: "\u25C8 ", fg: memFg, bold: true },
     ...memBar,
     { t: ` ${memPct}%`, fg: memPct >= 90 ? "red" : memPct === 0 ? "gray" : "white", bold: memPct > 0 },
-    ...memTotal != null ? [{ t: ` ${memTotal}`, fg: "gray" }] : [],
+    ...memTallParts,
     { t: "  \u2665 ", fg: healthFg, bold: true },
     { t: `${healthPct}%`, fg: healthFg, bold: true },
     { t: ` ${healthGlyph} ${healthWord}`, fg: healthFg }
@@ -9603,7 +9673,7 @@ function App({ version = "0.1.0" }) {
       { t: "\u25C8 ", fg: memFg, bold: true },
       ...memBar,
       { t: ` ${memPct}%`, fg: memPct >= 90 ? "red" : memPct === 0 ? "gray" : "white", bold: memPct > 0 },
-      ...memTotal != null ? [{ t: ` ${memTotal}`, fg: "gray" }] : [],
+      ...memTotalParts,
       { t: ` \u2665${healthPct}%`, fg: healthFg, bold: true },
       { t: healthGlyph, fg: healthFg }
     ],

@@ -249,6 +249,7 @@ const junkalotUpdate = require('./junkalotUpdate');
 // a missing node_modules on Parrot took the site down with nobody told. Probes every
 // 3 min, alerts on bot 5, restores the dep tree from the editing copy when it vanishes.
 const junkalotGuard = require('./junkalotGuard');
+const bankSync = require('./bankSync');
 // Bots, build guards and agents: one feed, pulled from junkalot and phantomide
 // (owner SSH only — bot rows are never published), recorded here for every
 // Telegram delivery, and snapshotted back onto both Parrot admins.
@@ -4464,6 +4465,29 @@ app.get('/api/agent/memory-banks', requireOwnerForbidden, async (req, res) => {
     res.json({ total, cap: 300, banks, peers, peersPending });
   } catch (err) {
     res.status(500).json({ error: 'memory banks unavailable', detail: err && err.message });
+  }
+});
+
+// ── Memory banks across BOTH boxes (owner) ────────────────────────────
+// The ◈ header counts one box's disk, so the two boxes can disagree — 438 here,
+// 437 on the standby — and recall is worse on whichever is behind (owner,
+// 2026-11-27: "i always want the memory count correct and the same on both
+// boxes … per user … stay in sync with cli's signed in accounts"). Health reads
+// both boxes, names the account each CLI is signed in as, and reports the drift
+// per bank file; sync unions them append-only, so nothing is ever removed.
+app.get('/api/agent/memory-banks/health', requireOwnerForbidden, async (req, res) => {
+  try {
+    res.json(await bankSync.health({ budgetMs: 6000 }));
+  } catch (err) {
+    res.status(500).json({ error: 'bank health unavailable', detail: err && err.message });
+  }
+});
+
+app.post('/api/agent/memory-banks/sync', requireOwnerForbidden, async (req, res) => {
+  try {
+    res.json(await bankSync.syncNow({}));
+  } catch (err) {
+    res.status(500).json({ error: 'bank sync failed', detail: err && err.message });
   }
 });
 
@@ -15120,6 +15144,17 @@ function startServer(delay = 2000) {
       autoHeal.startAutoHealScheduler();
     } catch (e) {
       console.warn('  ⚠ Auto-heal scheduler failed to start:', e.message);
+    }
+
+    // Memory banks: measure both boxes every 10 min and union them append-only
+    // when they disagree, so the ◈ count is the same on both boxes (owner,
+    // 2026-11-27; HK_BANK_SYNC=off disables). Reads + atomic bank writes only —
+    // it never restarts anything (§37, §45).
+    try {
+      const r = bankSync.startAutoSync({ intervalMs: 10 * 60 * 1000 });
+      if (r && r.running) console.log('  ✓ Memory-bank sync scheduled (both boxes, 10-min drift check)');
+    } catch (e) {
+      console.warn('  ⚠ Memory-bank sync failed to start:', e.message);
     }
 
     // Start the continuous git exposure watcher (6h interval, ~/bin/secret-scan.sh)

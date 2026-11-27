@@ -1217,6 +1217,9 @@ module.exports = {
   SKILLS_DIR,
   BANK_CAP,
   MEMORY_SECTIONS,
+  // The same home resolution this module uses, so a peer/standby bank reader
+  // counts exactly the dir the CLI counts (§53).
+  resolveGhostHome,
 
   // Expose helpers for testing
   _jaccardSimilarity: jaccardSimilarity,
