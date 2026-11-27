@@ -1836,7 +1836,7 @@ export default function App({ version = '0.1.0' }) {
     { t: '◈ ', fg: memFg, bold: true },
     ...memBar,
     { t: ` ${memPct}%`, fg: memPct >= 90 ? 'red' : memPct === 0 ? 'gray' : 'white', bold: memPct > 0 },
-    ...memTallParts,
+    ...memTotalParts,
     { t: '  ♥ ', fg: healthFg, bold: true },
     { t: `${healthPct}%`, fg: healthFg, bold: true },
     { t: ` ${healthGlyph} ${healthWord}`, fg: healthFg },

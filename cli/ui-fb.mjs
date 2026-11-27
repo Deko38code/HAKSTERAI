@@ -9662,7 +9662,7 @@ function App({ version = "0.1.0" }) {
     { t: "\u25C8 ", fg: memFg, bold: true },
     ...memBar,
     { t: ` ${memPct}%`, fg: memPct >= 90 ? "red" : memPct === 0 ? "gray" : "white", bold: memPct > 0 },
-    ...memTallParts,
+    ...memTotalParts,
     { t: "  \u2665 ", fg: healthFg, bold: true },
     { t: `${healthPct}%`, fg: healthFg, bold: true },
     { t: ` ${healthGlyph} ${healthWord}`, fg: healthFg }
