@@ -1129,3 +1129,54 @@ Verified at adoption 2026-11-27: `--roots` → `1 root(s), 438 entries`; `--veri
 pull → `EQUAL … 438`; probe **17/17**; per-user tree modes proven on throwaway dirs (separate user root,
 `EQUAL across 2 roots`, second merge `0 added`); `bash -n scripts/failover-sync.sh` clean with
 `BANK_MODE=union` as the default. The first live union cycle is reported from the log.
+
+---
+
+## Section 54 Added — The Bank Check Runs Itself, And The CLI Shows Both Boxes (2026-11-27)
+
+_Appended 2026-11-27 at the owner's direction ("we need a auto update feat that checks banks that are
+connected to any cli per user … and will stay in sync with cli's signed in accounts"). Nothing above this
+line was rewritten, reordered or removed — an appended entry, exactly as §35–§53 were, and it extends §53
+(what the bank files must be) with who checks them and how the answer is shown. Backup before the append,
+hash-verified identical to the file at append time: `AGENTS.md.bak-20261127T235043Z` (86,583 B, sha256
+`6742fdd1b860…`); master-rulebook backup `CLAUDE.md.bak-20261127T235043Z` (131,978 B, sha256
+`59f24d344e98…`)._
+
+`/home/ghost/CLAUDE.md` is now **§1–§54**. §54 is **"The Bank Check Runs Itself, And The CLI Shows Both
+Boxes"**. What it makes binding here:
+
+1. **The server checks on its own, and can heal.** `bankSync.startAutoSync()` runs on the listen path — a
+   10-minute drift check (`HK_BANK_SYNC=off` disables it) that measures both boxes, syncs on drift, logs to
+   `logs/memory-bank-sync.log`, and reports an unreachable peer as `peer-unreachable`, never as equal.
+   `GET /api/agent/memory-banks/health` and `POST /api/agent/memory-banks/sync` are
+   `requireOwnerForbidden` — 403 to every non-owner and to a signed-out caller (§34). The five-minute
+   `failover-sync.sh` cycle (§53.3) is untouched; this is a second, independent check.
+2. **A sync pushes twice.** Push → merge on the peer → pull → merge here → **push again** → measure.
+   Push-then-pull alone leaves drift by construction. Both merges use the content-keyed union with an
+   explicit `--mem-dir`: the union's own default target is `os.homedir()`, the wrong directory under sudo
+   or a `HAKSTER_HOME` peer (measured 2026-11-28 — an implicit target merged a throwaway test dir into the
+   live banks; caught, the two test entries removed, the box verified back at 438 with its original
+   fingerprint).
+3. **Equality is knowledge, not bytes.** Compared per root and per file: entry count **and** a fingerprint
+   of the distinct facts. A file the union never rewrote keeps its old formatting, so identical knowledge
+   in different bytes is equal — a byte compare called a per-user root "drift" when nothing was missing.
+   A real difference is still named by file or root, and per-user roots are compared as their own roots,
+   never summed into the box figure (§53.4, §29.6).
+4. **The CLI shows both numbers.** The ◈ header renders `local/peer` from the owner-only health route —
+   green when the server says equal, red when it does not, the local count alone when the peer is
+   unreachable; a non-owner or signed-out key renders no pair at all (a permission, not a fault — §25.2,
+   §34). Display only: it never writes a bank.
+5. **A held or failed sync is reported.** Unreachable peer → exit 3, nothing written locally; lock held →
+   exit 4, nothing written; failed write → exit 2, logged as drift. No cycle ends without saying which
+   (§10, §13, §50.6).
+6. **Nothing else moves** — no model, route, provider order, rate, plan or allowance (§19.3, §22.4, §26),
+   no panel layout (§39.4). HaksterAI only (§16). The live server keeps its running code until its next
+   natural restart (§37, §45), so the two routes and the scheduler are **pending a restart** and are
+   reported as pending rather than live.
+
+Verified 2026-11-28: both boxes **438 / 438** with the identical distinct-fact fingerprint
+`a9c9d8f7512be63ad7445ee6af9e3f14` (unchanged after the twelve duplicates collapsed — no distinct fact
+lost); a full tree sync in **5.7 s**, equal, **0** writes needed; `bankSync.health()` live → `ok true ·
+local 438 · peer 438 · roots {banks:438} · equal true`; a cross-box throwaway `users/u1/banks` root synced
+and stayed out of the box root; `bank-sync-probe.mjs` **41/41**, `memory-bank-sync-probe.mjs` **17/17**,
+CLI suite **446/446**; CLI **0.3.129** with `ui-fb.mjs` rebuilt (§50.2).
